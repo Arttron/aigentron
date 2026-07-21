@@ -1,0 +1,152 @@
+.flush {
+  margin: 0 0 8px;
+}
+
+.input {
+  width: 100%;
+}
+
+.hidden {
+  display: none;
+}
+
+.actions {
+  margin-top: 10px;
+}
+
+.attachSelect {
+  max-width: 160px;
+}
+
+.hint {
+  font-size: 12px;
+}
+
+.staged {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  max-width: 220px;
+}
+
+.chipThumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.chipDoc {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chipName {
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipRemove {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 0 2px;
+}
+.chipRemove:hover {
+  color: var(--red);
+}
+
+/* ── Message queue ─────────────────────────────────────── */
+.queue {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.queueHead {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.draining {
+  color: var(--accent);
+}
+
+.qItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  margin-bottom: 6px;
+}
+
+.qNum {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qText {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qMeta {
+  color: var(--text-dim);
+}
+
+.qEditing {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.qBtn {
+  flex: none;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.qBtn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.qBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

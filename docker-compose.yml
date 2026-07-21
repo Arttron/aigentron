@@ -1,0 +1,238 @@
+name: local-dev-server
+
+# ----------------------------------------------------------------------
+# Development stack. Copy .env.example -> .env, then:
+#
+#   docker compose up   # postgres + redis + orchestrator (watch)
+#
+# Brings up postgres + redis + orchestrator (:3001) + dashboard (:3000), all
+# bind-mounted for hot-reload. Open http://localhost:3000.
+# Ollama (the "routine" tier model runtime) runs on the HOST, not here; the
+# container reaches it via http://host.docker.internal:11434.
+# ----------------------------------------------------------------------
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: orchestrator
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Creates the separate `litellm` database on a fresh volume.
+      - ./infra/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d orchestrator"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Anthropic-compatible proxy in front of the host's Ollama. Gives local
+  # models a working /v1/messages tool-use API for the Claude Agent SDK.
+  litellm:
+    # Pinned to the stable channel (not the floating main-latest) for reproducible boots.
+    image: ghcr.io/berriai/litellm:main-stable
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+    volumes:
+      - ./infra/litellm-config.yaml:/etc/litellm/config.yaml:ro
+    environment:
+      # DB-backed model store so the orchestrator can add/remove cloud routes at
+      # runtime via the admin API (persisted across restarts). MUST be its own
+      # database — LiteLLM runs a destructive prisma sync that would wipe the
+      # orchestrator's schema if they shared one.
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/litellm?schema=public
+      STORE_MODEL_IN_DB: "True"
+      # Admin auth for /model/* — shared with the orchestrator, which is the only
+      # caller. Override in .env. Upstream provider keys are sent per-route via
+      # this API; they never live in the committed config or the browser.
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-lds-master-dev}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Playwright MCP — browser automation for frontend/design agents. Heavy image,
+  # so it's behind a profile: `docker compose --profile mcp up`. Agents reach it
+  # at http://playwright-mcp:8931/sse (the seeded `playwright` MCP server).
+  playwright-mcp:
+    image: mcr.microsoft.com/playwright/mcp:latest
+    profiles: ["mcp"]
+    # --allowed-hosts: the server rejects requests whose Host isn't in this list
+    # (DNS-rebinding guard). Allow the compose service name so the orchestrator
+    # can reach it as http://playwright-mcp:8931/mcp.
+    command:
+      - "--headless"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8931"
+      - "--allowed-hosts"
+      - "playwright-mcp:8931,localhost:8931"
+    ports:
+      - "8931:8931"
+
+  # Dev server for the project under development (./project), so the playwright
+  # MCP has a reachable preview target on the compose network at
+  # http://project-dev:3000 (host: :3100). Serves the BASE ./project — a task's
+  # in-progress worktree is not reflected here (see docs; agent-run dev server is
+  # the follow-up for true worktree preview). Behind the `mcp` profile alongside
+  # playwright-mcp: `docker compose --profile mcp up -d`.
+  project-dev:
+    image: node:22-bookworm-slim
+    profiles: ["mcp"]
+    working_dir: /workspace/repo
+    # Prefer a `dev` script; fall back to `start`. Project dev servers must bind
+    # 0.0.0.0 (e.g. `next dev -H 0.0.0.0`) to be reachable from playwright-mcp.
+    command: ["sh", "-lc", "npm install --no-audit --no-fund && (npm run dev || npm start)"]
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+    # Host access for the operator. The compose-network target the MCP browser
+    # uses is http://project-dev:<the app's port>. Note: ./project currently
+    # hardcodes 3080 (ignores PORT), so it's project-dev:3080; a PORT-honoring
+    # project would be project-dev:3000. Adjust the playwright skill URL to match.
+    ports:
+      - "3100:3080"
+    volumes:
+      - ${PROJECT_HOST_PATH:-./project}:/workspace/repo
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: infra/dev.Dockerfile
+      target: dev
+    entrypoint: ["sh", "/app/infra/orchestrator-entrypoint.sh"]
+    env_file: .env
+    environment:
+      # Force the in-cluster service hostnames regardless of .env, so the
+      # container always reaches the compose-managed Postgres/Redis.
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/orchestrator?schema=public
+      REDIS_URL: redis://redis:6379
+      ORCHESTRATOR_PORT: "3001"
+      # Shared secret the PreToolUse hook must present to the approval gate
+      # (x-lds-hook-secret). Pinned so it survives restarts; override in .env.
+      LDS_HOOK_SECRET: ${LDS_HOOK_SECRET:-dev-hook-secret-change-me}
+      # LiteLLM admin API (manage cloud-proxy routes from the dashboard).
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-lds-master-dev}
+      # Ollama runs on the host; reach it through the docker host gateway
+      # unless the .env already overrides OLLAMA_BASE_URL.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # Where the REAL Ollama lives — used for the model picker (`ollama list`)
+      # and as the api_base of ollama LiteLLM routes. Kept separate from a
+      # provider's baseUrl, which points at the litellm gateway (litellm converts
+      # Anthropic↔Ollama; agents speak only Anthropic).
+      OLLAMA_NATIVE_URL: ${OLLAMA_NATIVE_URL:-http://host.docker.internal:11434}
+      # Shared workspace: all tasks work in the main repo dir (no per-task
+      # worktree isolation); execution is serialized (concurrency 1).
+      WORKSPACE_SHARED: ${WORKSPACE_SHARED:-true}
+      # Public dashboard URL for channel deep links (/web command).
+      DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-http://localhost:3000}
+    # Join the project's DB network (external) so agent bash / verify / preview —
+    # all of which execute in THIS container — can reach the project's Postgres/
+    # Redis by service name (tesla-postgres:5432 / tesla-redis:6379). `default` is
+    # kept so the platform's own postgres/redis/litellm stay reachable.
+    networks:
+      - default
+      - lds-agents
+    # Lets host.docker.internal resolve on Linux too (no-op on Docker Desktop).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${ORCHESTRATOR_PORT:-3001}:3001"
+    volumes:
+      # Live source for hot-reload…
+      - .:/app
+      # …with container-side node_modules preserved (anonymous volumes shadow
+      # the host's, which are macOS-native and incompatible with linux).
+      - /app/node_modules
+      - /app/apps/orchestrator/node_modules
+      - /app/packages/shared/node_modules
+      - /app/packages/agent-runner/node_modules
+      # Persisted pnpm store, seeded from the image; keeps node_modules
+      # consistent across reboots so installs stay fast and non-interactive.
+      - pnpm-store:/pnpm/store
+      # Host project directory the agents work in, provisioned by the
+      # orchestrator (clone from repoUrl or git init). Visible/seedable on the
+      # host at ./project (override with PROJECT_HOST_PATH).
+      - ${PROJECT_HOST_PATH:-./project}:/workspace/repo
+      - worktrees:/workspace/.worktrees
+      # Agent operational files (skills + generated per-run settings), kept out
+      # of the project. Add skills as markdown under ./agent/skills/.
+      - ${AGENT_HOST_PATH:-./agent}:/workspace/agent
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      litellm:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # Generous: first boot compiles shared + agent-runner before listening.
+      start_period: 120s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: infra/dev.Dockerfile
+      target: dev
+    entrypoint: ["sh", "/app/infra/dashboard-entrypoint.sh"]
+    # No env_file: the dashboard is a browser-facing Next.js app and must not be
+    # handed the orchestrator's secrets (API keys, GitHub token, hook secret).
+    # It only needs the NEXT_PUBLIC_* below, which are public by design.
+    environment:
+      # NEXT_PUBLIC_* are inlined into the client bundle and used by the BROWSER
+      # (running on the host), so they point at the host-mapped orchestrator port
+      # (ORCHESTRATOR_PORT from .env; the in-network port stays 3001).
+      NEXT_PUBLIC_ORCHESTRATOR_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
+      NEXT_PUBLIC_ORCHESTRATOR_WS_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/dashboard/node_modules
+      - /app/packages/shared/node_modules
+      - /app/packages/agent-runner/node_modules
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+
+networks:
+  # Shared with the project's own compose so the agent fleet can reach the
+  # project databases. Pre-create once: docker network create lds-agents
+  lds-agents:
+    external: true
+
+volumes:
+  pgdata:
+  redisdata:
+  worktrees:
+  pnpm-store:

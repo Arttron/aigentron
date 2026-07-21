@@ -1,0 +1,46 @@
+.flush {
+  margin: 0;
+}
+
+.intro {
+  margin: 8px 0 12px;
+  line-height: 1.5;
+}
+
+.head {
+  margin-bottom: 4px;
+}
+
+.meta {
+  font-size: 12px;
+}
+
+.entry {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--bg-elev);
+}
+
+.ident {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ok {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--green, #3fb950);
+}
+
+.fail {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--red, #f85149);
+}
+
+.error {
+  margin-top: 8px;
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_MODEL",
+    "LITELLM_BASE_URL",
+    "AGENT_CONCURRENCY",
+    "AGENT_DIR",
+    "AGENT_MAX_TURNS",
+    "AGENT_RUN_TIMEOUT_MS",
+    "APPROVAL_TIMEOUT_SECONDS",
+    "APPROVALS_API_URL",
+    "COMPLEX_MODEL",
+    "CORS_ORIGINS",
+    "GITHUB_TOKEN",
+    "LITELLM_BASE_URL",
+    "LITELLM_MASTER_KEY",
+    "HOOK_SCRIPT_PATH",
+    "LDS_HOOK_SECRET",
+    "OLLAMA_AUTH_TOKEN",
+    "OLLAMA_BASE_URL",
+    "ORCHESTRATOR_PORT",
+    "REPO_BRANCH",
+    "REPO_URL",
+    "ROUTINE_MODEL",
+    "SHARED_DIST_PATH",
+    "WORKSPACE_REPO_PATH",
+    "WORKTREES_ROOT"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

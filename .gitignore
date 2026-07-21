@@ -1,0 +1,46 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# turbo
+.turbo/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+
+# prisma generated client
+apps/orchestrator/src/generated/
+**/generated/prisma/
+
+# agent runtime artifacts
+.agent-workspaces/
+# agents' git sandbox (bind-mounted into the orchestrator container)
+.workspace/
+**/.claude-settings.json
+
+# logs / os
+*.log
+.DS_Store
+coverage/
+
+# host-mounted agent workspace (bind-mounted to /workspace/repo)
+/project/
+
+# agent runtime artifacts (generated per-run settings + task attachments)
+/agent/runs/
+/agent/attachments/
+# roadmap Phase 6: pre-write snapshots of agent/skills/learned/*.md — rollback
+# history, not meant to be committed (the skill files themselves ARE tracked).
+/agent/skills/learned/.snapshots/
+
+# local Claude Code settings (never commit)
+.claude/settings.local.json

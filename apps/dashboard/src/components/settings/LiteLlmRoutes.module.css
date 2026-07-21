@@ -1,0 +1,30 @@
+.intro {
+  display: block;
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.name {
+  font-weight: 600;
+}
+
+.arrow {
+  color: var(--text-dim);
+}
+
+.backend {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-dim);
+  word-break: break-all;
+}

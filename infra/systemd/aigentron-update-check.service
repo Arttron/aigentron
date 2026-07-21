@@ -1,0 +1,25 @@
+[Unit]
+Description=Check for a newer Aigentron release (log-only, does not auto-update)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# The user who ran install.sh / owns the docker-compose.minimal.yml checkout
+# (needs docker CLI access, e.g. in the `docker` group). %h below resolves
+# to THIS user's home — systemd requires User= set for %h to work in a
+# system-level unit at all.
+User=CHANGEME
+Environment=REPO=CHANGEME/aigentron
+# If this server installs from S3 (install.sh with S3_PREFIX set) rather than
+# GitHub, uncomment this and it takes priority over REPO above:
+#Environment=S3_PREFIX=s3://ai-tools-sysfiles/arttron-dev-server
+# install.sh users: leave as-is, it defaults to the container name install.sh
+# creates. docker-compose.minimal.yml users: matches the compose service's
+# container_name — leave as-is too, both profiles use the same name.
+Environment=CONTAINER_NAME=local-dev-server
+# install.sh copies update-check.sh into $INSTALL_DIR (default
+# ~/.local-dev-server) on every run, so this path stays valid across
+# upgrades. docker-compose.minimal.yml users: point this at
+# <your-checkout>/infra/update-check.sh instead.
+ExecStart=%h/.local-dev-server/update-check.sh

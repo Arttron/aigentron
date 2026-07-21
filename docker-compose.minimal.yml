@@ -1,0 +1,43 @@
+# Compose variant of the single-container profile (see infra/minimal.Dockerfile
+# and README "Server deployment"). Builds locally — no registry involved.
+#
+# Uses .env.minimal (copy .env.minimal.example), NOT the root .env — that file
+# is the multi-service `full` profile's template (Postgres/Redis hostnames)
+# and would override this image's own baked-in SQLite/embedded-queue defaults.
+# Both APP_VERSION substitution below and the container's env come from the
+# same file, so invoke with --env-file explicitly:
+#   docker compose --env-file .env.minimal -f docker-compose.minimal.yml up -d --build
+#
+# Upgrade: bump APP_VERSION in .env.minimal, then
+#   docker compose --env-file .env.minimal -f docker-compose.minimal.yml build
+#   docker compose --env-file .env.minimal -f docker-compose.minimal.yml up -d
+# Never leave APP_VERSION as `latest`/unset in a real deployment — pin it.
+#
+# Explicit project name: without it, Compose derives the project name from the
+# directory (same as docker-compose.yml's own `name: local-dev-server`), which
+# collides with the `full` profile if both are ever run from this checkout —
+# confirmed while testing (orphan-container warnings, a shared default network/
+# volume namespace). Keeping this profile in its own project avoids that.
+name: local-dev-server-minimal
+services:
+  local-dev-server:
+    build:
+      context: .
+      dockerfile: infra/minimal.Dockerfile
+      args:
+        VERSION: ${APP_VERSION:-dev}
+    image: local-dev-server:${APP_VERSION:-dev}
+    container_name: local-dev-server
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+      - '3001:3001'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - lds-data:/data
+    env_file:
+      - .env.minimal
+
+volumes:
+  lds-data:

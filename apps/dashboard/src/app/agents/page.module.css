@@ -1,0 +1,53 @@
+.flush {
+  margin: 0;
+}
+
+.list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--bg-elev);
+}
+.item:hover {
+  border-color: var(--accent);
+}
+
+.name {
+  min-width: 120px;
+}
+
+.desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.providerSelect {
+  max-width: 260px;
+}
+
+.modelHint {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.warn {
+  border-color: var(--amber);
+  background: rgba(210, 153, 34, 0.06);
+  font-size: 13px;
+  line-height: 1.5;
+}

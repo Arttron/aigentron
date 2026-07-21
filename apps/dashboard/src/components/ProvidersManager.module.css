@@ -1,0 +1,46 @@
+.flush {
+  margin: 0;
+}
+
+.defaultSelect {
+  max-width: 260px;
+}
+
+.entry {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.head {
+  margin-bottom: 4px;
+}
+
+.ident {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meta {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.result {
+  margin-top: 8px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  word-break: break-word;
+}
+.ok {
+  color: var(--green);
+}
+.fail {
+  color: var(--red);
+}
+
+.error {
+  display: block;
+  margin-top: 10px;
+}

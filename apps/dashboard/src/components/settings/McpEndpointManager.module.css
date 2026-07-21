@@ -1,0 +1,137 @@
+.intro {
+  margin: 0 0 1rem;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.intro code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* --- status panel --- */
+.panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.9rem 1.25rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  margin-bottom: 1rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.statLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.statValue {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- warning --- */
+.warn {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  background: rgba(210, 153, 34, 0.1);
+  color: var(--text);
+  font-size: 0.83rem;
+  line-height: 1.5;
+}
+
+.warn code {
+  font-family: var(--mono);
+}
+
+/* --- connect section --- */
+.section {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.method {
+  margin-bottom: 1rem;
+}
+
+.method:last-child {
+  margin-bottom: 0;
+}
+
+.methodLabel {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.field {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.copyBtn {
+  flex: none;
+  min-width: 3.75rem;
+}
+
+.hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.hint code {
+  font-family: var(--mono);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 0.9em;
+  white-space: nowrap;
+}
+
+.docs {
+  margin: 1.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.docs code {
+  font-family: var(--mono);
+}

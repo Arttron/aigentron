@@ -1,0 +1,41 @@
+# LiteLLM proxy — exposes an Anthropic-compatible /v1/messages endpoint and
+# translates tool-use to/from a local Ollama model running on the host.
+# The orchestrator's routine tier points ANTHROPIC_BASE_URL here.
+model_list:
+  - model_name: local-coder # convenience alias
+    litellm_params:
+      # ollama_chat/ (not ollama/) supports function/tool calling. This model
+      # emits structured tool_calls on Ollama (qwen2.5-coder:32b does NOT —
+      # it returns tool calls as plain text, which breaks agentic tool-use).
+      model: ollama_chat/hf.co/Jackrong/Qwopus3.6-27B-Coder-GGUF:Q4_K_M
+      api_base: http://host.docker.internal:11434
+
+  # Cloud passthrough routes (OpenAI-native providers) are NOT listed here —
+  # the orchestrator registers them at runtime via the LiteLLM admin API
+  # (/model/new) from the dashboard's provider records, persisted in the DB
+  # (STORE_MODEL_IN_DB). Keys travel orchestrator→litellm over the internal
+  # network and live in the DB + litellm; never in this file or the browser.
+
+  # NOTE: no `"*"` catch-all. A wildcard that maps any model_name to Ollama also
+  # acts as a fallback DEPLOYMENT for named cloud routes (e.g. GPT/gpt-4o-mini):
+  # when the cloud route errors or cools down, LiteLLM silently reroutes to the
+  # local model — cloud tokens aren't spent and a weak local model answers
+  # instead. Every provider registers an exact `<provider>/<model>` route, so a
+  # catch-all isn't needed; an unmatched model name should error, not misroute.
+
+litellm_settings:
+  # Silently drop params the backend doesn't understand instead of erroring.
+  drop_params: true
+  # Local 32B inference is slow; allow long single-turn generations.
+  request_timeout: 600
+  # Retry transient upstream failures (429 rate-limit, timeouts, 5xx) with
+  # backoff instead of surfacing them — combined with per-route rpm/tpm caps
+  # (set on rate-limited providers like GPT) this absorbs rate limits.
+  num_retries: 3
+
+router_settings:
+  # Cool a deployment down briefly after a rate-limit/timeout before retrying.
+  cooldown_time: 30
+  retry_policy:
+    RateLimitErrorRetries: 3
+    TimeoutErrorRetries: 2

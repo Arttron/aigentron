@@ -1,0 +1,14 @@
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker {
+  margin-top: 8px;
+}
+
+.note {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}

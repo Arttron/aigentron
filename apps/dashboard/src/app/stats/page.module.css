@@ -1,0 +1,57 @@
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.arrow {
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+.cost {
+  color: var(--text-dim);
+}
+
+.totals td {
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+  font-weight: 600;
+}
+
+.note {
+  margin-top: 14px;
+  font-size: 12px;
+}
+
+.empty {
+  display: block;
+  padding: 16px 0;
+}

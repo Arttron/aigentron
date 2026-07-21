@@ -1,0 +1,79 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: var(--bg-elev);
+}
+.item:hover {
+  border-color: var(--accent);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pill {
+  background: var(--amber);
+  color: #2a1d00;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* neutral count pill (number of subtasks) */
+.count {
+  background: var(--bg);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.group {
+  list-style: none;
+}
+
+/* subtasks nested under their parent */
+.children {
+  list-style: none;
+  margin: -4px 0 8px;
+  padding-left: 22px;
+}
+
+.child {
+  position: relative;
+  margin-bottom: 6px;
+  background: var(--bg);
+}
+
+/* connector tick on a subtask row */
+.branch {
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 10px;
+  height: 1px;
+  background: var(--border);
+}

@@ -1,0 +1,24 @@
+.narrow {
+  max-width: 240px;
+}
+
+.note {
+  display: block;
+  margin: 0;
+  font-size: 12px;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.checkbox {
+  width: auto;
+}
+
+.saved {
+  color: var(--green);
+}

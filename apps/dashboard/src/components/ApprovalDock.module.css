@@ -1,0 +1,59 @@
+.dock {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1000;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev, #161b22);
+  border: 1px solid var(--amber, #d29922);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-weight: 700;
+  font-size: 13px;
+  color: #2a1d00;
+  background: var(--amber, #d29922);
+}
+
+/* Pulsing attention icon while approvals are pending. */
+.icon {
+  display: inline-block;
+  font-size: 15px;
+  animation: approvalPulse 1s ease-in-out infinite;
+}
+
+@keyframes approvalPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon {
+    animation: none;
+  }
+}
+
+.list {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}

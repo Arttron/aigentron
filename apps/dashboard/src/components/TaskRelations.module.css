@@ -1,0 +1,61 @@
+.flush {
+  margin: 0;
+}
+
+.parent {
+  margin: 0.25rem 0 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.empty {
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--border, #e5e5e8);
+}
+
+.itemTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted, #888);
+  flex-shrink: 0;
+}
+
+.summary {
+  flex: 2;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--muted, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.grow {
+  flex: 1;
+}

@@ -1,0 +1,53 @@
+.flush {
+  margin: 0;
+}
+
+.hint {
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.entry {
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--border, #2a2a2a);
+}
+
+.head {
+  align-items: center;
+}
+
+.ident {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.meta {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+}
+
+.identities {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.identRow {
+  align-items: center;
+  gap: 0.4rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.identInput {
+  flex: 1;
+}
+
+.actions {
+  margin-top: 1rem;
+}
+
+.error {
+  margin-top: 0.75rem;
+}

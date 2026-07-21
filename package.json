@@ -1,0 +1,40 @@
+{
+  "name": "local-dev-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted orchestration platform for a fleet of autonomous Claude Code agents.",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "better-sqlite3",
+      "msgpackr-extract",
+      "prisma"
+    ],
+    "overrides": {
+      "ioredis": "5.11.1"
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.18.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.10.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.20.0"
+  }
+}

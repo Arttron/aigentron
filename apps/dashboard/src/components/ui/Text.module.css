@@ -1,0 +1,7 @@
+.muted {
+  color: var(--text-dim);
+}
+
+.error {
+  color: var(--red);
+}

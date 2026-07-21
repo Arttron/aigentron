@@ -1,0 +1,91 @@
+/* Token-composition chart — colors validated (dataviz) against the card
+ * surface #161b22: blue/aqua/yellow, worst adjacent CVD ΔE 41.3, contrast ≥3:1. */
+.wrap {
+  --viz-input: #3987e5;
+  --viz-output: #199e70;
+  --viz-cache: #c98500;
+  margin: 4px 0 20px;
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 130px 1fr max-content;
+  align-items: center;
+  gap: 12px;
+}
+.name {
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Track spans the column; the bar inside grows from the left baseline, its width
+ * scaled to the busiest provider so lengths compare across rows. */
+.track {
+  height: 20px;
+}
+.bar {
+  display: flex;
+  gap: 2px; /* the 2px surface gap between stacked segments */
+  height: 100%;
+  min-width: 2px;
+}
+.seg {
+  height: 100%;
+}
+.total {
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.empty {
+  display: block;
+  padding: 12px 0;
+}
+
+.tip {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 9px;
+  font-size: 12px;
+  color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
+.tipName {
+  color: var(--text-dim);
+}
+.tipVal {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,93 @@
+.transcript {
+  background: #010409;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 1px 0;
+}
+
+.kind {
+  color: var(--text-dim);
+  margin-right: 8px;
+  user-select: none;
+}
+
+/* User (request) messages — a chat bubble distinct from agent output. */
+.userMsg {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: rgba(76, 154, 255, 0.06);
+  border-radius: 0 6px 6px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.userTag {
+  display: inline-block;
+  margin-right: 8px;
+  font-weight: 700;
+  color: var(--accent);
+  user-select: none;
+}
+.userText {
+  color: var(--text);
+}
+.thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.thumb {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.assistant {
+  color: var(--text);
+}
+.tool_use {
+  color: var(--accent);
+}
+.delegation {
+  color: #d2a8ff;
+  font-weight: 600;
+}
+.tool_result {
+  color: #a5d6ff;
+}
+.system {
+  color: var(--text-dim);
+}
+.result {
+  color: var(--green);
+}
+.stderr {
+  color: var(--red);
+}
+.working {
+  color: var(--amber);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
