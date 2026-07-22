@@ -95,6 +95,9 @@ if [ ! -f "$ENV_FILE" ]; then
   cp "$RELEASE_DIR/.env.minimal.example" "$ENV_FILE"
   log "First install: wrote a starter .env to $ENV_FILE"
   log "Fill in ANTHROPIC_API_KEY (and anything else you need) before relying on the cloud tier."
+  log "Pick your own WIZARD_ADMIN_PASSWORD in $ENV_FILE before using the setup wizard's advanced"
+  log "mode — you'll type it there yourself (over Telegram or the dashboard, later), so a random"
+  log "generated one isn't a good fit; leave it blank to keep advanced mode locked."
 fi
 
 # Stable path (not under releases/$VERSION, which changes every upgrade) so
@@ -120,3 +123,7 @@ docker run -d --name "$CONTAINER_NAME" \
 log "Aigentron $VERSION is running."
 log "Dashboard:    http://localhost:3000"
 log "Orchestrator: http://localhost:3001/api/health"
+log ""
+log "Run the setup wizard to configure providers, channels, agents, skills, and a repo:"
+log "  docker exec -it $CONTAINER_NAME node /app/infra/setup-wizard.mjs"
+log "  # (or, if this machine also has Node: node \"$RELEASE_DIR/infra/setup-wizard.mjs\")"

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { api, type ProviderInfo, type ProviderKind } from '@/lib/api';
+import { api, type ProviderInfo, type ProviderKind, type ProviderAuthMode } from '@/lib/api';
 import { Field, Row, Button, Muted, ErrorText } from '@/components/ui';
 import styles from './ProviderForm.module.css';
 
@@ -10,7 +10,7 @@ export interface ProviderFormValues {
   kind: ProviderKind;
   baseUrl: string;
   model: string;
-  authMode: 'api-key' | 'auth-token';
+  authMode: ProviderAuthMode;
   secret: string;
   /** Rate caps as strings for the inputs; empty = no cap. */
   rpm: string;
@@ -135,13 +135,23 @@ export function ProviderForm({
         <select value={values.authMode} onChange={(e) => set('authMode', e.target.value as ProviderFormValues['authMode'])}>
           <option value="auth-token">auth-token</option>
           <option value="api-key">api-key</option>
+          <option value="oauth-token">oauth-token (Claude subscription)</option>
         </select>
+        {values.authMode === 'oauth-token' && (
+          <Muted className={styles.note}>
+            Run <code>claude setup-token</code> locally (or <code>scripts/cli-auth.sh &lt;name&gt;</code>) and
+            paste the printed token below. Bypasses LiteLLM — talks to Anthropic directly, so Base URL is
+            ignored; this provider also can’t be delegated to as a subagent.
+          </Muted>
+        )}
       </Field>
       <Field
         label={
           initial?.secretSet
             ? `Secret — set (${initial.secretHint}); leave blank to keep`
-            : 'Secret (API key / auth token)'
+            : values.authMode === 'oauth-token'
+              ? 'Secret (OAuth token from `claude setup-token`)'
+              : 'Secret (API key / auth token)'
         }
       >
         <input

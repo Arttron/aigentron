@@ -1,6 +1,9 @@
 import { IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 
 const KINDS = ['anthropic', 'openai', 'deepseek', 'ollama'] as const;
+// oauth-token: a CLI-minted subscription token (e.g. `claude setup-token`) —
+// bypasses LiteLLM, see @lds/shared resolveProvider().
+const AUTH_MODES = ['api-key', 'auth-token', 'oauth-token'] as const;
 
 export class CreateProviderDto {
   @IsString()
@@ -25,8 +28,8 @@ export class CreateProviderDto {
   model?: string;
 
   @IsOptional()
-  @IsIn(['api-key', 'auth-token'])
-  authMode?: 'api-key' | 'auth-token';
+  @IsIn(AUTH_MODES)
+  authMode?: (typeof AUTH_MODES)[number];
 
   @IsOptional()
   @IsString()
@@ -57,8 +60,8 @@ export class ModelsPreviewDto {
   baseUrl?: string;
 
   @IsOptional()
-  @IsIn(['api-key', 'auth-token'])
-  authMode?: 'api-key' | 'auth-token';
+  @IsIn(AUTH_MODES)
+  authMode?: (typeof AUTH_MODES)[number];
 
   @IsOptional()
   @IsString()
@@ -82,8 +85,8 @@ export class UpdateProviderDto {
   model?: string;
 
   @IsOptional()
-  @IsIn(['api-key', 'auth-token'])
-  authMode?: 'api-key' | 'auth-token';
+  @IsIn(AUTH_MODES)
+  authMode?: (typeof AUTH_MODES)[number];
 
   @IsOptional()
   @IsString()

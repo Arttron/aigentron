@@ -83,7 +83,7 @@ COPY --from=build /app/apps/dashboard/.next/static /app/apps/dashboard-standalon
 # Agent operational files (skills, agent defs) — read at runtime, not compiled.
 COPY agent /app/agent
 
-COPY infra/minimal-entrypoint.sh infra/minimal-supervisor.mjs infra/minimal-healthcheck.sh /app/infra/
+COPY infra/minimal-entrypoint.sh infra/minimal-supervisor.mjs infra/minimal-healthcheck.sh infra/setup-wizard.mjs /app/infra/
 RUN chmod +x /app/infra/minimal-entrypoint.sh /app/infra/minimal-healthcheck.sh
 
 ENV NODE_ENV=production \

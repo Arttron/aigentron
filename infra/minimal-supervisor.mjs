@@ -11,24 +11,29 @@
 // just two children and no per-service isolation requirement, a plain script
 // that restarts a crashed child and forwards signals is the simpler form that
 // does the same job (see docs/plan-single-container.md's Phase 4 note).
+//
+// Shared verbatim by the Docker image (APP_DIR unset → defaults to /app,
+// matching the image's layout) AND the bare-metal installer (install-bare.sh
+// sets APP_DIR to the current release dir) — no forked/duplicated supervisor.
 // ----------------------------------------------------------------------
 import { spawn } from 'node:child_process';
 
 const RESTART_DELAY_MS = 2000;
+const APP_DIR = process.env.APP_DIR ?? '/app';
 
 const services = [
   {
     name: 'dashboard',
     command: 'node',
     args: ['apps/dashboard-standalone/apps/dashboard/server.js'],
-    cwd: '/app',
+    cwd: APP_DIR,
     env: { PORT: process.env.DASHBOARD_PORT ?? '3000', HOSTNAME: '0.0.0.0' },
   },
   {
     name: 'orchestrator',
     command: 'node',
     args: ['apps/orchestrator/dist/main.js'],
-    cwd: '/app',
+    cwd: APP_DIR,
     env: {},
   },
 ];

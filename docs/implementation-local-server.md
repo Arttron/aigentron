@@ -266,6 +266,24 @@ model name" request and reports latency/model/error.
 `infra/litellm-config.yaml` additionally defines a static `local-coder` route (Qwopus 27B via
 `ollama_chat/`) and a `"*"` wildcard to host Ollama; `drop_params: true`, `request_timeout: 600`.
 
+**`authMode: 'oauth-token'`** — a third mode alongside `api-key`/`auth-token`: a CLI-minted
+subscription token (e.g. `claude setup-token`, or `scripts/cli-auth.sh <provider-name>` which
+wraps it and registers the result). Unlike the other two modes, this **always bypasses LiteLLM**
+— LiteLLM can only forward with a real Anthropic `x-api-key`, so `resolveModelEnv`
+(`real-agent-executor.ts`) short-circuits to `CLAUDE_CODE_OAUTH_TOKEN` + `ANTHROPIC_MODEL` and
+talks to Anthropic's native endpoint directly, ignoring `baseUrl` and never calling `ensureRoute`.
+`resolveProvider()` (`@lds/shared`) looks up the env var name per `provider.kind` via a small
+table (`OAUTH_ENV_VAR_BY_KIND`) — the extension point for a future CLI-login provider on a
+different `kind`. Known v1 limitation: since the SDK shares one connection (base URL + auth)
+between the lead and all its subagents, a task whose default provider is `oauth-token` gets **no
+delegatable subagents** (`buildSubagents` returns empty), and any individual subagent whose own
+provider is `oauth-token` is skipped the same way — mixing an oauth-token connection with
+LiteLLM-routed subagents in one run isn't supported. The connectivity `test()` also short-circuits
+for this mode (returns a friendly "not verified via HTTP probe" result) rather than guessing at
+the token's actual request shape; run a real task to confirm it works. Multiple providers can use
+different auth modes side by side (e.g. one `api-key` and one `oauth-token` provider both
+registered) — the mode lives on the `Provider` row, not globally.
+
 ### 6.5 Worktrees & GitHub
 
 `WorkspaceService.ensure()` (serialized by a promise lock) provisions `/workspace/repo`: if

@@ -9,6 +9,13 @@ Type=oneshot
 # (needs docker CLI access, e.g. in the `docker` group). %h below resolves
 # to THIS user's home — systemd requires User= set for %h to work in a
 # system-level unit at all.
+#
+# install-bare.sh users (no Docker): that installer runs as root into
+# /opt/aigentron, not a per-user $HOME — set `User=root`, ExecStart=
+# /opt/aigentron/update-check.sh (or wherever INSTALL_DIR points), and add
+# `Environment=INSTALL_DIR=/opt/aigentron` if you changed it from the
+# default; CONTAINER_NAME below is irrelevant in that case (no container
+# exists, update-check.sh falls back to reading /opt/aigentron/current).
 User=CHANGEME
 Environment=REPO=CHANGEME/aigentron
 # If this server installs from S3 (install.sh with S3_PREFIX set) rather than

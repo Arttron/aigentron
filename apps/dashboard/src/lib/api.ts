@@ -88,6 +88,9 @@ export type TaskDetail = Task & {
 
 /** An AI model endpoint (from GET /api/providers; secret masked). */
 export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama';
+// oauth-token: a CLI-minted subscription token (e.g. `claude setup-token`) —
+// bypasses LiteLLM; see @lds/shared resolveProvider().
+export type ProviderAuthMode = 'api-key' | 'auth-token' | 'oauth-token';
 
 export interface ProviderInfo {
   name: string;
@@ -96,7 +99,7 @@ export interface ProviderInfo {
   baseUrl: string | null;
   /** Optional default model — agents may override with their own. */
   model: string;
-  authMode: 'api-key' | 'auth-token';
+  authMode: ProviderAuthMode;
   secretSet: boolean;
   secretHint: string | null;
   /** Optional LiteLLM-enforced rate caps (null = no cap). */
@@ -109,7 +112,7 @@ export type ProviderInput = {
   kind?: ProviderKind;
   baseUrl?: string;
   model?: string;
-  authMode?: 'api-key' | 'auth-token';
+  authMode?: ProviderAuthMode;
   secret?: string;
   rpm?: number;
   tpm?: number;
@@ -475,7 +478,7 @@ export const api = {
       unwrap<ProviderModelsResult>,
     ),
 
-  previewProviderModels: (body: { kind?: ProviderKind; baseUrl?: string; authMode?: 'api-key' | 'auth-token'; secret?: string }) =>
+  previewProviderModels: (body: { kind?: ProviderKind; baseUrl?: string; authMode?: ProviderAuthMode; secret?: string }) =>
     fetch(`${API_BASE}/providers/models-preview`, {
       method: 'POST',
       headers: jsonHeaders,

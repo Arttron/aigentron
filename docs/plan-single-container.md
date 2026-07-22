@@ -283,6 +283,24 @@ noop task ran queued→done through the reworked BullMQ path in seconds.
   `qwen3-coder:30b`, matching the actual code default and `.env`.
 - No config keys deleted — both profiles are permanent, `full` stays default.
 
+## Addendum — bare-metal (no Docker) install (2026-07-22)
+
+Docker was mandatory for every server-deploy path (`install.sh` hard-`die`s without it).
+The runtime the minimal profile actually needs — `infra/minimal-entrypoint.sh` (sqlite
+migrate + seed agent defs) and `infra/minimal-supervisor.mjs` (fork/restart
+dashboard+orchestrator) — never depended on containers; Docker was packaging/isolation,
+not a capability. Parameterized both scripts' hardcoded `/app`/`/data` paths behind
+`APP_DIR`/`DATA_DIR` (default unchanged, so the Docker image's behavior is byte-identical)
+and added `install-bare.sh` — a sibling installer that builds from source and runs the
+same two scripts directly as a systemd service instead of inside a container. See the
+README's "Server deployment" §Option D. `infra/update-check.sh` gained a fallback to read
+the installed version from the `$INSTALL_DIR/current` symlink when no Docker container
+exists, instead of only `docker inspect`.
+
+Ollama needed no code change to become "optional" for this — it already was
+(`ollama-local` is a soft, lazily-used seeded provider row; nothing preflight-checks it).
+Just documented explicitly, since nothing said so before.
+
 ## Order & effort
 
 0 ✅ → 1 ✅ → 2 ✅ → 3 ✅ → 4 ✅ → 5 ✅. All phases landed independently;

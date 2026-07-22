@@ -1,6 +1,14 @@
-import { Body, Controller, Get, Put } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put } from '@nestjs/common';
+import { IsString, MinLength } from 'class-validator';
 import { SettingsService, type SettingsPatch } from './settings.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { AppConfigService } from '../config/app-config.service';
+
+class VerifyWizardPasswordDto {
+  @IsString()
+  @MinLength(1)
+  password!: string;
+}
 
 type SettingsRow = Awaited<ReturnType<SettingsService['get']>>;
 
@@ -48,7 +56,10 @@ function toPatch(dto: UpdateSettingsDto): SettingsPatch {
 
 @Controller('settings')
 export class SettingsController {
-  constructor(private readonly settings: SettingsService) {}
+  constructor(
+    private readonly settings: SettingsService,
+    private readonly config: AppConfigService,
+  ) {}
 
   @Get()
   async get() {
@@ -58,5 +69,18 @@ export class SettingsController {
   @Put()
   async update(@Body() dto: UpdateSettingsDto) {
     return serialize(await this.settings.update(toPatch(dto)));
+  }
+
+  /**
+   * Gates infra/setup-wizard.mjs's "advanced" mode. A local confirmation
+   * speed bump (mirrors hook-secret.guard.ts's shared-secret-from-env
+   * pattern), not a security boundary — v1 has no auth anywhere else either.
+   */
+  @Post('verify-wizard-password')
+  verifyWizardPassword(@Body() dto: VerifyWizardPasswordDto) {
+    if (!this.config.wizardAdminPassword) {
+      return { ok: false, error: 'WIZARD_ADMIN_PASSWORD is not configured on the server' };
+    }
+    return { ok: dto.password === this.config.wizardAdminPassword };
   }
 }

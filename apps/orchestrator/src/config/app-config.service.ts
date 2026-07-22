@@ -103,6 +103,14 @@ export class AppConfigService {
    *  Strongly recommended once the endpoint is exposed beyond localhost. */
   readonly mcpToken: string;
 
+  /**
+   * Gates `infra/setup-wizard.mjs`'s "advanced" mode — a local confirmation
+   * speed bump, not a security boundary (v1 has no auth at all; see
+   * hookSecret above for the same shared-secret-from-env pattern). Empty =
+   * advanced mode refuses to unlock until the operator sets one.
+   */
+  readonly wizardAdminPassword: string;
+
   constructor() {
     this.port = parseInt(process.env.ORCHESTRATOR_PORT ?? '3001', 10);
     this.databaseUrl = this.required('DATABASE_URL');
@@ -159,6 +167,7 @@ export class AppConfigService {
       .map((s) => s.trim())
       .filter(Boolean);
     this.mcpToken = process.env.MCP_TOKEN?.trim() ?? '';
+    this.wizardAdminPassword = process.env.WIZARD_ADMIN_PASSWORD ?? '';
   }
 
   private required(key: string): string {

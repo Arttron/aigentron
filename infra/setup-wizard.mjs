@@ -1,0 +1,526 @@
+#!/usr/bin/env node
+// ----------------------------------------------------------------------
+// Aigentron interactive setup wizard — a CLI guide for first-run
+// configuration, alternative to clicking through the dashboard by hand.
+// Pure HTTP client against the orchestrator's REST API (`/api/...`), so it
+// works identically regardless of how the server was installed:
+//   - bare-metal (install-bare.sh): run directly — `node infra/setup-wizard.mjs`
+//   - Docker (install.sh): `docker exec -it <container> node /app/infra/setup-wizard.mjs`
+//     (Node only exists inside the container in that profile), or directly on
+//     the host if you happen to have Node there too, hitting the published port.
+//   - full dev stack (`make up`): `node infra/setup-wizard.mjs` from the repo root.
+//
+// No external dependencies — only Node built-ins (readline, fetch, child_process).
+// Not auto-launched by install.sh/install-bare.sh: both installers are meant to
+// run via `curl -fsSL ... | sh`, so stdin is the curl pipe, not a real TTY —
+// an inline interactive prompt would just hit EOF. Run this yourself afterward.
+//
+// Usage:
+//   node infra/setup-wizard.mjs [--orchestrator-url http://localhost:3001] [--advanced]
+// ----------------------------------------------------------------------
+import { createInterface } from 'node:readline';
+import { spawnSync, execSync } from 'node:child_process';
+
+let BASE = 'http://localhost:3001';
+
+function log(msg = '') {
+  console.log(msg);
+}
+function header(title) {
+  console.log(`\n== ${title} ==`);
+}
+
+// ---- prompt helpers (plain node:readline, one shared Interface) ----
+
+function qp(rl, query) {
+  return new Promise((resolve) => rl.question(query, resolve));
+}
+
+async function prompt(rl, query, def) {
+  const suffix = def !== undefined && def !== '' ? ` [${def}]` : '';
+  const answer = (await qp(rl, `${query}${suffix}: `)).trim();
+  return answer || def || '';
+}
+
+async function promptYesNo(rl, query, def = false) {
+  const hint = def ? 'Y/n' : 'y/N';
+  const answer = (await qp(rl, `${query} (${hint}): `)).trim().toLowerCase();
+  if (!answer) return def;
+  return /^y(es)?$/.test(answer);
+}
+
+/** Restrict to a fixed set of options; blank falls back to `def`, invalid re-prompts. */
+async function promptChoice(rl, query, options, def) {
+  for (;;) {
+    const answer = (await qp(rl, `${query} [${options.join('/')}]${def ? ` (${def})` : ''}: `)).trim();
+    if (!answer) return def ?? options[0];
+    const match = options.find((o) => o.toLowerCase() === answer.toLowerCase());
+    if (match) return match;
+    log(`  please choose one of: ${options.join(', ')}`);
+  }
+}
+
+/** Same as promptChoice, but blank means "none" instead of a required default. */
+async function promptChoiceOptional(rl, query, options) {
+  if (!options.length) return undefined;
+  for (;;) {
+    const answer = (await qp(rl, `${query} [${options.join('/')}] (blank = none): `)).trim();
+    if (!answer) return undefined;
+    const match = options.find((o) => o.toLowerCase() === answer.toLowerCase());
+    if (match) return match;
+    log(`  please choose one of: ${options.join(', ')}, or leave blank`);
+  }
+}
+
+/** Masked input: readline still drives the actual line-editing (Enter/Backspace/
+ *  Ctrl+C all work normally); a parallel raw 'data' listener just repaints the
+ *  visible line as asterisks instead of echoing real characters. */
+async function promptSecret(rl, query) {
+  process.stdout.write(query);
+  return new Promise((resolve, reject) => {
+    const redraw = () => {
+      process.stdout.write(`\r\x1B[K${query}${'*'.repeat(rl.line.length)}`);
+    };
+    const onData = () => redraw();
+    process.stdin.on('data', onData);
+    rl.question('', (value) => {
+      process.stdin.removeListener('data', onData);
+      process.stdout.write('\n');
+      resolve(value.trim());
+    });
+  });
+}
+
+function toIntOrUndef(s) {
+  if (!s) return undefined;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+function toCsvOrUndef(list) {
+  return list && list.length ? list.join(',') : undefined;
+}
+function splitCsv(s) {
+  return (s || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+// ---- orchestrator REST client ----
+
+async function api(method, path, body) {
+  const res = await fetch(`${BASE}/api${path}`, {
+    method,
+    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
+  }
+  if (!res.ok) {
+    const msg = json?.message || json?.error || res.statusText;
+    throw new Error(`${method} ${path} → HTTP ${res.status}: ${Array.isArray(msg) ? msg.join('; ') : msg}`);
+  }
+  return json;
+}
+const apiGet = (path) => api('GET', path);
+const apiPost = (path, body) => api('POST', path, body ?? {});
+const apiPut = (path, body) => api('PUT', path, body ?? {});
+
+async function waitForOrchestrator(maxTries = 10) {
+  for (let i = 0; i < maxTries; i++) {
+    try {
+      return await apiGet('/health');
+    } catch (e) {
+      if (i === 0) log(`  waiting for the orchestrator at ${BASE} ...`);
+      if (i === maxTries - 1) throw e;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
+
+function commandExists(cmd) {
+  try {
+    execSync(`command -v ${cmd}`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Runs `claude setup-token` inline (interactive login inherited from this TTY),
+ *  capturing the printed token. Mirrors scripts/cli-auth.sh's logic — duplicated
+ *  rather than shelled out to, since that sibling script won't exist when this
+ *  wizard runs inside a Docker `docker exec` context. */
+function runClaudeSetupToken() {
+  log('  Launching `claude setup-token` — follow the login it opens...');
+  const res = spawnSync('claude', ['setup-token'], { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8' });
+  if (res.status !== 0 || !res.stdout) return null;
+  const lines = res.stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : null;
+}
+
+// ---- steps ----
+
+async function stepDeploymentMode(rl, cliUrl) {
+  header('Step 0 — Deployment');
+  const mode = await promptChoice(rl, 'How is Aigentron installed here?', ['docker', 'bare-metal', 'not-sure'], 'not-sure');
+  const defaultUrl = cliUrl || process.env.ORCHESTRATOR_URL || 'http://localhost:3001';
+  BASE = (await prompt(rl, 'Orchestrator URL', defaultUrl)).replace(/\/$/, '');
+  try {
+    const health = await waitForOrchestrator();
+    log(`  ✓ reachable (version ${health.version ?? 'unknown'})`);
+  } catch {
+    log(`  ✗ could not reach ${BASE}/api/health.`);
+    if (mode === 'docker') {
+      log('  If Node isn\'t installed on this machine, run this wizard via:');
+      log('    docker exec -it <container-name> node /app/infra/setup-wizard.mjs');
+    }
+    throw new Error('orchestrator unreachable — fix the URL/deployment and re-run');
+  }
+  return mode;
+}
+
+async function stepProviders(rl) {
+  header('Step 1 — Providers (network, model, auth)');
+  const providers = [];
+  let first = true;
+  while (await promptYesNo(rl, first ? 'Add a provider now?' : 'Add another provider?', first)) {
+    first = false;
+    const name = await prompt(rl, 'Provider name (id)', providers.length ? undefined : 'claude-cloud');
+    const kind = await promptChoice(rl, 'Kind (upstream family)', ['anthropic', 'openai', 'deepseek', 'ollama'], 'anthropic');
+
+    let baseUrl;
+    if (kind !== 'anthropic') {
+      baseUrl = await prompt(rl, `Base URL for ${kind} (blank = default)`);
+    } else if (await promptYesNo(rl, 'Use a custom Anthropic-compatible base URL? (no = native Anthropic API)', false)) {
+      baseUrl = await prompt(rl, 'Base URL');
+    }
+
+    const authOptions = kind === 'anthropic' ? ['api-key', 'auth-token', 'oauth-token'] : ['api-key', 'auth-token'];
+    const authMode = await promptChoice(rl, 'Auth mode', authOptions, 'api-key');
+
+    let secret;
+    if (authMode === 'oauth-token') {
+      if (commandExists('claude') && (await promptYesNo(rl, 'Run `claude setup-token` now to mint one?', true))) {
+        secret = runClaudeSetupToken() || undefined;
+        if (!secret) log('  (no token captured — falling back to manual entry)');
+      }
+      if (!secret) {
+        log('  If `claude` isn\'t available here (e.g. inside a `docker exec` session), run');
+        log('  `scripts/cli-auth.sh <name>` from your own machine, then paste the token below.');
+        secret = await promptSecret(rl, 'OAuth token: ');
+      }
+    } else {
+      secret = await promptSecret(rl, 'Secret (API key/token, hidden): ');
+    }
+
+    let model;
+    if (await promptYesNo(rl, 'Try to list available models from this endpoint?', false)) {
+      try {
+        const preview = await apiPost('/providers/models-preview', {
+          kind,
+          baseUrl: baseUrl || undefined,
+          authMode,
+          secret: secret || undefined,
+        });
+        if (preview.ok && preview.models?.length) {
+          model = await promptChoiceOptional(rl, 'Pick a model', preview.models);
+        } else {
+          log(`  (could not list models: ${preview.error || 'none returned'})`);
+        }
+      } catch (e) {
+        log(`  (model preview failed: ${e.message})`);
+      }
+    }
+    if (!model) model = await prompt(rl, 'Model name');
+
+    let rpm;
+    let tpm;
+    if (await promptYesNo(rl, 'Set rate limits (rpm/tpm)?', false)) {
+      rpm = toIntOrUndef(await prompt(rl, 'Requests/min (blank = none)'));
+      tpm = toIntOrUndef(await prompt(rl, 'Tokens/min (blank = none)'));
+    }
+
+    try {
+      await apiPost('/providers', {
+        name,
+        kind,
+        baseUrl: baseUrl || undefined,
+        model,
+        authMode,
+        secret: secret || undefined,
+        rpm,
+        tpm,
+      });
+      log(`  ✓ provider "${name}" created`);
+      providers.push(name);
+    } catch (e) {
+      log(`  ✗ failed to create provider "${name}": ${e.message}`);
+    }
+  }
+
+  if (providers.length) {
+    const def = await promptChoiceOptional(rl, 'Set the default provider', providers);
+    if (def) {
+      try {
+        await apiPut('/settings', { defaultProvider: def });
+        log(`  ✓ default provider set to "${def}"`);
+      } catch (e) {
+        log(`  ✗ ${e.message}`);
+      }
+    }
+  }
+  return providers;
+}
+
+async function promptChannelField(rl, field) {
+  const note = [field.required ? 'required' : null, field.help].filter(Boolean).join(' — ');
+  const suffix = note ? ` (${note})` : '';
+  if (field.type === 'password') {
+    return await promptSecret(rl, `${field.label}${suffix}: `);
+  }
+  if (field.type === 'list') {
+    return splitCsv(await prompt(rl, `${field.label}${suffix} (comma-separated)`));
+  }
+  if (field.type === 'agent') {
+    const agents = await apiGet('/agents').catch(() => []);
+    if (!agents.length) return undefined;
+    return await promptChoiceOptional(rl, `${field.label}${suffix}`, agents.map((a) => a.name));
+  }
+  const value = await prompt(rl, `${field.label}${suffix}`, field.placeholder ? undefined : '');
+  return value || undefined;
+}
+
+async function stepChannels(rl) {
+  header('Step 2 — Channels');
+  if (!(await promptYesNo(rl, 'Configure a channel now (e.g. Telegram)?', false))) {
+    log('  Skipped — configurable later via the dashboard or this wizard.');
+    return;
+  }
+  const kinds = await apiGet('/channels/kinds').catch(() => []);
+  const available = kinds.filter((k) => k.available);
+  if (!available.length) {
+    log('  No channel kind is implemented yet.');
+    return;
+  }
+  let more = true;
+  while (more) {
+    const kindNames = available.map((k) => k.kind);
+    const kind = await promptChoice(rl, 'Channel kind', kindNames, kindNames[0]);
+    const kindDef = available.find((k) => k.kind === kind);
+    if (kindDef.hint) log(`  ${kindDef.hint}`);
+    const name = await prompt(rl, 'Channel name (id)', kind);
+    const config = {};
+    for (const field of kindDef.fields) {
+      config[field.key] = await promptChannelField(rl, field);
+    }
+    try {
+      const row = await apiPost('/channels', { name, kind, enabled: true, config });
+      log(`  ✓ channel "${name}" created`);
+      if (await promptYesNo(rl, 'Test this channel now?', true)) {
+        const t = await apiPost(`/channels/${row.id}/test`);
+        log(t.ok ? '  ✓ test ok' : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
+      }
+    } catch (e) {
+      log(`  ✗ failed to create channel "${name}": ${e.message}`);
+    }
+    more = await promptYesNo(rl, 'Add another channel?', false);
+  }
+}
+
+async function stepAgents(rl, providerNames) {
+  header('Step 3 — Agents (+ skills)');
+  const agents = await apiGet('/agents').catch(() => []);
+  if (!agents.length) {
+    log('  No agents found — nothing to configure.');
+    return;
+  }
+  const allSkills = await apiGet('/agents/skills').catch(() => []);
+  log(`  Agents: ${agents.map((a) => a.name).join(', ')}`);
+  if (allSkills.length) log(`  Skills available to all agents by default: ${allSkills.join(', ')}`);
+
+  while (await promptYesNo(rl, 'Configure an agent now?', true)) {
+    const name = await promptChoice(rl, 'Which agent?', agents.map((a) => a.name), agents[0].name);
+    const def = await apiGet(`/agents/${encodeURIComponent(name)}`);
+
+    const provider = providerNames.length
+      ? (await promptChoiceOptional(rl, `Provider for "${name}" (blank = keep "${def.provider || 'platform default'}")`, providerNames)) ||
+        def.provider
+      : def.provider;
+
+    const modelInput = await prompt(rl, `Model override for "${name}" (blank = keep "${def.model || 'provider default'}")`);
+    const model = modelInput || def.model;
+
+    let fallbackProviders = def.fallbackProviders;
+    if (providerNames.length > 1 && (await promptYesNo(rl, 'Set fallback providers (in order)?', false))) {
+      fallbackProviders = splitCsv(await prompt(rl, `Fallback providers, comma-separated (from: ${providerNames.join(', ')})`));
+    }
+
+    let skills = def.skills;
+    if (allSkills.length && (await promptYesNo(rl, `Restrict "${name}" to a subset of skills? (default: all)`, false))) {
+      skills = splitCsv(await prompt(rl, `Skills for "${name}", comma-separated (from: ${allSkills.join(', ')})`));
+    }
+
+    try {
+      await apiPut(`/agents/${encodeURIComponent(name)}`, {
+        description: def.description,
+        provider: provider || undefined,
+        model: model || undefined,
+        fallbackProviders: toCsvOrUndef(fallbackProviders),
+        skills: toCsvOrUndef(skills),
+        allowedTools: toCsvOrUndef(def.allowedTools),
+        disallowedTools: toCsvOrUndef(def.disallowedTools),
+        mcp: toCsvOrUndef(def.mcp),
+        instructions: def.instructions,
+      });
+      log(`  ✓ agent "${name}" updated`);
+    } catch (e) {
+      log(`  ✗ failed to update "${name}": ${e.message}`);
+    }
+  }
+
+  if (await promptYesNo(rl, "Set a default agent (used when a task doesn't pick one)?", false)) {
+    const name = await promptChoice(rl, 'Default agent', agents.map((a) => a.name), agents[0].name);
+    try {
+      await apiPut('/settings', { defaultAgent: name });
+      log(`  ✓ default agent set to "${name}"`);
+    } catch (e) {
+      log(`  ✗ ${e.message}`);
+    }
+  }
+}
+
+async function stepRepo(rl) {
+  header('Step 4 — Repository (optional)');
+  if (!(await promptYesNo(rl, 'Configure a project repository now?', false))) {
+    log('  Skipped — configurable later in Settings.');
+    return;
+  }
+  const repoUrl = await prompt(rl, 'Repo URL (blank = local-only, no remote)');
+  const repoBranch = await prompt(rl, 'Base branch', 'main');
+  const githubToken = repoUrl ? await promptSecret(rl, 'GitHub token (for push/PR, blank = none): ') : '';
+  const workspaceSubdir = await prompt(rl, 'Subdirectory within the repo agents should work in (blank = repo root)');
+  try {
+    await apiPut('/settings', {
+      repoUrl: repoUrl || undefined,
+      repoBranch: repoBranch || undefined,
+      githubToken: githubToken || undefined,
+      workspaceSubdir: workspaceSubdir || undefined,
+    });
+    log('  ✓ repository settings saved');
+  } catch (e) {
+    log(`  ✗ failed: ${e.message}`);
+  }
+}
+
+async function stepAdvanced(rl, { startUnlocked = false } = {}) {
+  header('Advanced mode (password-gated)');
+  if (!startUnlocked && !(await promptYesNo(rl, 'Enter advanced mode?', false))) return;
+
+  const password = await promptSecret(rl, 'Admin password: ');
+  let verify;
+  try {
+    verify = await apiPost('/settings/verify-wizard-password', { password });
+  } catch (e) {
+    log(`  ✗ could not verify: ${e.message}`);
+    return;
+  }
+  if (!verify.ok) {
+    if (verify.error) {
+      log(`  ✗ ${verify.error}`);
+      log('  Pick your own WIZARD_ADMIN_PASSWORD in your .env (a short memorable one — you\'ll type it');
+      log('  back in later, e.g. over Telegram or the dashboard) and restart the service.');
+    } else {
+      log('  ✗ wrong password');
+    }
+    return;
+  }
+
+  log('  ✓ unlocked. Blank keeps the current value.');
+  const current = await apiGet('/settings');
+  const patch = {};
+  const approvalTimeoutSeconds = toIntOrUndef(await prompt(rl, `Approval timeout seconds [${current.approvalTimeoutSeconds}]`));
+  if (approvalTimeoutSeconds !== undefined) patch.approvalTimeoutSeconds = approvalTimeoutSeconds;
+  const verifyMaxAttempts = toIntOrUndef(await prompt(rl, `Verify max attempts [${current.verifyMaxAttempts}]`));
+  if (verifyMaxAttempts !== undefined) patch.verifyMaxAttempts = verifyMaxAttempts;
+  const verifyCommands = await prompt(rl, `Verify commands, one per line joined by ';' [${current.verifyCommands || '(none)'}]`);
+  if (verifyCommands) patch.verifyCommands = verifyCommands;
+  const debugModeRaw = await prompt(rl, `Debug mode? (y/n) [${current.debugMode ? 'y' : 'n'}]`);
+  if (debugModeRaw) patch.debugMode = /^y/i.test(debugModeRaw);
+  const agentInstructions = await prompt(rl, 'Extra global agent instructions to append (blank = keep current)');
+  if (agentInstructions) patch.agentInstructions = agentInstructions;
+
+  if (Object.keys(patch).length) {
+    await apiPut('/settings', patch);
+    log('  ✓ advanced settings updated');
+  } else {
+    log('  (no changes)');
+  }
+}
+
+function parseArgs(argv) {
+  const args = { advanced: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--orchestrator-url') args.orchestratorUrl = argv[++i];
+    else if (a === '--advanced') args.advanced = true;
+    else if (a === '-h' || a === '--help') args.help = true;
+  }
+  return args;
+}
+
+function printHelp() {
+  log('Usage: node infra/setup-wizard.mjs [--orchestrator-url <url>] [--advanced]');
+  log('  --orchestrator-url  Orchestrator base URL (default http://localhost:3001)');
+  log('  --advanced          Skip straight to the password-gated advanced-settings step');
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    printHelp();
+    return;
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  rl.on('SIGINT', () => {
+    log('\naborted');
+    process.exit(130);
+  });
+
+  try {
+    log('Aigentron setup wizard — guided first-run configuration.');
+    await stepDeploymentMode(rl, args.orchestratorUrl);
+
+    if (args.advanced) {
+      await stepAdvanced(rl, { startUnlocked: true });
+      return;
+    }
+
+    const providers = await stepProviders(rl);
+    await stepChannels(rl);
+    await stepAgents(rl, providers);
+    await stepRepo(rl);
+    await stepAdvanced(rl);
+
+    header('Done');
+    log(`Orchestrator: ${BASE}/api/health`);
+    log('Dashboard: check DASHBOARD_BASE_URL in your .env (default http://localhost:3000)');
+    log('Re-run this wizard any time: node infra/setup-wizard.mjs');
+  } finally {
+    rl.close();
+  }
+}
+
+main().catch((e) => {
+  console.error(`\nfatal: ${e.message}`);
+  process.exit(1);
+});

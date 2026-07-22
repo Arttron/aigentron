@@ -636,6 +636,9 @@ export class RealAgentExecutor extends AgentExecutor {
 
   /**
    * Map a provider + chosen model to the agent's Anthropic env.
+   *  - `authMode: 'oauth-token'` (CLI-minted subscription token) always
+   *    bypasses LiteLLM — it can't forward one — and talks to the provider's
+   *    native endpoint directly.
    *  - OpenAI-native providers are proxied through LiteLLM (registered as
    *    `<name>/*`): the agent talks Anthropic to litellm with the master key,
    *    and litellm forwards to OpenAI with the provider's key.
@@ -643,6 +646,13 @@ export class RealAgentExecutor extends AgentExecutor {
    *    the master key too, since litellm enforces it on every request.
    */
   private async resolveModelEnv(provider: Provider, model: string): Promise<AgentModelEnv> {
+    // CLI-minted OAuth/subscription token: LiteLLM can only forward a real
+    // Anthropic API key, so this always bypasses it and talks to the family's
+    // native endpoint directly — never registers a route.
+    if (isOauthToken(provider)) {
+      return resolveProvider({ ...provider, model });
+    }
+
     const masterKey = this.config.litellmMasterKey;
 
     // Everything runs through LiteLLM when it's configured: ensure an exact
@@ -721,6 +731,13 @@ export class RealAgentExecutor extends AgentExecutor {
    * the lead, each carrying its own system prompt, tools, and `model` (its
    * LiteLLM route, so it runs on its own provider). Agents without a resolvable
    * model are skipped. Never throws — a bad agent just isn't offered.
+   *
+   * Limitation: the SDK spawns one subprocess per run, sharing a single
+   * connection (base URL + auth) between the lead and every subagent. A CLI
+   * OAuth/subscription provider always bypasses LiteLLM (see resolveModelEnv),
+   * so when `defaultProvider` is one, no subagent — regardless of its own
+   * provider — can share that connection; skip delegation entirely for this
+   * task rather than offer subagents that would fail to resolve at runtime.
    */
   private async buildSubagents(
     leadName: string | null,
@@ -728,6 +745,13 @@ export class RealAgentExecutor extends AgentExecutor {
     orientation: string,
   ): Promise<Record<string, SubagentDefinition>> {
     const map: Record<string, SubagentDefinition> = {};
+    const defaultProviderRow = await this.providers.get(defaultProvider).catch(() => null);
+    if (defaultProviderRow && isOauthToken(defaultProviderRow)) {
+      this.logger.debug(
+        `Default provider "${defaultProvider}" is oauth-token — subagent delegation disabled for this task`,
+      );
+      return map;
+    }
     const summaries = await this.agents.list().catch(() => []);
     for (const s of summaries) {
       if (s.name === leadName) continue;
@@ -751,6 +775,11 @@ export class RealAgentExecutor extends AgentExecutor {
   private async subagentModel(def: AgentDef, defaultProvider: string): Promise<string | null> {
     const provider = await this.providers.get(def.provider ?? defaultProvider).catch(() => null);
     if (!provider) return null;
+    if (isOauthToken(provider)) {
+      // Can't share a subagent slot on the lead's connection — see buildSubagents.
+      this.logger.debug(`Subagent provider "${provider.name}" is oauth-token — not offered as a subagent`);
+      return null;
+    }
     const model = (def.model || provider.model || '').trim();
     if (!model) return null;
     if (this.config.litellmMasterKey) {
@@ -884,6 +913,11 @@ export class RealAgentExecutor extends AgentExecutor {
       payload: { taskId, agentSessionId, status, ts: new Date().toISOString() },
     });
   }
+}
+
+/** A CLI-minted OAuth/subscription token — bypasses LiteLLM, see resolveModelEnv/subagentModel. */
+function isOauthToken(provider: Pick<Provider, 'authMode'>): boolean {
+  return provider.authMode === 'oauth-token';
 }
 
 /**

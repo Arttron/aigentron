@@ -25,6 +25,11 @@ make up                # build + start the full stack
 
 Dashboard → http://localhost:3000 · Orchestrator API → http://localhost:3001
 
+**First-run setup:** once the stack is up, `pnpm setup` (or `node infra/setup-wizard.mjs`)
+runs a guided CLI wizard for providers, channels, agents, skills, and an optional project
+repo — the same REST API the dashboard uses, just walked step by step from a terminal. The
+dashboard keeps working standalone; the wizard is a guided alternative, not a replacement.
+
 ## Running locally with Docker Compose
 
 ### Prerequisites
@@ -114,7 +119,7 @@ with `docker inspect`) are the source of truth for what's actually running.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/install.sh | sh
 # or pin an explicit version — always do this for a real deployment:
-VERSION=0.1.0 sh install.sh
+VERSION=0.1.1 sh install.sh
 ```
 
 Re-running the same command later checks the installed version via `docker inspect` and
@@ -148,13 +153,44 @@ persists in the `/data` volume (SQLite DB, agent defs, repo, worktrees, attachme
 back it up by copying that volume, nothing else to snapshot. `/api/health` reports the
 running `version` alongside DB/LiteLLM status.
 
+**Option D — bare-metal (no Docker)**, for servers where you'd rather not run Docker at
+all: builds from source and installs the exact same runtime (orchestrator + dashboard +
+self-managed LiteLLM) as a systemd service, using `infra/minimal-entrypoint.sh` /
+`infra/minimal-supervisor.mjs` directly instead of a container. Requires root (installs a
+systemd unit) and, on the host: Node ≥22, `pnpm`/`corepack`, `python3`, `git`.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/install-bare.sh | sudo sh
+# or pin an explicit version — always do this for a real deployment:
+VERSION=0.1.1 sudo sh install-bare.sh
+```
+
+Installs into `/opt/aigentron` by default (`INSTALL_DIR` to change it), data under
+`/opt/aigentron/data` (`DATA_DIR` to change it), and manages the service with
+`systemctl {status,restart} aigentron` / `journalctl -u aigentron -f`. Re-running the same
+command later checks the installed version (via the `/opt/aigentron/current` symlink) and
+upgrades in place, same `FORCE=1`/pinning rules as Option A.
+
 **Env vars worth overriding for a real deployment** (all have working local defaults —
-see `ENV` in `infra/minimal.Dockerfile`):
+see `ENV` in `infra/minimal.Dockerfile` for Options A–C, or the generated
+`/etc/systemd/system/aigentron.service` for Option D):
 - `ANTHROPIC_API_KEY` — for the cloud/"complex" model tier.
 - `LITELLM_MASTER_KEY` — the image ships a fixed dev default; set your own.
 - `ROUTINE_MODEL` / `OLLAMA_NATIVE_URL` — which local model to route to, and where Ollama
   actually is (defaults assume it's on the same host as the container).
 
+**Ollama is optional.** It only backs one seeded provider (`ollama-local`) for the
+"routine" local-model tier — if you only run tasks against cloud Claude (including the
+CLI-minted subscription `oauth-token` auth mode — see `scripts/cli-auth.sh`), you can
+leave `OLLAMA_NATIVE_URL` unreachable entirely: the app boots and runs fine either way,
+that provider just errors if something tries to route to it.
+
+**First-run setup:** every option above ends by printing how to run
+`infra/setup-wizard.mjs` — a guided CLI walkthrough for providers, channels, agents,
+skills, and an optional repo, instead of clicking through the dashboard by hand. It's a
+plain REST client, so it works the same regardless of which option you used.
+
 **Known follow-ups** (don't block using it, just not done yet): the runtime image ships
 the full resolved `node_modules` rather than a production-pruned one (~3 GB); no container
-registry yet, so every path above builds locally rather than pulling a pre-built image.
+registry yet, so every Docker path above builds locally rather than pulling a pre-built
+image.

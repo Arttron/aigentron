@@ -151,26 +151,29 @@ export function ProvidersManager() {
               {p.kind} · {p.model || 'no default model'} · {p.baseUrl || 'native'} · {p.authMode}
               {p.secretSet ? ` · secret ${p.secretHint}` : ' · no secret'}
             </Muted>
-            {r && (
-              <div className={cn(styles.result, r.ok ? styles.ok : styles.fail)}>
-                {r.ok ? (
-                  <>
-                    ✓ responded as <strong>{r.model}</strong>
-                    {typeof r.latencyMs === 'number' ? ` · ${r.latencyMs}ms` : ''}
-                    {r.toolUse === true
-                      ? ' · tools ✓'
-                      : r.toolUse === false
-                        ? ' · tools ✗ (unusable for agents)'
-                        : r.toolUseNote
-                          ? ` · tools ? (${r.toolUseNote})`
-                          : ''}
-                    {r.reply ? ` · “${r.reply}”` : ''}
-                  </>
-                ) : (
-                  <>✗ {r.error}{r.status ? ` (HTTP ${r.status})` : ''}</>
-                )}
-              </div>
-            )}
+            {r &&
+              (p.authMode === 'oauth-token' && !r.ok ? (
+                <Muted className={styles.result}>ⓘ {r.error}</Muted>
+              ) : (
+                <div className={cn(styles.result, r.ok ? styles.ok : styles.fail)}>
+                  {r.ok ? (
+                    <>
+                      ✓ responded as <strong>{r.model}</strong>
+                      {typeof r.latencyMs === 'number' ? ` · ${r.latencyMs}ms` : ''}
+                      {r.toolUse === true
+                        ? ' · tools ✓'
+                        : r.toolUse === false
+                          ? ' · tools ✗ (unusable for agents)'
+                          : r.toolUseNote
+                            ? ` · tools ? (${r.toolUseNote})`
+                            : ''}
+                      {r.reply ? ` · “${r.reply}”` : ''}
+                    </>
+                  ) : (
+                    <>✗ {r.error}{r.status ? ` (HTTP ${r.status})` : ''}</>
+                  )}
+                </div>
+              ))}
           </div>
         );
       })}

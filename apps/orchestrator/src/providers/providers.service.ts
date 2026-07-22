@@ -10,7 +10,7 @@ export interface ProviderPatch {
   kind?: string;
   baseUrl?: string | null;
   model?: string;
-  authMode?: 'api-key' | 'auth-token';
+  authMode?: 'api-key' | 'auth-token' | 'oauth-token';
   secret?: string | null;
   rpm?: number | null;
   tpm?: number | null;
@@ -177,6 +177,12 @@ export class ProvidersService implements OnModuleInit {
   async test(name: string): Promise<ProviderTestResult> {
     const p = toProvider(await this.getRow(name));
     if (!p.model) return { ok: false, error: `provider "${name}" has no model` };
+    if (p.authMode === 'oauth-token') {
+      // The Claude Agent SDK handles this token's auth internally; we don't
+      // know its exact request shape, so don't guess at an HTTP probe — an
+      // agent run is the real test.
+      return { ok: false, error: 'OAuth/subscription tokens aren’t verified via HTTP probe — start a task on this provider to confirm it works.' };
+    }
 
     const kind = p.kind || defaultKind(p.baseUrl);
     const anthropic = kind === 'anthropic';
@@ -299,6 +305,10 @@ export class ProvidersService implements OnModuleInit {
   /** Models the provider's endpoint advertises (for the agent's model picker). */
   async listModels(name: string): Promise<ProviderModelsResult> {
     const p = toProvider(await this.getRow(name));
+    if (p.authMode === 'oauth-token') {
+      // Same reasoning as test(): don't guess at the OAuth token's request shape.
+      return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
+    }
     return this.fetchModels({ kind: p.kind || defaultKind(p.baseUrl), baseUrl: p.baseUrl, authMode: p.authMode, secret: p.secret });
   }
 
@@ -306,9 +316,12 @@ export class ProvidersService implements OnModuleInit {
   async previewModels(input: {
     kind?: string;
     baseUrl?: string | null;
-    authMode?: 'api-key' | 'auth-token';
+    authMode?: 'api-key' | 'auth-token' | 'oauth-token';
     secret?: string | null;
   }): Promise<ProviderModelsResult> {
+    if (input.authMode === 'oauth-token') {
+      return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
+    }
     return this.fetchModels({
       kind: input.kind || defaultKind(input.baseUrl),
       baseUrl: input.baseUrl || null,
@@ -370,7 +383,10 @@ function oaiBase(kind: string, baseUrl: string | null): string {
 }
 
 /** Build auth headers for a direct upstream test/model-list, by kind. */
-function authHeaders(kind: string, p: { authMode: 'api-key' | 'auth-token'; secret: string | null }): {
+function authHeaders(
+  kind: string,
+  p: { authMode: 'api-key' | 'auth-token' | 'oauth-token'; secret: string | null },
+): {
   headers: Record<string, string>;
   error?: string;
 } {
@@ -442,13 +458,17 @@ export interface ProviderModelsResult {
   error?: string;
 }
 
+const KNOWN_AUTH_MODES = ['api-key', 'auth-token', 'oauth-token'] as const;
+
 function toProvider(row: ProviderRow): Provider {
   return {
     name: row.name,
     kind: row.kind,
     baseUrl: row.baseUrl,
     model: row.model,
-    authMode: row.authMode === 'api-key' ? 'api-key' : 'auth-token',
+    authMode: (KNOWN_AUTH_MODES as readonly string[]).includes(row.authMode)
+      ? (row.authMode as Provider['authMode'])
+      : 'auth-token',
     secret: row.secret,
     rpm: row.rpm,
     tpm: row.tpm,
