@@ -147,8 +147,7 @@ export class AppConfigService {
     this.approvalsApiUrl = process.env.APPROVALS_API_URL ?? `http://localhost:${this.port}`;
     this.approvalTimeoutSeconds = parseInt(process.env.APPROVAL_TIMEOUT_SECONDS ?? '300', 10);
 
-    this.hookScriptPath =
-      process.env.HOOK_SCRIPT_PATH ?? '/app/infra/hooks/pre-tool-use.mjs';
+    this.hookScriptPath = process.env.HOOK_SCRIPT_PATH ?? defaultHookScriptPath();
     this.sharedDistPath = process.env.SHARED_DIST_PATH ?? safeResolveShared();
     // Stable across this process so all spawned agents share it; random if unset.
     this.hookSecret = process.env.LDS_HOOK_SECRET || randomUUID();
@@ -186,4 +185,26 @@ function safeResolveShared(): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * Portable default location of the PreToolUse approval hook script, computed
+ * relative to this compiled file (apps/orchestrator/dist/config/) instead of
+ * a hardcoded Docker-only absolute path. The old default, `/app/infra/hooks/
+ * pre-tool-use.mjs`, only ever resolved in the `full` profile's DEV container
+ * — that one bind-mounts the whole repo at `/app`, so the path existed there
+ * by accident. `minimal`'s Dockerfile never COPYs `infra/hooks/` into the
+ * image at all, and bare-metal has no `/app` directory whatsoever (it installs
+ * under `/opt/aigentron/...`) — on both, the hook script silently didn't
+ * exist, so `node <scriptPath>` failed to spawn, the SDK never got a
+ * PreToolUse decision, and EVERY tool call (not just internal control-plane
+ * ones like report_task_status) fell through to the SDK's own interactive
+ * permission prompt, which nothing answers in a headless run. Resolving
+ * relative to `__dirname` instead works unchanged across all three profiles
+ * as long as `infra/hooks/` sits at the same repo-root-relative path — true
+ * for bare-metal's full checkout, and now also true for `minimal` once its
+ * Dockerfile copies that directory in.
+ */
+function defaultHookScriptPath(): string {
+  return join(__dirname, '..', '..', '..', '..', 'infra', 'hooks', 'pre-tool-use.mjs');
 }

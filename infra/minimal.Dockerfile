@@ -88,6 +88,12 @@ COPY --from=build /app/apps/dashboard/dist /app/apps/dashboard/dist
 COPY agent /app/agent
 
 COPY infra/minimal-entrypoint.sh infra/minimal-healthcheck.sh infra/setup-wizard.mjs /app/infra/
+# The PreToolUse approval hook (apps/orchestrator's AppConfigService resolves
+# it relative to its own compiled location, expecting it here) — previously
+# missing from this COPY list entirely, so the hook script never existed in
+# this image and every tool call silently fell through to the SDK's own
+# interactive permission prompt instead of our auto-allow/human-approval gate.
+COPY infra/hooks /app/infra/hooks
 RUN chmod +x /app/infra/minimal-entrypoint.sh /app/infra/minimal-healthcheck.sh
 
 ENV NODE_ENV=production \
