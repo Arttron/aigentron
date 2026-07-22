@@ -28,4 +28,6 @@
 # Never remove/reuse a version's own release — this file only marks it,
 # doesn't unpublish it (matches this repo's "never reuse a tag" rule).
 
-0.1.1: install.sh hard-required Docker with no bare-metal alternative, and REPO defaulted to an unfilled CHANGEME/aigentron placeholder, breaking every fresh install that didn't pass REPO= explicitly — fixed in 0.1.2.
+0.1.0: published release archive was missing tsconfig.base.json (publish/allowlist.txt gap since the release tooling's first commit) — every from-source build (Docker AND bare-metal) fails with TS5083. Fixed in 0.1.3.
+0.1.1: same tsconfig.base.json gap as 0.1.0 (still unfixed at this point), PLUS install.sh hard-required Docker with no bare-metal alternative, and REPO defaulted to an unfilled CHANGEME/aigentron placeholder, breaking every fresh install that didn't pass REPO= explicitly — fixed in 0.1.2/0.1.3.
+0.1.2: same tsconfig.base.json gap as 0.1.0/0.1.1 (still unfixed at this point) — every from-source build fails with TS5083. Fixed in 0.1.3.
