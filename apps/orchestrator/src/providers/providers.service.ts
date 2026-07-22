@@ -91,7 +91,14 @@ export class ProvidersService implements OnModuleInit {
         {
           name: 'ollama-local',
           kind: 'ollama',
-          baseUrl: process.env.OLLAMA_BASE_URL || 'http://host.docker.internal:11434',
+          // OLLAMA_BASE_URL (full profile's .env.example) and
+          // OLLAMA_NATIVE_URL (minimal/bare-metal's .env.minimal.example,
+          // also read by AppConfigService for the model picker) are two
+          // names for the same thing across profiles — this shared,
+          // profile-agnostic seed path needs to check both, or minimal/
+          // bare-metal installs always silently got the Docker-only
+          // fallback regardless of what they'd actually configured.
+          baseUrl: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_NATIVE_URL || 'http://host.docker.internal:11434',
           // A real Ollama tag (kind=ollama wraps it to `ollama_chat/<tag>`); a
           // litellm alias like `local-coder` would 404 (no such Ollama tag).
           model: process.env.ROUTINE_MODEL || 'qwen3-coder:30b',

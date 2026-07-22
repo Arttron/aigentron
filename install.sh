@@ -509,6 +509,21 @@ else
   pnpm --filter @lds/orchestrator build </dev/null
   pnpm --filter @lds/dashboard build </dev/null
 
+  # Next's standalone output needs the exact same relocation
+  # infra/minimal.Dockerfile does for the Docker image — its own build
+  # doesn't produce a runnable server at the path minimal-supervisor.mjs
+  # expects (apps/dashboard-standalone/...) otherwise. Missing this step
+  # broke the dashboard on EVERY bare-metal install with a MODULE_NOT_FOUND
+  # crash-loop, found live — the orchestrator half worked fine (it needs no
+  # such relocation), masking the problem until someone actually opened the
+  # dashboard. `.next/static` isn't included in the standalone output by
+  # design (Next's own documented deployment steps), so it's copied in too.
+  rm -rf "$RELEASE_DIR/apps/dashboard-standalone"
+  mkdir -p "$RELEASE_DIR/apps/dashboard-standalone"
+  cp -a "$RELEASE_DIR/apps/dashboard/.next/standalone/." "$RELEASE_DIR/apps/dashboard-standalone/"
+  mkdir -p "$RELEASE_DIR/apps/dashboard-standalone/apps/dashboard/.next/static"
+  cp -a "$RELEASE_DIR/apps/dashboard/.next/static/." "$RELEASE_DIR/apps/dashboard-standalone/apps/dashboard/.next/static/"
+
   LITELLM_VENV="$INSTALL_DIR/litellm-venv"
   if [ ! -x "$LITELLM_VENV/bin/litellm" ]; then
     log "Setting up the LiteLLM Python venv at $LITELLM_VENV (one-time, reused across upgrades)"
