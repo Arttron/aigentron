@@ -404,6 +404,14 @@ fetch "$ARCHIVE_URL" "$ARCHIVE_PATH" || die "download failed — check REPO/S3_P
 tar -xzf "$ARCHIVE_PATH" -C "$RELEASE_DIR" --strip-components=1
 rm -f "$ARCHIVE_PATH"
 
+# Belt-and-suspenders: systemd execs this file directly (ExecStart=) in
+# bare-metal mode — don't rely solely on the archive having preserved the
+# executable bit. It hadn't (a tracked-file-mode regression), breaking every
+# bare-metal install with a confusing systemd 203/EXEC "Permission denied"
+# found live on a real server. Harmless no-op for Docker mode, which never
+# execs this file directly.
+chmod +x "$RELEASE_DIR/infra/minimal-entrypoint.sh" 2>/dev/null || true
+
 ENV_FILE="$INSTALL_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
   # .env.minimal.example, NOT .env.example — the latter is the multi-service

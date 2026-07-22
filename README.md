@@ -125,7 +125,7 @@ found, bare-metal otherwise:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sh
 # or pin an explicit version — always do this for a real deployment:
-VERSION=0.1.6 sh install.sh
+VERSION=0.1.7 sh install.sh
 # or skip the question entirely:
 INSTALL_MODE=docker sh install.sh   # force Docker
 INSTALL_MODE=bare sh install.sh     # force bare-metal (root required; see below)
@@ -133,9 +133,9 @@ INSTALL_MODE=bare sh install.sh     # force bare-metal (root required; see below
 
 Bare-metal mode needs root — piping straight into `sudo`, put env var overrides *after*
 `sudo`, not before (`sudo` resets the environment by default, so e.g.
-`VERSION=0.1.6 sudo sh install.sh` silently drops `VERSION`):
+`VERSION=0.1.7 sudo sh install.sh` silently drops `VERSION`):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sudo INSTALL_MODE=bare VERSION=0.1.6 sh
+curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sudo INSTALL_MODE=bare VERSION=0.1.7 sh
 ```
 
 Bare-metal mode builds from source and installs the exact same runtime (orchestrator +
