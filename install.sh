@@ -186,11 +186,49 @@ else
     log "git not found — installing"
     pkg_install git
   }
+  # Debian/Ubuntu split `python3 -m venv`'s ensurepip support into a separate
+  # package — `python3` alone can be present and working while venv creation
+  # still fails ("ensurepip is not available"). Check the actual capability,
+  # not just the binary, or this sails past unnoticed and only fails later
+  # at the real venv-creation step with a confusing raw traceback.
+  python3_venv_ready() {
+    command -v python3 >/dev/null 2>&1 && python3 -c 'import ensurepip' >/dev/null 2>&1
+  }
   ensure_python3() {
-    command -v python3 >/dev/null 2>&1 && return 0
-    [ "$AUTO_INSTALL_DEPS" = "1" ] || die "python3 is required (for the self-managed LiteLLM) but not found on PATH"
-    log "python3 not found — installing"
-    pkg_install python3
+    python3_venv_ready && return 0
+    if [ "$AUTO_INSTALL_DEPS" != "1" ]; then
+      if command -v python3 >/dev/null 2>&1; then
+        die "python3 is present but its venv/ensurepip module is missing — install it manually (e.g. Debian/Ubuntu: apt install python3-venv) and re-run"
+      fi
+      die "python3 is required (for the self-managed LiteLLM) but not found on PATH"
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+      log "python3 not found — installing"
+      pkg_install python3
+    fi
+    if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
+      log "python3's venv/ensurepip module missing — installing the matching venv package"
+      case "$PKG_MGR" in
+        apt)
+          # The generic metapackage usually resolves to the right
+          # version-specific one; on a system mid-transition to a newer
+          # default python3 (e.g. bookworm→trixie/sid), it may not — fall
+          # back to the exact python3.X-venv the ensurepip error names.
+          pkg_install python3-venv </dev/null || true
+          if ! python3 -c 'import ensurepip' >/dev/null 2>&1; then
+            pyver=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)
+            # pyver is already "3.14"-style (major.minor) — Debian's package
+            # is python3.14-venv, NOT python33.14-venv (no extra "3" prefix).
+            [ -n "$pyver" ] && pkg_install "python${pyver}-venv" </dev/null || true
+          fi
+          ;;
+        dnf) pkg_install python3-pip ;;
+        yum) pkg_install python3-pip ;;
+        *) ;;  # apk/unknown: Alpine's python3 doesn't split this out
+      esac
+    fi
+    python3_venv_ready \
+      || die "python3's venv/ensurepip module still missing after attempting install — install it manually (e.g. Debian/Ubuntu: apt install python3-venv, or the exact package name from any 'ensurepip is not available' error) and re-run"
   }
   node_new_enough() {
     command -v node >/dev/null 2>&1 && node -e 'process.exit(parseInt(process.versions.node) >= 22 ? 0 : 1)'
