@@ -125,7 +125,7 @@ found, bare-metal otherwise:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sh
 # or pin an explicit version — always do this for a real deployment:
-VERSION=0.1.5 sh install.sh
+VERSION=0.1.6 sh install.sh
 # or skip the question entirely:
 INSTALL_MODE=docker sh install.sh   # force Docker
 INSTALL_MODE=bare sh install.sh     # force bare-metal (root required; see below)
@@ -133,9 +133,9 @@ INSTALL_MODE=bare sh install.sh     # force bare-metal (root required; see below
 
 Bare-metal mode needs root — piping straight into `sudo`, put env var overrides *after*
 `sudo`, not before (`sudo` resets the environment by default, so e.g.
-`VERSION=0.1.5 sudo sh install.sh` silently drops `VERSION`):
+`VERSION=0.1.6 sudo sh install.sh` silently drops `VERSION`):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sudo INSTALL_MODE=bare VERSION=0.1.5 sh
+curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sudo INSTALL_MODE=bare VERSION=0.1.6 sh
 ```
 
 Bare-metal mode builds from source and installs the exact same runtime (orchestrator +
@@ -146,6 +146,14 @@ host, Node ≥22/`pnpm`/`python3`/`git` (auto-installed if missing on apt/dnf/yu
 default (`INSTALL_DIR` to change it), data under `/opt/aigentron/data` (`DATA_DIR`), managed
 with `systemctl {status,restart} aigentron` / `journalctl -u aigentron -f`. Docker mode
 auto-installs Docker itself the same way if missing (`get.docker.com`).
+
+On a real terminal (not piped), it also asks where to put things
+(`INSTALL_DIR`/`DATA_DIR` — blank keeps the default shown), then checks free disk space on
+every filesystem it'll actually write a lot to (install dir, data dir / Docker's own storage,
+and the temp dir — which is sometimes a small RAM-backed tmpfs, independent of how much room
+the root filesystem has) before downloading or building anything, rather than failing deep
+into a build with a confusing "No space left on device" (`MIN_FREE_DISK_MB` to adjust the
+5 GB default floor).
 
 Prefer to skip the question and always get bare-metal, with a separate memorable URL:
 ```bash

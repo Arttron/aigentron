@@ -40,11 +40,21 @@
 # AUTO_INSTALL_DEPS=0 to just check and die instead). Docker mode
 # auto-installs Docker itself the same way if missing (get.docker.com).
 #
+# Install location: on a real terminal, you're asked (blank = the default
+# shown); piped sessions and anyone with INSTALL_DIR/DATA_DIR already set via
+# env var skip the question. Useful for redirecting to a roomier mounted
+# volume when the default location's filesystem is tight — see the disk
+# space preflight below, which checks wherever you end up pointing these.
+#
 # Override points for later (no code changes needed):
 #   REPO=<owner>/<repo>        which public GitHub repo to install from (GitHub mode)
 #   ARCHIVE_URL=<url>          skip version-resolution — any tag/version tarball (s3:// or http(s)://)
-#   INSTALL_DIR=<path>         bare-metal only: where releases/venv/current live (default /opt/aigentron)
-#   DATA_DIR=<path>            bare-metal only: sqlite db/agent/repo/worktrees (default $INSTALL_DIR/data)
+#   INSTALL_DIR=<path>         where things live: releases/venv/current (bare) or the release
+#                              archive + .env (docker); default $HOME/.local-dev-server (docker)
+#                              or /opt/aigentron (bare). Also skips the interactive prompt.
+#   DATA_DIR=<path>            bare-metal only: sqlite db/agent/repo/worktrees (default
+#                              $INSTALL_DIR/data). Also skips the interactive prompt.
+#   MIN_FREE_DISK_MB=<n>       preflight disk-space floor per checked location, in MB (default 5120)
 #   AUTO_INSTALL_DEPS=0        don't auto-install missing prerequisites — just check and die (default: 1)
 set -eu
 
@@ -116,6 +126,12 @@ case "$INSTALL_MODE" in
 esac
 log "Install mode: $INSTALL_MODE"
 
+# Remember whether these came from an explicit env var, before applying
+# mode-specific defaults — used below to skip prompting (and disk-check
+# recompute) for anyone who already told us where to put things.
+INSTALL_DIR_WAS_SET="${INSTALL_DIR:+1}"
+DATA_DIR_WAS_SET="${DATA_DIR:+1}"
+
 if [ "$INSTALL_MODE" = docker ]; then
   CONTAINER_NAME="${CONTAINER_NAME:-local-dev-server}"
   DATA_VOLUME="${DATA_VOLUME:-lds-data}"
@@ -124,6 +140,25 @@ if [ "$INSTALL_MODE" = docker ]; then
 else
   INSTALL_DIR="${INSTALL_DIR:-/opt/aigentron}"
   DATA_DIR="${DATA_DIR:-$INSTALL_DIR/data}"
+fi
+
+# Interactive-only (curl | sh has no real stdin to prompt on — same rule as
+# the docker/bare question above); skip entirely for anything already set
+# explicitly via env var. Lets an operator redirect to a roomier mounted
+# volume without needing to already know the env var name up front.
+if [ -t 0 ]; then
+  if [ "$INSTALL_DIR_WAS_SET" != "1" ]; then
+    printf 'Install location [%s]: ' "$INSTALL_DIR"
+    read -r ans
+    [ -n "$ans" ] && INSTALL_DIR="$ans"
+  fi
+  if [ "$INSTALL_MODE" = bare ] && [ "$DATA_DIR_WAS_SET" != "1" ]; then
+    # Track the INSTALL_DIR answer above, in case it just changed.
+    DATA_DIR="$INSTALL_DIR/data"
+    printf 'Data directory (sqlite db, agent files, repo, worktrees) [%s]: ' "$DATA_DIR"
+    read -r ans
+    [ -n "$ans" ] && DATA_DIR="$ans"
+  fi
 fi
 
 # ---- prerequisites (mode-specific) ---------------------------------------
@@ -296,6 +331,59 @@ log "Currently installed: $installed"
 if [ "$installed" = "$VERSION" ] && [ "$FORCE" != "1" ]; then
   log "Already on $VERSION — nothing to do (set FORCE=1 to reinstall anyway)."
   exit 0
+fi
+
+# ---- disk space preflight (shared) ---------------------------------------
+# Fail fast and clearly, before downloading/building anything — found live:
+# a small VPS ran out of disk mid-pnpm-install/pip-install with a confusing
+# raw "No space left on device", not something a preflight check could have
+# explained. Checks every filesystem this run will actually write a lot to.
+MIN_FREE_DISK_MB="${MIN_FREE_DISK_MB:-5120}"  # 5 GB: a practical floor
+  # (bare-metal node_modules + dist/.next build output + litellm[proxy]'s own
+  # sizeable pip deps; Docker mode's image layers are comparable) — not a
+  # guarantee, just the point below which we know from experience it's
+  # heading for trouble. Override if you're confident it'll fit anyway.
+
+free_mb() {  # $1=path (created first if missing, so df has something real to read)
+  mkdir -p "$1" 2>/dev/null || true
+  df -Pk "$1" 2>/dev/null | awk 'NR==2 { printf "%d", $4/1024 }'
+}
+
+disk_warnings=""
+note_if_low() {  # $1=label $2=path
+  # Only skip a truly-empty path (e.g. docker_root when `docker info`
+  # failed) — NOT a nonexistent directory: on a first install, INSTALL_DIR/
+  # DATA_DIR never exist yet, and free_mb() creates them itself in order to
+  # check the right filesystem. An `[ -d ]` guard here would silently skip
+  # checking exactly that (most common) case.
+  [ -n "$2" ] || return 0
+  avail=$(free_mb "$2")
+  [ -n "$avail" ] || return 0
+  if [ "$avail" -lt "$MIN_FREE_DISK_MB" ]; then
+    disk_warnings="$disk_warnings
+  - $1 ($2): only ${avail}MB free (want >= ${MIN_FREE_DISK_MB}MB)"
+  fi
+}
+
+note_if_low "install dir" "$INSTALL_DIR"
+if [ "$INSTALL_MODE" = bare ]; then
+  note_if_low "data dir" "$DATA_DIR"
+else
+  # Where Docker images/volumes actually live — usually /var/lib/docker, but
+  # ask Docker itself rather than assume (it may be reconfigured elsewhere).
+  docker_root=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)
+  [ -n "$docker_root" ] && note_if_low "docker storage" "$docker_root"
+fi
+# Many tools (pip, apt, tar) stage large temp files here by default — worth
+# checking on its own since it's sometimes a small RAM-backed tmpfs (seen
+# live: 455MB), independent of how much room the root filesystem has.
+note_if_low "temp dir (\$TMPDIR or /tmp — used for scratch space by many tools)" "${TMPDIR:-/tmp}"
+
+if [ -n "$disk_warnings" ]; then
+  die "not enough free disk space:$disk_warnings
+Free up space, point INSTALL_DIR/DATA_DIR (re-run interactively, or set the
+env var) at a filesystem with more room, or set MIN_FREE_DISK_MB=<lower> if
+you're confident it'll fit anyway."
 fi
 
 # ---- fetch the release archive (shared) ----------------------------------
