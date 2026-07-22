@@ -10,14 +10,15 @@ Type=oneshot
 # to THIS user's home — systemd requires User= set for %h to work in a
 # system-level unit at all.
 #
-# install-bare.sh users (no Docker): that installer runs as root into
-# /opt/aigentron, not a per-user $HOME — set `User=root`, ExecStart=
-# /opt/aigentron/update-check.sh (or wherever INSTALL_DIR points), and add
-# `Environment=INSTALL_DIR=/opt/aigentron` if you changed it from the
-# default; CONTAINER_NAME below is irrelevant in that case (no container
-# exists, update-check.sh falls back to reading /opt/aigentron/current).
+# install.sh bare-metal mode users (INSTALL_MODE=bare, or the install-bare.sh
+# redirect — no Docker either way): that path runs as root into /opt/aigentron,
+# not a per-user $HOME — set `User=root`, ExecStart=/opt/aigentron/update-check.sh
+# (or wherever INSTALL_DIR points), and add `Environment=INSTALL_DIR=/opt/aigentron`
+# if you changed it from the default; CONTAINER_NAME below is irrelevant in
+# that case (no container exists, update-check.sh falls back to reading
+# /opt/aigentron/current).
 User=CHANGEME
-Environment=REPO=CHANGEME/aigentron
+Environment=REPO=Arttron/aigentron
 # If this server installs from S3 (install.sh with S3_PREFIX set) rather than
 # GitHub, uncomment this and it takes priority over REPO above:
 #Environment=S3_PREFIX=s3://ai-tools-sysfiles/arttron-dev-server

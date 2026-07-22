@@ -11,7 +11,7 @@
 # symlink install-bare.sh flips on every install.
 set -eu
 
-REPO="${REPO:-CHANGEME/aigentron}"
+REPO="${REPO:-Arttron/aigentron}"
 S3_PREFIX="${S3_PREFIX:-}"
 CONTAINER_NAME="${CONTAINER_NAME:-local-dev-server}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/aigentron}"

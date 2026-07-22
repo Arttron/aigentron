@@ -291,11 +291,21 @@ migrate + seed agent defs) and `infra/minimal-supervisor.mjs` (fork/restart
 dashboard+orchestrator) — never depended on containers; Docker was packaging/isolation,
 not a capability. Parameterized both scripts' hardcoded `/app`/`/data` paths behind
 `APP_DIR`/`DATA_DIR` (default unchanged, so the Docker image's behavior is byte-identical)
-and added `install-bare.sh` — a sibling installer that builds from source and runs the
-same two scripts directly as a systemd service instead of inside a container. See the
-README's "Server deployment" §Option D. `infra/update-check.sh` gained a fallback to read
-the installed version from the `$INSTALL_DIR/current` symlink when no Docker container
-exists, instead of only `docker inspect`.
+and added a bare-metal install path that builds from source and runs the same two scripts
+directly as a systemd service instead of inside a container. `infra/update-check.sh` gained
+a fallback to read the installed version from the `$INSTALL_DIR/current` symlink when no
+Docker container exists, instead of only `docker inspect`.
+
+**Follow-up (same day):** initially shipped as a separate `install-bare.sh` script,
+duplicating `install.sh`'s fetch/version-resolution logic on purpose (both had to stay
+self-contained for `curl | sh`). Live use surfaced real friction from having two entrypoints
+— the operator has to know which to run, and picked wrong once. Merged into one `install.sh`
+that detects Docker and, when found on a real (non-piped) terminal, **asks** whether to
+install via Docker or bare-metal — Docker present doesn't imply it's meant for Aigentron
+itself; it may be reserved for the project(s) the agents build/test in, with Aigentron
+running bare-metal alongside it as the supervisor. `install-bare.sh` now survives only as a
+3-line redirect (`INSTALL_MODE=bare` forced) — no duplicated logic, so no drift risk. See
+the README's "Server deployment" §Option A.
 
 Ollama needed no code change to become "optional" for this — it already was
 (`ollama-local` is a soft, lazily-used seeded provider row; nothing preflight-checks it).

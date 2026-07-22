@@ -1,0 +1,31 @@
+# Deprecated Aigentron releases — one per line, format: X.Y.Z: reason
+#
+# What this does: install.sh's warn_if_deprecated() fetches this file (from
+# the PUBLIC repo's `main` via raw.githubusercontent.com, or its S3 mirror in
+# S3 mode) and prints a warning — never a hard block — if the version being
+# installed is listed here. This only covers an explicit `VERSION=x.y.z`
+# pin; "latest" auto-resolution is already covered by the mechanism below
+# and never needs an entry here. (infra/update-check.sh does not consume
+# this file today — it only compares installed-vs-latest.)
+#
+# Not instant: this file lives in the PRIVATE dev repo. A commit here only
+# reaches the PUBLIC repo's `main` (what install.sh actually fetches) via
+# publish/sync-public.sh, which only runs as part of cutting a release (a
+# tag push). In practice that's fine — the normal remedy for "this release
+# is bad" is shipping the next one anyway, and that release's own workflow
+# run is what makes the new DEPRECATED entry live.
+#
+# How to deprecate a release (two-part — do both, then cut a release so it
+# actually reaches the public repo/S3):
+#   1. Hide it from "latest" auto-resolution (GitHub mode only — S3 mode's
+#      `latest.txt` is just a mutable pointer; keep it always correct
+#      manually and skip this step):
+#        gh release edit vX.Y.Z --repo <owner>/<public-repo> --prerelease
+#   2. Protect explicit `VERSION=X.Y.Z` pins: add a line below, commit to
+#      `main`, and cut a release (any version) — that release's workflow
+#      run mirrors this file to the public repo and to S3 (release.yml).
+#
+# Never remove/reuse a version's own release — this file only marks it,
+# doesn't unpublish it (matches this repo's "never reuse a tag" rule).
+
+0.1.1: install.sh hard-required Docker with no bare-metal alternative, and REPO defaulted to an unfilled CHANGEME/aigentron placeholder, breaking every fresh install that didn't pass REPO= explicitly — fixed in 0.1.2.

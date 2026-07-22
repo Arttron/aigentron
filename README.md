@@ -114,17 +114,50 @@ involved — every path below builds `infra/minimal.Dockerfile` locally from sou
 `VERSION` file at repo root and the image's `org.opencontainers.image.version` label (check
 with `docker inspect`) are the source of truth for what's actually running.
 
-**Option A — installer script** (downloads a tagged release archive, builds, runs):
+**Option A — installer script** (downloads a tagged release archive, builds, runs). Detects
+Docker: if found and you're running this interactively (not piped), it **asks** whether to
+install via Docker or directly on this system (bare-metal) — Docker being present doesn't
+mean it's meant for Aigentron itself; it might be reserved for the project(s) your agents
+will build/test in, with Aigentron meant to run bare-metal alongside it as the supervisor.
+Piped `curl | sh` sessions can't be asked (no real stdin), so they default to Docker if
+found, bare-metal otherwise:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sh
 # or pin an explicit version — always do this for a real deployment:
-VERSION=0.1.1 sh install.sh
+VERSION=0.1.2 sh install.sh
+# or skip the question entirely:
+INSTALL_MODE=docker sh install.sh   # force Docker
+INSTALL_MODE=bare sh install.sh     # force bare-metal (root required; see below)
 ```
 
-Re-running the same command later checks the installed version via `docker inspect` and
-upgrades in place (`FORCE=1` to reinstall the same version). Never pin production to
-`latest`/unset — that's an unpinned, unpredictable deploy.
+Bare-metal mode needs root — piping straight into `sudo`, put env var overrides *after*
+`sudo`, not before (`sudo` resets the environment by default, so e.g.
+`VERSION=0.1.2 sudo sh install.sh` silently drops `VERSION`):
+```bash
+curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sudo INSTALL_MODE=bare VERSION=0.1.2 sh
+```
+
+Bare-metal mode builds from source and installs the exact same runtime (orchestrator +
+dashboard + self-managed LiteLLM) as a systemd service, using `infra/minimal-entrypoint.sh` /
+`infra/minimal-supervisor.mjs` directly instead of a container — requires root and, on the
+host, Node ≥22/`pnpm`/`python3`/`git` (auto-installed if missing on apt/dnf/yum/apk systems;
+`AUTO_INSTALL_DEPS=0` to just check and die instead). Installs into `/opt/aigentron` by
+default (`INSTALL_DIR` to change it), data under `/opt/aigentron/data` (`DATA_DIR`), managed
+with `systemctl {status,restart} aigentron` / `journalctl -u aigentron -f`. Docker mode
+auto-installs Docker itself the same way if missing (`get.docker.com`).
+
+Prefer to skip the question and always get bare-metal, with a separate memorable URL:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install-bare.sh | sudo sh
+```
+(a 3-line redirect that forces `INSTALL_MODE=bare` — no Docker involved, no question asked,
+even if Docker happens to be present.)
+
+Re-running the same command later checks the installed version (via `docker inspect` in
+Docker mode, or the `/opt/aigentron/current` symlink in bare-metal mode) and upgrades in
+place (`FORCE=1` to reinstall the same version). Never pin production to `latest`/unset —
+that's an unpinned, unpredictable deploy.
 
 **Option B — docker compose**, for building straight from a local checkout of this repo.
 Uses `.env.minimal`, **not** the root `.env` — the latter is the multi-service `full`
@@ -153,27 +186,9 @@ persists in the `/data` volume (SQLite DB, agent defs, repo, worktrees, attachme
 back it up by copying that volume, nothing else to snapshot. `/api/health` reports the
 running `version` alongside DB/LiteLLM status.
 
-**Option D — bare-metal (no Docker)**, for servers where you'd rather not run Docker at
-all: builds from source and installs the exact same runtime (orchestrator + dashboard +
-self-managed LiteLLM) as a systemd service, using `infra/minimal-entrypoint.sh` /
-`infra/minimal-supervisor.mjs` directly instead of a container. Requires root (installs a
-systemd unit) and, on the host: Node ≥22, `pnpm`/`corepack`, `python3`, `git`.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/install-bare.sh | sudo sh
-# or pin an explicit version — always do this for a real deployment:
-VERSION=0.1.1 sudo sh install-bare.sh
-```
-
-Installs into `/opt/aigentron` by default (`INSTALL_DIR` to change it), data under
-`/opt/aigentron/data` (`DATA_DIR` to change it), and manages the service with
-`systemctl {status,restart} aigentron` / `journalctl -u aigentron -f`. Re-running the same
-command later checks the installed version (via the `/opt/aigentron/current` symlink) and
-upgrades in place, same `FORCE=1`/pinning rules as Option A.
-
-**Env vars worth overriding for a real deployment** (all have working local defaults —
-see `ENV` in `infra/minimal.Dockerfile` for Options A–C, or the generated
-`/etc/systemd/system/aigentron.service` for Option D):
+**Env vars worth overriding for a real deployment** (all have working local defaults — see
+`ENV` in `infra/minimal.Dockerfile` for Docker mode, or the generated
+`/etc/systemd/system/aigentron.service` for bare-metal mode):
 - `ANTHROPIC_API_KEY` — for the cloud/"complex" model tier.
 - `LITELLM_MASTER_KEY` — the image ships a fixed dev default; set your own.
 - `ROUTINE_MODEL` / `OLLAMA_NATIVE_URL` — which local model to route to, and where Ollama
