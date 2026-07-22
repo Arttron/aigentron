@@ -13,6 +13,11 @@
 # against Anthropic's usage policies — not something this script decides for
 # you.
 #
+# Rotation: the minted token expires after 1 year (a static bearer credential,
+# no auto-refresh) — just re-run this script with the SAME provider name when
+# it does (or sooner, if you revoke it early); an existing name is updated
+# in place (PUT), not duplicated.
+#
 # Adding a future CLI-login provider (e.g. a different service's own login
 # flow) is meant to be "add one more case" in the dispatch below, not new
 # plumbing — that's the "in perspective for other services" extension point.
@@ -38,7 +43,7 @@ while [ $# -gt 0 ]; do
     --kind) KIND="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     --orchestrator-url) ORCHESTRATOR_URL="$2"; shift 2 ;;
-    -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     -*) die "unknown flag: $1" ;;
     *) [ -z "$NAME" ] || die "unexpected extra argument: $1"; NAME="$1"; shift ;;
   esac
@@ -52,8 +57,18 @@ case "$KIND" in
     PROVIDER_KIND="anthropic"
     DEFAULT_MODEL="claude-sonnet-4-6"
     log "Running 'claude setup-token' — this opens an interactive login for your Claude subscription."
-    TOKEN=$(claude setup-token | tr -d '\r' | sed '/^[[:space:]]*$/d' | tail -n 1)
-    [ -n "$TOKEN" ] || die "'claude setup-token' produced no output — check the command ran interactively and try again"
+    # Run with normal (unpiped) stdio, not captured: piping its output (an
+    # earlier version of this script did, via `$(claude setup-token | ...)`)
+    # hides the login URL/prompts the user needs to see and act on, so the
+    # command just sits there waiting for a browser confirmation the user was
+    # never shown how to give — a real deadlock found live, not hypothetical.
+    claude setup-token
+    printf 'Paste the token it printed above: '
+    stty -echo 2>/dev/null || true
+    IFS= read -r TOKEN
+    stty echo 2>/dev/null || true
+    printf '\n'
+    [ -n "$TOKEN" ] || die "no token entered"
     ;;
   *)
     die "unsupported --kind '$KIND' (only 'claude' is wired up today — add a case here for a new CLI-login provider)"

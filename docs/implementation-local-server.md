@@ -284,6 +284,16 @@ the token's actual request shape; run a real task to confirm it works. Multiple 
 different auth modes side by side (e.g. one `api-key` and one `oauth-token` provider both
 registered) — the mode lives on the `Provider` row, not globally.
 
+**Token lifetime & rotation**: a `claude setup-token` token is a static bearer credential that
+expires after 1 year, with no documented auto-refresh — an operator rotates it by re-running
+`claude setup-token` (via `scripts/cli-auth.sh <name>` or `infra/setup-wizard.mjs`'s "rotate an
+existing provider's secret" step, or the dashboard) against the **same** provider name, which
+`PUT`s the existing row rather than creating a duplicate. Neither the CLI helper nor the wizard
+attempt to auto-capture the printed token by piping `claude setup-token`'s output — that hides
+the interactive login URL from the operator and deadlocks the process waiting for a browser
+confirmation it was never shown; both always run it with fully inherited stdio and prompt for a
+manual paste afterward.
+
 ### 6.5 Worktrees & GitHub
 
 `WorkspaceService.ensure()` (serialized by a promise lock) provisions `/workspace/repo`: if

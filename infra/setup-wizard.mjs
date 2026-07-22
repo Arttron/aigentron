@@ -152,19 +152,36 @@ function commandExists(cmd) {
   }
 }
 
-/** Runs `claude setup-token` inline (interactive login inherited from this TTY),
- *  capturing the printed token. Mirrors scripts/cli-auth.sh's logic — duplicated
- *  rather than shelled out to, since that sibling script won't exist when this
- *  wizard runs inside a Docker `docker exec` context. */
-function runClaudeSetupToken() {
-  log('  Launching `claude setup-token` — follow the login it opens...');
-  const res = spawnSync('claude', ['setup-token'], { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8' });
-  if (res.status !== 0 || !res.stdout) return null;
-  const lines = res.stdout
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return lines.length ? lines[lines.length - 1] : null;
+/**
+ * Runs `claude setup-token` fully interactively — stdio entirely inherited
+ * from this TTY, nothing captured. Piping its stdout (an earlier version of
+ * this function did, to auto-scrape the token) hides the login URL/prompts
+ * the user needs to see and act on, so the process just sits there waiting
+ * for a browser confirmation the user was never shown how to give — a real
+ * deadlock found live, not a hypothetical. The caller always prompts for the
+ * token manually afterward instead of trying to auto-capture it.
+ */
+function runClaudeSetupTokenInteractive() {
+  log('  Launching `claude setup-token` — complete the login it opens, then come back here.');
+  const res = spawnSync('claude', ['setup-token'], { stdio: 'inherit' });
+  if (res.status !== 0) {
+    log('  (`claude setup-token` did not exit successfully — you can still paste a token manually below)');
+  }
+}
+
+/** Shared oauth-token entry flow: offer to launch `claude setup-token`
+ *  inline, then always end with a manual paste (see
+ *  runClaudeSetupTokenInteractive's note on why this never auto-captures). */
+async function promptOauthSecret(rl, label) {
+  if (commandExists('claude') && (await promptYesNo(rl, 'Run `claude setup-token` now (opens an interactive login)?', true))) {
+    runClaudeSetupTokenInteractive();
+  } else {
+    log('  If `claude` isn\'t available here (e.g. inside a `docker exec` session), run');
+    log('  `claude setup-token` (or `scripts/cli-auth.sh <name>`) on a machine where it works,');
+    log('  then paste the resulting token below.');
+  }
+  log('  Note: tokens from `claude setup-token` expire after 1 year — repeat this to rotate one.');
+  return promptSecret(rl, `${label}: `);
 }
 
 // ---- steps ----
@@ -188,10 +205,56 @@ async function stepDeploymentMode(rl, cliUrl) {
   return mode;
 }
 
+/**
+ * Rotate/update an existing provider's secret — e.g. an oauth-token that
+ * expired (they're valid 1 year) or an api-key that got revoked. The wizard
+ * previously had no path back to an already-configured provider at all;
+ * scripts/cli-auth.sh could re-run against an existing name (PUT), but
+ * re-authenticating via the wizard itself meant no way to actually apply the
+ * new secret short of the dashboard. Returns every existing provider's name
+ * (whether or not the operator rotated any), so the caller's "add another" /
+ * "set default" / later agent-provider-picker steps see the full set, not
+ * just ones created this session.
+ */
+async function stepRotateExistingSecret(rl) {
+  let existing;
+  try {
+    existing = await apiGet('/providers');
+  } catch {
+    return [];
+  }
+  if (!existing.length) return [];
+  const names = existing.map((p) => p.name);
+  if (!(await promptYesNo(rl, `Rotate/update an existing provider's secret (found: ${names.join(', ')})?`, false))) {
+    return names;
+  }
+  let more = true;
+  while (more) {
+    const name = await promptChoice(rl, 'Which provider?', names, names[0]);
+    const p = existing.find((x) => x.name === name);
+    const secret =
+      p.authMode === 'oauth-token'
+        ? await promptOauthSecret(rl, 'New OAuth token')
+        : await promptSecret(rl, 'New secret (blank = keep current): ');
+    if (secret) {
+      try {
+        await apiPut(`/providers/${encodeURIComponent(name)}`, { secret });
+        log(`  ✓ "${name}" secret updated`);
+      } catch (e) {
+        log(`  ✗ failed to update "${name}": ${e.message}`);
+      }
+    } else {
+      log('  (no change)');
+    }
+    more = await promptYesNo(rl, 'Rotate another provider\'s secret?', false);
+  }
+  return names;
+}
+
 async function stepProviders(rl) {
   header('Step 1 — Providers (network, model, auth)');
-  const providers = [];
-  let first = true;
+  const providers = await stepRotateExistingSecret(rl);
+  let first = providers.length === 0;
   while (await promptYesNo(rl, first ? 'Add a provider now?' : 'Add another provider?', first)) {
     first = false;
     const name = await prompt(rl, 'Provider name (id)', providers.length ? undefined : 'claude-cloud');
@@ -209,15 +272,7 @@ async function stepProviders(rl) {
 
     let secret;
     if (authMode === 'oauth-token') {
-      if (commandExists('claude') && (await promptYesNo(rl, 'Run `claude setup-token` now to mint one?', true))) {
-        secret = runClaudeSetupToken() || undefined;
-        if (!secret) log('  (no token captured — falling back to manual entry)');
-      }
-      if (!secret) {
-        log('  If `claude` isn\'t available here (e.g. inside a `docker exec` session), run');
-        log('  `scripts/cli-auth.sh <name>` from your own machine, then paste the token below.');
-        secret = await promptSecret(rl, 'OAuth token: ');
-      }
+      secret = await promptOauthSecret(rl, 'OAuth token');
     } else {
       secret = await promptSecret(rl, 'Secret (API key/token, hidden): ');
     }

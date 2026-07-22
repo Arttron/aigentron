@@ -141,7 +141,8 @@ export function ProviderForm({
           <Muted className={styles.note}>
             Run <code>claude setup-token</code> locally (or <code>scripts/cli-auth.sh &lt;name&gt;</code>) and
             paste the printed token below. Bypasses LiteLLM — talks to Anthropic directly, so Base URL is
-            ignored; this provider also can’t be delegated to as a subagent.
+            ignored; this provider also can’t be delegated to as a subagent. Expires after 1 year (no
+            auto-refresh) — rotate by repeating this with the same provider name.
           </Muted>
         )}
       </Field>
