@@ -370,6 +370,21 @@ if [ "$INSTALL_MODE" = docker ]; then
   log "  docker exec -it $CONTAINER_NAME node /app/infra/setup-wizard.mjs"
   log "  # (or, if this machine also has Node: node \"$RELEASE_DIR/infra/setup-wizard.mjs\")"
 else
+  # Prune superseded release dirs BEFORE building this one: each holds a full
+  # monorepo checkout + its own node_modules/dist/.next build output (unlike
+  # Docker mode, where the equivalent build happens inside the image, not on
+  # host disk) — left behind indefinitely across upgrades otherwise, easily
+  # enough to exhaust disk on a small server after a few version bumps (found
+  # live: three superseded release dirs plus litellm[proxy]'s own sizeable
+  # pip deps were enough to hit "No space left on device"). No rollback
+  # feature exists yet to need old ones kept around.
+  for d in "$INSTALL_DIR"/releases/*/; do
+    d="${d%/}"
+    [ "$(basename "$d")" = "$VERSION" ] && continue
+    log "Removing superseded release dir $d"
+    rm -rf "$d"
+  done
+
   cd "$RELEASE_DIR"
   log "Installing dependencies + building from source (this can take a few minutes)"
   corepack enable >/dev/null 2>&1 || true
