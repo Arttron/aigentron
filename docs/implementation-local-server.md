@@ -308,11 +308,20 @@ today**.
 
 MCP configs are raw SDK `McpServerConfig` JSON stored in `McpServer`. `resolveMany(names, secrets)`
 builds the `{name: config}` map and recursively substitutes `${KEY}` (e.g. `${GITHUB_TOKEN}`);
-unknown names are skipped with a warning (non-blocking). Seeded servers: `playwright` (sse),
-`github` (http, needs token), `postgres` (npx stdio), `code-intel` = Serena (uvx stdio; `uv` is in
-the image). Attachments are per-task files (`png/jpg/jpeg/webp/gif/pdf`, ≤10 MB) streamed to
-`<attachmentsDir>/<taskId>/`, surfaced to the agent as prompt paths (read via the Read tool) and to
-the UI as inline thumbnails.
+unknown names are skipped with a warning (non-blocking) — but this only catches "no such server in
+the DB," not "the server's underlying binary (`uvx`/`npx`) isn't actually on `PATH`"; that surfaces
+later as an SDK spawn/connection failure at task-run time, not a clean upfront warning. Seeded
+servers: `playwright` (sse), `github` (http, needs token), `postgres` (npx stdio), `code-intel` =
+Serena (uvx stdio). Of the 11 bundled skills, only `code-intel` and `playwright` actually call an
+`mcp__` tool (everything else is pure Bash/knowledge — `git`'s GitHub-operations subsection
+degrades gracefully by design if `github` isn't in an agent's `mcp:` list). `uv`/`uvx` is installed
+to `/usr/local/bin` in the full dev image, the minimal Docker image, and (best-effort,
+non-fatal) bare-metal installs (`install.sh`'s `ensure_uv`) — so `code-intel` works in all three.
+`playwright` still needs a running browser MCP service, which only the full profile's
+`--profile mcp` compose service provides; bare-metal/minimal have no equivalent yet (tracked in
+`docs/BACKLOG.md`). Attachments are per-task files (`png/jpg/jpeg/webp/gif/pdf`, ≤10 MB) streamed
+to `<attachmentsDir>/<taskId>/`, surfaced to the agent as prompt paths (read via the Read tool) and
+to the UI as inline thumbnails.
 
 ### 6.7 Settings (`settings/settings.service.ts`)
 

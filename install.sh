@@ -285,11 +285,30 @@ else
     node_new_enough \
       || die "node >=22 still not available after attempting install — install it manually (https://nodejs.org) and re-run"
   }
+  # Only needed for the code-intel skill's Serena MCP server (uvx spawns it
+  # on demand) — soft/optional, unlike the ensure_* functions above: no
+  # `die`, just a warning, since Aigentron itself works fine without it.
+  ensure_uv() {
+    command -v uvx >/dev/null 2>&1 && return 0
+    if [ "$AUTO_INSTALL_DEPS" != "1" ]; then
+      log "uv/uvx not found — the code-intel skill (Serena) won't work without it (https://docs.astral.sh/uv)"
+      return 0
+    fi
+    log "uv/uvx not found — installing to /usr/local/bin (needed for the code-intel skill's Serena MCP server)"
+    # /usr/local/bin is already on systemd services' default PATH — unlike
+    # the installer's own default (~/.local/bin), which a systemd unit
+    # wouldn't see without an explicit Environment=PATH= override, since
+    # systemd doesn't source shell profiles.
+    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+    command -v uvx >/dev/null 2>&1 \
+      || log "uv/uvx install didn't succeed — the code-intel skill will be unavailable until you install it manually"
+  }
 
   ensure_curl
   ensure_git
   ensure_python3
   ensure_node
+  ensure_uv
   command -v pnpm >/dev/null 2>&1 || command -v corepack >/dev/null 2>&1 \
     || die "pnpm (or corepack, which provides it) is required but not found on PATH"
 fi

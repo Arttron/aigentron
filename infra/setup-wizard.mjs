@@ -75,19 +75,61 @@ async function promptChoiceOptional(rl, query, options) {
 /** Masked input: readline still drives the actual line-editing (Enter/Backspace/
  *  Ctrl+C all work normally); a parallel raw 'data' listener just repaints the
  *  visible line as asterisks instead of echoing real characters. */
-async function promptSecret(rl, query) {
-  process.stdout.write(query);
-  return new Promise((resolve, reject) => {
-    const redraw = () => {
-      process.stdout.write(`\r\x1B[K${query}${'*'.repeat(rl.line.length)}`);
+/**
+ * Masked input, WITHOUT going through readline's own `.question()` — an
+ * earlier version did (`rl.question('', cb)` + a manual 'data' listener that
+ * redrew the label + asterisks on every keystroke), but readline's internal
+ * line-refresh runs even with an empty prompt string, wiping the manually
+ * -written label right after it's first printed; it then only reappears once
+ * the first keystroke triggers our own redraw. Found live: the label visibly
+ * "not appearing until you start typing" — a real, reproducible bug, not a
+ * terminal quirk (confirmed in this codebase's own earlier test transcripts,
+ * which show a literal stray `[K` escape-sequence remnant on screen).
+ *
+ * This does raw single-character accumulation instead (the standard
+ * password-prompt pattern), pausing the shared `rl` (so it isn't also
+ * consuming the same stdin bytes) and switching stdin to raw mode for the
+ * duration — echoing '*' per character ourselves, with proper
+ * backspace/Ctrl+C handling, then handing stdin back to `rl` afterward.
+ */
+function promptSecret(rl, query) {
+  return new Promise((resolve) => {
+    process.stdout.write(query);
+    rl.pause();
+    const stdin = process.stdin;
+    const wasRaw = stdin.isRaw;
+    if (stdin.isTTY) stdin.setRawMode(true);
+    stdin.resume();
+    let buf = '';
+    const cleanup = () => {
+      stdin.removeListener('data', onData);
+      if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
+      rl.resume();
     };
-    const onData = () => redraw();
-    process.stdin.on('data', onData);
-    rl.question('', (value) => {
-      process.stdin.removeListener('data', onData);
-      process.stdout.write('\n');
-      resolve(value.trim());
-    });
+    const onData = (chunk) => {
+      for (const ch of chunk.toString('utf8')) {
+        if (ch === '\r' || ch === '\n') {
+          cleanup();
+          process.stdout.write('\n');
+          resolve(buf.trim());
+          return;
+        } else if (ch === '\u0003') {
+          // Ctrl+C — match readline's own SIGINT-on-prompt behavior.
+          cleanup();
+          process.stdout.write('\n');
+          process.exit(130);
+        } else if (ch === '\u007f' || ch === '\b') {
+          if (buf.length) {
+            buf = buf.slice(0, -1);
+            process.stdout.write('\b \b');
+          }
+        } else if (ch >= ' ') {
+          buf += ch;
+          process.stdout.write('*');
+        }
+      }
+    };
+    stdin.on('data', onData);
   });
 }
 
@@ -326,7 +368,12 @@ async function stepProviders(rl) {
         log(`  (model preview failed: ${e.message})`);
       }
     }
-    if (!model) model = await prompt(rl, 'Model name');
+    if (!model) model = await prompt(rl, 'Model name (leave blank ONLY if every agent using this provider sets its own model)');
+    if (!model) {
+      log('  ⚠ No model set — this provider is skipped when resolving which model to run unless');
+      log('  an agent using it has its own model override. A task that reaches it with neither set');
+      log('  fails with "No runnable provider: set a default model on the provider or pick one on the agent."');
+    }
 
     let rpm;
     let tpm;
@@ -431,7 +478,21 @@ async function stepAgents(rl, providerNames) {
   }
   const allSkills = await apiGet('/agents/skills').catch(() => []);
   log(`  Agents: ${agents.map((a) => a.name).join(', ')}`);
-  if (allSkills.length) log(`  Skills available to all agents by default: ${allSkills.join(', ')}`);
+  if (allSkills.length) {
+    log(`  Skills available to all agents by default: ${allSkills.join(', ')}`);
+    // The only two core skills that actually call an mcp__ tool (everything
+    // else is pure Bash/knowledge, no MCP dependency) — neither's MCP server
+    // is set up by default outside the full dev-stack profile: code-intel
+    // needs `uv`/`uvx` (Serena), playwright needs a running browser MCP
+    // service. An agent assigned one without it fails at task-run time, not
+    // here at setup time, so flag it now instead.
+    const mcpSkills = allSkills.filter((s) => s === 'code-intel' || s === 'playwright');
+    if (mcpSkills.length) {
+      log(`  Note: ${mcpSkills.join(', ')} need${mcpSkills.length === 1 ? 's' : ''} an MCP server not set up by`);
+      log('  default on bare-metal/minimal installs (code-intel: `uv`/`uvx`; playwright: a running browser MCP');
+      log('  service) — only assign these to an agent if you\'ve set that up, or it\'ll fail at run time.');
+    }
+  }
 
   while (await promptYesNo(rl, 'Configure an agent now?', true)) {
     const name = await promptChoice(rl, 'Which agent?', agents.map((a) => a.name), agents[0].name);
