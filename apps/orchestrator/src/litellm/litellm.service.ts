@@ -47,6 +47,11 @@ export function stripSelfPrefix(name: string, model: string): string {
 export function defaultKind(baseUrl: string | null | undefined): ProviderKind {
   const u = (baseUrl ?? '').toLowerCase();
   if (!u || u.includes('api.anthropic.com') || u.includes('api.z.ai')) return 'anthropic';
+  // Some vendors expose a dedicated Anthropic-protocol-compatible path
+  // alongside their native one (e.g. DeepSeek's `.../anthropic` — real,
+  // documented, not a guess) — prefer 'anthropic' whenever the URL itself
+  // says so, regardless of which vendor it is.
+  if (/\/anthropic\/?$/.test(u)) return 'anthropic';
   if (u.includes('api.deepseek.com')) return 'deepseek';
   if (u.includes('api.openai.com')) return 'openai';
   if (u.includes('11434') || u.includes('ollama')) return 'ollama';

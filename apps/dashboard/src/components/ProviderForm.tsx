@@ -23,6 +23,10 @@ const KINDS: ProviderKind[] = ['anthropic', 'openai', 'deepseek', 'ollama'];
 function defaultKind(url: string): ProviderKind {
   const u = url.toLowerCase();
   if (!u || u.includes('api.anthropic.com') || u.includes('api.z.ai')) return 'anthropic';
+  // Some vendors expose a dedicated Anthropic-protocol-compatible path
+  // alongside their native one (e.g. DeepSeek's `.../anthropic` — real,
+  // documented) — prefer 'anthropic' whenever the URL itself says so.
+  if (/\/anthropic\/?$/.test(u)) return 'anthropic';
   if (u.includes('api.deepseek.com')) return 'deepseek';
   if (u.includes('api.openai.com')) return 'openai';
   if (u.includes('11434') || u.includes('ollama')) return 'ollama';
