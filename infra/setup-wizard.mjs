@@ -106,6 +106,18 @@ function splitCsv(s) {
     .filter(Boolean);
 }
 
+/** Best-effort provider kind from a base URL — mirrors litellm.service.ts's
+ *  defaultKind() (server-side) and ProviderForm.tsx's client-side copy of
+ *  the same heuristic; a form pre-fill/suggestion, never authoritative. */
+function guessKind(baseUrl) {
+  const u = (baseUrl || '').toLowerCase();
+  if (!u || u.includes('api.anthropic.com') || u.includes('api.z.ai')) return 'anthropic';
+  if (u.includes('api.deepseek.com')) return 'deepseek';
+  if (u.includes('api.openai.com')) return 'openai';
+  if (u.includes('11434') || u.includes('ollama')) return 'ollama';
+  return 'openai';
+}
+
 // ---- orchestrator REST client ----
 
 async function api(method, path, body) {
@@ -258,13 +270,20 @@ async function stepProviders(rl) {
   while (await promptYesNo(rl, first ? 'Add a provider now?' : 'Add another provider?', first)) {
     first = false;
     const name = await prompt(rl, 'Provider name (id)', providers.length ? undefined : 'claude-cloud');
-    const kind = await promptChoice(rl, 'Kind (upstream family)', ['anthropic', 'openai', 'deepseek', 'ollama'], 'anthropic');
-
-    let baseUrl;
-    if (kind !== 'anthropic') {
-      baseUrl = await prompt(rl, `Base URL for ${kind} (blank = default)`);
-    } else if (await promptYesNo(rl, 'Use a custom Anthropic-compatible base URL? (no = native Anthropic API)', false)) {
-      baseUrl = await prompt(rl, 'Base URL');
+    // Base URL BEFORE kind, then suggest kind from it (mirrors the
+    // dashboard's ProviderForm.tsx) — asking kind first (with 'anthropic'
+    // always the default) let an operator add e.g. a DeepSeek endpoint while
+    // leaving kind=anthropic, which sends model-listing/agent traffic at a
+    // literal `<url>/v1/messages` (Anthropic's own protocol path) that
+    // doesn't exist on a vendor speaking a different protocol — a 404 found
+    // live, not hypothetical. `kind` isn't just a label: it picks which
+    // protocol LiteLLM expects upstream and how it translates for it.
+    const baseUrlInput = await prompt(rl, 'Base URL (blank = native Anthropic API)');
+    const baseUrl = baseUrlInput || undefined;
+    const suggestedKind = guessKind(baseUrl);
+    const kind = await promptChoice(rl, 'Kind (upstream family — LiteLLM uses this to know the protocol to speak)', ['anthropic', 'openai', 'deepseek', 'ollama'], suggestedKind);
+    if (baseUrl && kind !== 'anthropic') {
+      log(`  Note: this should be ${kind}'s own native API base — not an Anthropic-style path. LiteLLM translates protocols for you.`);
     }
 
     const authOptions = kind === 'anthropic' ? ['api-key', 'auth-token', 'oauth-token'] : ['api-key', 'auth-token'];
