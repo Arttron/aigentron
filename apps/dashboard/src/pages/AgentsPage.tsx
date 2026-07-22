@@ -1,7 +1,5 @@
-'use client';
-
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { api, type AgentInfo, type McpServerInfo, type ProviderInfo } from '@/lib/api';
 import {
   AppHeader,
@@ -16,7 +14,7 @@ import {
   Muted,
   ErrorText,
 } from '@/components/ui';
-import styles from './page.module.css';
+import styles from './AgentsPage.module.css';
 
 type Form = {
   name: string;
@@ -44,7 +42,7 @@ const emptyForm: Form = {
   instructions: '',
 };
 
-export default function AgentsPage() {
+export function AgentsPage() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [skillOptions, setSkillOptions] = useState<string[]>([]);
@@ -184,7 +182,7 @@ export default function AgentsPage() {
   return (
     <>
       <BackLink href="/">← all tasks</BackLink>
-      <AppHeader title="🧑‍💻 Agents" actions={<Link href="/settings">⚙ Settings</Link>} />
+      <AppHeader title="🧑‍💻 Agents" actions={<Link to="/settings">⚙ Settings</Link>} />
 
       {error && (
         <Card>

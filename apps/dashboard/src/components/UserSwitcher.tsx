@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import type { User } from '@lds/shared';
 import { api, getActingUserId, setActingUserId } from '@/lib/api';

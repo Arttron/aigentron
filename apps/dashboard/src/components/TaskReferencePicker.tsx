@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import { api, type TaskListItem } from '@/lib/api';
 import styles from './TaskReferencePicker.module.css';

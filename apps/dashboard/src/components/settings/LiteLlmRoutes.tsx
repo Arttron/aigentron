@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import { api, type LitellmRoute } from '@/lib/api';
 import { Card, SectionTitle, Badge, Muted, ErrorText } from '@/components/ui';

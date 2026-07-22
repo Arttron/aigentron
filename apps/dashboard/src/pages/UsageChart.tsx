@@ -1,5 +1,3 @@
-'use client';
-
 import { useState } from 'react';
 import type { ProviderUsage } from '@lds/shared';
 import { Muted } from '@/components/ui';

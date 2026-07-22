@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import type { TaskListItem } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -38,7 +38,7 @@ export function TaskList({
         <div className={cn(styles.item, isChild && styles.child)}>
           {isChild && <span className={styles.branch} aria-hidden />}
           <StatusBadge status={t.status} />
-          <Link className={styles.title} href={`/tasks/${t.id}`}>
+          <Link className={styles.title} to={`/tasks/${t.id}`}>
             {t.title}
           </Link>
           {!isChild && kids.length > 0 && (

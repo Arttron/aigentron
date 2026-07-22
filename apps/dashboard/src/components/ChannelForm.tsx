@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 import { api, type AgentInfo, type ChannelInfo, type ChannelInput, type ChannelKindMeta } from '@/lib/api';
 import { Field, Row, Button, Muted, ErrorText } from '@/components/ui';

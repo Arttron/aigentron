@@ -1,5 +1,3 @@
-'use client';
-
 import { useState } from 'react';
 import { api, type ProviderInfo, type ProviderKind, type ProviderAuthMode } from '@/lib/api';
 import { Field, Row, Button, Muted, ErrorText } from '@/components/ui';

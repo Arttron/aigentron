@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { api, type McpServerInfo } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, ErrorText, Muted } from '@/components/ui';

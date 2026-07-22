@@ -1,5 +1,7 @@
+import { join } from 'path';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ServeStaticModule } from '@nestjs/serve-static';
 import { AppConfigModule } from './config/config.module';
 import { PreflightModule } from './preflight/preflight.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -27,6 +29,14 @@ import { HealthController } from './health/health.controller';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', '../../.env'] }),
+    // Serves the dashboard SPA build same-origin. `exclude` keeps every
+    // /api/* route (the global prefix set in main.ts) reaching its controller
+    // instead of the static handler; unmatched non-API GETs fall back to
+    // index.html so client-side routes (e.g. /tasks/:id) survive a refresh.
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', '..', 'dashboard', 'dist'),
+      exclude: ['/api/*splat'],
+    }),
     AppConfigModule,
     PreflightModule,
     PrismaModule,

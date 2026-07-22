@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useRef, useState } from 'react';
 import { CONTINUE_RUN_TOOL, type ApprovalRequest } from '@lds/shared';
 import { api } from '@/lib/api';

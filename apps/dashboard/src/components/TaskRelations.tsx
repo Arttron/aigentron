@@ -1,7 +1,5 @@
-'use client';
-
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { api, type AgentInfo, type TaskDetail } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, Field, Muted, ErrorText } from '@/components/ui';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -55,7 +53,7 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
     <>
       {task.parent && (
         <Muted className={styles.parent}>
-          ↑ subtask of <Link href={`/tasks/${task.parent.id}`}>{task.parent.title}</Link>{' '}
+          ↑ subtask of <Link to={`/tasks/${task.parent.id}`}>{task.parent.title}</Link>{' '}
           <StatusBadge status={task.parent.status} />
         </Muted>
       )}
@@ -74,7 +72,7 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
 
         {task.subtasks.map((s) => (
           <div key={s.id} className={styles.item}>
-            <Link href={`/tasks/${s.id}`} className={styles.itemTitle}>
+            <Link to={`/tasks/${s.id}`} className={styles.itemTitle}>
               {s.title}
             </Link>
             <span className={styles.meta}>
@@ -125,7 +123,7 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
           <Muted className={styles.empty}>Summaries of these tasks are folded into this task&rsquo;s context.</Muted>
           {task.linksOut.map((link) => (
             <div key={link.toTaskId} className={styles.item}>
-              <Link href={`/tasks/${link.toTaskId}`} className={styles.itemTitle}>
+              <Link to={`/tasks/${link.toTaskId}`} className={styles.itemTitle}>
                 {link.to.title}
               </Link>
               <span className={styles.summary}>{summaryOf(link)}</span>

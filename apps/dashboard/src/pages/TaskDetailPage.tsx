@@ -1,7 +1,5 @@
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   SERVER_EVENT,
   CLIENT_EVENT,
@@ -28,15 +26,14 @@ import {
   Muted,
   ErrorText,
 } from '@/components/ui';
-import styles from './page.module.css';
+import styles from './TaskDetailPage.module.css';
 
 /** Stable de-dup key — the same line can arrive via fetch and over the socket. */
 const lineKey = (sessionId: string, seq: number) => `${sessionId}:${seq}`;
 
-export default function TaskPage() {
-  const params = useParams<{ id: string }>();
-  const id = params.id;
-  const router = useRouter();
+export function TaskDetailPage() {
+  const { id = '' } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -176,7 +173,7 @@ export default function TaskPage() {
     setBusy(true);
     try {
       await api.deleteTask(id);
-      router.push('/');
+      navigate('/');
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);

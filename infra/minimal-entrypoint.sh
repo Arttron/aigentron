@@ -2,7 +2,8 @@
 # ----------------------------------------------------------------------
 # Entrypoint for the minimal/single-container profile (docs/plan-single-
 # container.md Phase 4). Applies pending sqlite migrations against the data
-# dir, then hands off to the process supervisor. Shared verbatim by the
+# dir, then execs the orchestrator (which also serves the dashboard SPA
+# same-origin — one process, no supervisor needed). Shared verbatim by the
 # Docker image (infra/minimal.Dockerfile — APP_DIR/DATA_DIR unset → defaults
 # below) AND the bare-metal installer (install-bare.sh sets APP_DIR/DATA_DIR
 # to real paths) — no forked/duplicated entrypoint logic between the two.
@@ -28,5 +29,5 @@ cd "$APP_DIR/apps/orchestrator"
 node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts
 cd "$APP_DIR"
 
-echo "[entrypoint] starting supervisor…"
-exec node "$APP_DIR/infra/minimal-supervisor.mjs"
+echo "[entrypoint] starting orchestrator (also serves the dashboard, same-origin)…"
+exec node "$APP_DIR/apps/orchestrator/dist/main.js"

@@ -1,7 +1,5 @@
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { Link } from 'react-router-dom';
 import { SERVER_EVENT, type ApprovalRequest } from '@lds/shared';
 import { api, type TaskListItem } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
@@ -13,7 +11,7 @@ import { AppHeader, Button, Card, SectionTitle, ConnStatus, ErrorText, Muted } f
 
 const PAGE_SIZE = 25;
 
-export default function Home() {
+export function TaskListPage() {
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -110,9 +108,9 @@ export default function Home() {
           <>
             <UserSwitcher />
             <ConnStatus connected={connected} />
-            <Link href="/agents">🧑‍💻 Agents</Link>
-            <Link href="/stats">📊 Stats</Link>
-            <Link href="/settings">⚙ Settings</Link>
+            <Link to="/agents">🧑‍💻 Agents</Link>
+            <Link to="/stats">📊 Stats</Link>
+            <Link to="/settings">⚙ Settings</Link>
           </>
         }
       />

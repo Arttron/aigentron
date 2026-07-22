@@ -5,8 +5,10 @@
  *
  * `CORS_ORIGINS` is a comma-separated list of exact origins; `*` opts back into
  * reflecting any origin. With nothing set we allow only localhost/127.0.0.1 on
- * any port (the dashboard) and reject other sites — so a random page can't make
- * credentialed calls to the orchestrator.
+ * any port — not just the dashboard's own dev server, but any generic
+ * browser-based MCP client too (see docs/mcp-entry-point.md) — and reject
+ * other sites, so a random page can't make credentialed calls to the
+ * orchestrator.
  */
 export function resolveCorsOrigin(raw = process.env.CORS_ORIGINS): boolean | (string | RegExp)[] {
   const value = raw?.trim();

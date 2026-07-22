@@ -1,5 +1,3 @@
-'use client';
-
 import { io, type Socket } from 'socket.io-client';
 import { SOCKET_URL } from './config';
 

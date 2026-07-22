@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useRef, useState } from 'react';
 import { api, type AgentInfo } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';

@@ -9,8 +9,8 @@ Two pillars:
 - **Orchestrator** (`apps/orchestrator`) — NestJS REST API + WebSocket gateway. Owns the
   task lifecycle, spawns/supervises agents, routes models by tier, and gates dangerous
   tool calls behind human approval.
-- **Dashboard** (`apps/dashboard`) — Next.js (App Router) + Tailwind. Human ↔ agent
-  communication, live logs, and approvals.
+- **Dashboard** (`apps/dashboard`) — Vite + React SPA (CSS Modules), served same-origin
+  by the orchestrator in production. Human ↔ agent communication, live logs, and approvals.
 
 > **Status:** v1 skeleton — in active construction. See milestones in the build log /
 > commit history. Auth/RBAC, multi-tenant, and production hardening are out of scope for
@@ -138,9 +138,9 @@ Bare-metal mode needs root — piping straight into `sudo`, put env var override
 curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | sudo INSTALL_MODE=bare VERSION=0.1.12 sh
 ```
 
-Bare-metal mode builds from source and installs the exact same runtime (orchestrator +
-dashboard + self-managed LiteLLM) as a systemd service, using `infra/minimal-entrypoint.sh` /
-`infra/minimal-supervisor.mjs` directly instead of a container — requires root and, on the
+Bare-metal mode builds from source and installs the exact same runtime (orchestrator,
+which also serves the dashboard same-origin, + self-managed LiteLLM) as a systemd service,
+using `infra/minimal-entrypoint.sh` directly instead of a container — requires root and, on the
 host, Node ≥22/`pnpm`/`python3`/`git` (auto-installed if missing on apt/dnf/yum/apk systems;
 `AUTO_INSTALL_DEPS=0` to just check and die instead). Installs into `/opt/aigentron` by
 default (`INSTALL_DIR` to change it), data under `/opt/aigentron/data` (`DATA_DIR`), managed
@@ -182,14 +182,14 @@ docker compose --env-file .env.minimal -f docker-compose.minimal.yml up -d --bui
 ```bash
 docker build --build-arg VERSION="$(cat VERSION)" -f infra/minimal.Dockerfile -t lds-minimal .
 docker run -d --name lds \
-  -p 3000:3000 -p 3001:3001 \
+  -p 3001:3001 \
   --add-host host.docker.internal:host-gateway \
   -v lds-data:/data \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   lds-minimal
 ```
 
-Dashboard → http://localhost:3000 · Orchestrator API → http://localhost:3001. Everything
+Dashboard + Orchestrator API → http://localhost:3001 (same origin, one port). Everything
 persists in the `/data` volume (SQLite DB, agent defs, repo, worktrees, attachments) —
 back it up by copying that volume, nothing else to snapshot. `/api/health` reports the
 running `version` alongside DB/LiteLLM status.

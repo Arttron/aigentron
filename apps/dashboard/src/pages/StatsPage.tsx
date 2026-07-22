@@ -1,12 +1,10 @@
-'use client';
-
 import { useEffect, useMemo, useState } from 'react';
 import type { ProviderUsage, UsageReport } from '@lds/shared';
 import { api } from '@/lib/api';
 import { AppHeader, BackLink, Button, Card, SectionTitle, Muted, ErrorText } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { UsageChart } from './UsageChart';
-import styles from './page.module.css';
+import styles from './StatsPage.module.css';
 
 type RangeKey = 'today' | '7d' | '30d' | 'all';
 const RANGES: { key: RangeKey; label: string }[] = [
@@ -42,7 +40,7 @@ const fmtInt = (n: number) => NF.format(n);
 const fmtCost = (n: number) => (n === 0 ? '—' : `$${n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`);
 const cell = (key: ColKey, v: number) => (key === 'estCostUsd' ? fmtCost(v) : fmtInt(v));
 
-export default function StatsPage() {
+export function StatsPage() {
   const [range, setRange] = useState<RangeKey>('7d');
   const [data, setData] = useState<UsageReport | null>(null);
   const [error, setError] = useState<string | null>(null);

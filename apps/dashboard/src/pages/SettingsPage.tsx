@@ -1,5 +1,3 @@
-'use client';
-
 import { useState } from 'react';
 import { AppHeader, BackLink, Tabs, type TabDef } from '@/components/ui';
 import { GeneralSettingsForm } from '@/components/settings/GeneralSettingsForm';
@@ -22,7 +20,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 
-export default function SettingsPage() {
+export function SettingsPage() {
   const [tab, setTab] = useState<TabId>('general');
 
   return (

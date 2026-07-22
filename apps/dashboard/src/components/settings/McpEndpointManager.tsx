@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import { api, type McpHostStatus } from '@/lib/api';
 import { ORCHESTRATOR_URL } from '@/lib/config';

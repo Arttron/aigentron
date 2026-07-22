@@ -23,7 +23,7 @@ reaches).
 | Queue | `TaskQueue` token (✅ Phase 1) | BullMQ + redis | in-process DB-backed poller (`QueueJob` table) | `REDIS_URL` set → BullMQ, unset → embedded |
 | Event bus | `AgentEventBus` token (✅ Phase 2, scope discovery) | Redis pub/sub (cross-instance) | in-process `EventEmitter` | same signal as Queue (`REDIS_URL`) |
 | LLM gateway | `LitellmService` (✅ Phase 3) | litellm container, admin API | litellm **child process**, static config (`ManagedLitellmRoute` table) | `LITELLM_MANAGED=1` |
-| Dashboard | HTTP (✅ Phase 4) | separate Next dev container | Next `standalone` served in-container | build target |
+| Dashboard | HTTP (✅ Phase 4) | separate Vite dev container (hot-reload) | Vite SPA build served same-origin by the orchestrator (`ServeStaticModule`) | build target |
 | Browser tool (playwright-mcp) | MCP registry (yes) | optional compose profile | omitted (or remote MCP URL) | already optional |
 | Ollama | provider record | host daemon | host daemon / any endpoint | already config |
 
@@ -310,6 +310,33 @@ the README's "Server deployment" §Option A.
 Ollama needed no code change to become "optional" for this — it already was
 (`ollama-local` is a soft, lazily-used seeded provider row; nothing preflight-checks it).
 Just documented explicitly, since nothing said so before.
+
+## Addendum — dashboard rewritten as a Vite SPA, served same-origin (2026-07-22)
+
+Phase 4 shipped the dashboard as Next.js `output: 'standalone'`, relocated by hand into
+`apps/dashboard-standalone/` (both in `infra/minimal.Dockerfile` and `install.sh`, kept in
+sync manually) and run as a SECOND Node process by `infra/minimal-supervisor.mjs` — two
+top-level processes, two exposed ports (`3000` dashboard, `3001` API), and the client bundle
+had the orchestrator's URL baked in at build time (`NEXT_PUBLIC_ORCHESTRATOR_URL`), so
+changing the orchestrator's port meant rebuilding the image.
+
+`apps/dashboard` is now a Vite + React SPA (`react-router-dom`, CSS Modules, no Next
+dependency at all). The orchestrator serves its `dist/` directly, in-process
+(`ServeStaticModule.forRoot` in `app.module.ts`, `exclude: ['/api/*splat']`, with an
+`index.html` SPA-fallback for client routes like `/tasks/:id` surviving a refresh) — same
+origin, same port, zero build-time URL baking (the SPA defaults to relative `/api` paths;
+`VITE_ORCHESTRATOR_URL`/`VITE_ORCHESTRATOR_WS_URL` are a dev-only escape hatch for the `full`
+profile's separate hot-reload Vite server).
+
+This retires both Phase 4 mechanisms that motivated the "two top-level processes" framing
+above: the `dashboard-standalone` relocation dance is gone (Vite's flat `dist/` needs no
+relocation), and `infra/minimal-supervisor.mjs` is deleted — `minimal`/`bare-metal` are down
+to ONE Node process, so `infra/minimal-entrypoint.sh` execs the orchestrator directly and
+relies on the container/systemd restart policy for crash recovery (the supervisor's own
+per-child restart logic no longer has more than one child to matter for). `EXPOSE`/published
+ports collapse to `3001` only; `DASHBOARD_PORT` and both `NEXT_PUBLIC_*` vars stop existing
+in these two profiles. The `full` profile is unaffected beyond Next→Vite under its existing
+separate dev-server service — hot-reload DX there is unchanged.
 
 ## Order & effort
 

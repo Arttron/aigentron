@@ -450,11 +450,13 @@ library — React hooks + a Socket.IO singleton.
 - `/settings` — tabbed: General (repo/token/timeouts/verify/defaults), Providers (CRUD + test),
   LiteLLM (read-only routes), MCP servers (CRUD).
 
-**Client libs** (`src/lib`): `config.ts` (`NEXT_PUBLIC_ORCHESTRATOR_URL` /
-`_WS_URL`, default `http://localhost:3001`), `api.ts` (typed `fetch` wrapper `unwrap<T>` +
-every REST endpoint), `socket.ts` (lazy `io()` singleton; subscribes to the `SERVER_EVENT`s and
-calls refetch/append on each). `next.config.mjs` transpiles `@lds/shared`. The dashboard container
-gets **no secrets** — only `NEXT_PUBLIC_*` reach the browser.
+**Client libs** (`src/lib`): `config.ts` (relative `/api` + same-origin socket by default;
+`VITE_ORCHESTRATOR_URL`/`_WS_URL` are a dev-only escape hatch for the separate hot-reload
+dev server), `api.ts` (typed `fetch` wrapper `unwrap<T>` + every REST endpoint), `socket.ts`
+(lazy `io()` singleton; subscribes to the `SERVER_EVENT`s and calls refetch/append on each).
+The dashboard is a Vite + React SPA, served same-origin by the orchestrator in production
+(`ServeStaticModule` in `app.module.ts`) — the dashboard container/process gets **no
+secrets** either way.
 
 ---
 
@@ -467,8 +469,8 @@ Env is grouped in `.env.example` and allowlisted in `turbo.json` `globalEnv`. No
 |---|---|---|
 | `DATABASE_URL` | — (required) | orchestrator Postgres |
 | `REDIS_URL` | redis://redis:6379 | BullMQ backend |
-| `ORCHESTRATOR_PORT` / `DASHBOARD_PORT` | 3001 / 3000 | host ports |
-| `NEXT_PUBLIC_ORCHESTRATOR_URL` / `_WS_URL` | http://localhost:3001 | browser → API/WS |
+| `ORCHESTRATOR_PORT` / `DASHBOARD_PORT` | 3001 / 3000 | host ports (`full` profile only — `minimal`/`bare-metal` are one port, `3001`) |
+| `VITE_ORCHESTRATOR_URL` / `_WS_URL` | http://localhost:3001 | `full` profile's separate dev-server dashboard → API/WS (dev-only; production is same-origin) |
 | `LITELLM_BASE_URL` / `LITELLM_MASTER_KEY` | http://litellm:4000 / — | proxy URL + master key (gates all LiteLLM traffic) |
 | `OLLAMA_BASE_URL` / `ROUTINE_MODEL` | host.docker.internal:11434 / — | local tier |
 | `ANTHROPIC_API_KEY` / `COMPLEX_MODEL` | — / claude-sonnet-4-6 | cloud tier |
@@ -511,17 +513,17 @@ feature-flag branching sprinkled through business logic. Full design/history:
 | Queue (`TaskQueue` token) | BullMQ + Redis | in-process poller over a `QueueJob` table | `REDIS_URL` presence |
 | Event bus (`AgentEventBus` token) | Redis pub/sub | in-process `EventEmitter` | same signal as Queue |
 | LiteLLM (`LitellmService`'s 3 write methods) | admin API (needs LiteLLM's own Postgres) | `LitellmManagedService`: a `child_process`-spawned litellm + a static rendered config | `LITELLM_MANAGED=1` |
-| Dashboard | separate Next dev container | Next `standalone` build, same container | build target |
+| Dashboard | separate Vite dev container (hot-reload) | Vite SPA build served same-origin by the orchestrator | build target |
 
 Each pair is bound to the SAME DI token via a factory provider (e.g.
 `{ provide: PrismaService, useFactory: (config) => config.storageDriver === 'sqlite' ? new PrismaServiceSqlite() : new PrismaService() }`)
 so the ~15-20 files across the app that inject `PrismaService`/`TaskQueue`/
 `AgentEventBus` never change regardless of which profile is running.
 
-`minimal` packaging (`infra/minimal.Dockerfile`, `infra/minimal-supervisor.mjs`) is
-covered in the README's "Server deployment" section — one container running Node
-(orchestrator + dashboard) and a `python3-venv` (litellm, spawned BY the orchestrator,
-not a third top-level process). `full` remains the default and the regression baseline;
-`minimal` is not a reduced feature set, just a different set of backing implementations
-for the same modules.
+`minimal` packaging (`infra/minimal.Dockerfile`) is covered in the README's "Server
+deployment" section — one container running a SINGLE Node process (the orchestrator,
+which also serves the dashboard's static build same-origin) and a `python3-venv`
+(litellm, spawned BY the orchestrator, not a separate top-level process). `full` remains
+the default and the regression baseline; `minimal` is not a reduced feature set, just a
+different set of backing implementations for the same modules.
 </content>

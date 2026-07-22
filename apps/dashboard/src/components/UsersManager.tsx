@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { USER_ROLES, type ChannelKind, type User, type UserRole } from '@lds/shared';
 import { api, getActingUserId } from '@/lib/api';

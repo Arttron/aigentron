@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useState } from 'react';
 import { SERVER_EVENT, CLIENT_EVENT, type ApprovalRequest } from '@lds/shared';
 import { api } from '@/lib/api';

@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AttachmentMeta } from '@/lib/api';
 import { Card, Row, Button, Muted, ErrorText } from '@/components/ui';
@@ -76,7 +74,6 @@ export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSi
           return (
             <a key={a.name} href={url} target="_blank" rel="noreferrer" className={styles.tile} title={a.name}>
               {a.mime.startsWith('image/') ? (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img src={url} alt={a.name} className={styles.thumb} />
               ) : (
                 <div className={styles.doc}>📄</div>

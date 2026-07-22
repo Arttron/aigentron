@@ -204,15 +204,17 @@ services:
       dockerfile: infra/dev.Dockerfile
       target: dev
     entrypoint: ["sh", "/app/infra/dashboard-entrypoint.sh"]
-    # No env_file: the dashboard is a browser-facing Next.js app and must not be
+    # No env_file: the dashboard is a browser-facing SPA and must not be
     # handed the orchestrator's secrets (API keys, GitHub token, hook secret).
-    # It only needs the NEXT_PUBLIC_* below, which are public by design.
+    # It only needs the VITE_* below, which are public by design.
     environment:
-      # NEXT_PUBLIC_* are inlined into the client bundle and used by the BROWSER
+      # VITE_* are inlined into the client bundle and used by the BROWSER
       # (running on the host), so they point at the host-mapped orchestrator port
-      # (ORCHESTRATOR_PORT from .env; the in-network port stays 3001).
-      NEXT_PUBLIC_ORCHESTRATOR_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
-      NEXT_PUBLIC_ORCHESTRATOR_WS_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
+      # (ORCHESTRATOR_PORT from .env; the in-network port stays 3001). Only this
+      # separate hot-reload dev server needs them — the orchestrator also serves
+      # the dashboard itself, same-origin, off its own port with no config.
+      VITE_ORCHESTRATOR_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
+      VITE_ORCHESTRATOR_WS_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
     ports:
       - "${DASHBOARD_PORT:-3000}:3000"
     volumes:

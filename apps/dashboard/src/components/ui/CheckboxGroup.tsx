@@ -1,5 +1,3 @@
-'use client';
-
 import { cn } from '@/lib/cn';
 import { Muted } from './Text';
 import styles from './CheckboxGroup.module.css';

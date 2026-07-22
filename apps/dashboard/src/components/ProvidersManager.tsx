@@ -1,5 +1,3 @@
-'use client';
-
 import { useCallback, useEffect, useState } from 'react';
 import { api, type ProviderInfo, type ProviderTestResult } from '@/lib/api';
 import { cn } from '@/lib/cn';

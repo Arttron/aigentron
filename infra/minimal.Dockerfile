@@ -78,22 +78,21 @@ COPY --from=build /app/packages/agent-runner/dist /app/packages/agent-runner/dis
 COPY --from=build /app/packages/agent-runner/package.json /app/packages/agent-runner/package.json
 COPY --from=build /app/packages/agent-runner/node_modules /app/packages/agent-runner/node_modules
 
-# Dashboard: standalone output is already self-contained (its own pruned
-# node_modules) — only .next/static needs copying alongside it per Next's
-# documented standalone deployment steps (no public/ dir in this app).
-COPY --from=build /app/apps/dashboard/.next/standalone /app/apps/dashboard-standalone
-COPY --from=build /app/apps/dashboard/.next/static /app/apps/dashboard-standalone/apps/dashboard/.next/static
+# Dashboard: a plain Vite SPA build — static HTML/CSS/JS with no runtime deps
+# of its own, served in-process by the orchestrator (ServeStaticModule in
+# app.module.ts). No relocation dance needed (contrast the old Next.js
+# standalone-output copy this replaced).
+COPY --from=build /app/apps/dashboard/dist /app/apps/dashboard/dist
 
 # Agent operational files (skills, agent defs) — read at runtime, not compiled.
 COPY agent /app/agent
 
-COPY infra/minimal-entrypoint.sh infra/minimal-supervisor.mjs infra/minimal-healthcheck.sh infra/setup-wizard.mjs /app/infra/
+COPY infra/minimal-entrypoint.sh infra/minimal-healthcheck.sh infra/setup-wizard.mjs /app/infra/
 RUN chmod +x /app/infra/minimal-entrypoint.sh /app/infra/minimal-healthcheck.sh
 
 ENV NODE_ENV=production \
     APP_VERSION=$VERSION \
     ORCHESTRATOR_PORT=3001 \
-    DASHBOARD_PORT=3000 \
     DATABASE_URL=file:/data/orchestrator.db \
     LITELLM_MANAGED=1 \
     LITELLM_MANAGED_COMMAND=/opt/litellm-venv/bin/litellm \
@@ -105,12 +104,10 @@ ENV NODE_ENV=production \
     WORKSPACE_REPO_PATH=/data/repo \
     WORKTREES_ROOT=/data/worktrees \
     ATTACHMENTS_DIR=/data/agent/attachments \
-    NEXT_PUBLIC_ORCHESTRATOR_URL=http://localhost:3001 \
-    NEXT_PUBLIC_ORCHESTRATOR_WS_URL=ws://localhost:3001 \
-    DASHBOARD_BASE_URL=http://localhost:3000
+    DASHBOARD_BASE_URL=http://localhost:3001
 
 VOLUME /data
-EXPOSE 3000 3001
+EXPOSE 3001
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD ["/app/infra/minimal-healthcheck.sh"]

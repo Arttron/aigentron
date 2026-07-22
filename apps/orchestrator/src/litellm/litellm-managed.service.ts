@@ -98,7 +98,7 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
     // features and hard-errors on a non-postgres scheme — inheriting the
     // orchestrator's sqlite DATABASE_URL broke boot entirely. Pass through only
     // what a child process needs (PATH et al.), explicitly excluding it.
-    const { DATABASE_URL, ...inheritedEnv } = process.env;
+    const { DATABASE_URL: _DATABASE_URL, ...inheritedEnv } = process.env;
     const child = spawn(this.config.litellmManagedCommand, args, {
       env: { ...inheritedEnv, LITELLM_MASTER_KEY: this.config.litellmMasterKey },
       stdio: ['ignore', 'pipe', 'pipe'],

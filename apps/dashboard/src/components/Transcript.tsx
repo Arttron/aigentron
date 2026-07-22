@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useRef } from 'react';
 import type { TaskStatus } from '@lds/shared';
 import { api } from '@/lib/api';
@@ -63,7 +61,6 @@ export function Transcript({
             rel="noreferrer"
             title={name}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={api.attachmentUrl(taskId, name)} alt={name} className={styles.thumb} />
           </a>
         ))}

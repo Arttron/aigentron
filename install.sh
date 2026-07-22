@@ -471,15 +471,14 @@ if [ "$INSTALL_MODE" = docker ]; then
   log "Starting $CONTAINER_NAME"
   docker run -d --name "$CONTAINER_NAME" \
     --restart unless-stopped \
-    -p 3000:3000 -p 3001:3001 \
+    -p 3001:3001 \
     --add-host host.docker.internal:host-gateway \
     -v "$DATA_VOLUME:/data" \
     --env-file "$ENV_FILE" \
     "$IMAGE:$VERSION"
 
   log "Aigentron $VERSION is running."
-  log "Dashboard:    http://localhost:3000"
-  log "Orchestrator: http://localhost:3001/api/health"
+  log "Dashboard + API: http://localhost:3001"
   log ""
   log "Run the setup wizard to configure providers, channels, agents, skills, and a repo:"
   log "  docker exec -it $CONTAINER_NAME node /app/infra/setup-wizard.mjs"
@@ -509,21 +508,6 @@ else
   pnpm --filter @lds/orchestrator build </dev/null
   pnpm --filter @lds/dashboard build </dev/null
 
-  # Next's standalone output needs the exact same relocation
-  # infra/minimal.Dockerfile does for the Docker image — its own build
-  # doesn't produce a runnable server at the path minimal-supervisor.mjs
-  # expects (apps/dashboard-standalone/...) otherwise. Missing this step
-  # broke the dashboard on EVERY bare-metal install with a MODULE_NOT_FOUND
-  # crash-loop, found live — the orchestrator half worked fine (it needs no
-  # such relocation), masking the problem until someone actually opened the
-  # dashboard. `.next/static` isn't included in the standalone output by
-  # design (Next's own documented deployment steps), so it's copied in too.
-  rm -rf "$RELEASE_DIR/apps/dashboard-standalone"
-  mkdir -p "$RELEASE_DIR/apps/dashboard-standalone"
-  cp -a "$RELEASE_DIR/apps/dashboard/.next/standalone/." "$RELEASE_DIR/apps/dashboard-standalone/"
-  mkdir -p "$RELEASE_DIR/apps/dashboard-standalone/apps/dashboard/.next/static"
-  cp -a "$RELEASE_DIR/apps/dashboard/.next/static/." "$RELEASE_DIR/apps/dashboard-standalone/apps/dashboard/.next/static/"
-
   LITELLM_VENV="$INSTALL_DIR/litellm-venv"
   if [ ! -x "$LITELLM_VENV/bin/litellm" ]; then
     log "Setting up the LiteLLM Python venv at $LITELLM_VENV (one-time, reused across upgrades)"
@@ -543,7 +527,7 @@ else
   log "Writing $SERVICE_FILE"
   cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Aigentron (orchestrator + dashboard, minimal profile)
+Description=Aigentron (minimal profile)
 After=network-online.target
 Wants=network-online.target
 
@@ -561,13 +545,10 @@ Environment=ATTACHMENTS_DIR=$DATA_DIR/agent/attachments
 Environment=WORKSPACE_SHARED=true
 Environment=APP_VERSION=$VERSION
 Environment=ORCHESTRATOR_PORT=3001
-Environment=DASHBOARD_PORT=3000
 Environment=LITELLM_MANAGED=1
 Environment=LITELLM_MANAGED_COMMAND=$LITELLM_VENV/bin/litellm
 Environment=LITELLM_BASE_URL=http://127.0.0.1:4000
-Environment=NEXT_PUBLIC_ORCHESTRATOR_URL=http://localhost:3001
-Environment=NEXT_PUBLIC_ORCHESTRATOR_WS_URL=ws://localhost:3001
-Environment=DASHBOARD_BASE_URL=http://localhost:3000
+Environment=DASHBOARD_BASE_URL=http://localhost:3001
 ExecStart=$CURRENT_LINK/infra/minimal-entrypoint.sh
 Restart=on-failure
 RestartSec=5
@@ -585,9 +566,8 @@ EOF
   systemctl restart aigentron
 
   log "Aigentron $VERSION is running."
-  log "Dashboard:    http://localhost:3000"
-  log "Orchestrator: http://localhost:3001/api/health"
-  log "Logs:         journalctl -u aigentron -f"
+  log "Dashboard + API: http://localhost:3001"
+  log "Logs:             journalctl -u aigentron -f"
   log ""
   log "Run the setup wizard to configure providers, channels, agents, skills, and a repo:"
   log "  node \"$CURRENT_LINK/infra/setup-wizard.mjs\""
