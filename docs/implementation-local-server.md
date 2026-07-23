@@ -402,6 +402,21 @@ delegation ("route by capability, not keyword"; use the **Task tool**, not `Send
 (read freely; writing to `agent/skills/` is approval-gated — how the fleet *learns*), and
 attachments (`$LDS_ATTACHMENTS_DIR`).
 
+A deployed instance's `agent/` tree lives in a persistent data dir, seeded ONCE from the shipped
+`agent/` on first boot (`infra/minimal-entrypoint.sh`'s directory-existence check) — so a later
+code-level improvement to SOUL.md/core skills doesn't reach an already-running instance on its
+own. `AgentFilesSyncService` (`agent-registry/agent-files-sync.service.ts`) closes that gap for
+`SOUL.md` + `skills/core/**` specifically: on every boot it three-way-compares live (deployed,
+possibly hand-edited) vs. the last-synced shipped snapshot (`$AGENT_DIR/.sync/base/**`) vs. the
+current release's shipped content. Untouched → straight update. Locally edited but shipped hasn't
+moved → left alone. Both changed → merged via `git merge-file` (snapshotted first); a real
+conflict is left untouched with a `<file>.merge-conflict` sibling instead of guessing. Deliberately
+excludes `agent/agents/*.md` (user-owned from creation, edited via the Agents API — no "shipped
+default" to reconcile against) and `skills/learned/*` (agent-written, its own approval/snapshot
+flow). A brand-new mechanism boot with no recorded baseline yet adopts the current release's
+shipped content as the baseline WITHOUT touching live that boot, so introducing this itself can't
+surprise anyone — reconciliation resumes normally from the next shipped change.
+
 **Agents** (`agent/agents/<name>.md`, frontmatter + body = system prompt; read on demand, no
 restart):
 

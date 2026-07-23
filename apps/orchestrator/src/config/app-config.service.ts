@@ -29,6 +29,16 @@ export class AppConfigService {
   /** Directory for agent operational files (skills, generated settings) — kept
    *  out of the project so worktrees only ever contain project files. */
   readonly agentDir: string;
+  /** The currently-running release's OWN copy of `agent/` (read-only reference) —
+   *  distinct from `agentDir` above, which is the live/persistent copy a human may
+   *  have hand-edited. Used by AgentFilesSyncService to bring platform-maintained
+   *  files (SOUL.md, core skills) up to date on every boot without clobbering
+   *  local edits. Same __dirname-relative trick as defaultHookScriptPath() below —
+   *  works unchanged across the `full`/`minimal`/bare-metal profiles as long as
+   *  `agent/` sits at the same repo-root-relative path (true for all three; in
+   *  `full` dev it's actually the SAME path as agentDir, which is fine — the sync
+   *  logic just finds nothing to reconcile).  */
+  readonly shippedAgentDir: string;
   readonly agentMaxTurns: number;
   /** Max times a task may auto-request "continue?" after hitting the step limit
    *  before it's stalled instead — stops a non-converging run grinding forever. */
@@ -129,6 +139,7 @@ export class AppConfigService {
     this.workspaceRepoPath = process.env.WORKSPACE_REPO_PATH ?? '/workspace/repo';
     this.worktreesRoot = process.env.WORKTREES_ROOT ?? '/workspace/.worktrees';
     this.agentDir = process.env.AGENT_DIR ?? '/workspace/agent';
+    this.shippedAgentDir = process.env.SHIPPED_AGENT_DIR ?? defaultShippedAgentDir();
     this.agentMaxTurns = parseInt(process.env.AGENT_MAX_TURNS ?? '40', 10);
     this.maxContinuations = parseInt(process.env.MAX_CONTINUATIONS ?? '2', 10);
     // Lazy skills: inject a short index (name + description + path) and let the
@@ -207,4 +218,9 @@ function safeResolveShared(): string {
  */
 function defaultHookScriptPath(): string {
   return join(__dirname, '..', '..', '..', '..', 'infra', 'hooks', 'pre-tool-use.mjs');
+}
+
+/** Same repo-root-relative resolution as defaultHookScriptPath(), for `agent/`. */
+function defaultShippedAgentDir(): string {
+  return join(__dirname, '..', '..', '..', '..', 'agent');
 }
