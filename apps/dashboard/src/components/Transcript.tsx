@@ -10,7 +10,14 @@ export interface LogLine {
   kind: string;
   text: string;
   attachments?: string[];
+  ts?: string;
 }
+
+const formatTs = (ts?: string) => {
+  if (!ts) return null;
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
 
 const WORKING: Partial<Record<TaskStatus, string>> = {
   queued: '▷ queued — waiting for a free worker slot…',
@@ -73,12 +80,14 @@ export function Transcript({
         l.kind === 'prompt' ? (
           <div key={l.id} className={styles.userMsg}>
             <span className={styles.userTag}>you</span>
+            {formatTs(l.ts) && <span className={styles.ts}>{formatTs(l.ts)}</span>}
             {l.text && <span className={styles.userText}>{l.text}</span>}
             {thumbs(l.attachments)}
           </div>
         ) : (
           <div key={l.id} className={cn(styles.line, styles[l.kind])}>
             <span className={styles.kind}>{l.kind}</span>
+            {formatTs(l.ts) && <span className={styles.ts}>{formatTs(l.ts)}</span>}
             {l.text}
             {thumbs(l.attachments)}
           </div>

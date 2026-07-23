@@ -21,6 +21,13 @@
   user-select: none;
 }
 
+.ts {
+  color: var(--text-dim);
+  margin-right: 8px;
+  user-select: none;
+  font-size: 11px;
+}
+
 /* User (request) messages — a chat bubble distinct from agent output. */
 .userMsg {
   margin: 8px 0;

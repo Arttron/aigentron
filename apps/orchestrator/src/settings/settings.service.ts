@@ -113,6 +113,11 @@ export class SettingsService {
     return (await this.load()).verifyMaxAttempts;
   }
 
+  /** Whether to persist verbose intermediate transcript events (see AgentEvent). */
+  async debugMode(): Promise<boolean> {
+    return (await this.load()).debugMode;
+  }
+
   /** Instructions appended to the agent's system prompt (the "skill"). */
   async agentInstructions(): Promise<string> {
     return (await this.load()).agentInstructions;

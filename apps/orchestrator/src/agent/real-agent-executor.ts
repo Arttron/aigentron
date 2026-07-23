@@ -315,6 +315,12 @@ export class RealAgentExecutor extends AgentExecutor {
     let seq = 0;
     let writeChain: Promise<unknown> = Promise.resolve();
     let capturedSessionId: string | null = null;
+    const debugMode = await this.settings.debugMode();
+    // The chat itself (what the human sent, what the agent finally answered) is
+    // always kept; the intermediate process trace (thinking/tool calls/system
+    // chatter) is only worth the DB weight when someone's actually debugging —
+    // it still streams live either way, just isn't replayed on the next page load.
+    const alwaysPersist = (kind: AgentEvent['kind']) => kind === 'prompt' || kind === 'result';
 
     const onEvent = (event: AgentEvent): void => {
       if (event.kind === 'system') capturedSessionId = event.sessionId || capturedSessionId;
@@ -348,6 +354,7 @@ export class RealAgentExecutor extends AgentExecutor {
           ts,
         },
       });
+      if (!debugMode && !alwaysPersist(event.kind)) return;
       writeChain = writeChain.then(() =>
         this.prisma.agentEvent
           .create({

@@ -91,7 +91,7 @@ export function TaskDetailPage() {
           const key = lineKey(e.agentSessionId, e.seq);
           if (seen.current.has(key)) continue;
           seen.current.add(key);
-          initial.push({ id: key, kind: e.kind, text: e.text, attachments: e.attachments });
+          initial.push({ id: key, kind: e.kind, text: e.text, attachments: e.attachments, ts: e.createdAt });
         }
         setLines(initial);
       })
@@ -106,7 +106,7 @@ export function TaskDetailPage() {
     const onLog = (e: AgentLogEvent) => {
       if (e.taskId !== id) return;
       const key = lineKey(e.agentSessionId, e.seq);
-      addLine(key, { id: key, kind: e.kind, text: e.text, attachments: e.attachments });
+      addLine(key, { id: key, kind: e.kind, text: e.text, attachments: e.attachments, ts: e.ts });
       // A tool shared an image (screenshot, etc.) → refresh the gallery live.
       if (e.attachments?.length) setAssetTick((n) => n + 1);
     };
@@ -193,7 +193,10 @@ export function TaskDetailPage() {
   // Until the run emits the opening `prompt` event, seed the request from the
   // task so the conversation always shows what was asked.
   if (task && !visibleLines.some((l) => l.kind === 'prompt')) {
-    visibleLines = [{ id: 'seed-prompt', kind: 'prompt', text: task.prompt }, ...visibleLines];
+    visibleLines = [
+      { id: 'seed-prompt', kind: 'prompt', text: task.prompt, ts: task.createdAt },
+      ...visibleLines,
+    ];
   }
 
   return (
