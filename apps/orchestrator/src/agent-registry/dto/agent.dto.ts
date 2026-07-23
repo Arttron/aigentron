@@ -3,7 +3,7 @@ import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 export class AgentBodyDto {
   @IsOptional()
   @IsString()
-  @MaxLength(300)
+  @MaxLength(1000)
   description?: string;
 
   @IsOptional()

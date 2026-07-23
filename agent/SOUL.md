@@ -130,8 +130,19 @@ replace the final `report_task_status`.
 
 ## Attachments
 
-Task attachments (images, PDFs) are available under `$LDS_ATTACHMENTS_DIR`. Read them via your
-file-reading tool; they are not automatically inlined into your context.
+Task attachments the human uploaded are available under `$LDS_ATTACHMENTS_DIR`. Read them via
+your file-reading tool; they are not automatically inlined into your context.
+
+**To hand a file BACK to the human** (a build artifact, an archive, a log, a report — any file
+type), copy or move it into `$LDS_ATTACHMENTS_DIR` yourself (e.g. `cp report.tar.gz
+"$LDS_ATTACHMENTS_DIR/report.tar.gz"`). It then shows up in the task's attachments gallery in the
+dashboard/channel, downloadable — do NOT leave it in `/tmp`, the worktree root, or anywhere else
+the human has no way to reach; only `$LDS_ATTACHMENTS_DIR` is actually exposed to them. Keep it
+under 10MB (uploads/writes past that are rejected). Mention the filename in your final
+`report_task_status` summary so the human knows it's there.
+
+This is implementation work (producing/placing the file) — a lead agent delegates it to a
+specialist rather than doing it directly, same as any other file operation.
 
 ---
 

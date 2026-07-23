@@ -369,8 +369,24 @@ export class ProvidersService implements OnModuleInit {
         // Anthropic-protocol-compatible layers (e.g. DeepSeek's /anthropic),
         // which often only implement the messages endpoint. Confirmed live:
         // the same secret/URL that works fine for actual chat/tool-use calls
-        // still 404s here. Don't show a bare status code for this case — it
-        // reads as "something's broken" when the provider itself is fine.
+        // still 404s here.
+        //
+        // Some of these vendors (DeepSeek confirmed) DO support listing on
+        // their own native OpenAI-compatible root — same base with the
+        // compat suffix stripped, same secret, just Bearer auth instead of
+        // x-api-key. Try that before giving up; only if it also fails do we
+        // show the "doesn't support listing" message instead of a raw status.
+        if (res.status === 404 && anthropic && baseUrl) {
+          const nativeBase = baseUrl.replace(/\/anthropic\/?$/, '');
+          if (nativeBase !== baseUrl) {
+            const fallback = await this.tryFetchModelNames(
+              `${nativeBase}/v1/models`,
+              { 'content-type': 'application/json', authorization: `Bearer ${p.secret ?? ''}` },
+              controller.signal,
+            );
+            if (fallback) return { ok: true, models: fallback };
+          }
+        }
         const error =
           res.status === 404
             ? 'this endpoint doesn’t support listing models — type the model name manually'
@@ -388,6 +404,28 @@ export class ProvidersService implements OnModuleInit {
       return { ok: false, models: [], error: err.name === 'AbortError' ? 'timed out after 15s' : err.message };
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /** Best-effort model-name fetch for the anthropic-compat 404 fallback above
+   *  — null on any failure (network error, non-2xx, empty list), never throws. */
+  private async tryFetchModelNames(
+    url: string,
+    headers: Record<string, string>,
+    signal: AbortSignal,
+  ): Promise<string[] | null> {
+    try {
+      const res = await fetch(url, { headers, signal });
+      const text = await res.text();
+      if (!res.ok) return null;
+      const json = JSON.parse(text);
+      const rows: unknown[] = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : [];
+      const models = rows
+        .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
+        .filter((x): x is string => typeof x === 'string' && x.length > 0);
+      return models.length ? Array.from(new Set(models)).sort() : null;
+    } catch {
+      return null;
     }
   }
 }

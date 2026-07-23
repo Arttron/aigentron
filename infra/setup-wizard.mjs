@@ -23,6 +23,15 @@ import { spawnSync, execSync } from 'node:child_process';
 
 let BASE = 'http://localhost:3001';
 
+// readRawLine() below leaves stdin in raw mode once the first prompt runs
+// (never toggled back per-call — see its own comment for why). `exit` is the
+// only event guaranteed to fire even after a direct process.exit() call (the
+// Ctrl+C paths below do exactly that, bypassing any try/finally), so restore
+// cooked mode here or the user's shell is left with echo off after we quit.
+process.on('exit', () => {
+  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+});
+
 function log(msg = '') {
   console.log(msg);
 }
@@ -30,10 +39,63 @@ function header(title) {
   console.log(`\n== ${title} ==`);
 }
 
-// ---- prompt helpers (plain node:readline, one shared Interface) ----
+// ---- prompt helpers ----
+//
+// Every prompt — masked or not — reads stdin itself in raw mode via
+// readRawLine() below; readline's own `.question()` is never used to
+// capture input (rl is paused immediately after creation in main() and
+// kept that way — see the comment there). This used to be split: plain
+// fields went through `rl.question()` (cooked-mode terminal echo) and only
+// secret fields switched to a raw-mode reader for the duration of that one
+// prompt. That split left a real race: readline's own keypress listener
+// stays attached to stdin (echoing in cleartext) until something pauses
+// it, and a paste delivered for a SECRET field can physically arrive on
+// stdin — and get echoed by readline — in the gap between the field
+// BEFORE it resolving and promptSecret's own pause()/raw-mode-switch
+// executing a few microtasks later. Found live: a pasted API key
+// partially printed in cleartext before the masking kicked in, immediately
+// followed by the correctly-masked remainder. Routing every prompt through
+// this one always-raw reader (readline's listener paused from the very
+// start of the wizard) closes that window entirely — there is no longer
+// any mode/listener to race against a fast paste. The trade-off is losing
+// readline's own arrow-key/history line editing for plain fields (masked
+// fields never had it either); Enter/Backspace/Ctrl+C still work.
+function readRawLine(query, { mask = false } = {}) {
+  return new Promise((resolve) => {
+    process.stdout.write(query);
+    const stdin = process.stdin;
+    if (stdin.isTTY) stdin.setRawMode(true);
+    stdin.resume();
+    let buf = '';
+    const onData = (chunk) => {
+      for (const ch of chunk.toString('utf8')) {
+        if (ch === '\r' || ch === '\n') {
+          stdin.removeListener('data', onData);
+          process.stdout.write('\n');
+          resolve(buf.trim());
+          return;
+        } else if (ch === '\u0003') {
+          // Ctrl+C — match readline's own SIGINT-on-prompt behavior.
+          stdin.removeListener('data', onData);
+          log('\naborted');
+          process.exit(130);
+        } else if (ch === '\u007f' || ch === '\b') {
+          if (buf.length) {
+            buf = buf.slice(0, -1);
+            process.stdout.write('\b \b');
+          }
+        } else if (ch >= ' ') {
+          buf += ch;
+          process.stdout.write(mask ? '*' : ch);
+        }
+      }
+    };
+    stdin.on('data', onData);
+  });
+}
 
-function qp(rl, query) {
-  return new Promise((resolve) => rl.question(query, resolve));
+function qp(_rl, query) {
+  return readRawLine(query);
 }
 
 async function prompt(rl, query, def) {
@@ -72,65 +134,11 @@ async function promptChoiceOptional(rl, query, options) {
   }
 }
 
-/** Masked input: readline still drives the actual line-editing (Enter/Backspace/
- *  Ctrl+C all work normally); a parallel raw 'data' listener just repaints the
- *  visible line as asterisks instead of echoing real characters. */
-/**
- * Masked input, WITHOUT going through readline's own `.question()` — an
- * earlier version did (`rl.question('', cb)` + a manual 'data' listener that
- * redrew the label + asterisks on every keystroke), but readline's internal
- * line-refresh runs even with an empty prompt string, wiping the manually
- * -written label right after it's first printed; it then only reappears once
- * the first keystroke triggers our own redraw. Found live: the label visibly
- * "not appearing until you start typing" — a real, reproducible bug, not a
- * terminal quirk (confirmed in this codebase's own earlier test transcripts,
- * which show a literal stray `[K` escape-sequence remnant on screen).
- *
- * This does raw single-character accumulation instead (the standard
- * password-prompt pattern), pausing the shared `rl` (so it isn't also
- * consuming the same stdin bytes) and switching stdin to raw mode for the
- * duration — echoing '*' per character ourselves, with proper
- * backspace/Ctrl+C handling, then handing stdin back to `rl` afterward.
- */
-function promptSecret(rl, query) {
-  return new Promise((resolve) => {
-    process.stdout.write(query);
-    rl.pause();
-    const stdin = process.stdin;
-    const wasRaw = stdin.isRaw;
-    if (stdin.isTTY) stdin.setRawMode(true);
-    stdin.resume();
-    let buf = '';
-    const cleanup = () => {
-      stdin.removeListener('data', onData);
-      if (stdin.isTTY) stdin.setRawMode(wasRaw ?? false);
-      rl.resume();
-    };
-    const onData = (chunk) => {
-      for (const ch of chunk.toString('utf8')) {
-        if (ch === '\r' || ch === '\n') {
-          cleanup();
-          process.stdout.write('\n');
-          resolve(buf.trim());
-          return;
-        } else if (ch === '\u0003') {
-          // Ctrl+C — match readline's own SIGINT-on-prompt behavior.
-          cleanup();
-          process.stdout.write('\n');
-          process.exit(130);
-        } else if (ch === '\u007f' || ch === '\b') {
-          if (buf.length) {
-            buf = buf.slice(0, -1);
-            process.stdout.write('\b \b');
-          }
-        } else if (ch >= ' ') {
-          buf += ch;
-          process.stdout.write('*');
-        }
-      }
-    };
-    stdin.on('data', onData);
-  });
+/** Masked input — same always-raw reader as qp(), echoing '*' per character
+ *  instead of the real one. See readRawLine()'s comment for why this no
+ *  longer toggles raw mode/pauses `rl` per call. */
+function promptSecret(_rl, query) {
+  return readRawLine(query, { mask: true });
 }
 
 function toIntOrUndef(s) {
@@ -638,6 +646,12 @@ async function main() {
   }
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
+  // Paused immediately and never used to actually read input — every prompt
+  // (qp()/promptSecret(), see readRawLine()) reads stdin itself in raw mode.
+  // Kept alive only for this SIGINT fallback and rl.close() at the end; if
+  // it stayed active it would compete with readRawLine() for stdin bytes,
+  // which is exactly the race that used to leak pasted secrets in cleartext.
+  rl.pause();
   rl.on('SIGINT', () => {
     log('\naborted');
     process.exit(130);
