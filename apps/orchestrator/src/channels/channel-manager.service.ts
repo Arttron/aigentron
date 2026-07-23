@@ -17,7 +17,7 @@ import { AttachmentsService } from '../attachments/attachments.service';
 import { PresenceService } from '../presence/presence.service';
 import { ChannelsService } from './channels.service';
 import { ChannelCommandService } from './channel-commands.service';
-import type { ChannelAdapter, IncomingEvent } from './channel-adapter';
+import type { ChannelAdapter, IncomingEvent, MessageButton } from './channel-adapter';
 
 type ChannelRow = Awaited<ReturnType<ChannelsService['getRow']>>;
 
@@ -374,11 +374,11 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       .catch((err) => this.logger.warn(`resolveApprovalMessage failed: ${(err as Error).message}`));
   }
 
-  private async send(channelId: string, chatId: string, text: string): Promise<void> {
+  private async send(channelId: string, chatId: string, text: string, buttons?: MessageButton[][]): Promise<void> {
     const row = await this.channels.getRow(channelId).catch(() => null);
     if (!row) return;
     const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
-    await adapter.sendMessage(chatId, text).catch((err) =>
+    await adapter.sendMessage(chatId, text, buttons).catch((err) =>
       this.logger.warn(`sendMessage failed: ${(err as Error).message}`),
     );
   }
@@ -414,6 +414,15 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    if (e.type === 'task-switch') {
+      const ctx = { channelId, chatId: e.chatId, userId: e.userId, kind: row.kind };
+      const reply = await this.commands
+        .switchToTaskById(ctx, e.taskId)
+        .catch((err) => `⚠️ ${(err as Error).message}`);
+      await this.send(channelId, e.chatId, reply);
+      return;
+    }
+
     const ctx = { channelId, chatId: e.chatId, userId: e.userId, kind: row.kind };
 
     // Slash commands manage the conversation (new-task, tasks, task, clear, …).
@@ -421,7 +430,11 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       const reply = await this.commands
         .handle(ctx, e.text)
         .catch((err) => `⚠️ ${(err as Error).message}`);
-      await this.send(channelId, e.chatId, reply);
+      if (typeof reply === 'string') {
+        await this.send(channelId, e.chatId, reply);
+      } else {
+        await this.send(channelId, e.chatId, reply.text, reply.buttons);
+      }
       return;
     }
 

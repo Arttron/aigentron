@@ -13,6 +13,13 @@ export interface OutgoingApproval {
   reason: string;
 }
 
+/** A tappable inline button. `data` is opaque — echoed back via a 'task-switch'
+ *  (or future button-driven) IncomingEvent when tapped, never shown to the user. */
+export interface MessageButton {
+  label: string;
+  data: string;
+}
+
 /** A normalized inbound event from a channel. */
 export type IncomingEvent =
   | {
@@ -35,6 +42,14 @@ export type IncomingEvent =
       decision: 'approve' | 'deny';
     }
   | {
+      /** A tap on a task-list/subtask-list button — switch the chat's active task. */
+      type: 'task-switch';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      taskId: string;
+    }
+  | {
       type: 'attachment';
       chatId: string;
       userId: string;
@@ -55,8 +70,10 @@ export interface ChannelAdapter {
   readonly kind: string;
   /** Connectivity/credentials check (e.g. Telegram getMe). */
   verify(): Promise<{ ok: boolean; info?: string; error?: string }>;
-  /** Post a plain text message to a conversation. */
-  sendMessage(chatId: string, text: string): Promise<void>;
+  /** Post a plain text message to a conversation. `buttons` is a grid of rows
+   *  (each an array of buttons) rendered as tappable inline controls when the
+   *  transport supports them; ignored by transports that don't. */
+  sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<void>;
   /** Post an image (e.g. an agent screenshot). Optional — not every transport supports it. */
   sendImage?(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void>;
   /** Post an approval request with Approve/Deny controls; returns its message id. */

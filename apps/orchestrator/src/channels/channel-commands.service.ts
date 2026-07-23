@@ -9,14 +9,26 @@ import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { SettingsService } from '../settings/settings.service';
 import { ChannelsService } from './channels.service';
 import { HELP_TEXT } from './command-menu';
+import type { MessageButton } from './channel-adapter';
 
 const HELP = HELP_TEXT;
+/** Telegram (and presumably any other transport) caps callback_data at 64
+ *  bytes; `tk:` + a task id comfortably fits, but keep the constant named so
+ *  it reads as a deliberate limit, not a random slice. */
+const MAX_BUTTON_LABEL = 64;
 
 interface CommandCtx {
   channelId: string;
   chatId: string;
   userId: string;
   kind: string;
+}
+
+/** A command's reply: plain text, optionally with tappable buttons (e.g. a
+ *  task list where each row switches the chat's active task). */
+export interface CommandReply {
+  text: string;
+  buttons?: MessageButton[][];
 }
 
 /**
@@ -41,7 +53,7 @@ export class ChannelCommandService {
     return text.trim().startsWith('/');
   }
 
-  async handle(ctx: CommandCtx, text: string): Promise<string> {
+  async handle(ctx: CommandCtx, text: string): Promise<string | CommandReply> {
     const trimmed = text.trim();
     const cmd = trimmed.split(/\s+/)[0]!.toLowerCase();
     const arg = trimmed.slice(cmd.length).trim();
@@ -118,16 +130,27 @@ export class ChannelCommandService {
     return `✅ New task «${task.title}» (${shortId(task.id)}). Updates will appear here.`;
   }
 
-  private async listTasks(ctx: CommandCtx): Promise<string> {
+  private async listTasks(ctx: CommandCtx): Promise<CommandReply> {
     const [{ items: rows }, state] = await Promise.all([
       this.tasks.list({ pageSize: 10 }),
       this.channels.chatState(ctx.channelId, ctx.chatId),
     ]);
-    if (!rows.length) return 'No tasks yet. Use /new-task <text>.';
-    const lines = rows
-      .slice(0, 10)
-      .map((t) => `${t.id === state.activeTaskId ? '▶' : '·'} ${shortId(t.id)} [${t.status}] ${t.title}`);
-    return `Recent tasks:\n${lines.join('\n')}`;
+    if (!rows.length) return { text: 'No tasks yet. Use /new-task <text>.' };
+    const top = rows.slice(0, 10);
+    return {
+      text: 'Recent tasks — tap one to switch:',
+      buttons: top.map((t) => [taskButton(t.id, t.title, t.status, t.id === state.activeTaskId)]),
+    };
+  }
+
+  /** Switch the chat's active task to an EXACT id (button tap — no fuzzy match
+   *  needed, we already resolved it). Shared with switchTask() below. */
+  async switchToTaskById(ctx: CommandCtx, taskId: string): Promise<string> {
+    const task = await this.tasks.get(taskId).catch(() => null);
+    if (!task) return 'Task not found (it may have been deleted). See /tasks.';
+    await this.channels.linkThread(ctx.channelId, task.id, ctx.chatId);
+    await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: task.id });
+    return `▶ Now on «${task.title}» (${shortId(task.id)}) — ${task.status}.\n${await this.channels.summarize(task.id)}`;
   }
 
   private async switchTask(ctx: CommandCtx, arg: string): Promise<string> {
@@ -137,9 +160,7 @@ export class ChannelCommandService {
     const { items: rows } = await this.tasks.list({ pageSize: 100 });
     const task = rows.find((t) => t.id === arg || t.id.endsWith(arg) || shortId(t.id) === arg);
     if (!task) return `Task not found: ${arg}. See /tasks.`;
-    await this.channels.linkThread(ctx.channelId, task.id, ctx.chatId);
-    await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: task.id });
-    return `▶ Now on «${task.title}» (${shortId(task.id)}) — ${task.status}.\n${await this.channels.summarize(task.id)}`;
+    return this.switchToTaskById(ctx, task.id);
   }
 
   private async compress(ctx: CommandCtx): Promise<string> {
@@ -205,7 +226,7 @@ export class ChannelCommandService {
     return `▶ «${task.title}» — ${task.status}\nagent: ${task.agentName ?? 'default'}${model}${subLine}\n${await this.channels.summarize(id)}`;
   }
 
-  private async subtasks(ctx: CommandCtx): Promise<string> {
+  private async subtasks(ctx: CommandCtx): Promise<string | CommandReply> {
     const id = await this.activeTaskId(ctx);
     if (!id) return 'No active task.';
     const subs = await this.prisma.task.findMany({
@@ -214,7 +235,10 @@ export class ChannelCommandService {
       select: { id: true, title: true, status: true },
     });
     if (!subs.length) return 'No subtasks for the active task.';
-    return `Subtasks:\n${subs.map((s) => `· ${shortId(s.id)} [${s.status}] ${s.title}`).join('\n')}`;
+    return {
+      text: 'Subtasks — tap one to switch:',
+      buttons: subs.map((s) => [taskButton(s.id, s.title, s.status)]),
+    };
   }
 
   private async cancel(ctx: CommandCtx): Promise<string> {
@@ -296,4 +320,14 @@ function countByStatus(statuses: string[]): string {
 
 function shortId(id: string): string {
   return id.slice(-6);
+}
+
+/** One task-list row's button: label shows status + title, data carries the
+ *  full id (`tk:` prefix, parsed by the adapter's callback_query handler). */
+function taskButton(id: string, title: string, status: string, active = false): MessageButton {
+  const label = `${active ? '▶ ' : ''}[${status}] ${title}`;
+  return {
+    label: label.length > MAX_BUTTON_LABEL ? `${label.slice(0, MAX_BUTTON_LABEL - 1)}…` : label,
+    data: `tk:${id}`,
+  };
 }

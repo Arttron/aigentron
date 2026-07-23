@@ -452,6 +452,22 @@ if [ ! -f "$ENV_FILE" ]; then
   log "generated one isn't a good fit; leave it blank to keep advanced mode locked."
 fi
 
+if [ "$INSTALL_MODE" = bare ]; then
+  # Bare-metal's systemd unit wires $ENV_FILE as EnvironmentFile= AND sets its
+  # own Environment=APP_VERSION=$VERSION line — but $ENV_FILE is only ever
+  # written ONCE (first install, above) and never touched again, so an
+  # APP_VERSION= line copied in from .env.minimal.example (meaningful there
+  # for the docker-compose minimal profile's own upgrade flow, not here) stays
+  # frozen at whatever it was on day one — and empirically overrides the
+  # freshly-generated Environment= line on every later upgrade, so
+  # /api/health kept reporting the FIRST-ever installed version forever
+  # (found live: a server stuck reporting 0.1.2 through five later
+  # upgrades). Strip it unconditionally, every run, so the systemd unit's own
+  # line is the only source — self-heals existing installs, not just fresh
+  # ones.
+  sed -i.bak '/^APP_VERSION=/d' "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+fi
+
 # Stable path (not under releases/$VERSION, which changes every upgrade) so
 # a systemd timer's ExecStart keeps working across upgrades. See
 # infra/systemd/aigentron-update-check.{service,timer} — check-only, doesn't

@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { Logger } from '@nestjs/common';
-import type { ChannelAdapter, IncomingHandler, OutgoingApproval } from './channel-adapter';
+import type { ChannelAdapter, IncomingHandler, MessageButton, OutgoingApproval } from './channel-adapter';
 import { COMMAND_MENU } from './command-menu';
 
 /** Telegram bot config stored in Channel.config. */
@@ -15,6 +15,7 @@ export interface TelegramConfig {
 const API = 'https://api.telegram.org';
 const CALLBACK_APPROVE = 'ap:';
 const CALLBACK_DENY = 'dn:';
+const CALLBACK_TASK = 'tk:';
 
 /**
  * Telegram transport over the Bot API using long-polling (getUpdates) — no
@@ -55,10 +56,25 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async sendMessage(chatId: string, text: string): Promise<void> {
+  async sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<void> {
     // Telegram caps a message at 4096 chars — truncate defensively.
     const body = text.length > 4096 ? `${text.slice(0, 4093)}…` : text;
-    await this.call('sendMessage', { chat_id: chatId, text: body, disable_web_page_preview: true });
+    await this.call('sendMessage', {
+      chat_id: chatId,
+      text: body,
+      disable_web_page_preview: true,
+      ...(buttons?.length
+        ? {
+            reply_markup: {
+              inline_keyboard: buttons.map((row) =>
+                // Telegram caps callback_data at 64 bytes and button label length
+                // isn't formally bounded but long labels get truncated by clients.
+                row.map((b) => ({ text: b.label.slice(0, 64), callback_data: b.data.slice(0, 64) })),
+              ),
+            },
+          }
+        : {}),
+    });
   }
 
   async sendImage(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void> {
@@ -193,6 +209,20 @@ export class TelegramAdapter implements ChannelAdapter {
     if (u.callback_query) {
       const cq = u.callback_query;
       const data = cq.data ?? '';
+      if (data.startsWith(CALLBACK_TASK)) {
+        // Just acknowledge — unlike approve/deny there's no message to edit
+        // here, the reply (task summary) arrives as a fresh message.
+        await this.call('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => undefined);
+        if (!cq.message) return;
+        await onEvent({
+          type: 'task-switch',
+          chatId: String(cq.message.chat.id),
+          userId: String(cq.from?.id ?? ''),
+          userName: cq.from?.username ?? cq.from?.first_name,
+          taskId: data.slice(CALLBACK_TASK.length),
+        });
+        return;
+      }
       const prefix = data.startsWith(CALLBACK_APPROVE)
         ? CALLBACK_APPROVE
         : data.startsWith(CALLBACK_DENY)

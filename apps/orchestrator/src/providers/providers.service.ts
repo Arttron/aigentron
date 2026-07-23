@@ -362,7 +362,21 @@ export class ProvidersService implements OnModuleInit {
     try {
       const res = await fetch(url, { headers: auth.headers, signal: controller.signal });
       const text = await res.text();
-      if (!res.ok) return { ok: false, models: [], error: extractError(text) || `HTTP ${res.status}` };
+      if (!res.ok) {
+        // A 404 on a model-LISTING route (unlike other statuses) usually means
+        // the upstream just doesn't implement this endpoint at all, rather than
+        // anything wrong with the request — common for third-party
+        // Anthropic-protocol-compatible layers (e.g. DeepSeek's /anthropic),
+        // which often only implement the messages endpoint. Confirmed live:
+        // the same secret/URL that works fine for actual chat/tool-use calls
+        // still 404s here. Don't show a bare status code for this case — it
+        // reads as "something's broken" when the provider itself is fine.
+        const error =
+          res.status === 404
+            ? 'this endpoint doesn’t support listing models — type the model name manually'
+            : extractError(text) || `HTTP ${res.status}`;
+        return { ok: false, models: [], error };
+      }
       const json = JSON.parse(text);
       const rows: unknown[] = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : [];
       const models = rows

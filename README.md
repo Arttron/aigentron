@@ -208,6 +208,23 @@ CLI-minted subscription `oauth-token` auth mode — see `scripts/cli-auth.sh`), 
 leave `OLLAMA_NATIVE_URL` unreachable entirely: the app boots and runs fine either way,
 that provider just errors if something tries to route to it.
 
+**Accessing a remote deployment (e.g. an AWS instance) over SSH.** Rather than opening the
+port to the internet, forward it through your existing SSH connection — the dashboard and
+API now share the one port above (`minimal`/`bare-metal`: `ORCHESTRATOR_PORT`, default
+`3001`), so a single tunnel covers both:
+
+```bash
+ssh -L 3001:localhost:3001 <user>@<remote-host>
+```
+
+Then open http://localhost:3001 locally — that's your dashboard, API, and the wizard's
+target URL (`--orchestrator-url http://localhost:3001`) all at once. (Before this dashboard
+rewrite, the dashboard and API lived on separate ports and needed two tunnels — one port is
+the whole reason for the same-origin cutover.) Add `-i /path/to/key.pem` if the host needs a
+specific key, and `-N` if you only want the tunnel (no remote shell). To also reach a
+different local port, e.g. because `ORCHESTRATOR_PORT` was changed on the remote side, adjust
+the first number: `ssh -L <local-port>:localhost:<remote-port> <user>@<remote-host>`.
+
 **First-run setup:** every option above ends by printing how to run
 `infra/setup-wizard.mjs` — a guided CLI walkthrough for providers, channels, agents,
 skills, and an optional repo, instead of clicking through the dashboard by hand. It's a
