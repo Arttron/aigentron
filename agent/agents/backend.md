@@ -1,7 +1,5 @@
 ---
 description: Server-side implementation — NestJS, PostgreSQL, REST API, business logic, Elasticsearch, migrations, backend tests.
-provider: ollama-local
-model: qwen3-coder:30b
 skills: nestjs, postgres, elasticsearch, heroku, i18n, git, code-intel
 mcp: postgres, github, code-intel
 ---

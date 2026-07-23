@@ -1,7 +1,5 @@
 ---
 description: Default lead agent. Clarifies intent, plans work, and delegates to specialists. Does not write or edit code directly.
-provider: DeepSeek
-model: deepseek-v4-pro
 skills: translation, playwright
 disallowedTools: Write, Edit, NotebookEdit
 mcp: playwright, github

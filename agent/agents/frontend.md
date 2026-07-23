@@ -1,7 +1,5 @@
 ---
 description: Frontend engineering — Next.js, React, CSS Modules, i18n, data wiring, frontend tests. Implements what UI Designer specifies, does not invent the design language.
-provider: ollama-local
-model: qwen3-coder:30b
 skills: nextjs, material-ux, i18n, playwright, git, code-intel
 mcp: playwright, code-intel, github
 ---

@@ -1,7 +1,5 @@
 ---
 description: UX/visual design and look-and-feel — recreating designs from references and reviewing the running UI via screenshots. Read-only advisory: produces the design spec and a visual verdict; `frontend` implements. Has vision — can analyze images and critique UI.
-provider: ollama-view
-fallbackProviders: GPT
 skills: nextjs, playwright, material-ux, i18n
 disallowedTools: Write, Edit, NotebookEdit
 mcp: playwright

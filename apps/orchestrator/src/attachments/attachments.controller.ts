@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import { createReadStream } from 'node:fs';
 import { AttachmentsService } from './attachments.service';
 
-/** Image/PDF attachments for a task (raw-body upload — no multer dependency). */
+/** Attachments for a task, any file type (raw-body upload — no multer dependency). */
 @Controller('tasks/:id/attachments')
 export class AttachmentsController {
   constructor(private readonly attachments: AttachmentsService) {}
@@ -25,9 +25,13 @@ export class AttachmentsController {
 
   @Get(':file')
   async serve(@Param('id') id: string, @Param('file') file: string, @Res() res: Response) {
-    const { path, mime } = await this.attachments.filePath(id, file);
+    const { path, mime, inline, name } = await this.attachments.filePath(id, file);
     res.setHeader('content-type', mime);
     res.setHeader('cache-control', 'private, max-age=300');
+    // Anything outside the known-safe inline set (images/PDF) force-downloads
+    // instead of rendering — an uploaded .html/.svg/.js must never execute as
+    // same-origin script just because its URL was opened in a browser tab.
+    if (!inline) res.setHeader('content-disposition', `attachment; filename="${name}"`);
     createReadStream(path).pipe(res);
   }
 }

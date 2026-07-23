@@ -4,8 +4,9 @@ import { Card, Row, Button, Muted, ErrorText } from '@/components/ui';
 import styles from './Attachments.module.css';
 
 /**
- * Task attachments gallery: upload image/PDF references, and view what the
- * agents read/produced. Agents see these via the Read tool (vision).
+ * Task attachments gallery: upload any reference file, and view what the
+ * agents read/produced. Agents view images/PDF via the Read tool's vision and
+ * read text-based formats as plain text either way.
  */
 export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSignal?: string }) {
   const [items, setItems] = useState<AttachmentMeta[]>([]);
@@ -55,7 +56,6 @@ export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSi
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
         multiple
         className={styles.hidden}
         onChange={(e) => onPick(e.target.files)}
@@ -64,7 +64,7 @@ export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSi
       {open && error && <ErrorText>{error}</ErrorText>}
       {open && items.length === 0 && !error && (
         <Muted className={styles.empty}>
-          Reference images/PDFs uploaded to this task, plus images agents share (e.g. screenshots).
+          Reference files uploaded to this task, plus images agents share (e.g. screenshots).
         </Muted>
       )}
 

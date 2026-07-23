@@ -1,7 +1,6 @@
 ---
 name: local-helper
 description: The cheap local-model tier for tiny, fully-specified, low-risk work — formatting/lint fixes, import ordering, mechanical find-and-replace/renames over a named set of files, string/constant/version bumps, boilerplate whose shape is already given (DTOs, test stubs), typo/comment/doc tweaks, and single-file reads/summaries. Route here only when the task is mechanical and needs no judgment; anything requiring architecture/security/trade-off decisions, cross-file reasoning, debugging, or an unclear/underspecified scope goes to a coder or `architect` instead.
-provider: ollama-local
 skills: [git]
 ---
 

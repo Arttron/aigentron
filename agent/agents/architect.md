@@ -1,8 +1,5 @@
 ---
 description: System design, technology decisions, escalation target for failed or ambiguous tasks, critical code review beyond a coder's scope.
-provider: DeepSeek
-fallbackProviders: DeepSeek
-model: deepseek-v4-pro
 skills: nestjs, postgres, heroku, i18n, git, elasticsearch, code-intel
 mcp: code-intel
 ---

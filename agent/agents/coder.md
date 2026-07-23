@@ -1,7 +1,5 @@
 ---
 description: General implementation fallback for tasks that don't cleanly split into backend/frontend, or when a dedicated specialist isn't the right fit.
-provider: ollama-local
-model: qwen3-coder:30b
 skills: nestjs, nextjs, postgres, git, i18n, code-intel
 mcp: github, postgres, code-intel
 ---

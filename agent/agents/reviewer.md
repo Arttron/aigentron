@@ -1,8 +1,5 @@
 ---
 description: Code review and QA — the quality gate before merge/push/deploy. Read-only. Has vision — can review Playwright screenshots.
-provider: OpenRouter
-fallbackProviders: DeepSeek
-model: tencent/hy3
 skills: nestjs, nextjs, postgres, playwright, elasticsearch, i18n, code-intel
 disallowedTools: Write, Edit, NotebookEdit
 mcp: playwright, code-intel, github
