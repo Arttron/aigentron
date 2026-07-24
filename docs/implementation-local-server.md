@@ -21,8 +21,9 @@ write. Two pillars:
 - **Orchestrator** (`apps/orchestrator`) — NestJS REST API + Socket.IO gateway. Owns the
   task lifecycle, spawns/supervises agents, routes each run to a model endpoint, and gates
   dangerous tool calls behind human approval.
-- **Dashboard** (`apps/dashboard`) — Next.js (App Router) + CSS Modules. Human ↔ agent
-  chat, live logs, approvals, and management of providers / agents / MCP servers / settings.
+- **Dashboard** (`apps/dashboard`) — Vite + React SPA (`react-router-dom`) + CSS Modules, served
+  same-origin by the orchestrator (`@nestjs/serve-static`). Human ↔ agent chat, live logs,
+  approvals, and management of providers / agents / MCP servers / settings.
 
 Shared logic lives in two packages: **`@lds/shared`** (domain types, event names, the danger
 classifier, provider→env resolution) and **`@lds/agent-runner`** (drives the Claude Agent SDK).
@@ -38,7 +39,7 @@ classifier, provider→env resolution) and **`@lds/agent-runner`** (drives the C
 local-dev-server/
 ├── apps/
 │   ├── orchestrator/        NestJS API + WebSocket gateway + BullMQ worker
-│   └── dashboard/           Next.js UI (App Router)
+│   └── dashboard/           Vite + React SPA
 ├── packages/
 │   ├── shared/              @lds/shared — types, events, classifier, routing
 │   └── agent-runner/        @lds/agent-runner — runAgent() over the Claude Agent SDK
@@ -68,7 +69,7 @@ each `dependsOn: ["^build"]`), TypeScript strict (`tsconfig.base.json`: NodeNext
 | **redis** | `redis:7-alpine` | 6379 | BullMQ backend (`--appendonly yes`) |
 | **litellm** | `ghcr.io/berriai/litellm:main-stable` | 4000 | Anthropic-protocol proxy in front of all model backends |
 | **orchestrator** | built from `infra/dev.Dockerfile` | 3001 | REST + WS + worker |
-| **dashboard** | built from `infra/dev.Dockerfile` | 3000 | Next.js UI (no secrets passed in) |
+| **dashboard** | built from `infra/dev.Dockerfile` | 3000 | Vite dev server, hot-reload (no secrets passed in) |
 | **playwright-mcp** | `mcr.microsoft.com/playwright/mcp` | 8931 | Optional browser MCP, `profiles: [mcp]` |
 
 **Ollama runs on the HOST**, not in compose — containers reach it at
@@ -99,29 +100,40 @@ no rebuild.
 
 ```
 AppSettings (singleton "singleton")   — runtime config, seeded from env, DB is source of truth
+User        (cuid)                     — an identity that can create/approve/operate (no auth yet)
 McpServer   (name unique, config Json) — an MCP server agents can attach
 Provider    (name unique)              — an AI model endpoint (Anthropic/OpenAI/DeepSeek/Ollama)
+Channel     (name unique, kind, config Json) — a chat transport (Telegram shipped) — §6.8
+ └─ ChannelThread                     — binds a (channel, external chat) to a Task
+ └─ ChannelChatState                  — per-chat state: active task, chosen agent/model, muted
 Task        (cuid)                     — a unit of work
  └─ AgentSession (per run/attempt)     — provider+model+claudeSessionId for --resume
      └─ AgentEvent (seq, kind, text)   — persisted transcript line (+attachments[])
  └─ ApprovalRequest                    — a gated dangerous tool call
+ └─ PendingFollowUp                    — a follow-up message held while the task isn't terminal
+ └─ TaskLink                           — a reference to another task, folded into context
 ```
 
-Enums: `TaskStatus = queued | running | needs_approval | done | failed | cancelled`;
-`AgentSessionStatus = starting | running | completed | errored | cancelled`;
+Enums: `TaskStatus = queued | running | needs_approval | done | failed | cancelled | blocked |
+stalled`; `AgentSessionStatus = starting | running | completed | errored | cancelled`;
 `ApprovalStatus = pending | approved | denied | timeout`.
 
 Notable fields:
-- **Task**: `prompt`, `title`, `status`, `branch`, `worktreePath`, `agentName`, `prUrl`, `error`.
+- **Task**: `prompt`, `title`, `status`, `branch`, `worktreePath`, `agentName`, `prUrl`, `error`,
+  `parentId` (subtask decomposition), `createdByChannel`, `providerOverride`.
 - **AgentSession**: `provider`, `model`, `claudeSessionId` (captured from the SDK init event, used
   to `--resume` on follow-ups).
 - **AgentEvent**: `seq` (monotonic per session), `kind` (`prompt|system|assistant|tool_use|
   delegation|tool_result|result|stderr`), `text`, `attachments[]` (filenames, for inline thumbnails).
 - **ApprovalRequest**: `toolName`, `toolInput` (Json), `summary`, `reason`, `status`, `resolvedBy`.
+- **PendingFollowUp**: `taskId`, `text`, `attachments[]`, `references[]`, `createdAt` (ordering) —
+  see §5/§6.8 for the enqueue/drain mechanism.
 
-There is **no message/chat table** and **no User table**: human↔agent conversation *is* the
-Task's `prompt` + follow-ups, persisted as `AgentEvent` rows. Identity is at best a free-form
-`resolvedBy` string on approvals.
+Human↔agent conversation is still *not* a generic message table: it's the Task's `prompt` + each
+follow-up, persisted as `AgentEvent` rows (`kind: 'prompt'`) — `PendingFollowUp` only holds
+messages that haven't been dispatched into that stream yet. `User` exists (identity for
+created-by/resolved-by attribution and role-gating a few endpoints — `identity/roles.guard.ts`)
+but there's still no auth: the acting user is resolved from a request header, not a credential.
 
 ---
 
@@ -150,15 +162,19 @@ POST /api/tasks ──▶ TasksService.create ──▶ TaskQueueService.enqueue
                           task → needs_approval; hook long-polls /wait until decision or timeout
 ```
 
-- **create** (`tasks.service.ts:48`): resolves the agent (explicit `agentName` 404s on a bad name;
+- **create** (`tasks.service.ts:79`): resolves the agent (explicit `agentName` 404s on a bad name;
   otherwise the configured `defaultAgent`, default `pm`), derives a title, persists the task,
   publishes `task-upserted`, and enqueues — unless `autostart=false` (client uploads attachments,
   then calls `POST /tasks/:id/start`).
-- **follow-up** (`tasks.service.ts:84`): allowed **only on a terminal task** (else a duplicate job
-  would race the same worktree); re-queues with `followUpPrompt`, which resumes the last *completed*
-  Claude session.
-- **worker** (`queue/task-worker.service.ts`): BullMQ worker, concurrency = `AGENT_CONCURRENCY`
-  (default 2), **no retries** (`attempts: 1` — agent runs aren't idempotent). Follow-ups reuse the
+- **follow-up** (`tasks.service.ts:314`): if the task is terminal, re-queues immediately with
+  `followUpPrompt` (resumes the last *completed* Claude session) — same as before. If it's NOT
+  terminal, it no longer 409s: it enqueues into the `PendingFollowUp` table instead (capped at
+  `MAX_PENDING_FOLLOWUPS = 3`, which DOES 409 once full), drained oldest-first — one per settle
+  cycle — from `setStatus()` whenever the task next goes terminal. Shared by the web dashboard and
+  every channel (§6.8) — the exact same queue either way.
+- **worker** (`queue/task-worker.service.ts`): concurrency comes from `Settings.concurrency`
+  (§6.7), live-updatable — `AGENT_CONCURRENCY` only seeds it once on first boot. **No retries**
+  (`attempts: 1` for the BullMQ driver — agent runs aren't idempotent). Follow-ups reuse the
   existing branch + worktree; first runs create `agent/task-<id>`.
 - **verification gate** (`queue/verification.service.ts` + `verifyWithFixes`): after a run,
   runs each line of `verifyCommands` in the worktree; on failure hands the output back to the
@@ -193,12 +209,15 @@ modules; `ConfigModule` is global.
 
 ### 6.1 Event bus & gateway
 
-`AgentEventBus` (`bus/agent-event-bus.ts`) is a single-channel Node `EventEmitter`
-(`setMaxListeners(0)`). Producers: executor (`agent-log`, `agent-status`), tasks
-(`task-status`, `task-upserted`, `task-deleted`), approvals (`approval-created`,
-`approval-resolved`). Consumers: the **gateway** and the **approvals service itself**
-(`waitForVerdict` subscribes for `approval-resolved`). It is **in-process only** — no
-persistence, synchronous emit, latecomers miss history.
+`AgentEventBus` (`bus/agent-event-bus.ts`) is **Redis Pub/Sub** (channel `lds:bus`), not a plain
+in-process `EventEmitter` — a publish from any instance fans out to every instance's own local
+subscribers (including the publisher's), so multiple orchestrator instances observe the same
+stream. Producers: executor (`agent-log`, `agent-status`), tasks (`task-status`, `task-upserted`,
+`task-deleted`, `followup-queue`), approvals (`approval-created`, `approval-resolved`). Consumers:
+the **gateway**, `ChannelManagerService` (§6.8), and the **approvals service itself**
+(`waitForVerdict` subscribes for `approval-resolved`). Postgres remains the durable source of
+truth (the transcript); this channel is live/fire-and-forget — a Redis hiccup drops the live push,
+never persisted state, and latecomers still miss history (no replay).
 
 `EventsGateway` (`events/events.gateway.ts`) bridges the bus to Socket.IO rooms:
 `global` (task list + all approvals) and `task:<id>` (per-task live log). Clients auto-join
@@ -327,10 +346,71 @@ to the UI as inline thumbnails.
 
 Singleton row `id="singleton"`, seeded from env on first load, DB authoritative thereafter (no
 restart needed). Accessors: `approvalTimeoutSeconds`, `verifyCommands` (split per line),
-`verifyMaxAttempts`, `agentInstructions`, `defaultProvider`, `defaultAgent` (default `pm`, used by
-`tasks.create`), `workspaceConfig` (`{repoUrl, repoBranch, githubToken}`). `githubToken` is masked
-in the API (set-flag + last-4). Empty-string in the update DTO clears a nullable field; `undefined`
-leaves it.
+`verifyMaxAttempts`, `concurrency`, `agentInstructions`, `defaultProvider`, `defaultAgent` (default
+`pm`, used by `tasks.create`), `workspaceConfig` (`{repoUrl, repoBranch, githubToken}`).
+`githubToken` is masked in the API (set-flag + last-4). Empty-string in the update DTO clears a
+nullable field; `undefined` leaves it.
+
+`concurrency` (max agent runs in parallel) is the one live-updatable setting the queue worker
+doesn't just read once at boot: `TaskWorkerService` polls it every 10s and pushes a change into
+the running `TaskQueue` driver via `setConcurrency()` — `EmbeddedTaskQueue` reassigns its own
+field, `BullTaskQueue` reassigns the live `Worker`'s `.concurrency` (BullMQ applies it without a
+restart). Shared-workspace mode (`WORKSPACE_SHARED=true`) hard-caps this at 1 regardless of the
+stored value, at the `SettingsService.concurrency()` getter — concurrent agents in one worktree
+would corrupt each other's work, not just serialize slower.
+
+### 6.8 Channels (`channels/`)
+
+Bidirectional chat transports — Telegram shipped, Slack/email proposed
+([`rfc-001-channels-and-human-agents.md`](./rfc-001-channels-and-human-agents.md)). `ChannelAdapter`
+(`channel-adapter.ts`) is the transport-agnostic contract: `sendMessage`/`sendApproval`/
+`startPolling`/`verify`/`stop` are required; `sendImage` (screenshots), `editMessage` (live status
+text), `reactToMessage` (ack/outcome reactions), and `resolveApprovalMessage` (drop the
+Approve/Deny buttons + show the outcome once resolved) are all optional, since not every transport
+supports them. `ChannelManagerService` is the bridge: it subscribes to the event bus (§6.1) for
+outbound updates and long-polls each enabled channel's adapter for inbound `IncomingEvent`s
+(`message` / `attachment` / `approval` / `task-switch` / `cancel` / `reaction`).
+`ChannelCommandService` (`channel-commands.service.ts`) parses slash commands (`/new_task`,
+`/task <id>`, `/cancel`, `/approve`, `/model`, …) against per-`(channel, chat)` state
+(`ChannelChatState`: active task, chosen agent/model, muted) — a plain-text message with no active
+task starts one; with one, it's a follow-up.
+
+**Follow-up queue is shared with the web dashboard**, not a separate channel-only mechanism: both
+call `TasksService.followUp()`, which enqueues into the `PendingFollowUp` table when the task
+isn't terminal (instead of the old 409) and is drained (oldest first, one per settle cycle) from
+`TasksService.setStatus()` whenever the task next goes terminal — a channel message and a
+dashboard follow-up sent while a run is in progress land in the exact same queue, live-synced to
+the dashboard over the `task:followup-queue` socket event.
+
+**Live per-run feedback**, all keyed by taskId in `ChannelManagerService`'s in-memory maps (reset
+on restart — best-effort, not durable state; a restart mid-run also kills the run itself, same as
+any other task — the orphan sweep marks it `stalled`, this isn't a purely cosmetic loss):
+- an **ack reaction** on the human's own message — 👀 for both "continuing now" and "new task
+  created", 📥 for "queued behind the current run", ⚠️ on an error — updated to the final outcome
+  (✅/❌/⛔/🛑) once the task settles (`reactionIcon`).
+- a **live-editing status message**, but only for a run that's actually dispatched immediately: the
+  bot's own "↳ Continuing the current task" reply doubles as the anchor whose *text* gets replaced
+  (not a new message per event) as compact process steps stream in from `agent-log` bus events. A
+  "📥 Queued" ack is deliberately NOT reused this way (it needs to keep saying "queued" until the
+  message actually runs) — when a queued item is later drained, the first process step posts a
+  fresh status message of its own. Edits are debounced to at most one per ~1.5s
+  (`STATUS_EDIT_MIN_MS`) so a burst of tool calls collapses to the latest line instead of hammering
+  the transport's edit-rate limit. `compactProcessLine()` classifies every kind to a ≤100-char line
+  rather than forwarding raw content — `tool_use`, `assistant`, `delegation`, and `stderr` all get
+  an icon prefix and truncation (`tool_use`'s text is already a short one-liner from the agent
+  runner, e.g. "Bash ls -la"); `tool_result`/`system`/`result`/`prompt` are dropped entirely
+  (unbounded size, or already shown elsewhere — the final answer is a separate, full message once
+  the task settles).
+- a **"⏹ Cancel" inline button** — attached to the follow-up ack message specifically (the
+  `/cancel` command already existed and still works everywhere; this just makes it discoverable
+  from a message that's likely on-screen right when someone would want to use it).
+
+A human can also react 👍/👎 directly on an approval message as an alternative to tapping
+Approve/Deny or typing `/approve` — resolved by matching the reacted-to message id against
+`approvalMessages` (the same map that tracks approval messages for editing on resolve). Unlike
+tapping the actual Approve/Deny buttons or typing `/approve` (both fall back to a `ChannelThread`
+DB lookup if `approvalMessages` is empty, e.g. after a restart), reaction-based approve/deny has no
+such fallback — it stops working for any approval sent before the last restart.
 
 ---
 
@@ -454,16 +534,18 @@ trust levels (roadmap Phase 6, done):
 
 ## 10. Dashboard (`apps/dashboard`)
 
-Next.js App Router, CSS Modules (no Tailwind), design tokens in `globals.css`. No external state
-library — React hooks + a Socket.IO singleton.
+Vite + React SPA (`react-router-dom`), CSS Modules (no Tailwind) — neumorphic dark/cream themes
+(switchable: System/Light/Dark in Settings, plus a floating quick-toggle), design tokens in
+`globals.css`. No external state library — React hooks + a Socket.IO singleton.
 
-**Routes** (`src/app`):
+**Routes** (`src/pages`):
 - `/` — task fleet: create form, task list, pending approvals, connection status.
-- `/tasks/[id]` — chat-style detail: live transcript, attachments gallery, approval cards,
-  follow-up composer. De-dups live vs fetched lines by `sessionId:seq`.
+- `/tasks/:id` — chat-style detail: live transcript, attachments gallery, approval cards,
+  follow-up composer (server-side queue, shared with channels — §6.8). De-dups live vs fetched
+  lines by `sessionId:seq`.
 - `/agents` — agent CRUD with provider/model/skills/MCP pickers and model preview.
-- `/settings` — tabbed: General (repo/token/timeouts/verify/defaults), Providers (CRUD + test),
-  LiteLLM (read-only routes), MCP servers (CRUD).
+- `/settings` — tabbed: General (repo/token/timeouts/verify/concurrency/defaults/theme),
+  Providers (CRUD + test), LiteLLM (read-only routes), MCP servers (CRUD).
 
 **Client libs** (`src/lib`): `config.ts` (relative `/api` + same-origin socket by default;
 `VITE_ORCHESTRATOR_URL`/`_WS_URL` are a dev-only escape hatch for the separate hot-reload
@@ -490,7 +572,7 @@ Env is grouped in `.env.example` and allowlisted in `turbo.json` `globalEnv`. No
 | `OLLAMA_BASE_URL` / `ROUTINE_MODEL` | host.docker.internal:11434 / — | local tier |
 | `ANTHROPIC_API_KEY` / `COMPLEX_MODEL` | — / claude-sonnet-4-6 | cloud tier |
 | `WORKSPACE_REPO_PATH` / `AGENT_DIR` / `WORKTREES_ROOT` | /workspace/repo · /workspace/agent · volume | paths |
-| `AGENT_CONCURRENCY` / `AGENT_MAX_TURNS` / `AGENT_RUN_TIMEOUT_MS` | 2 / 40 / 600000 | run bounds |
+| `AGENT_CONCURRENCY` / `AGENT_MAX_TURNS` / `AGENT_RUN_TIMEOUT_MS` | 2 / 40 / 600000 | `AGENT_CONCURRENCY` only seeds Settings' `concurrency` on first load — live-editable after (§6.7) |
 | `APPROVALS_API_URL` / `APPROVAL_TIMEOUT_SECONDS` | http://orchestrator:3001 / 300 | hook callback + gate timeout |
 | `LDS_HOOK_SECRET` | randomUUID() | hook ↔ orchestrator shared secret |
 | `HOOK_SCRIPT_PATH` / `SHARED_DIST_PATH` | infra hook / resolved | hook wiring |
@@ -510,10 +592,16 @@ Env is grouped in `.env.example` and allowlisted in `turbo.json` `globalEnv`. No
 - **No model/provider failover.** A missing/misconfigured provider or a runtime model error just
   fails the task — no fallback chain, no retry on another provider.
 - **No task retries** at the queue level (`attempts: 1`) — agent runs aren't idempotent.
-- **In-process event bus** — no persistence, single instance; not horizontally scalable as-is.
-- **Only outbound integration is GitHub PRs.** External comms channels (Slack/Telegram) and human
-  participants are proposed but not built — see
-  [`rfc-001-channels-and-human-agents.md`](./rfc-001-channels-and-human-agents.md).
+- **Event bus has no replay** — Redis Pub/Sub, not Streams; a latecomer subscriber misses whatever
+  fired before it connected (Postgres is still the durable transcript, this is just the live push).
+- **Telegram shipped; Slack/email and human-as-agent participants still proposed** — see
+  [`rfc-001-channels-and-human-agents.md`](./rfc-001-channels-and-human-agents.md). Channel
+  per-run status/reaction tracking (§6.8) is in-memory only — a restart drops it, same as any other
+  in-flight run gets caught by the orphan sweep and marked `stalled` (not something the channel
+  layer avoids). What's specifically lost beyond that: the live status message freezes on its last
+  line instead of continuing to update, the final ack reaction never lands, and reaction-based
+  approve/deny stops working for approvals sent before the restart (the button/`/approve` paths
+  still work — they fall back to a DB lookup `approvalMessages` doesn't have to survive a restart).
 
 ## 13. Deploy profiles: `full` vs `minimal`
 

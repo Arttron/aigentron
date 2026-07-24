@@ -57,10 +57,10 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<void> {
+  async sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<{ messageId: string }> {
     // Telegram caps a message at 4096 chars — truncate defensively.
     const body = text.length > 4096 ? `${text.slice(0, 4093)}…` : text;
-    await this.call('sendMessage', {
+    const msg = await this.call<{ message_id: number }>('sendMessage', {
       chat_id: chatId,
       text: body,
       disable_web_page_preview: true,
@@ -76,6 +76,18 @@ export class TelegramAdapter implements ChannelAdapter {
           }
         : {}),
     });
+    return { messageId: String(msg.message_id) };
+  }
+
+  /** Replace a message's text in place — omitting reply_markup leaves any
+   *  existing inline keyboard (e.g. the "⏹ Cancel" button) untouched. */
+  async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
+    const body = text.length > 4096 ? `${text.slice(0, 4093)}…` : text;
+    await this.call('editMessageText', {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      text: body,
+    }).catch(() => undefined); // "message not modified" / message gone — best effort
   }
 
   async sendImage(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void> {

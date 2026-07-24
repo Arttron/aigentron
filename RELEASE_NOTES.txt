@@ -1,0 +1,19 @@
+Aigentron v0.1.23
+
+Telegram (and future chat channels) now behave much more like the web dashboard:
+
+- Follow-up messages sent while a task is still running are queued and delivered
+  automatically once it settles — the same queue the dashboard uses, so a message
+  sent from either place shows up in both.
+- A "Cancel" button on the bot's own messages, alongside the existing /cancel command.
+- The bot reacts to your messages (seen / queued / done / error) instead of only
+  replying with text, and you can approve/deny a pending action with a thumbs up/down
+  reaction instead of tapping a button.
+- A single message per task run now updates live with a short summary of what the
+  agent is doing (reading a file, running a command, etc.) instead of staying silent
+  until the final result.
+
+Also in this release:
+- Agent concurrency (how many tasks run in parallel) is now a live setting instead of
+  a boot-time-only config value.
+- Release notes (this file!) are now published alongside every release.

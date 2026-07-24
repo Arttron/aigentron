@@ -4,7 +4,7 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import { isTerminalStatus, type TaskStatus } from '@lds/shared';
+import { isTerminalStatus, type AgentLogEvent, type TaskStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { decodeAttachments } from '../prisma/agent-event-attachments';
@@ -23,6 +23,55 @@ type ChannelRow = Awaited<ReturnType<ChannelsService['getRow']>>;
 
 /** Grace period before an unattended dashboard approval is pushed to channels. */
 const ESCALATE_DELAY_MS = 10_000;
+/** Minimum gap between edits of a task's live-status message — Telegram
+ *  rate-limits rapid edits of the same message; a burst of tool calls just
+ *  collapses to the latest line once this window elapses. */
+const STATUS_EDIT_MIN_MS = 1500;
+
+/** Final-outcome reaction for a settled task — mirrors the icon already used
+ *  in the result message text, plus 'cancelled' (which gets no result message
+ *  of its own; the /cancel command/button already confirmed synchronously). */
+function reactionIcon(status: TaskStatus): string {
+  switch (status) {
+    case 'done':
+      return '✅';
+    case 'blocked':
+      return '⛔';
+    case 'cancelled':
+      return '🛑';
+    default:
+      return '❌'; // failed, stalled
+  }
+}
+
+/**
+ * Compact (≤~100 char) status line for a task's live-editable channel
+ * message — mirrors the web dashboard's live transcript, but far too verbose
+ * to forward as-is (tool_result can be an entire file's contents, assistant
+ * text can run to paragraphs). Prefers a field that's already short (tool_use
+ * text is pre-summarized by the agent runner — "Bash ls -la", not raw JSON)
+ * over showing raw content; classifies to null (not shown) for kinds with
+ * nothing short worth surfacing — prompt/system/tool_result/result all either
+ * duplicate what the human already sees or are unbounded in size.
+ */
+function compactProcessLine(kind: AgentLogEvent['kind'], text: string): string | null {
+  const withIcon = (icon: string) => {
+    const s = `${icon} ${text}`;
+    return s.length > 100 ? `${s.slice(0, 99).trimEnd()}…` : s;
+  };
+  switch (kind) {
+    case 'tool_use':
+      return withIcon('🔧');
+    case 'delegation':
+      return withIcon('🤝');
+    case 'assistant':
+      return withIcon('💭');
+    case 'stderr':
+      return withIcon('⚠️');
+    default:
+      return null;
+  }
+}
 
 /**
  * Runtime bridge between channels and the orchestrator:
@@ -45,6 +94,14 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   >();
   /** Pending escalation timers, so they can be cleared on shutdown. */
   private readonly escalationTimers = new Set<NodeJS.Timeout>();
+  /** taskId → the human's OWN message we ack-reacted to — updated with the
+   *  final outcome reaction once the task settles (see reactionIcon). */
+  private readonly ackMessages = new Map<string, { channelId: string; chatId: string; messageId: string }>();
+  /** taskId → our own "processing…" message, edited in place as compact
+   *  process steps stream in (see compactProcessLine). */
+  private readonly statusMessages = new Map<string, { channelId: string; chatId: string; messageId: string }>();
+  /** taskId → debounce state for status-message edits. */
+  private readonly statusEdit = new Map<string, { lastEditAt: number; timer?: NodeJS.Timeout; pending?: string }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -68,6 +125,8 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     this.adapters.clear();
     for (const t of this.escalationTimers) clearTimeout(t);
     this.escalationTimers.clear();
+    for (const s of this.statusEdit.values()) if (s.timer) clearTimeout(s.timer);
+    this.statusEdit.clear();
   }
 
   /** (Re)start polling to match the set of enabled channels. Called on CRUD changes. */
@@ -98,6 +157,8 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     switch (e.type) {
       case 'task-status':
         return this.onTaskStatus(e.payload.taskId, e.payload.status);
+      case 'agent-log':
+        return this.onAgentLog(e.payload);
       case 'approval-created':
         return this.onApprovalCreated(e.payload.approval);
       case 'approval-resolved':
@@ -105,13 +166,80 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       case 'task-deleted':
         return this.onTaskDeleted(e.payload.taskId);
       default:
-        return; // agent-log etc. are too noisy to forward
+        return;
     }
   }
 
+  /** A live process step — update the task's compact status message (see
+   *  compactProcessLine). Most kinds are filtered out before this even runs a
+   *  DB query, so this only costs a lookup for the kinds worth narrating. */
+  private async onAgentLog(payload: AgentLogEvent): Promise<void> {
+    const line = compactProcessLine(payload.kind, payload.text);
+    if (!line) return;
+    const dest = await this.channels.threadForTask(payload.taskId);
+    if (!dest) return; // dashboard-only task, or a subtask (no thread of its own)
+    const chatState = await this.prisma.channelChatState.findUnique({
+      where: { channelId_chatId: { channelId: dest.channel.id, chatId: dest.externalThreadId } },
+      select: { muted: true },
+    });
+    if (chatState?.muted) return;
+    await this.updateStatusLine(dest.channel.id, dest.externalThreadId, payload.taskId, line);
+  }
+
+  /** Debounced edit of a task's status message — a burst of tool calls
+   *  collapses to whatever the latest line is once STATUS_EDIT_MIN_MS elapses,
+   *  rather than firing one Telegram API call per event. */
+  private async updateStatusLine(channelId: string, chatId: string, taskId: string, line: string): Promise<void> {
+    const state = this.statusEdit.get(taskId) ?? { lastEditAt: 0 };
+    this.statusEdit.set(taskId, state);
+    state.pending = line;
+    if (state.timer) return; // already scheduled — it'll pick up this (or a later) pending line
+    const fire = async () => {
+      state.timer = undefined;
+      const text = state.pending;
+      state.pending = undefined;
+      state.lastEditAt = Date.now();
+      if (text) await this.applyStatusLine(channelId, chatId, taskId, text);
+    };
+    const elapsed = Date.now() - state.lastEditAt;
+    if (elapsed >= STATUS_EDIT_MIN_MS) await fire();
+    else state.timer = setTimeout(() => void fire(), STATUS_EDIT_MIN_MS - elapsed);
+  }
+
+  /** Edit the existing status message if one's tracked for this task, else
+   *  post a fresh one (covers a queued follow-up whose ack message already
+   *  said "Queued" — that shouldn't be overwritten once it actually starts). */
+  private async applyStatusLine(channelId: string, chatId: string, taskId: string, line: string): Promise<void> {
+    const existing = this.statusMessages.get(taskId);
+    if (existing) {
+      const row = await this.channels.getRow(existing.channelId).catch(() => null);
+      if (!row) return;
+      const adapter = this.adapters.get(existing.channelId) ?? this.channels.buildAdapter(row);
+      await adapter.editMessage?.(existing.chatId, existing.messageId, line).catch(() => undefined);
+      return;
+    }
+    const sent = await this.send(channelId, chatId, line);
+    if (sent) this.statusMessages.set(taskId, { channelId, chatId, messageId: sent.messageId });
+  }
+
+  /** Task settled — react to the human's message with the final outcome and
+   *  stop tracking this run's messages (a fresh run starts its own). */
+  private finishRunMessages(taskId: string, status: TaskStatus): void {
+    const ack = this.ackMessages.get(taskId);
+    this.ackMessages.delete(taskId);
+    if (ack) void this.react(ack.channelId, ack.chatId, ack.messageId, reactionIcon(status));
+    this.statusMessages.delete(taskId);
+    const edit = this.statusEdit.get(taskId);
+    if (edit?.timer) clearTimeout(edit.timer);
+    this.statusEdit.delete(taskId);
+  }
+
   private async onTaskStatus(taskId: string, status: TaskStatus): Promise<void> {
-    // Keep chats quiet: only final, meaningful outcomes — no queued/running/
-    // needs_approval churn (approvals are posted separately).
+    if (isTerminalStatus(status)) this.finishRunMessages(taskId, status);
+    // Keep chats quiet: only final, meaningful outcomes get a result message —
+    // no queued/running/needs_approval churn (approvals are posted
+    // separately), and 'cancelled' already got its own confirmation
+    // synchronously (the /cancel command/button sends it directly).
     if (!['done', 'failed', 'blocked', 'stalled'].includes(status)) return;
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
@@ -142,7 +270,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     });
     if (chatState?.muted) return;
 
-    const icon = status === 'done' ? '✅' : status === 'blocked' ? '⛔' : '❌';
+    const icon = reactionIcon(status);
     // Post the agent's actual final answer (the `result` event) — not just a
     // status line. Fall back to the reported summary / title when there is none.
     const body =
@@ -360,6 +488,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       this.approvalMessages.delete(approvalId);
       for (const r of refs) await this.editApprovalMessage(r, 'ℹ️ Task removed — no longer needed.');
     }
+    this.finishRunMessages(taskId, 'cancelled');
   }
 
   private async editApprovalMessage(
@@ -374,13 +503,21 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       .catch((err) => this.logger.warn(`resolveApprovalMessage failed: ${(err as Error).message}`));
   }
 
-  private async send(channelId: string, chatId: string, text: string, buttons?: MessageButton[][]): Promise<void> {
+  private async send(
+    channelId: string,
+    chatId: string,
+    text: string,
+    buttons?: MessageButton[][],
+  ): Promise<{ messageId: string } | null> {
     const row = await this.channels.getRow(channelId).catch(() => null);
-    if (!row) return;
+    if (!row) return null;
     const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
-    await adapter.sendMessage(chatId, text, buttons).catch((err) =>
-      this.logger.warn(`sendMessage failed: ${(err as Error).message}`),
-    );
+    try {
+      return await adapter.sendMessage(chatId, text, buttons);
+    } catch (err) {
+      this.logger.warn(`sendMessage failed: ${(err as Error).message}`);
+      return null;
+    }
   }
 
   /**
@@ -401,9 +538,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     try {
       const result = await this.tasks.followUp(taskId, text, attachments);
-      if (incomingMessageId) void this.react(channelId, chatId, incomingMessageId, result.queued ? '📥' : '👀');
+      if (incomingMessageId) {
+        this.ackMessages.set(taskId, { channelId, chatId, messageId: incomingMessageId });
+        void this.react(channelId, chatId, incomingMessageId, result.queued ? '📥' : '👀');
+      }
       const prefix = attachedLabel ? `📎 Attached ${attachedLabel} — ` : '';
-      await this.send(
+      const sent = await this.send(
         channelId,
         chatId,
         result.queued
@@ -411,6 +551,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
           : `${prefix}↳ Continuing the current task.`,
         [[{ label: '⏹ Cancel', data: `cn:${taskId}` }]],
       );
+      // Only an immediately-dispatched run has a live agent to narrate — a
+      // queued message has nothing to say until it actually drains, at which
+      // point applyStatusLine posts its own fresh status message.
+      if (sent && !result.queued) this.statusMessages.set(taskId, { channelId, chatId, messageId: sent.messageId });
     } catch (err) {
       if (incomingMessageId) void this.react(channelId, chatId, incomingMessageId, '⚠️');
       await this.send(channelId, chatId, `⚠️ ${(err as Error).message}`);
@@ -549,12 +693,18 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       }
       // active task was deleted — fall through to create a fresh one
     }
-    const reply = await this.commands.newTask(ctx, e.text).catch((err) => `⚠️ ${(err as Error).message}`);
-    // Neither reaction fits the "send a description" prompt (empty input) —
-    // only react on a real outcome (created, or actually failed).
-    const ackEmoji = reply.startsWith('✅') ? '✅' : reply.startsWith('⚠️') ? '⚠️' : null;
-    if (e.messageId && ackEmoji) void this.react(channelId, e.chatId, e.messageId, ackEmoji);
-    await this.send(channelId, e.chatId, reply);
+    const created = await this.commands
+      .newTask(ctx, e.text)
+      .catch((err) => ({ text: `⚠️ ${(err as Error).message}`, taskId: null }));
+    if (e.messageId && created.taskId) {
+      // A brand-new task — track its ack message so the final outcome updates
+      // this reaction too (👀 now, ✅/❌/⛔ once it settles).
+      this.ackMessages.set(created.taskId, { channelId, chatId: e.chatId, messageId: e.messageId });
+      void this.react(channelId, e.chatId, e.messageId, '👀');
+    } else if (e.messageId && created.text.startsWith('⚠️')) {
+      void this.react(channelId, e.chatId, e.messageId, '⚠️');
+    }
+    await this.send(channelId, e.chatId, created.text);
   }
 
   /** A photo/document from the chat → attach to the active task (or start one). */
@@ -599,7 +749,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     await this.tasks.start(created.id, [meta.name]);
     await this.channels.linkThread(channelId, created.id, e.chatId);
     await this.channels.setChatState(channelId, e.chatId, { activeTaskId: created.id });
-    if (e.messageId) void this.react(channelId, e.chatId, e.messageId, '✅');
+    if (e.messageId) {
+      this.ackMessages.set(created.id, { channelId, chatId: e.chatId, messageId: e.messageId });
+      void this.react(channelId, e.chatId, e.messageId, '👀');
+    }
     await this.send(channelId, e.chatId, `📎 New task «${created.title}» with ${meta.name}. Updates will appear here.`);
   }
 }

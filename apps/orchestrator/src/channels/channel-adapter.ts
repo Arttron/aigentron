@@ -95,8 +95,14 @@ export interface ChannelAdapter {
   verify(): Promise<{ ok: boolean; info?: string; error?: string }>;
   /** Post a plain text message to a conversation. `buttons` is a grid of rows
    *  (each an array of buttons) rendered as tappable inline controls when the
-   *  transport supports them; ignored by transports that don't. */
-  sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<void>;
+   *  transport supports them; ignored by transports that don't. Returns the
+   *  posted message's id so a caller can later edit it (e.g. a live status
+   *  line) or react to it. */
+  sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<{ messageId: string }>;
+  /** Replace a previously-sent message's text in place (e.g. a live-updating
+   *  "processing…" status line) — existing buttons/keyboard are preserved.
+   *  Best-effort, optional — not every transport supports editing. */
+  editMessage?(chatId: string, messageId: string, text: string): Promise<void>;
   /** Post an image (e.g. an agent screenshot). Optional — not every transport supports it. */
   sendImage?(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void>;
   /** Post an approval request with Approve/Deny controls; returns its message id. */

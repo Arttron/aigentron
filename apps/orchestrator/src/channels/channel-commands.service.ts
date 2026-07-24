@@ -65,7 +65,7 @@ export class ChannelCommandService {
         return this.clear(ctx);
       case '/new_task':
       case '/new':
-        return this.newTask(ctx, arg);
+        return this.newTask(ctx, arg).then((r) => r.text);
       case '/tasks':
         return this.listTasks(ctx);
       case '/task':
@@ -113,10 +113,12 @@ export class ChannelCommandService {
     return '🧹 Cleared. Your next message starts a new task.';
   }
 
-  async newTask(ctx: CommandCtx, text: string): Promise<string> {
+  /** `taskId` is null when nothing was actually created (e.g. the empty-text
+   *  prompt below) — callers that want to react/track the run key off that. */
+  async newTask(ctx: CommandCtx, text: string): Promise<{ text: string; taskId: string | null }> {
     if (!text) {
       await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: null });
-      return '📝 Send the task description as your next message.';
+      return { text: '📝 Send the task description as your next message.', taskId: null };
     }
     const state = await this.channels.chatState(ctx.channelId, ctx.chatId);
     const task = await this.tasks.create({
@@ -127,7 +129,7 @@ export class ChannelCommandService {
     });
     await this.channels.linkThread(ctx.channelId, task.id, ctx.chatId);
     await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: task.id });
-    return `✅ New task «${task.title}» (${shortId(task.id)}). Updates will appear here.`;
+    return { text: `✅ New task «${task.title}» (${shortId(task.id)}). Updates will appear here.`, taskId: task.id };
   }
 
   private async listTasks(ctx: CommandCtx): Promise<CommandReply> {

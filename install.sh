@@ -8,9 +8,11 @@
 #   - S3 (set S3_PREFIX): an internal deploy target, e.g.
 #     S3_PREFIX=s3://ai-tools-sysfiles/arttron-dev-server — needs the `aws`
 #     CLI and credentials already usable on this host (IAM role, env vars,
-#     ~/.aws/config, whatever). latest.txt at that prefix is the one mutable
-#     pointer object; every archive itself stays immutable/versioned, same
-#     discipline as GitHub releases (see .github/workflows/release.yml).
+#     ~/.aws/config, whatever). Layout: `latest.txt` and `deprecated.txt` at
+#     the prefix root are the two mutable/current-state objects; each release
+#     is its own immutable `releases/X.Y.Z/` directory (archive.tar.gz,
+#     notes.txt, a deprecated.txt snapshot) — same discipline as GitHub
+#     releases (see .github/workflows/release.yml).
 #
 # Install mode: if Docker is found AND this is a real interactive terminal
 # (not curl-piped), you're ASKED — Docker being present doesn't mean it's
@@ -411,7 +413,7 @@ RELEASE_DIR="$INSTALL_DIR/releases/$VERSION"
 ARCHIVE_PATH="$INSTALL_DIR/release-$VERSION.tar.gz"
 if [ -z "$ARCHIVE_URL" ]; then
   if [ -n "$S3_PREFIX" ]; then
-    ARCHIVE_URL="$S3_PREFIX/aigentron-$VERSION.tar.gz"
+    ARCHIVE_URL="$S3_PREFIX/releases/$VERSION/archive.tar.gz"
   else
     ARCHIVE_URL="https://github.com/$REPO/archive/refs/tags/v$VERSION.tar.gz"
   fi
