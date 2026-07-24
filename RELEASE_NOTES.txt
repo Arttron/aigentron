@@ -1,19 +1,16 @@
-Aigentron v0.1.23
+Aigentron v0.1.24
 
-Telegram (and future chat channels) now behave much more like the web dashboard:
+Channels can now forward any file an agent produces, not just screenshots:
 
-- Follow-up messages sent while a task is still running are queued and delivered
-  automatically once it settles — the same queue the dashboard uses, so a message
-  sent from either place shows up in both.
-- A "Cancel" button on the bot's own messages, alongside the existing /cancel command.
-- The bot reacts to your messages (seen / queued / done / error) instead of only
-  replying with text, and you can approve/deny a pending action with a thumbs up/down
-  reaction instead of tapping a button.
-- A single message per task run now updates live with a short summary of what the
-  agent is doing (reading a file, running a command, etc.) instead of staying silent
-  until the final result.
+- Files an agent copies into $LDS_ATTACHMENTS_DIR (a report, an archive, a
+  log — anything, per SOUL.md) now reach the chat channel automatically once
+  the task settles, the same way they already show up in the dashboard's
+  attachments gallery. Images are sent as photos, everything else as a
+  downloadable document. Each file is only ever delivered once, even across
+  several follow-up runs of the same task.
 
 Also in this release:
-- Agent concurrency (how many tasks run in parallel) is now a live setting instead of
-  a boot-time-only config value.
-- Release notes (this file!) are now published alongside every release.
+- Fixed the per-release S3 layout: a release's own deprecated.txt is now only
+  written when that specific version is actually deprecated, containing just
+  the reason (previously every release got a copy of the entire deprecated-
+  versions list, regardless of relevance).

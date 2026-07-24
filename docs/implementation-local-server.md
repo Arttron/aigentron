@@ -364,12 +364,21 @@ would corrupt each other's work, not just serialize slower.
 Bidirectional chat transports — Telegram shipped, Slack/email proposed
 ([`rfc-001-channels-and-human-agents.md`](./rfc-001-channels-and-human-agents.md)). `ChannelAdapter`
 (`channel-adapter.ts`) is the transport-agnostic contract: `sendMessage`/`sendApproval`/
-`startPolling`/`verify`/`stop` are required; `sendImage` (screenshots), `editMessage` (live status
-text), `reactToMessage` (ack/outcome reactions), and `resolveApprovalMessage` (drop the
-Approve/Deny buttons + show the outcome once resolved) are all optional, since not every transport
-supports them. `ChannelManagerService` is the bridge: it subscribes to the event bus (§6.1) for
-outbound updates and long-polls each enabled channel's adapter for inbound `IncomingEvent`s
-(`message` / `attachment` / `approval` / `task-switch` / `cancel` / `reaction`).
+`startPolling`/`verify`/`stop` are required; `sendImage` (screenshots as photos), `sendDocument`
+(any other file type, as a downloadable document), `editMessage` (live status text),
+`reactToMessage` (ack/outcome reactions), and `resolveApprovalMessage` (drop the Approve/Deny
+buttons + show the outcome once resolved) are all optional, since not every transport supports
+them. `ChannelManagerService` is the bridge: it subscribes to the event bus (§6.1) for outbound
+updates and long-polls each enabled channel's adapter for inbound `IncomingEvent`s (`message` /
+`attachment` / `approval` / `task-switch` / `cancel` / `reaction`).
+
+Outbound file delivery mirrors the dashboard's attachments gallery: `sendRunAttachments`
+(`channel-manager.service.ts`) runs whenever a task settles, lists everything under the task's
+attachments dir (`AttachmentsService.list`) — both tool-result screenshots and files the agent
+itself copied into `$LDS_ATTACHMENTS_DIR` per SOUL.md — and pushes any not already sent (dedup by
+filename, tracked in-memory per task) to the channel: images via `sendImage`, everything else via
+`sendDocument`. Capped per settle event so a burst of new files doesn't spam the chat; anything
+past the cap goes out next time the task settles again.
 `ChannelCommandService` (`channel-commands.service.ts`) parses slash commands (`/new_task`,
 `/task <id>`, `/cancel`, `/approve`, `/model`, …) against per-`(channel, chat)` state
 (`ChannelChatState`: active task, chosen agent/model, muted) — a plain-text message with no active

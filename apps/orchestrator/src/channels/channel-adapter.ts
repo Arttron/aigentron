@@ -105,6 +105,14 @@ export interface ChannelAdapter {
   editMessage?(chatId: string, messageId: string, text: string): Promise<void>;
   /** Post an image (e.g. an agent screenshot). Optional — not every transport supports it. */
   sendImage?(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void>;
+  /** Post an arbitrary file as a downloadable document (anything the image path
+   *  doesn't cover — pdf/zip/docx/log/etc). Optional — not every transport
+   *  supports it. */
+  sendDocument?(
+    chatId: string,
+    file: { data: Buffer; filename: string; mime?: string },
+    caption?: string,
+  ): Promise<void>;
   /** Post an approval request with Approve/Deny controls; returns its message id. */
   sendApproval(chatId: string, approval: OutgoingApproval): Promise<{ messageId: string }>;
   /** Mark a previously-sent approval message as resolved: remove its buttons and

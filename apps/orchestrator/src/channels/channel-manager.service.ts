@@ -5,9 +5,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import { isTerminalStatus, type AgentLogEvent, type TaskStatus } from '@lds/shared';
-import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { decodeAttachments } from '../prisma/agent-event-attachments';
 import { AgentEventBus, type BusEvent } from '../bus/agent-event-bus';
 import { Readable } from 'node:stream';
 import { readFile } from 'node:fs/promises';
@@ -102,10 +100,13 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   private readonly statusMessages = new Map<string, { channelId: string; chatId: string; messageId: string }>();
   /** taskId → debounce state for status-message edits. */
   private readonly statusEdit = new Map<string, { lastEditAt: number; timer?: NodeJS.Timeout; pending?: string }>();
+  /** taskId → attachment filenames already pushed to the channel (see
+   *  sendRunAttachments) — in-memory only, reset on restart like the maps
+   *  above; worst case a file gets re-sent once after a restart. */
+  private readonly sentAttachments = new Map<string, Set<string>>();
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: AppConfigService,
     private readonly bus: AgentEventBus,
     private readonly channels: ChannelsService,
     private readonly tasks: TasksService,
@@ -281,9 +282,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     let text = `${header}\n\n${body}`;
     if (status === 'done' && task.prUrl) text += `\n\n${task.prUrl}`;
     await this.send(dest.channel.id, dest.externalThreadId, text);
-    // Also deliver any screenshots the agent produced this run (as photos).
-    await this.sendRunImages(dest.channel.id, dest.externalThreadId, taskId).catch((err) =>
-      this.logger.warn(`sendRunImages failed: ${(err as Error).message}`),
+    // Also deliver any new attachments the agent produced (screenshots as
+    // photos, everything else — reports, archives, etc. — as documents).
+    await this.sendRunAttachments(dest.channel.id, dest.externalThreadId, taskId).catch((err) =>
+      this.logger.warn(`sendRunAttachments failed: ${(err as Error).message}`),
     );
   }
 
@@ -327,33 +329,40 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     await this.send(channelId, chatId, text);
   }
 
-  /** Send the images (screenshots) the agent produced in the task's latest run. */
-  private async sendRunImages(channelId: string, chatId: string, taskId: string): Promise<void> {
-    const session = await this.prisma.agentSession.findFirst({
-      where: { taskId },
-      orderBy: { startedAt: 'desc' },
-      select: { id: true },
-    });
-    if (!session) return;
-    const events = await this.prisma.agentEvent.findMany({
-      where: { agentSessionId: session.id, kind: 'tool_result' },
-      orderBy: { seq: 'asc' },
-      select: { attachments: true },
-    });
-    const names = [...new Set(events.flatMap((e) => decodeAttachments(this.config, e.attachments)))]
-      .filter((n) => /\.(png|jpe?g|webp|gif)$/i.test(n))
-      .slice(0, 6);
-    if (!names.length) return;
+  /**
+   * Send any attachments the task has accumulated that haven't been pushed to
+   * the channel yet — covers both tool-result screenshots (written by the
+   * agent runner when a tool call returns an image) and files the agent
+   * itself copied into $LDS_ATTACHMENTS_DIR per SOUL.md (reports, archives,
+   * anything). Images go out via sendImage (as photos); everything else via
+   * sendDocument. Dedup by filename per task (sentAttachments) so a file is
+   * only ever delivered once, no matter how many times the task later settles
+   * again (follow-ups) — capped per call so a burst of new files doesn't spam
+   * the chat; anything past the cap just goes out next time it settles.
+   */
+  private async sendRunAttachments(channelId: string, chatId: string, taskId: string): Promise<void> {
+    const all = await this.attachments.list(taskId);
+    if (!all.length) return;
+    const sent = this.sentAttachments.get(taskId) ?? new Set<string>();
+    this.sentAttachments.set(taskId, sent);
+    const fresh = all.filter((m) => !sent.has(m.name)).slice(0, 10);
+    if (!fresh.length) return;
     const row = await this.channels.getRow(channelId).catch(() => null);
     if (!row) return;
     const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
-    if (!adapter.sendImage) return;
-    for (const name of names) {
+    if (!adapter.sendImage && !adapter.sendDocument) return;
+    for (const meta of fresh) {
+      sent.add(meta.name);
       try {
-        const { path } = await this.attachments.filePath(taskId, name);
-        await adapter.sendImage(chatId, { data: await readFile(path), filename: name });
+        const { path } = await this.attachments.filePath(taskId, meta.name);
+        const data = await readFile(path);
+        if (meta.mime.startsWith('image/') && adapter.sendImage) {
+          await adapter.sendImage(chatId, { data, filename: meta.name });
+        } else {
+          await adapter.sendDocument?.(chatId, { data, filename: meta.name, mime: meta.mime });
+        }
       } catch (err) {
-        this.logger.warn(`send screenshot ${name} failed: ${(err as Error).message}`);
+        this.logger.warn(`send attachment ${meta.name} failed: ${(err as Error).message}`);
       }
     }
   }
@@ -489,6 +498,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       for (const r of refs) await this.editApprovalMessage(r, 'ℹ️ Task removed — no longer needed.');
     }
     this.finishRunMessages(taskId, 'cancelled');
+    this.sentAttachments.delete(taskId);
   }
 
   private async editApprovalMessage(

@@ -101,6 +101,22 @@ export class TelegramAdapter implements ChannelAdapter {
     if (!data.ok) throw new Error(data.description || `Telegram sendPhoto failed (${res.status})`);
   }
 
+  async sendDocument(
+    chatId: string,
+    file: { data: Buffer; filename: string; mime?: string },
+    caption?: string,
+  ): Promise<void> {
+    // sendDocument needs multipart/form-data with the file part — same shape as
+    // sendPhoto, just the generic (any-MIME, up to 50MB) Bot API method.
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    if (caption) form.append('caption', caption.slice(0, 1024));
+    form.append('document', new Blob([file.data], file.mime ? { type: file.mime } : undefined), file.filename);
+    const res = await fetch(`${API}/bot${this.token}/sendDocument`, { method: 'POST', body: form });
+    const data = (await res.json()) as { ok: boolean; description?: string };
+    if (!data.ok) throw new Error(data.description || `Telegram sendDocument failed (${res.status})`);
+  }
+
   async sendApproval(chatId: string, approval: OutgoingApproval): Promise<{ messageId: string }> {
     const text = `⚠️ Approval needed for task ${approval.taskId}\n\n${approval.summary}\n${approval.reason}`;
     const msg = await this.call<{ message_id: number }>('sendMessage', {
