@@ -1,9 +1,7 @@
-/* Token-composition chart — colors validated (dataviz) against the card
- * surface #161b22: blue/aqua/yellow, worst adjacent CVD ΔE 41.3, contrast ≥3:1. */
+/* Token-composition chart — bar colors are the theme-aware --viz-* tokens
+ * (globals.css), tuned separately per theme to keep contrast against the
+ * card surface (--bg-elev) in both. */
 .wrap {
-  --viz-input: #3987e5;
-  --viz-output: #199e70;
-  --viz-cache: #c98500;
   margin: 4px 0 20px;
 }
 
@@ -75,12 +73,12 @@
   z-index: 50;
   pointer-events: none;
   background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
   font-size: 12px;
   color: var(--text);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--raised-sm), 0 4px 14px rgba(0, 0, 0, 0.4);
   white-space: nowrap;
 }
 .tipName {

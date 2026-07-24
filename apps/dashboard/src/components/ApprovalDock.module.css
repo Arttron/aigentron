@@ -7,10 +7,10 @@
   max-height: min(70vh, 640px);
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev, #161b22);
-  border: 1px solid var(--amber, #d29922);
-  border-radius: 10px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  background: var(--bg-elev, #f2ece0);
+  border: none;
+  border-radius: var(--radius-lg, 20px);
+  box-shadow: var(--raised), 0 0 28px rgba(168, 120, 31, 0.25);
   overflow: hidden;
 }
 
@@ -18,11 +18,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 11px 14px;
   font-weight: 700;
   font-size: 13px;
   color: #2a1d00;
-  background: var(--amber, #d29922);
+  background: var(--amber, #a8781f);
 }
 
 /* Pulsing attention icon while approvals are pending. */

@@ -1,7 +1,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(1, 4, 9, 0.7);
+  background: var(--backdrop);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -12,11 +12,11 @@
 
 .dialog {
   background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: none;
+  border-radius: var(--radius-lg);
   width: 100%;
   max-width: 560px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--raised), 0 24px 56px rgba(0, 0, 0, 0.45);
 }
 
 .header {
@@ -24,20 +24,29 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 16px 18px;
 }
 
 .close {
-  background: transparent;
+  background: var(--bg-elev-2);
   border: none;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--raised-xs);
   color: var(--text-dim);
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
-  padding: 2px 6px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 .close:hover {
   color: var(--text);
+}
+.close:active {
+  box-shadow: var(--inset-sm);
 }
 
 .body {

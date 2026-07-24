@@ -16,11 +16,12 @@
 }
 
 .entry {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  margin-bottom: 12px;
-  background: var(--bg-elev);
+  border: none;
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 14px;
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-sm);
 }
 
 .ident {
@@ -32,13 +33,13 @@
 .ok {
   margin-top: 8px;
   font-size: 13px;
-  color: var(--green, #3fb950);
+  color: var(--green, #3f8a54);
 }
 
 .fail {
   margin-top: 8px;
   font-size: 13px;
-  color: var(--red, #f85149);
+  color: var(--red, #af4238);
 }
 
 .error {

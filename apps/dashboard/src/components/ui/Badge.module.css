@@ -1,12 +1,13 @@
 .badge {
   display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-xs);
   white-space: nowrap;
 }
 
@@ -16,27 +17,27 @@
 }
 .running {
   color: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .needs_approval {
   color: var(--amber);
-  border-color: var(--amber);
+  background: var(--amber-soft);
 }
 .done {
   color: var(--green);
-  border-color: var(--green);
+  background: var(--green-soft);
 }
 .failed,
 .cancelled {
   color: var(--red);
-  border-color: var(--red);
+  background: var(--red-soft);
 }
 .blocked {
   color: var(--amber);
-  border-color: var(--amber);
+  background: var(--amber-soft);
 }
 .stalled {
   color: var(--red);
-  border-color: var(--red);
-  border-style: dashed;
+  background: var(--red-soft);
+  box-shadow: var(--inset-sm);
 }

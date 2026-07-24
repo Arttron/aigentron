@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { ApprovalDock } from '@/components/ApprovalDock';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 export function App() {
   return (
@@ -8,6 +9,7 @@ export function App() {
         <Outlet />
       </div>
       <ApprovalDock />
+      <ThemeToggle />
     </>
   );
 }

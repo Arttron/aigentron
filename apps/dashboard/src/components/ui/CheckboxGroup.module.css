@@ -8,20 +8,22 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-pill);
   font-size: 13px;
   cursor: pointer;
   user-select: none;
-  background: var(--bg);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-xs);
 }
 .chip:hover {
-  border-color: var(--accent);
+  color: var(--accent);
 }
 .on {
-  border-color: var(--accent);
   color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--inset-sm);
 }
 
 .box {

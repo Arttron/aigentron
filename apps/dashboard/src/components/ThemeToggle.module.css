@@ -1,0 +1,23 @@
+.toggle {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 900;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  background: var(--bg-elev-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--raised-sm);
+}
+.toggle:hover {
+  box-shadow: var(--raised-sm), 0 0 0 2px var(--accent-soft);
+}
+.toggle:active {
+  box-shadow: var(--inset-sm);
+}

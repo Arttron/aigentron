@@ -31,9 +31,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-xs);
   font-size: 12px;
 }
 

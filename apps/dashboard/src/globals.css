@@ -3,18 +3,146 @@
  * styling only. Everything presentational lives in co-located CSS Modules
  * (Component.module.css) so component styles can't leak or collide.
  */
+/*
+ * Neumorphism, two themes: surfaces are all close to the same base tone, and
+ * depth comes from a paired light/dark shadow instead of borders. Two shadow
+ * "directions" cover every control: RAISED (a highlight up-left, a shadow
+ * down-right — reads as sitting above the surface) and INSET (the same pair
+ * flipped inward — reads as pressed/carved into it). Everything below
+ * composes from the --raised-* / --inset-* tokens rather than one-off
+ * box-shadows, so the whole app reads as one continuous material instead of
+ * a pile of flat boxes. The shadow/radius geometry is theme-independent
+ * (defined once, right below); only the color tokens differ between themes.
+ *
+ * Theme selection: `index.html`'s inline script sets `data-theme` on <html>
+ * from localStorage (falling back to system preference) before first paint,
+ * and `ThemeToggle` flips + persists it at runtime. The bare `:root` block
+ * and the `prefers-color-scheme` media query below are just the no-JS/
+ * first-paint fallback — the `[data-theme]` attribute selectors (highest
+ * specificity here) are what actually apply once the toggle script runs.
+ */
 :root {
-  --bg: #0d1117;
-  --bg-elev: #161b22;
-  --bg-elev-2: #1c2330;
-  --border: #30363d;
-  --text: #e6edf3;
-  --text-dim: #8b949e;
-  --accent: #4c9aff;
-  --green: #3fb950;
-  --amber: #d29922;
-  --red: #f85149;
   --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --radius-sm: 10px;
+  --radius: 14px;
+  --radius-lg: 20px;
+  --radius-pill: 999px;
+
+  --raised: 7px 7px 16px var(--shadow-dark), -5px -5px 12px var(--shadow-light);
+  --raised-sm: 4px 4px 9px var(--shadow-dark), -3px -3px 7px var(--shadow-light);
+  --raised-xs: 2px 2px 5px var(--shadow-dark), -2px -2px 4px var(--shadow-light);
+  --inset: inset 4px 4px 9px var(--shadow-dark), inset -3px -3px 7px var(--shadow-light);
+  --inset-sm: inset 3px 3px 6px var(--shadow-dark), inset -2px -2px 5px var(--shadow-light);
+
+  /* Dark theme colors — the default (also the no-JS/prefers-color-scheme:dark fallback). */
+  --bg: #1a1d23;
+  --bg-elev: #1e2229;
+  --bg-elev-2: #23272f;
+  --shadow-dark: rgba(0, 0, 0, 0.55);
+  --shadow-light: rgba(255, 255, 255, 0.045);
+  --border: #2c3038; /* subtle hairlines only (table rows, dividers) — depth is shadows, not borders */
+  --text: #e8eaed;
+  --text-dim: #8a909c;
+  --accent: #45c4b0;
+  --accent-strong: #33a396;
+  --accent-soft: rgba(69, 196, 176, 0.16);
+  --green: #4cbf7a;
+  --green-soft: rgba(76, 191, 122, 0.16);
+  --amber: #d9a441;
+  --amber-soft: rgba(217, 164, 65, 0.16);
+  --red: #e2685f;
+  --red-soft: rgba(226, 104, 95, 0.16);
+  --on-accent: #06231f; /* text color for solid accent/green fills — accent is bright here, so dark text */
+  --backdrop: rgba(10, 12, 15, 0.7);
+  --pastel-purple: #d2a8ff;
+  --pastel-blue: #a5d6ff;
+  --viz-input: #3987e5;
+  --viz-output: #199e70;
+  --viz-cache: #c98500;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #ece5d8;
+    --bg-elev: #f2ece0;
+    --bg-elev-2: #e3dcce;
+    --shadow-dark: rgba(120, 100, 70, 0.3);
+    --shadow-light: rgba(255, 253, 247, 0.95);
+    --border: #ddd4c2;
+    --text: #2c2820;
+    --text-dim: #7d7364;
+    --accent: #2f6f68;
+    --accent-strong: #24544f;
+    --accent-soft: rgba(47, 111, 104, 0.14);
+    --green: #3f8a54;
+    --green-soft: rgba(63, 138, 84, 0.16);
+    --amber: #a8781f;
+    --amber-soft: rgba(168, 120, 31, 0.16);
+    --red: #af4238;
+    --red-soft: rgba(175, 66, 56, 0.16);
+    --on-accent: #f6f1e4;
+    --backdrop: rgba(44, 40, 32, 0.45);
+    --pastel-purple: #7c4fb0;
+    --pastel-blue: #2f6fa8;
+    --viz-input: #2f5fae;
+    --viz-output: #157a56;
+    --viz-cache: #96650a;
+  }
+}
+
+:root[data-theme='light'] {
+  --bg: #ece5d8;
+  --bg-elev: #f2ece0;
+  --bg-elev-2: #e3dcce;
+  --shadow-dark: rgba(120, 100, 70, 0.3);
+  --shadow-light: rgba(255, 253, 247, 0.95);
+  --border: #ddd4c2;
+  --text: #2c2820;
+  --text-dim: #7d7364;
+  --accent: #2f6f68;
+  --accent-strong: #24544f;
+  --accent-soft: rgba(47, 111, 104, 0.14);
+  --green: #3f8a54;
+  --green-soft: rgba(63, 138, 84, 0.16);
+  --amber: #a8781f;
+  --amber-soft: rgba(168, 120, 31, 0.16);
+  --red: #af4238;
+  --red-soft: rgba(175, 66, 56, 0.16);
+  --on-accent: #f6f1e4;
+  --backdrop: rgba(44, 40, 32, 0.45);
+  --pastel-purple: #7c4fb0;
+  --pastel-blue: #2f6fa8;
+  --viz-input: #2f5fae;
+  --viz-output: #157a56;
+  --viz-cache: #96650a;
+}
+
+:root[data-theme='dark'] {
+  --bg: #1a1d23;
+  --bg-elev: #1e2229;
+  --bg-elev-2: #23272f;
+  --shadow-dark: rgba(0, 0, 0, 0.55);
+  --shadow-light: rgba(255, 255, 255, 0.045);
+  --border: #2c3038;
+  --text: #e8eaed;
+  --text-dim: #8a909c;
+  --accent: #45c4b0;
+  --accent-strong: #33a396;
+  --accent-soft: rgba(69, 196, 176, 0.16);
+  --green: #4cbf7a;
+  --green-soft: rgba(76, 191, 122, 0.16);
+  --amber: #d9a441;
+  --amber-soft: rgba(217, 164, 65, 0.16);
+  --red: #e2685f;
+  --red-soft: rgba(226, 104, 95, 0.16);
+  --on-accent: #06231f; /* text color for solid accent/green fills — accent is bright here, so dark text */
+  --backdrop: rgba(10, 12, 15, 0.7);
+  --pastel-purple: #d2a8ff;
+  --pastel-blue: #a5d6ff;
+  --viz-input: #3987e5;
+  --viz-output: #199e70;
+  --viz-cache: #c98500;
 }
 
 * {
@@ -42,17 +170,27 @@ button {
   cursor: pointer;
 }
 
-/* Base form controls — shared everywhere, so kept global for consistency. */
+/* Base form controls — shared everywhere, so kept global for consistency.
+ * Carved-in (inset) rather than raised: a field reads as a groove you type
+ * into, the classic neumorphic tell for anything that accepts input. */
 textarea,
 input,
 select {
   width: 100%;
   background: var(--bg);
   color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--inset-sm);
+  padding: 9px 12px;
   font: inherit;
+}
+
+textarea:focus,
+input:focus,
+select:focus {
+  outline: none;
+  box-shadow: var(--inset-sm), 0 0 0 2px var(--accent-soft);
 }
 
 textarea {

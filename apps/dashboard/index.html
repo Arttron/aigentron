@@ -5,6 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Local Dev Server — Agent Fleet</title>
     <meta name="description" content="Orchestration dashboard for autonomous Claude Code agents." />
+    <script>
+      // Set the theme before first paint (no flash of the wrong theme).
+      // ThemeToggle.tsx flips + persists `lds-theme`; globals.css reads the
+      // `data-theme` attribute this sets.
+      (function () {
+        try {
+          var stored = localStorage.getItem('lds-theme');
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          document.documentElement.dataset.theme = theme;
+        } catch (e) {
+          /* localStorage/matchMedia unavailable — globals.css's prefers-color-scheme fallback still applies */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

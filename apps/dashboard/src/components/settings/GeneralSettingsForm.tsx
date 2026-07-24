@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type AgentInfo, type ChannelInfo, type Settings, type SettingsUpdate } from '@/lib/api';
 import { Card, SectionTitle, Field, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { applyThemePref, getThemePref, type ThemePref } from '@/lib/theme';
 import styles from './GeneralSettingsForm.module.css';
 
 /** The non-secret app settings, edited in one form with an explicit Save. */
@@ -14,6 +15,18 @@ export function GeneralSettingsForm() {
 
   const [form, setForm] = useState<SettingsUpdate>({});
   const [githubToken, setGithubToken] = useState('');
+  // Client-side only (per-browser, not part of SettingsUpdate/the server API) —
+  // applies immediately on change, not gated behind "Save settings".
+  const [themePref, setThemePref] = useState<ThemePref>('system');
+
+  useEffect(() => {
+    setThemePref(getThemePref());
+  }, []);
+
+  const changeTheme = (pref: ThemePref) => {
+    applyThemePref(pref);
+    setThemePref(pref);
+  };
 
   useEffect(() => {
     api
@@ -221,6 +234,21 @@ export function GeneralSettingsForm() {
 
       <Card>
         <SectionTitle>Display</SectionTitle>
+        <Field label="Theme">
+          <select
+            className={styles.narrow}
+            value={themePref}
+            onChange={(e) => changeTheme(e.target.value as ThemePref)}
+          >
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </Field>
+        <Muted className={styles.note}>
+          Applies immediately — this is a per-browser preference, not part of "Save settings"
+          below. "System" follows your OS's light/dark setting.
+        </Muted>
         <label className={styles.checkRow}>
           <input
             type="checkbox"

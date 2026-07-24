@@ -8,14 +8,15 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 8px;
+  padding: 13px;
+  border: none;
+  border-radius: var(--radius);
+  margin-bottom: 10px;
   background: var(--bg-elev);
+  box-shadow: var(--raised-sm);
 }
 .item:hover {
-  border-color: var(--accent);
+  box-shadow: var(--raised-sm), 0 0 0 2px var(--accent-soft);
 }
 
 .title {
@@ -42,11 +43,12 @@
 
 /* neutral count pill (number of subtasks) */
 .count {
-  background: var(--bg);
+  background: var(--bg-elev-2);
   color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 1px 7px;
+  border: none;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--raised-xs);
+  padding: 2px 8px;
   font-size: 11px;
   font-weight: 700;
 }
