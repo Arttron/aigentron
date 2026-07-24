@@ -112,6 +112,9 @@ export class EventsGateway
           .to(ROOM.task(event.payload.taskId))
           .emit(SERVER_EVENT.approvalResolved, event.payload);
         break;
+      case 'followup-queue':
+        this.server.to(ROOM.task(event.payload.taskId)).emit(SERVER_EVENT.followUpQueue, event.payload);
+        break;
     }
   }
 }

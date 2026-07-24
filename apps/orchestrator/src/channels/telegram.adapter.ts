@@ -16,6 +16,7 @@ const API = 'https://api.telegram.org';
 const CALLBACK_APPROVE = 'ap:';
 const CALLBACK_DENY = 'dn:';
 const CALLBACK_TASK = 'tk:';
+const CALLBACK_CANCEL = 'cn:';
 
 /**
  * Telegram transport over the Bot API using long-polling (getUpdates) — no
@@ -115,6 +116,17 @@ export class TelegramAdapter implements ChannelAdapter {
     }).catch(() => undefined); // message may be gone/unchanged — best effort
   }
 
+  /** React to a message with an emoji (e.g. acknowledging a follow-up was
+   *  received/queued). Best-effort: the message may be too old, or the bot may
+   *  lack the right permission in a group — never worth failing the caller. */
+  async reactToMessage(chatId: string, messageId: string, emoji: string): Promise<void> {
+    await this.call('setMessageReaction', {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      reaction: [{ type: 'emoji', emoji }],
+    }).catch(() => undefined);
+  }
+
   startPolling(onEvent: IncomingHandler): void {
     if (this.polling) return;
     this.polling = true;
@@ -151,7 +163,13 @@ export class TelegramAdapter implements ChannelAdapter {
       try {
         const updates = await this.call<TelegramUpdate[]>(
           'getUpdates',
-          { offset: this.offset, timeout: 30, allowed_updates: ['message', 'callback_query'] },
+          {
+            offset: this.offset,
+            timeout: 30,
+            // message_reaction isn't delivered unless explicitly requested, even
+            // on a bot's very first getUpdates call (unlike message/callback_query).
+            allowed_updates: ['message', 'callback_query', 'message_reaction'],
+          },
           this.abort.signal,
         );
         for (const u of updates) {
@@ -189,6 +207,7 @@ export class TelegramAdapter implements ChannelAdapter {
           data,
           caption: m.caption,
           isReply: Boolean(m.reply_to_message),
+          messageId: String(m.message_id),
         });
       } catch (e) {
         this.logger.warn(`file download failed: ${(e as Error).message}`);
@@ -203,6 +222,23 @@ export class TelegramAdapter implements ChannelAdapter {
         userName: m.from?.username ?? m.from?.first_name,
         text: m.text,
         isReply: Boolean(m.reply_to_message),
+        messageId: String(m.message_id),
+      });
+      return;
+    }
+    if (u.message_reaction) {
+      const r = u.message_reaction;
+      // Only the emoji type is relevant here (custom-emoji reactions need a
+      // premium sticker set id, not a plain string) — take the first, since a
+      // user can only have one reaction per message on a bot chat in practice.
+      const emoji = r.new_reaction.find((x) => x.type === 'emoji')?.emoji ?? '';
+      await onEvent({
+        type: 'reaction',
+        chatId: String(r.chat.id),
+        userId: String(r.user?.id ?? r.chat.id),
+        userName: r.user?.username ?? r.user?.first_name,
+        messageId: String(r.message_id),
+        emoji,
       });
       return;
     }
@@ -220,6 +256,21 @@ export class TelegramAdapter implements ChannelAdapter {
           userId: String(cq.from?.id ?? ''),
           userName: cq.from?.username ?? cq.from?.first_name,
           taskId: data.slice(CALLBACK_TASK.length),
+        });
+        return;
+      }
+      if (data.startsWith(CALLBACK_CANCEL)) {
+        await this.call('answerCallbackQuery', {
+          callback_query_id: cq.id,
+          text: 'Cancelling…',
+        }).catch(() => undefined);
+        if (!cq.message) return;
+        await onEvent({
+          type: 'cancel',
+          chatId: String(cq.message.chat.id),
+          userId: String(cq.from?.id ?? ''),
+          userName: cq.from?.username ?? cq.from?.first_name,
+          taskId: data.slice(CALLBACK_CANCEL.length),
         });
         return;
       }
@@ -251,6 +302,7 @@ export class TelegramAdapter implements ChannelAdapter {
 interface TelegramUpdate {
   update_id: number;
   message?: {
+    message_id: number;
     text?: string;
     caption?: string;
     chat: { id: number };
@@ -264,6 +316,13 @@ interface TelegramUpdate {
     data?: string;
     from?: { id: number; username?: string; first_name?: string };
     message?: { chat: { id: number } };
+  };
+  message_reaction?: {
+    chat: { id: number };
+    message_id: number;
+    user?: { id: number; username?: string; first_name?: string };
+    new_reaction: { type: string; emoji?: string }[];
+    old_reaction: { type: string; emoji?: string }[];
   };
 }
 

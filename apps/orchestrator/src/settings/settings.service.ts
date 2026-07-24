@@ -14,6 +14,7 @@ export interface SettingsPatch {
   approvalTimeoutSeconds?: number;
   verifyCommands?: string | null;
   verifyMaxAttempts?: number;
+  concurrency?: number;
   debugMode?: boolean;
   agentInstructions?: string;
   repoUrl?: string | null;
@@ -60,6 +61,7 @@ export class SettingsService {
       create: {
         id: SINGLETON_ID,
         approvalTimeoutSeconds: this.config.approvalTimeoutSeconds,
+        concurrency: this.config.agentConcurrency,
         repoUrl: cleanEnv(process.env.REPO_URL),
         repoBranch: process.env.REPO_BRANCH?.trim() || 'main',
         githubToken: cleanEnv(process.env.GITHUB_TOKEN),
@@ -111,6 +113,17 @@ export class SettingsService {
 
   async verifyMaxAttempts(): Promise<number> {
     return (await this.load()).verifyMaxAttempts;
+  }
+
+  /**
+   * Max agent runs processed in parallel — polled live by the queue worker.
+   * Shared-workspace mode (one worktree for every task) hard-caps this at 1
+   * regardless of the stored value: concurrent agents writing into the same
+   * checkout would corrupt each other's work, not just run slower.
+   */
+  async concurrency(): Promise<number> {
+    if (this.config.workspaceShared) return 1;
+    return (await this.load()).concurrency;
   }
 
   /** Whether to persist verbose intermediate transcript events (see AgentEvent). */

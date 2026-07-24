@@ -20,6 +20,12 @@ export class UpdateSettingsDto {
   verifyMaxAttempts?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  concurrency?: number;
+
+  @IsOptional()
   @IsBoolean()
   debugMode?: boolean;
 

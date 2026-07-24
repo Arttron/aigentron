@@ -29,4 +29,7 @@ export abstract class TaskQueue {
   abstract removeForTask(taskId: string): Promise<void>;
   /** Start consuming jobs with the given processor. Called once, by the worker module. */
   abstract startWorker(processor: TaskJobProcessor, concurrency: number): Promise<void>;
+  /** Change the running worker's concurrency cap live (TaskWorkerService polls
+   *  the Settings value and calls this on change — no restart needed). */
+  abstract setConcurrency(concurrency: number): void;
 }

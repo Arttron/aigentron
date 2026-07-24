@@ -17,6 +17,12 @@ function withQuestion(base: string, finalText?: string): string {
   return finalText ? `${base} — agent's last message:\n${finalText}` : base;
 }
 
+/** How often to check Settings for a changed concurrency value. Not event-driven
+ *  (the setting can change from a plain PUT /settings with no signal to this
+ *  service) — a short poll is simpler than wiring a notify path for a value
+ *  that changes rarely and isn't latency-sensitive. */
+const CONCURRENCY_SYNC_MS = 10_000;
+
 /**
  * Consumer side of the task queue. For each job it drives the task lifecycle:
  *   queued -> running -> (worktree) -> executor -> done | failed
@@ -27,6 +33,7 @@ export class TaskWorkerService implements OnModuleInit {
   private readonly logger = new Logger(TaskWorkerService.name);
   /** Tasks already handed back to the lead once for decomposition (one-shot). */
   private readonly decomposeHandedBack = new Set<string>();
+  private lastConcurrency = 0;
 
   constructor(
     private readonly queue: TaskQueue,
@@ -48,7 +55,23 @@ export class TaskWorkerService implements OnModuleInit {
     await this.tasks.reconcileOrphanedRunning().catch((err) => {
       this.logger.warn(`Orphan reconciliation failed: ${(err as Error).message}`);
     });
-    await this.queue.startWorker((data) => this.process(data), this.config.agentConcurrency);
+    // Settings.concurrency seeds from AppConfigService.agentConcurrency on its
+    // own first load (see SettingsService), so this already reflects the
+    // env/shared-workspace default the very first time — no special-casing
+    // needed here for "not set yet".
+    this.lastConcurrency = await this.settings.concurrency();
+    await this.queue.startWorker((data) => this.process(data), this.lastConcurrency);
+    setInterval(() => void this.syncConcurrency(), CONCURRENCY_SYNC_MS);
+  }
+
+  /** Poll Settings for a changed concurrency and push it into the running
+   *  worker live — see TaskQueue.setConcurrency's doc for why this is a poll. */
+  private async syncConcurrency(): Promise<void> {
+    const n = await this.settings.concurrency().catch(() => this.lastConcurrency);
+    if (n === this.lastConcurrency) return;
+    this.lastConcurrency = n;
+    this.queue.setConcurrency(n);
+    this.logger.log(`Concurrency updated to ${n}`);
   }
 
   private async process(data: TaskJobData): Promise<void> {

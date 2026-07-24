@@ -12,6 +12,7 @@ import type {
   AgentSessionStatus,
   ApprovalRequest,
   ApprovalStatus,
+  PendingFollowUp,
   Task,
   TaskStatus,
 } from '@lds/shared';
@@ -42,7 +43,8 @@ export type BusEvent =
   | {
       type: 'approval-resolved';
       payload: { approvalId: string; taskId: string; status: ApprovalStatus; ts: string };
-    };
+    }
+  | { type: 'followup-queue'; payload: { taskId: string; queue: PendingFollowUp[] } };
 
 /** Redis Pub/Sub channel all orchestrator instances share. */
 const CHANNEL = 'lds:bus';

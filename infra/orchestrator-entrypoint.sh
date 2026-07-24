@@ -6,8 +6,22 @@
 # ----------------------------------------------------------------------
 set -e
 
-echo "[entrypoint] syncing dependencies (frozen lockfile)…"
-pnpm install --frozen-lockfile --prefer-offline
+# pnpm install --frozen-lockfile is a correctness check (fails on drift), but
+# it's not free even when nothing changed — every container restart during a
+# dev session (and there are many: EADDRINUSE recovery, hot-reload edge cases)
+# paid its full cost again. node_modules is a docker-managed anonymous volume
+# (persists across restarts, only reset by a genuine volume recreate), so a
+# stamp of the lockfile's hash there is a safe "did dependencies actually
+# change since last install" check.
+LOCKFILE_STAMP="node_modules/.pnpm-lockfile-hash"
+LOCKFILE_HASH=$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)
+if [ -f "$LOCKFILE_STAMP" ] && [ "$(cat "$LOCKFILE_STAMP")" = "$LOCKFILE_HASH" ]; then
+  echo "[entrypoint] dependencies unchanged since last install — skipping pnpm install"
+else
+  echo "[entrypoint] syncing dependencies (frozen lockfile)…"
+  pnpm install --frozen-lockfile --prefer-offline
+  echo "$LOCKFILE_HASH" > "$LOCKFILE_STAMP"
+fi
 
 # Storage driver by DATABASE_URL scheme (docs/plan-single-container.md Phase
 # 2): `file:` = sqlite (minimal/single-container profile), else postgres

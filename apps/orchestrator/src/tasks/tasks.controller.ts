@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { FollowUpDto } from './dto/follow-up.dto';
@@ -43,6 +43,30 @@ export class TasksController {
   @Post(':id/follow-up')
   followUp(@Param('id') id: string, @Body() dto: FollowUpDto) {
     return this.tasks.followUp(id, dto.prompt ?? '', dto.attachments, dto.references);
+  }
+
+  /** The task's pending-follow-up queue (messages held while it's still running). */
+  @Get(':id/pending-follow-ups')
+  listPendingFollowUps(@Param('id') id: string) {
+    return this.tasks.listPendingFollowUps(id);
+  }
+
+  @Patch(':id/pending-follow-ups/:pendingId')
+  updatePendingFollowUp(
+    @Param('id') id: string,
+    @Param('pendingId') pendingId: string,
+    @Body() dto: FollowUpDto,
+  ) {
+    return this.tasks.updatePendingFollowUp(id, pendingId, {
+      text: dto.prompt,
+      attachments: dto.attachments,
+      references: dto.references,
+    });
+  }
+
+  @Delete(':id/pending-follow-ups/:pendingId')
+  removePendingFollowUp(@Param('id') id: string, @Param('pendingId') pendingId: string) {
+    return this.tasks.removePendingFollowUp(id, pendingId);
   }
 
   /** Create + enqueue a subtask under this task (manual decomposition). */

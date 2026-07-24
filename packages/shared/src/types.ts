@@ -149,6 +149,17 @@ export interface ApprovalRequest {
   resolvedAt: string | null;
 }
 
+/** A follow-up message held for a task that's still running — server-side
+ *  queue shared by the web dashboard and channels (see TasksService.followUp). */
+export interface PendingFollowUp {
+  id: string;
+  taskId: string;
+  text: string;
+  attachments: string[];
+  references: string[];
+  createdAt: string;
+}
+
 /** Usage aggregated for one provider over a time range (per-provider stats). */
 export interface ProviderUsage {
   provider: string;

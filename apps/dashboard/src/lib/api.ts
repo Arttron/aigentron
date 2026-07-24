@@ -2,6 +2,7 @@ import type {
   AgentSession,
   ApprovalRequest,
   ChannelKind,
+  PendingFollowUp,
   Task,
   TaskStatus,
   UsageReport,
@@ -263,6 +264,8 @@ export interface Settings {
   approvalTimeoutSeconds: number;
   verifyCommands: string;
   verifyMaxAttempts: number;
+  /** Max agent runs processed in parallel. */
+  concurrency: number;
   debugMode: boolean;
   agentInstructions: string;
   defaultProvider: string | null;
@@ -283,6 +286,7 @@ export type SettingsUpdate = Partial<{
   approvalTimeoutSeconds: number;
   verifyCommands: string;
   verifyMaxAttempts: number;
+  concurrency: number;
   debugMode: boolean;
   agentInstructions: string;
   defaultProvider: string;
@@ -496,7 +500,29 @@ export const api = {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({ prompt, attachments, references }),
-    }).then(unwrap<TaskDetail>),
+    }).then(unwrap<TaskDetail & { queued: boolean; queueLength: number }>),
+
+  /** The task's pending-follow-up queue — server-side, shared with channels. */
+  listPendingFollowUps: (id: string) =>
+    fetch(`${API_BASE}/tasks/${id}/pending-follow-ups`, { cache: 'no-store' }).then(
+      unwrap<PendingFollowUp[]>,
+    ),
+
+  updatePendingFollowUp: (
+    id: string,
+    pendingId: string,
+    patch: { prompt?: string; attachments?: string[]; references?: string[] },
+  ) =>
+    fetch(`${API_BASE}/tasks/${id}/pending-follow-ups/${pendingId}`, {
+      method: 'PATCH',
+      headers: jsonHeaders,
+      body: JSON.stringify(patch),
+    }).then(unwrap<PendingFollowUp[]>),
+
+  removePendingFollowUp: (id: string, pendingId: string) =>
+    fetch(`${API_BASE}/tasks/${id}/pending-follow-ups/${pendingId}`, { method: 'DELETE' }).then(
+      unwrap<PendingFollowUp[]>,
+    ),
 
   cancelTask: (id: string) =>
     fetch(`${API_BASE}/tasks/${id}/cancel`, { method: 'POST' }).then(unwrap<Task>),

@@ -45,6 +45,7 @@ export function GeneralSettingsForm() {
           approvalTimeoutSeconds: data.approvalTimeoutSeconds,
           verifyCommands: data.verifyCommands,
           verifyMaxAttempts: data.verifyMaxAttempts,
+          concurrency: data.concurrency,
           debugMode: data.debugMode,
           agentInstructions: data.agentInstructions,
           defaultAgent: data.defaultAgent ?? '',
@@ -215,6 +216,24 @@ export function GeneralSettingsForm() {
         </Field>
         <Muted className={styles.note}>
           On failure the agent gets the output and retries; only a green run is marked done / pushed.
+        </Muted>
+      </Card>
+
+      <Card>
+        <SectionTitle>Task queue</SectionTitle>
+        <Field label="Concurrency — agent runs processed in parallel">
+          <input
+            className={styles.narrow}
+            type="number"
+            min={1}
+            max={20}
+            value={form.concurrency ?? 1}
+            onChange={(e) => set('concurrency', Number(e.target.value))}
+          />
+        </Field>
+        <Muted className={styles.note}>
+          Takes effect live, within ~10s — no restart needed. In shared-workspace mode (one
+          worktree for all tasks) this is effectively capped at 1 regardless of this value.
         </Muted>
       </Card>
 

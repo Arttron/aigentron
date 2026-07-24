@@ -33,15 +33,28 @@ export class ProvidersService implements OnModuleInit {
   ) {}
 
 
-  /** Re-sync LiteLLM routes on boot (idempotent; covers a litellm DB reset). */
+  /**
+   * Re-sync LiteLLM routes on boot (idempotent; covers a litellm DB reset).
+   * Deliberately NOT awaited by the caller (NestJS awaits `onModuleInit`'s
+   * own returned promise, which blocks `app.listen()`) — each `syncRoute`
+   * below can trigger a full litellm restart (the managed/single-container
+   * profile's child process: kill, respawn, poll-for-ready up to 30s; or an
+   * HTTP round-trip to a separately-run litellm in the full profile), and
+   * those aren't parallel in practice (LitellmManagedService serializes every
+   * restart behind one queue) — N providers could mean N sequential restarts
+   * before the API became reachable at all. This is best-effort
+   * reconciliation, not something a request depends on: `list()`/`get()`
+   * already call `ensureSeeded()` themselves, so provider DATA is correct
+   * immediately even if the litellm ROUTE sync is still catching up in the
+   * background.
+   */
   async onModuleInit(): Promise<void> {
     if (!this.litellm.enabled) return;
+    void this.resyncRoutes();
+  }
+
+  private async resyncRoutes(): Promise<void> {
     try {
-      // On a genuinely fresh DB (no rows yet — e.g. first boot of a new
-      // volume) the table is only seeded lazily on the first `list()`/`get()`
-      // call, which nothing has made yet at this point in boot; without this,
-      // litellm stays routeless until someone happens to hit GET /providers
-      // or edit one.
       await this.ensureSeeded();
       const rows = await this.prisma.provider.findMany();
       await Promise.all(rows.map((r) => this.syncRoute(r)));

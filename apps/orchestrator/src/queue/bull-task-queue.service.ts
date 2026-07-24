@@ -57,6 +57,13 @@ export class BullTaskQueue extends TaskQueue implements OnModuleInit, OnModuleDe
     this.logger.log(`Task worker started (bullmq, concurrency=${concurrency})`);
   }
 
+  setConcurrency(concurrency: number): void {
+    // BullMQ's Worker applies a reassigned `.concurrency` to future dispatch
+    // without needing a restart. No-op if the worker hasn't started yet —
+    // startWorker's own initial value already covers that case.
+    if (this.worker) this.worker.concurrency = concurrency;
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.worker?.close();
     await this.queue?.close();

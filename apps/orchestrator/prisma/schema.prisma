@@ -51,6 +51,12 @@ model AppSettings {
   verifyCommands    String?
   verifyMaxAttempts Int     @default(2)
 
+  // Max agent runs processed in parallel. Seeded from AGENT_CONCURRENCY (or 1 in
+  // shared-workspace mode) on first load; live-editable thereafter — the queue
+  // worker polls this rather than reading it once at boot (queue/task-worker.
+  // service.ts), so a change here takes effect without a restart.
+  concurrency Int @default(2)
+
   // when true the dashboard shows verbose 'assistant' transcript lines
   debugMode Boolean @default(false)
 
@@ -194,10 +200,31 @@ model Task {
   linksOut  TaskLink[]        @relation("LinkFrom")
   linksIn   TaskLink[]        @relation("LinkTo")
   threads   ChannelThread[]
+  pendingFollowUps PendingFollowUp[]
 
   @@index([status])
   @@index([createdById])
   @@index([parentId])
+}
+
+/// A follow-up message held for a task that's still running (not terminal) —
+/// the server-side equivalent of the dashboard's old client-only (localStorage)
+/// queue, now shared by the web UI AND channels so either can enqueue/see the
+/// same pending messages. Drained (oldest first) whenever the task's status
+/// becomes terminal (TasksService.setStatus), one per settle cycle, same as
+/// the old client behavior.
+model PendingFollowUp {
+  id          String   @id @default(cuid())
+  taskId      String
+  task        Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  text        String
+  /// JSON-encoded string[] of attachment filenames.
+  attachments String   @default("[]")
+  /// JSON-encoded string[] of referenced task ids (folded into context on send).
+  references  String   @default("[]")
+  createdAt   DateTime @default(now())
+
+  @@index([taskId, createdAt])
 }
 
 /// A bidirectional message transport (Telegram bot, later Slack/email). Config

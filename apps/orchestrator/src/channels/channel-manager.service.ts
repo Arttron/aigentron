@@ -11,7 +11,7 @@ import { decodeAttachments } from '../prisma/agent-event-attachments';
 import { AgentEventBus, type BusEvent } from '../bus/agent-event-bus';
 import { Readable } from 'node:stream';
 import { readFile } from 'node:fs/promises';
-import { TasksService } from '../tasks/tasks.service';
+import { MAX_PENDING_FOLLOWUPS, TasksService } from '../tasks/tasks.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PresenceService } from '../presence/presence.service';
@@ -383,6 +383,94 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * Continue the active task with a message, using the SAME server-side
+   * pending-follow-up queue the dashboard uses (TasksService.followUp): if the
+   * task is still running this just enqueues and confirms with a queue
+   * position, rather than dropping the message — it's delivered automatically
+   * once the task next settles.
+   */
+  private async deliverFollowUp(
+    channelId: string,
+    chatId: string,
+    taskId: string,
+    text: string,
+    attachments?: string[],
+    attachedLabel?: string,
+    incomingMessageId?: string,
+  ): Promise<void> {
+    try {
+      const result = await this.tasks.followUp(taskId, text, attachments);
+      if (incomingMessageId) void this.react(channelId, chatId, incomingMessageId, result.queued ? '📥' : '👀');
+      const prefix = attachedLabel ? `📎 Attached ${attachedLabel} — ` : '';
+      await this.send(
+        channelId,
+        chatId,
+        result.queued
+          ? `${prefix}📥 Queued (${result.queueLength}/${MAX_PENDING_FOLLOWUPS}) — will run once the current turn finishes.`
+          : `${prefix}↳ Continuing the current task.`,
+        [[{ label: '⏹ Cancel', data: `cn:${taskId}` }]],
+      );
+    } catch (err) {
+      if (incomingMessageId) void this.react(channelId, chatId, incomingMessageId, '⚠️');
+      await this.send(channelId, chatId, `⚠️ ${(err as Error).message}`);
+    }
+  }
+
+  /** Best-effort emoji reaction on an inbound message (bot → user ack), e.g.
+   *  👀 "working on it" / 📥 "queued". No-op on transports without support. */
+  private async react(channelId: string, chatId: string, messageId: string, emoji: string): Promise<void> {
+    const row = await this.channels.getRow(channelId).catch(() => null);
+    if (!row) return;
+    const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
+    await adapter.reactToMessage?.(chatId, messageId, emoji).catch(() => undefined);
+  }
+
+  /** A tap on a "⏹ Cancel" button — same logic as the /cancel command, just
+   *  reachable without knowing the taskId is implicitly "the active one". */
+  private async cancelViaButton(channelId: string, chatId: string, taskId: string): Promise<void> {
+    const task = await this.tasks.get(taskId).catch(() => null);
+    if (!task) {
+      await this.send(channelId, chatId, 'Task not found (it may have been deleted).');
+      return;
+    }
+    if (isTerminalStatus(task.status)) {
+      await this.send(channelId, chatId, `Task is already ${task.status}.`);
+      return;
+    }
+    await this.tasks.cancel(taskId);
+    await this.send(channelId, chatId, '🛑 Cancelled.');
+  }
+
+  /**
+   * A reaction on a message we sent. Currently only meaningful on a tracked
+   * approval message: 👍 approves, 👎 denies — the same effect as tapping the
+   * Approve/Deny buttons or typing /approve, just via an emoji. Any other
+   * reaction (or one on an untracked message) is silently ignored.
+   */
+  private async handleReaction(
+    channelId: string,
+    chatId: string,
+    messageId: string,
+    emoji: string,
+    channelKind: string,
+    who: string,
+  ): Promise<void> {
+    if (emoji !== '👍' && emoji !== '👎') return;
+    let approvalId: string | null = null;
+    for (const [id, refs] of this.approvalMessages) {
+      if (refs.some((r) => r.channelId === channelId && r.chatId === chatId && r.messageId === messageId)) {
+        approvalId = id;
+        break;
+      }
+    }
+    if (!approvalId) return; // not a message we track reactions for
+    const decision = emoji === '👍' ? 'approve' : 'deny';
+    await this.approvals
+      .decide(approvalId, decision, { displayName: `${channelKind}:${who}` })
+      .catch((err) => this.logger.warn(`reaction-decide failed: ${(err as Error).message}`));
+  }
+
   // ---- Incoming (chat → orchestrator) --------------------------------------
 
   private async handleIncoming(row: ChannelRow, e: IncomingEvent): Promise<void> {
@@ -423,6 +511,16 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    if (e.type === 'cancel') {
+      await this.cancelViaButton(channelId, e.chatId, e.taskId);
+      return;
+    }
+
+    if (e.type === 'reaction') {
+      await this.handleReaction(channelId, e.chatId, e.messageId, e.emoji, row.kind, e.userName ?? e.userId);
+      return;
+    }
+
     const ctx = { channelId, chatId: e.chatId, userId: e.userId, kind: row.kind };
 
     // Slash commands manage the conversation (new-task, tasks, task, clear, …).
@@ -445,18 +543,17 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         where: { id: state.activeTaskId },
         select: { status: true },
       });
-      if (task && !isTerminalStatus(task.status)) {
-        await this.send(channelId, e.chatId, '⏳ Still working on the current task — send it again once this finishes, or /new-task to start another.');
-        return;
-      }
       if (task) {
-        await this.tasks.followUp(state.activeTaskId, e.text);
-        await this.send(channelId, e.chatId, '↳ Continuing the current task.');
+        await this.deliverFollowUp(channelId, e.chatId, state.activeTaskId, e.text, undefined, undefined, e.messageId);
         return;
       }
       // active task was deleted — fall through to create a fresh one
     }
     const reply = await this.commands.newTask(ctx, e.text).catch((err) => `⚠️ ${(err as Error).message}`);
+    // Neither reaction fits the "send a description" prompt (empty input) —
+    // only react on a real outcome (created, or actually failed).
+    const ackEmoji = reply.startsWith('✅') ? '✅' : reply.startsWith('⚠️') ? '⚠️' : null;
+    if (e.messageId && ackEmoji) void this.react(channelId, e.chatId, e.messageId, ackEmoji);
     await this.send(channelId, e.chatId, reply);
   }
 
@@ -475,14 +572,17 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         where: { id: state.activeTaskId },
         select: { status: true },
       });
-      if (task && !isTerminalStatus(task.status)) {
-        await this.send(channelId, e.chatId, '⏳ Still working — send the file again once the task finishes.');
-        return;
-      }
       if (task) {
         const meta = await this.attachments.save(state.activeTaskId, e.fileName, Readable.from(buf));
-        await this.tasks.followUp(state.activeTaskId, caption, [meta.name]);
-        await this.send(channelId, e.chatId, `📎 Attached ${meta.name} — continuing the task.`);
+        await this.deliverFollowUp(
+          channelId,
+          e.chatId,
+          state.activeTaskId,
+          caption,
+          [meta.name],
+          meta.name,
+          e.messageId,
+        );
         return;
       }
     }
@@ -499,6 +599,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     await this.tasks.start(created.id, [meta.name]);
     await this.channels.linkThread(channelId, created.id, e.chatId);
     await this.channels.setChatState(channelId, e.chatId, { activeTaskId: created.id });
+    if (e.messageId) void this.react(channelId, e.chatId, e.messageId, '✅');
     await this.send(channelId, e.chatId, `📎 New task «${created.title}» with ${meta.name}. Updates will appear here.`);
   }
 }

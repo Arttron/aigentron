@@ -6,6 +6,7 @@ import type {
   AgentSessionStatus,
   ApprovalRequest,
   ApprovalStatus,
+  PendingFollowUp,
   Task,
   TaskStatus,
 } from './types';
@@ -27,6 +28,9 @@ export const SERVER_EVENT = {
   agentStatus: 'agent:status',
   approvalCreated: 'approval:created',
   approvalResolved: 'approval:resolved',
+  /** The task's pending-follow-up queue changed (enqueued/removed/drained) —
+   *  from this client, another tab, or a channel. */
+  followUpQueue: 'task:followup-queue',
 } as const;
 
 /** Client -> server event names. */
@@ -87,4 +91,9 @@ export interface ApprovalResolvedEvent {
 
 export interface TaskUpsertedEvent {
   task: Task;
+}
+
+export interface FollowUpQueueEvent {
+  taskId: string;
+  queue: PendingFollowUp[];
 }

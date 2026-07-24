@@ -66,6 +66,12 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
     this.logger.log(`Task worker started (embedded, concurrency=${this.concurrency})`);
   }
 
+  setConcurrency(concurrency: number): void {
+    this.concurrency = Math.max(1, concurrency);
+    // A slot may now be free (raised) — don't wait for the next poll tick.
+    setImmediate(() => void this.tick());
+  }
+
   /** Claim due jobs up to the concurrency cap and run them. */
   private async tick(): Promise<void> {
     if (!this.processor || this.stopped) return;

@@ -32,6 +32,9 @@ export type IncomingEvent =
       text: string;
       /** True when the user replied to one of our messages (→ follow-up vs new task). */
       isReply: boolean;
+      /** Id of this message in the transport, for reactToMessage (ack) — optional
+       *  since not every transport can supply one. */
+      messageId?: string;
     }
   | {
       type: 'approval';
@@ -50,6 +53,14 @@ export type IncomingEvent =
       taskId: string;
     }
   | {
+      /** A tap on a "⏹ Cancel" button attached to a task-related message. */
+      type: 'cancel';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      taskId: string;
+    }
+  | {
       type: 'attachment';
       chatId: string;
       userId: string;
@@ -61,6 +72,18 @@ export type IncomingEvent =
       /** Optional caption sent with the file. */
       caption?: string;
       isReply: boolean;
+      messageId?: string;
+    }
+  | {
+      /** The human reacted (with an emoji) to a message we sent. */
+      type: 'reaction';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      /** Id of the message that was reacted to. */
+      messageId: string;
+      /** The reaction emoji, e.g. '👍'. Empty string = the reaction was removed. */
+      emoji: string;
     };
 
 export type IncomingHandler = (event: IncomingEvent) => void | Promise<void>;
@@ -81,6 +104,9 @@ export interface ChannelAdapter {
   /** Mark a previously-sent approval message as resolved: remove its buttons and
    *  show the outcome. No-op if the transport can't edit messages. */
   resolveApprovalMessage?(chatId: string, messageId: string, outcome: string): Promise<void>;
+  /** React to a message with an emoji (e.g. acknowledging receipt). Best-effort,
+   *  optional — not every transport supports message reactions. */
+  reactToMessage?(chatId: string, messageId: string, emoji: string): Promise<void>;
   /** Begin receiving inbound events (long-polling). Idempotent. */
   startPolling(onEvent: IncomingHandler): void;
   /** Stop receiving and release resources. Idempotent. */

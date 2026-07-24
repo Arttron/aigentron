@@ -18,6 +18,7 @@ function serialize(s: SettingsRow) {
     approvalTimeoutSeconds: s.approvalTimeoutSeconds,
     verifyCommands: s.verifyCommands ?? '',
     verifyMaxAttempts: s.verifyMaxAttempts,
+    concurrency: s.concurrency,
     debugMode: s.debugMode,
     agentInstructions: s.agentInstructions,
     defaultProvider: s.defaultProvider,
@@ -41,6 +42,7 @@ function toPatch(dto: UpdateSettingsDto): SettingsPatch {
     patch.approvalTimeoutSeconds = dto.approvalTimeoutSeconds;
   if (dto.verifyCommands !== undefined) patch.verifyCommands = dto.verifyCommands || null;
   if (dto.verifyMaxAttempts !== undefined) patch.verifyMaxAttempts = dto.verifyMaxAttempts;
+  if (dto.concurrency !== undefined) patch.concurrency = dto.concurrency;
   if (dto.debugMode !== undefined) patch.debugMode = dto.debugMode;
   if (dto.agentInstructions !== undefined) patch.agentInstructions = dto.agentInstructions;
   if (dto.defaultProvider !== undefined) patch.defaultProvider = dto.defaultProvider || null;

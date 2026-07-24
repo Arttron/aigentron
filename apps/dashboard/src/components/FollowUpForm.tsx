@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { SERVER_EVENT, type PendingFollowUp } from '@lds/shared';
 import { api } from '@/lib/api';
+import { getSocket } from '@/lib/socket';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { TaskReferencePicker } from './TaskReferencePicker';
@@ -10,30 +12,25 @@ interface Staged {
   mime: string;
 }
 
-/** A message held until the task is settled enough to accept a follow-up. */
-interface Queued {
-  id: string;
-  text: string;
-  attachments: Staged[];
-  references: string[];
+/** Mirrors TasksService.MAX_PENDING_FOLLOWUPS — the server is authoritative
+ *  (rejects past this), this is just for a clear inline hint before that. */
+const MAX_QUEUE = 3;
+
+const IMAGE_EXT: Record<string, string> = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', webp: 'webp', gif: 'gif' };
+/** The queue only stores filenames — infer a mime from the extension so a
+ *  re-opened edit still shows an image thumbnail instead of the generic icon. */
+function inferMime(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase();
+  return ext && IMAGE_EXT[ext] ? `image/${IMAGE_EXT[ext]}` : 'application/octet-stream';
 }
 
-const MAX_QUEUE = 3;
-/** Auto-retry budget for a failed queued send; after that, a user edit/remove re-arms. */
-const MAX_SEND_ATTEMPTS = 3;
-const queueKey = (taskId: string) => `lds.mq.${taskId}`;
-/** crypto.randomUUID is secure-context-only (undefined over plain HTTP on a LAN). */
-const newId = () =>
-  typeof crypto !== 'undefined' && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-
 /**
- * Chat composer + message queue. A follow-up can only be sent to a settled task
- * (the API 409s otherwise), so while a run is in progress messages are queued
- * (up to 3) and sent automatically — one per settle cycle, since each follow-up
- * re-runs the task. Editing a queued message loads it back into the composer
- * (Save / Cancel). The queue is persisted per task in localStorage.
+ * Chat composer + message queue. A follow-up can only run on a settled task,
+ * so while a run is in progress the message is held in the server-side
+ * pending-follow-up queue (TasksService) instead — the SAME queue a channel
+ * (Telegram, etc.) enqueues into, drained automatically (oldest first, one
+ * per settle cycle) by the backend, not by this component. This just displays
+ * the queue (live, via the followUpQueue socket event) and offers edit/remove.
  */
 export function FollowUpForm({
   taskId,
@@ -53,73 +50,28 @@ export function FollowUpForm({
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [queue, setQueue] = useState<Queued[]>([]);
-  const [draining, setDraining] = useState(false);
+  const [queue, setQueue] = useState<PendingFollowUp[]>([]);
   // Id of the queued message currently loaded into the composer for editing.
   const [editingId, setEditingId] = useState<string | null>(null);
-  // Allowed to auto-send once per settled period: armed while the task is busy,
-  // consumed on send, so we never fire a second follow-up before the first has
-  // re-run the task (which would 409).
-  const armed = useRef(true);
-  // Consecutive failures sending the current head; bounds auto-retries so a
-  // hard failure can't loop, while a user edit/remove resets and re-arms.
-  const sendFails = useRef(0);
 
-  // Load / persist the queue per task.
+  // Load the server-side queue for this task, then keep it live via the socket
+  // — a channel or another tab can enqueue/drain it just as easily as this form.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem(queueKey(taskId));
-      setQueue(raw ? (JSON.parse(raw) as Queued[]) : []);
-    } catch {
-      setQueue([]);
-    }
+    let active = true;
+    api
+      .listPendingFollowUps(taskId)
+      .then((q) => active && setQueue(q))
+      .catch(() => undefined);
+    const socket = getSocket();
+    const onQueue = (e: { taskId: string; queue: PendingFollowUp[] }) => {
+      if (e.taskId === taskId) setQueue(e.queue);
+    };
+    socket.on(SERVER_EVENT.followUpQueue, onQueue);
+    return () => {
+      active = false;
+      socket.off(SERVER_EVENT.followUpQueue, onQueue);
+    };
   }, [taskId]);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(queueKey(taskId), JSON.stringify(queue));
-    } catch {
-      /* quota / disabled storage — the queue just won't persist */
-    }
-  }, [taskId, queue]);
-
-  // Auto-drain: when the task is settled, send the head. `armed` gates it to one
-  // send per settle cycle (the follow-up flips `terminal` false → we re-arm).
-  // Paused while an edit is open — sending a message the user is rewriting would
-  // deliver the stale text and silently discard the edit.
-  useEffect(() => {
-    if (!terminal) {
-      armed.current = true;
-      sendFails.current = 0;
-      return;
-    }
-    if (!armed.current || draining || queue.length === 0 || editingId) return;
-    armed.current = false;
-    const head = queue[0];
-    setDraining(true);
-    setError(null);
-    onSend(head.text, head.attachments.map((a) => a.name), head.references)
-      .then(() => {
-        sendFails.current = 0;
-        setQueue((q) => q.filter((m) => m.id !== head.id));
-      })
-      .catch((e) => {
-        // Re-arm for a bounded number of auto-retries; past that the queue
-        // holds (error shown) until the user edits/removes the message, which
-        // re-arms. Without this a single network blip stuck the queue forever.
-        sendFails.current += 1;
-        if (sendFails.current < MAX_SEND_ATTEMPTS) armed.current = true;
-        setError(`Queued message not sent: ${(e as Error).message}`);
-      })
-      .finally(() => setDraining(false));
-  }, [terminal, draining, queue, editingId, onSend]);
-
-  /** A user touched the queue — reset the failure budget and allow draining again. */
-  const rearm = () => {
-    sendFails.current = 0;
-    armed.current = true;
-  };
 
   const pickFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -139,11 +91,10 @@ export function FollowUpForm({
   };
 
   const composed = text.trim().length > 0 || staged.length > 0;
-  // Send immediately only when the task is settled AND nothing is queued ahead;
-  // otherwise everything goes through the queue so order is preserved.
-  const immediate = terminal && queue.length === 0;
-  const canSendNow = immediate && !sending && composed;
-  const canQueue = !immediate && composed && queue.length < MAX_QUEUE;
+  // The server enqueues rather than 409s once terminal — this is just a clear
+  // inline block before that, matching the server's own cap.
+  const queueFull = !terminal && !editingId && queue.length >= MAX_QUEUE;
+  const canSend = composed && !sending && !queueFull;
 
   const clearComposer = () => {
     setText('');
@@ -153,11 +104,21 @@ export function FollowUpForm({
   };
 
   const send = async () => {
-    if (!canSendNow) return;
+    if (!canSend) return;
     setSending(true);
     setError(null);
     try {
-      await onSend(text.trim(), staged.map((s) => s.name), references);
+      if (editingId) {
+        const updated = await api.updatePendingFollowUp(taskId, editingId, {
+          prompt: text.trim(),
+          attachments: staged.map((s) => s.name),
+          references,
+        });
+        setQueue(updated);
+        setEditingId(null);
+      } else {
+        await onSend(text.trim(), staged.map((s) => s.name), references);
+      }
       clearComposer();
     } catch (e) {
       setError((e as Error).message);
@@ -166,48 +127,35 @@ export function FollowUpForm({
     }
   };
 
-  const enqueue = () => {
-    if (!canQueue) return;
-    setQueue((q) => [
-      ...q,
-      { id: newId(), text: text.trim(), attachments: staged, references },
-    ]);
-    rearm();
-    clearComposer();
-  };
-
   // Editing reuses the main composer: load the message in, Save writes it back
   // in place, Cancel discards. Both exit edit mode and clear the composer.
-  const startEdit = (m: Queued) => {
+  const startEdit = (m: PendingFollowUp) => {
     setEditingId(m.id);
     setText(m.text);
-    setStaged(m.attachments);
+    setStaged(m.attachments.map((name) => ({ name, mime: inferMime(name) })));
     setReferences(m.references);
     setShowRefs(m.references.length > 0);
     setError(null);
-  };
-  const saveEdit = () => {
-    if (!editingId || !composed) return;
-    setQueue((q) =>
-      q.map((x) =>
-        x.id === editingId ? { ...x, text: text.trim(), attachments: staged, references } : x,
-      ),
-    );
-    rearm();
-    setEditingId(null);
-    clearComposer();
   };
   const cancelEdit = () => {
     setEditingId(null);
     clearComposer();
   };
 
+  const removeQueued = async (id: string) => {
+    try {
+      const updated = await api.removePendingFollowUp(taskId, id);
+      setQueue(updated);
+      if (editingId === id) cancelEdit();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      if (editingId) saveEdit();
-      else if (immediate) void send();
-      else enqueue();
+      void send();
     }
   };
 
@@ -218,11 +166,15 @@ export function FollowUpForm({
     else if (kind === 'task') setShowRefs(true);
   };
 
-  const primaryLabel = immediate
-    ? sending
-      ? 'Sending…'
-      : 'Send'
-    : `Queue${queue.length ? ` (${queue.length}/${MAX_QUEUE})` : ''}`;
+  const primaryLabel = sending
+    ? editingId
+      ? 'Saving…'
+      : 'Sending…'
+    : editingId
+      ? 'Save changes'
+      : terminal
+        ? 'Send'
+        : `Queue${queue.length ? ` (${queue.length + 1}/${MAX_QUEUE})` : ''}`;
 
   return (
     <Card>
@@ -279,29 +231,23 @@ export function FollowUpForm({
         )}
         {editingId ? (
           <>
-            <Button variant="primary" onClick={saveEdit} disabled={!composed}>
-              Save changes
+            <Button variant="primary" onClick={send} disabled={!canSend}>
+              {primaryLabel}
             </Button>
             <Button onClick={cancelEdit}>Cancel</Button>
           </>
         ) : (
-          <Button
-            variant="primary"
-            onClick={immediate ? send : enqueue}
-            disabled={immediate ? !canSendNow : !canQueue}
-          >
+          <Button variant="primary" onClick={send} disabled={!canSend}>
             {primaryLabel}
           </Button>
         )}
         {editingId && <Muted className={styles.hint}>editing a queued message</Muted>}
         {!editingId && !terminal && (
           <Muted className={styles.hint}>
-            run in progress — messages queue and send automatically when it finishes
+            run in progress — this queues and sends automatically once it finishes
           </Muted>
         )}
-        {!editingId && !immediate && queue.length >= MAX_QUEUE && (
-          <Muted className={styles.hint}>queue full ({MAX_QUEUE}) — edit or remove one below</Muted>
-        )}
+        {queueFull && <Muted className={styles.hint}>queue full ({MAX_QUEUE}) — edit or remove one below</Muted>}
         {error && <ErrorText>{error}</ErrorText>}
       </Row>
 
@@ -309,10 +255,8 @@ export function FollowUpForm({
         <div className={styles.queue}>
           <div className={styles.queueHead}>
             Queued ({queue.length}/{MAX_QUEUE}) — sent automatically, one per run
-            {draining && <span className={styles.draining}> · sending…</span>}
           </div>
           {queue.map((m, i) => {
-            const locked = i === 0 && draining; // the head is being sent
             const editing = editingId === m.id;
             return (
               <div key={m.id} className={cn(styles.qItem, editing && styles.qEditing)}>
@@ -333,22 +277,12 @@ export function FollowUpForm({
                   type="button"
                   className={styles.qBtn}
                   title="Edit"
-                  disabled={locked || editing}
+                  disabled={editing}
                   onClick={() => startEdit(m)}
                 >
                   ✎
                 </button>
-                <button
-                  type="button"
-                  className={styles.qBtn}
-                  title="Remove"
-                  disabled={locked}
-                  onClick={() => {
-                    if (editing) cancelEdit();
-                    setQueue((q) => q.filter((x) => x.id !== m.id));
-                    rearm();
-                  }}
-                >
+                <button type="button" className={styles.qBtn} title="Remove" onClick={() => removeQueued(m.id)}>
                   ✕
                 </button>
               </div>

@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { isTerminalStatus, type Task, type TaskStatus } from '@lds/shared';
+import { isTerminalStatus, type PendingFollowUp, type Task, type TaskStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { decodeAttachments } from '../prisma/agent-event-attachments';
@@ -40,6 +40,24 @@ export interface SubtaskInput {
   title?: string;
   prompt: string;
   agentName?: string;
+}
+
+/** Cap on pending follow-ups per task — matches the old client-only queue's
+ *  limit (FollowUpForm.tsx), now enforced server-side since any client can add. */
+export const MAX_PENDING_FOLLOWUPS = 3;
+
+/** Prisma row shape for a pending follow-up. */
+type PendingFollowUpRow = Awaited<ReturnType<PrismaService['pendingFollowUp']['create']>>;
+
+function serializePendingFollowUp(row: PendingFollowUpRow): PendingFollowUp {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    text: row.text,
+    attachments: JSON.parse(row.attachments || '[]'),
+    references: JSON.parse(row.references || '[]'),
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 @Injectable()
@@ -284,21 +302,107 @@ export class TasksService {
     return task;
   }
 
-  /** Queue a follow-up that continues the task's existing agent session. */
+  /**
+   * Continue a task with a follow-up message. If it's still running (not
+   * terminal), the message is held in the server-side pending-follow-up queue
+   * instead of racing a duplicate job onto the same worktree — the SAME queue
+   * whether this came from the dashboard or a channel, drained (oldest first,
+   * one per settle cycle) by setStatus() whenever the task next goes terminal.
+   * Returns the task detail with `queued`/`queueLength` merged in so a caller
+   * that doesn't care can still treat the result as a plain task.
+   */
   async followUp(id: string, prompt: string, attachments?: string[], references?: string[]) {
     const task = await this.get(id);
-    // Only follow up on a settled task; following up on one still queued/
-    // running/awaiting-approval would race a duplicate job onto the same worktree.
     if (!isTerminalStatus(task.status)) {
-      throw new ConflictException(
-        `Task ${id} is ${task.status}; wait for it to finish before following up`,
-      );
+      return this.enqueueFollowUp(id, prompt, attachments, references);
     }
+    return this.runFollowUpNow(id, prompt, attachments, references);
+  }
+
+  /** Actually dispatch a follow-up now — caller has already confirmed the task is terminal. */
+  private async runFollowUpNow(id: string, prompt: string, attachments?: string[], references?: string[]) {
     // References added in a message accumulate on the task and fold into context.
     if (references?.length) await this.linkReferences(id, references);
     await this.setStatus(id, 'queued');
-    await this.queue.enqueue({ taskId: task.id, followUpPrompt: prompt, attachments });
-    return this.get(id);
+    await this.queue.enqueue({ taskId: id, followUpPrompt: prompt, attachments });
+    const queueLength = await this.prisma.pendingFollowUp.count({ where: { taskId: id } });
+    return { ...(await this.get(id)), queued: false as const, queueLength };
+  }
+
+  private async enqueueFollowUp(id: string, prompt: string, attachments?: string[], references?: string[]) {
+    const count = await this.prisma.pendingFollowUp.count({ where: { taskId: id } });
+    if (count >= MAX_PENDING_FOLLOWUPS) {
+      throw new ConflictException(
+        `Follow-up queue is full (${MAX_PENDING_FOLLOWUPS}) for this task — remove one before adding another`,
+      );
+    }
+    await this.prisma.pendingFollowUp.create({
+      data: {
+        taskId: id,
+        text: prompt,
+        attachments: JSON.stringify(attachments ?? []),
+        references: JSON.stringify(references ?? []),
+      },
+    });
+    await this.publishFollowUpQueue(id);
+    return { ...(await this.get(id)), queued: true as const, queueLength: count + 1 };
+  }
+
+  /** Pop the oldest pending follow-up (if any) and run it now — called from
+   *  setStatus() whenever a task settles into a terminal status. */
+  private async drainPendingFollowUp(id: string): Promise<void> {
+    const next = await this.prisma.pendingFollowUp.findFirst({
+      where: { taskId: id },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!next) return;
+    // Delete before dispatch: runFollowUpNow flips the task off-terminal, and a
+    // concurrent read of the queue mid-dispatch should already see it gone.
+    await this.prisma.pendingFollowUp.delete({ where: { id: next.id } }).catch(() => undefined);
+    await this.publishFollowUpQueue(id);
+    await this.runFollowUpNow(
+      id,
+      next.text,
+      JSON.parse(next.attachments || '[]'),
+      JSON.parse(next.references || '[]'),
+    );
+  }
+
+  async listPendingFollowUps(taskId: string): Promise<PendingFollowUp[]> {
+    const rows = await this.prisma.pendingFollowUp.findMany({
+      where: { taskId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map(serializePendingFollowUp);
+  }
+
+  /** Remove one queued follow-up (e.g. the dashboard's ✕ button). Scoped by
+   *  taskId too so a stray id from elsewhere can't touch another task's queue. */
+  async removePendingFollowUp(taskId: string, pendingId: string): Promise<PendingFollowUp[]> {
+    await this.prisma.pendingFollowUp.deleteMany({ where: { id: pendingId, taskId } });
+    await this.publishFollowUpQueue(taskId);
+    return this.listPendingFollowUps(taskId);
+  }
+
+  /** Edit a queued follow-up in place (the dashboard's ✎ edit flow) — only the
+   *  provided fields change, so a text-only edit doesn't disturb attachments. */
+  async updatePendingFollowUp(
+    taskId: string,
+    pendingId: string,
+    patch: { text?: string; attachments?: string[]; references?: string[] },
+  ): Promise<PendingFollowUp[]> {
+    const data: { text?: string; attachments?: string; references?: string } = {};
+    if (patch.text !== undefined) data.text = patch.text;
+    if (patch.attachments !== undefined) data.attachments = JSON.stringify(patch.attachments);
+    if (patch.references !== undefined) data.references = JSON.stringify(patch.references);
+    await this.prisma.pendingFollowUp.updateMany({ where: { id: pendingId, taskId }, data });
+    await this.publishFollowUpQueue(taskId);
+    return this.listPendingFollowUps(taskId);
+  }
+
+  private async publishFollowUpQueue(taskId: string): Promise<void> {
+    const queue = await this.listPendingFollowUps(taskId);
+    this.bus.publish({ type: 'followup-queue', payload: { taskId, queue } });
   }
 
   /**
@@ -497,6 +601,14 @@ export class TasksService {
     const ts = new Date().toISOString();
     this.bus.publish({ type: 'task-status', payload: { taskId: id, status, ts } });
     this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(task) } });
+    // The task just settled — drain one pending follow-up if the queue has any
+    // (runFollowUpNow's own setStatus('queued') call is NOT terminal, so this
+    // doesn't recurse). Never let a drain failure mask the status change itself.
+    if (isTerminalStatus(status)) {
+      await this.drainPendingFollowUp(id).catch((err) =>
+        this.logger.warn(`drain pending follow-up failed for ${id}: ${(err as Error).message}`),
+      );
+    }
     return task;
   }
 }
