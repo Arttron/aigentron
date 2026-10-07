@@ -1,6 +1,7 @@
-Aigentron v0.1.25
+Aigentron v0.1.26
 
-Two install-time fixes found on a fresh cloud server:
+Two install-time fixes found on a fresh cloud server (v0.1.25 was published
+without release assets; this release supersedes it):
 
 - The installer no longer fails on machines with a small RAM-backed /tmp
   (common on cloud images). If /tmp has less than the required free space but
