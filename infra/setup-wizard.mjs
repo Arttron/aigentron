@@ -645,7 +645,11 @@ async function main() {
     return;
   }
 
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  // No `output`: with one, readline runs in terminal mode on a TTY and echoes
+  // every keypress itself. readRawLine()'s stdin.resume() re-activates that
+  // listener, so each typed/pasted character was printed twice (ours + its).
+  // Without `output` it is non-terminal and never writes to the screen.
+  const rl = createInterface({ input: process.stdin });
   // Paused immediately and never used to actually read input — every prompt
   // (qp()/promptSecret(), see readRawLine()) reads stdin itself in raw mode.
   // Kept alive only for this SIGINT fallback and rl.close() at the end; if

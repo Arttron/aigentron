@@ -1,16 +1,9 @@
-Aigentron v0.1.24
+Aigentron v0.1.25
 
-Channels can now forward any file an agent produces, not just screenshots:
+Two install-time fixes found on a fresh cloud server:
 
-- Files an agent copies into $LDS_ATTACHMENTS_DIR (a report, an archive, a
-  log — anything, per SOUL.md) now reach the chat channel automatically once
-  the task settles, the same way they already show up in the dashboard's
-  attachments gallery. Images are sent as photos, everything else as a
-  downloadable document. Each file is only ever delivered once, even across
-  several follow-up runs of the same task.
-
-Also in this release:
-- Fixed the per-release S3 layout: a release's own deprecated.txt is now only
-  written when that specific version is actually deprecated, containing just
-  the reason (previously every release got a copy of the entire deprecated-
-  versions list, regardless of relevance).
+- The installer no longer fails on machines with a small RAM-backed /tmp
+  (common on cloud images). If /tmp has less than the required free space but
+  the install location has plenty, scratch files are staged under
+  <install dir>/tmp automatically — no TMPDIR workaround needed.
+- The setup wizard no longer shows every typed or pasted character twice.

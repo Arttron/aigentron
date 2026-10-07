@@ -398,6 +398,18 @@ fi
 # Many tools (pip, apt, tar) stage large temp files here by default — worth
 # checking on its own since it's sometimes a small RAM-backed tmpfs (seen
 # live: 455MB), independent of how much room the root filesystem has.
+# A small tmpfs /tmp (common on cloud images) shouldn't block the install when
+# the install filesystem has plenty of room: transparently stage scratch files
+# under INSTALL_DIR instead (exported, so install-bare.sh / pip / pnpm inherit it).
+tmp_avail=$(free_mb "${TMPDIR:-/tmp}")
+if [ -n "$tmp_avail" ] && [ "$tmp_avail" -lt "$MIN_FREE_DISK_MB" ]; then
+  alt_tmp="$INSTALL_DIR/tmp"
+  alt_avail=$(free_mb "$alt_tmp")
+  if [ -n "$alt_avail" ] && [ "$alt_avail" -ge "$MIN_FREE_DISK_MB" ]; then
+    log "${TMPDIR:-/tmp} has only ${tmp_avail}MB free — using $alt_tmp for temp files instead"
+    export TMPDIR="$alt_tmp"
+  fi
+fi
 note_if_low "temp dir (\$TMPDIR or /tmp — used for scratch space by many tools)" "${TMPDIR:-/tmp}"
 
 if [ -n "$disk_warnings" ]; then
