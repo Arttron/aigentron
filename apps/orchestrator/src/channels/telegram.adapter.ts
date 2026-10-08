@@ -101,6 +101,18 @@ export class TelegramAdapter implements ChannelAdapter {
     if (!data.ok) throw new Error(data.description || `Telegram sendPhoto failed (${res.status})`);
   }
 
+  async sendVoice(chatId: string, audio: { data: Buffer; mime: string }, caption?: string): Promise<void> {
+    // Ogg/Opus is what Telegram shows as a round-trip voice message; anything else goes out as an audio file.
+    const voice = /ogg|opus/i.test(audio.mime);
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    if (caption) form.append('caption', caption);
+    form.append(voice ? 'voice' : 'audio', new Blob([new Uint8Array(audio.data)], { type: audio.mime }), voice ? 'reply.ogg' : 'reply.mp3');
+    const res = await fetch(`${API}/bot${this.token}/${voice ? 'sendVoice' : 'sendAudio'}`, { method: 'POST', body: form });
+    const data = (await res.json()) as { ok: boolean; description?: string };
+    if (!data.ok) throw new Error(data.description || `Telegram ${voice ? 'sendVoice' : 'sendAudio'} failed (${res.status})`);
+  }
+
   async sendDocument(
     chatId: string,
     file: { data: Buffer; filename: string; mime?: string },
@@ -242,6 +254,28 @@ export class TelegramAdapter implements ChannelAdapter {
       }
       return;
     }
+    // A voice message, an audio file or a round video note → download and emit a voice event (transcribed upstream).
+    if (m && (m.voice || m.audio || m.video_note)) {
+      const v = m.voice ?? m.audio ?? m.video_note!;
+      const mime = m.voice?.mime_type ?? m.audio?.mime_type ?? (m.video_note ? 'video/mp4' : 'audio/ogg');
+      try {
+        const { data } = await this.downloadFile(v.file_id, m.audio?.file_name);
+        await onEvent({
+          type: 'voice',
+          chatId: String(m.chat.id),
+          userId: String(m.from?.id ?? m.chat.id),
+          userName: m.from?.username ?? m.from?.first_name,
+          data,
+          mime,
+          durationSec: v.duration,
+          isReply: Boolean(m.reply_to_message),
+          messageId: String(m.message_id),
+        });
+      } catch (e) {
+        this.logger.warn(`voice download failed: ${(e as Error).message}`);
+      }
+      return;
+    }
     if (m?.text) {
       await onEvent({
         type: 'message',
@@ -338,6 +372,9 @@ interface TelegramUpdate {
     reply_to_message?: unknown;
     photo?: { file_id: string }[];
     document?: { file_id: string; file_name?: string; mime_type?: string };
+    voice?: { file_id: string; duration?: number; mime_type?: string };
+    audio?: { file_id: string; duration?: number; mime_type?: string; file_name?: string };
+    video_note?: { file_id: string; duration?: number };
   };
   callback_query?: {
     id: string;

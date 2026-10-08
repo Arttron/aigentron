@@ -1,0 +1,51 @@
+.mic,
+.speak {
+  display: inline-grid;
+  place-items: center;
+  position: relative;
+  flex: none;
+  min-width: 42px;
+  height: 42px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  box-shadow: var(--raised-xs);
+  font-size: 18px;
+  line-height: 1;
+}
+.speak {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  font-size: 14px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.6;
+}
+.speakAbs {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+}
+.speak:hover {
+  opacity: 1;
+}
+.mic:disabled {
+  opacity: 0.5;
+}
+.rec {
+  color: #fff;
+  background: #ef4444 !important;
+}
+.dot {
+  --lvl: 0;
+  position: absolute;
+  inset: -3px;
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 calc(var(--lvl) * 8px) rgba(239, 68, 68, 0.35);
+  pointer-events: none;
+  transition: box-shadow 0.08s linear;
+}

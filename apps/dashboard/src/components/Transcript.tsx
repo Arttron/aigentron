@@ -5,6 +5,8 @@ import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
 import { Muted } from '@/components/ui';
 import { Markdown } from './Markdown';
+import { SpeakButton } from './SpeakButton';
+import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
 import styles from './Transcript.module.css';
 
 export interface LogLine {
@@ -18,7 +20,9 @@ export interface LogLine {
 const formatTs = (ts?: string) => {
   if (!ts) return null;
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? null : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
 const WORKING: Partial<Record<TaskStatus, string>> = {
@@ -80,6 +84,22 @@ export function Transcript({
   // trip the "near bottom" check and stop auto-scrolling mid-stream.
   const stick = useRef(true);
   const [away, setAway] = useState(false);
+  // Read new answers aloud when the person turned that on (voice-only mode speaks by itself, so skip it here).
+  const voice = useVoice();
+  const [autoSpeak] = useAutoSpeak();
+  const [voiceOnly] = useVoiceOnly();
+  const spoken = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const last = [...lines].reverse().find((l) => l.kind === 'result');
+    if (spoken.current === undefined) {
+      spoken.current = last?.id ?? null; // what was already there when the page opened is not "new"
+      return;
+    }
+    if (!last || last.id === spoken.current) return;
+    spoken.current = last.id;
+    if (autoSpeak && !voiceOnly && voice?.ttsReady && last.text.trim())
+      void speakText(last.text).catch(() => undefined);
+  }, [lines, autoSpeak, voiceOnly, voice]);
 
   const onScroll = () => {
     const el = ref.current;
@@ -110,17 +130,29 @@ export function Transcript({
     attachments && attachments.length > 0 ? (
       <span className={styles.thumbs}>
         {attachments.map((name) => (
-          <a key={name} href={api.attachmentUrl(taskId, name)} target="_blank" rel="noreferrer" title={name}>
+          <a
+            key={name}
+            href={api.attachmentUrl(taskId, name)}
+            target="_blank"
+            rel="noreferrer"
+            title={name}
+          >
             <img src={api.attachmentUrl(taskId, name)} alt={name} className={styles.thumb} />
           </a>
         ))}
       </span>
     ) : null;
 
-  const ts = (l: LogLine) => (formatTs(l.ts) ? <span className={styles.ts}>{formatTs(l.ts)}</span> : null);
+  const ts = (l: LogLine) =>
+    formatTs(l.ts) ? <span className={styles.ts}>{formatTs(l.ts)}</span> : null;
 
   const all = buildItems(lines);
-  const items = show === 'messages' ? all.filter((it) => it.type !== 'tool' && !(it.type === 'note' && it.line.kind === 'system')) : all;
+  // one read-aloud button only: on the latest answer
+  const lastFinalId = [...lines].reverse().find((l) => l.kind === 'result')?.id;
+  const items =
+    show === 'messages'
+      ? all.filter((it) => it.type !== 'tool' && !(it.type === 'note' && it.line.kind === 'system'))
+      : all;
   const hidden = all.length - items.length;
 
   return (
@@ -128,14 +160,26 @@ export function Transcript({
       <div className={styles.bar}>
         <span className={styles.seg} role="group" aria-label="Conversation style">
           {(['terminal', 'classic'] as const).map((v) => (
-            <button key={v} type="button" aria-pressed={look === v} className={cn(styles.segBtn, look === v && styles.segOn)} onClick={() => setLook(v)}>
+            <button
+              key={v}
+              type="button"
+              aria-pressed={look === v}
+              className={cn(styles.segBtn, look === v && styles.segOn)}
+              onClick={() => setLook(v)}
+            >
               {v}
             </button>
           ))}
         </span>
         <span className={styles.seg} role="group" aria-label="What to show">
           {(['all', 'messages'] as const).map((v) => (
-            <button key={v} type="button" aria-pressed={show === v} className={cn(styles.segBtn, show === v && styles.segOn)} onClick={() => setShow(v)}>
+            <button
+              key={v}
+              type="button"
+              aria-pressed={show === v}
+              className={cn(styles.segBtn, show === v && styles.segOn)}
+              onClick={() => setShow(v)}
+            >
               {v === 'all' ? 'all steps' : 'messages only'}
             </button>
           ))}
@@ -143,12 +187,21 @@ export function Transcript({
         {hidden > 0 && <span className={styles.hiddenNote}>{hidden} step(s) hidden</span>}
       </div>
 
-      <div className={styles.transcript} ref={ref} onScroll={onScroll} role="log" aria-live="polite" data-look={look}>
+      <div
+        className={styles.transcript}
+        ref={ref}
+        onScroll={onScroll}
+        role="log"
+        aria-live="polite"
+        data-look={look}
+      >
         {items.map((it, n) => {
           if (it.type === 'user') {
             return (
               <div key={it.line.id} className={styles.userMsg}>
-                <span className={styles.prompt} aria-label="you">you&gt;</span>
+                <span className={styles.prompt} aria-label="you">
+                  you&gt;
+                </span>
                 {ts(it.line)}
                 {it.line.text && <span className={styles.userText}>{it.line.text}</span>}
                 {thumbs(it.line.attachments)}
@@ -158,10 +211,15 @@ export function Transcript({
           if (it.type === 'agent') {
             return (
               <div key={it.line.id} className={cn(styles.agentMsg, it.final && styles.final)}>
-                <span className={styles.prompt} aria-label="agent">{it.final ? 'done>' : 'agent>'}</span>
+                <span className={styles.prompt} aria-label="agent">
+                  {it.final ? 'done>' : 'agent>'}
+                </span>
                 {ts(it.line)}
                 <div className={styles.agentBody}>
                   <Markdown text={it.line.text} />
+                  {it.final && autoSpeak && it.line.id === lastFinalId && (
+                    <SpeakButton text={it.line.text} abs />
+                  )}
                   {thumbs(it.line.attachments)}
                 </div>
               </div>
@@ -174,9 +232,15 @@ export function Transcript({
             return (
               <details key={key} className={styles.tool}>
                 <summary>
-                  <span className={styles.toolMark} aria-hidden>▸</span>
+                  <span className={styles.toolMark} aria-hidden>
+                    ▸
+                  </span>
                   <span className={styles.toolTitle}>{title || 'tool call'}</span>
-                  {it.result ? <span className={styles.toolDone}>[done]</span> : <span className={styles.toolRun}>[running]</span>}
+                  {it.result ? (
+                    <span className={styles.toolDone}>[done]</span>
+                  ) : (
+                    <span className={styles.toolRun}>[running]</span>
+                  )}
                 </summary>
                 <pre className={styles.toolBody}>{body}</pre>
                 {thumbs(it.result?.attachments)}
@@ -196,7 +260,9 @@ export function Transcript({
         {WORKING[status] && (
           <div className={cn(styles.line, styles.working)}>
             {WORKING[status]}
-            <span className={styles.cursor} aria-hidden>█</span>
+            <span className={styles.cursor} aria-hidden>
+              █
+            </span>
           </div>
         )}
       </div>

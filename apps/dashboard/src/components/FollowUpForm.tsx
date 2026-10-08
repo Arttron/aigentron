@@ -6,6 +6,10 @@ import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/
 import { cn } from '@/lib/cn';
 import { useLook } from '@/lib/transcript-look';
 import { useIsShort } from '@/lib/use-media';
+import { useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
+import { MicButton } from './MicButton';
+import { VoiceToggles } from './VoiceToggles';
+import { VoiceMode, type VoiceReply } from './VoiceMode';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import styles from './FollowUpForm.module.css';
 
@@ -45,14 +49,20 @@ export function FollowUpForm({
   terminal,
   onSend,
   compact = false,
+  lastReply = null,
 }: {
   taskId: string;
   terminal: boolean;
   /** Phone layout: a slim box pinned to the bottom (full-screen sheet in landscape). */
   compact?: boolean;
+  /** The agent's latest answer — read aloud in voice-only mode. */
+  lastReply?: VoiceReply | null;
   onSend: (prompt: string, attachments: string[], references: string[]) => Promise<void>;
 }) {
   const [look] = useLook();
+  const voiceCfg = useVoice();
+  const [voiceOnly, setVoiceOnly] = useVoiceOnly();
+  const [autoSpeak, setAutoSpeak] = useAutoSpeak();
   const short = useIsShort();
   const [sheet, setSheet] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -311,6 +321,44 @@ export function FollowUpForm({
     </>
   );
 
+  const micEl = (
+    <MicButton
+      onText={(t) => setText((x) => (x.trim() ? `${x.trimEnd()} ${t}` : t))}
+      onError={(m) => setError(m)}
+    />
+  );
+  const voiceBar =
+    voiceCfg && (voiceCfg.sttReady || voiceCfg.ttsReady) ? (
+      <div className={styles.voiceBar}>
+        <VoiceToggles
+          stt={voiceCfg.sttReady}
+          tts={voiceCfg.ttsReady}
+          autoSpeak={autoSpeak}
+          onAutoSpeak={setAutoSpeak}
+          onVoiceMode={() => setVoiceOnly(true)}
+        />
+      </div>
+    ) : null;
+  // Voice-only chat: the text box is replaced by a single indicator.
+  const voiceModeEl =
+    voiceOnly && voiceCfg?.sttReady && !editingId ? (
+      <VoiceMode
+        onSend={(t) => onSend(t, [], [])}
+        reply={lastReply}
+        working={!terminal}
+        onClose={() => setVoiceOnly(false)}
+      />
+    ) : null;
+  if (voiceModeEl && compact) return <div className={styles.dock}>{voiceModeEl}</div>;
+  if (voiceModeEl)
+    return (
+      <Card>
+        <SectionTitle className={styles.flush}>Voice message</SectionTitle>
+        {voiceModeEl}
+        {queueEl}
+      </Card>
+    );
+
   if (compact) {
     const sendBtn = (
       <Button
@@ -341,6 +389,7 @@ export function FollowUpForm({
             <Button onClick={() => setSheet(false)}>Close</Button>
           </div>
         )}
+        {voiceBar}
         {chipsEl}
         {(showRefs || references.length > 0) && (
           <TaskReferencePicker value={references} onChange={setReferences} excludeId={taskId} />
@@ -369,6 +418,7 @@ export function FollowUpForm({
             onKeyDown={onKeyDown}
             rows={sheet ? 8 : 1}
           />
+          {micEl}
           {sendBtn}
         </div>
         {editingId && (
@@ -393,6 +443,7 @@ export function FollowUpForm({
       <SectionTitle className={styles.flush}>
         {editingId ? 'Edit queued message' : 'Message'}
       </SectionTitle>
+      {voiceBar}
       <div className={cn(styles.composer, look === 'terminal' && styles.term)}>
         {look === 'terminal' && (
           <span className={styles.promptMark} aria-hidden>
@@ -429,6 +480,7 @@ export function FollowUpForm({
         {(showRefs || references.length > 0) && (
           <TaskReferencePicker value={references} onChange={setReferences} excludeId={taskId} />
         )}
+        {micEl}
         {editingId ? (
           <>
             <Button variant="primary" onClick={send} disabled={!canSend}>
@@ -452,7 +504,6 @@ export function FollowUpForm({
         )}
         {error && <ErrorText>{error}</ErrorText>}
       </Row>
-
       {queueEl}
     </Card>
   );

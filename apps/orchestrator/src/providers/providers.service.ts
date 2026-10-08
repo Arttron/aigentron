@@ -145,6 +145,22 @@ export class ProvidersService implements OnModuleInit {
     return row;
   }
 
+  /**
+   * Where to send OpenAI-style AUDIO requests (transcriptions / speech) for a provider. Only providers of kind "openai" qualify —
+   * that covers OpenAI itself and any OpenAI-compatible endpoint (Groq, a local Whisper/TTS server…) via its Base URL.
+   */
+  async audioEndpoint(name: string): Promise<{ base: string; headers: Record<string, string> }> {
+    const p = await this.getRow(name);
+    const kind = p.kind || defaultKind(p.baseUrl);
+    if (kind !== 'openai') throw new Error(`Provider "${name}" is of kind "${kind}". Voice needs a provider of kind "openai" (OpenAI or any OpenAI-compatible server — set its Base URL).`);
+    const base = oaiBase(kind, p.baseUrl);
+    if (!base) throw new Error(`Provider "${name}" has no Base URL.`);
+    const headers: Record<string, string> = {};
+    if (p.secret) headers.authorization = `Bearer ${p.secret}`;
+    else if (!/^https?:\/\/(localhost|127\.|host\.docker\.internal|[a-z0-9-]+(:\d+)?\/)/i.test(`${base}/`)) throw new Error(`Provider "${name}" has no API key.`);
+    return { base, headers };
+  }
+
   /** Shared Provider shape for resolveProvider. */
   async get(name: string): Promise<Provider> {
     return toProvider(await this.getRow(name));

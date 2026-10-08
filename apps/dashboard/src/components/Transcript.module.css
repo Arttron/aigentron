@@ -173,6 +173,11 @@
 }
 .agentBody {
   min-width: 0;
+  position: relative;
+}
+/* room for the (absolutely placed) read-aloud button on the final answer, so showing it never reflows the text */
+.final .agentBody {
+  padding-right: 32px;
 }
 .thumbs {
   display: flex;

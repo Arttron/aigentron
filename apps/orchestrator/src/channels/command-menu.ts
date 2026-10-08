@@ -28,6 +28,7 @@ export const COMMAND_MENU: CommandDef[] = [
   { command: 'models', description: 'List models' },
   { command: 'model', description: 'Set the model for new tasks', usage: '/model <name>' },
   { command: 'settings', description: 'Show what is selected' },
+  { command: 'voice', description: 'Voice replies on/off', usage: '/voice on|off' },
   { command: 'mute', description: 'Mute routine updates' },
   { command: 'unmute', description: 'Resume updates' },
   { command: 'help', description: 'Show commands' },
@@ -38,5 +39,5 @@ export const HELP_TEXT = [
   'Commands:',
   ...COMMAND_MENU.map((c) => `${c.usage ?? `/${c.command}`} — ${c.description}`),
   '',
-  'A plain message continues the active task. Send a photo/file to attach it.',
+  'A plain message continues the active task. Send a photo/file to attach it, or a voice message to speak to the assistant.',
 ].join('\n');

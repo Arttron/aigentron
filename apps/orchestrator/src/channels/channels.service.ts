@@ -207,7 +207,7 @@ export class ChannelsService {
   async setChatState(
     channelId: string,
     chatId: string,
-    patch: { activeTaskId?: string | null; agent?: string | null; model?: string | null; muted?: boolean },
+    patch: { activeTaskId?: string | null; agent?: string | null; model?: string | null; muted?: boolean; voice?: boolean },
   ) {
     return this.prisma.channelChatState.upsert({
       where: { channelId_chatId: { channelId, chatId } },

@@ -1,31 +1,21 @@
-Aigentron v0.1.31
+Aigentron v0.1.32
 
-For people who are not programmers: reminders, a shared library for your project, ready-made starter packs, and Telegram set up by the assistant.
+For people who are not programmers: you can now talk to the assistant and hear its answers.
 
-Update note: this release adds one database table (schedules). It is created automatically when the server starts.
+Update note: this release adds one small database column (a per-chat "voice replies" switch). It is created automatically when the server starts.
 
-Reminders and recurring tasks (Settings → Schedules)
-- Post a message to a chat on a schedule (free — no model involved) or start a task for an agent each time (its updates arrive in the chat).
-- Set the time in plain words — every day, weekdays, certain days of the week, every N hours — with your time zone and optional quiet hours.
-  "Run now" tries a schedule; a run missed while the server was off is skipped, not fired hours late.
-- The admin can create and change them for you.
+Voice (Settings → Voice)
+- Speech recognition: Telegram voice messages and the 🎤 button in the dashboard turn your speech into text.
+- Speech synthesis: answers can be read aloud. By default answers stay text — voice is switched on separately.
+- Works with OpenAI, Groq or any OpenAI-compatible server (including one on your own machine) — add it as a provider of kind OpenAI, pick it in Settings → Voice.
+- "Try it" on the same tab: hear the chosen voice and record yourself to see what is recognised. Cloud providers receive your audio / the read text — the page says so.
 
-Project library (📚 Resources)
-- A shared library of notes, images, PDFs and any files that every agent of the project can use as knowledge: house measurements, a learner's
-  profile, a style guide, reference photos. Agents see the titles and descriptions, read what is relevant and never modify the files.
-- Upload by button or drag & drop, write notes, add tags, limit an item to chosen agents. The admin can add and edit text notes.
+In the dashboard
+- Voice mode: the message box is replaced by a calm orb that shows listening, thinking and speaking. Speak, pause, hear the answer; optional "keep listening".
+- "Speak" switch: read the latest answers aloud; one replay button on the latest answer.
+- The same controls sit in the same place in both modes, so nothing jumps.
+- The microphone needs https or localhost (a note in docs/voice.md).
 
-Starter packs (Agents → Starter packs)
-- English learning: a tutor, a curriculum planner and a quiz maker, with a learner profile and a list of trusted resources.
-- Home renovation: a planner, an estimator, an interior designer and a materials advisor, with a brief, measurements and a budget to fill in.
-- Software team: the standard fleet (PM, architect, backend, frontend, designer, reviewer).
-- Installing never overwrites what you already have; prepared schedules start switched off. Or just tell the admin what you want to do.
-
-Telegram, set up by the admin
-- The assistant creates the channel, asks for the bot token in a secure field (never in the chat) and checks the connection.
-- A chat that writes to the bot but is not allowed yet shows up in Settings → Channels with Allow / Dismiss, and the bot tells the person their chat id.
-- Keys requested through Telegram arrive as a one-time link (10 minutes, one use) when PUBLIC_URL is set.
-
-Also
-- Names of schedules, channels and library items may use letters of any language.
-- Fixes found while testing: a dependency cycle that stopped the server from starting, and an upload route that could eat JSON files.
+In Telegram
+- Send a voice message — the bot replies in text, with the recognised words echoed.
+- /voice on and /voice off — the bot answers with voice in that chat.

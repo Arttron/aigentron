@@ -16,6 +16,8 @@ import { PresenceService } from '../presence/presence.service';
 import { ChannelsService } from './channels.service';
 import { ChannelCommandService } from './channel-commands.service';
 import { PairingService } from './pairing.service';
+import { VoiceService } from '../voice/voice.service';
+import { MAX_AUDIO_SECONDS } from '../voice/voice-core';
 import { SecretLinksService, secretLabel } from '../approvals/secret-links.service';
 import type { ChannelAdapter, IncomingEvent, MessageButton } from './channel-adapter';
 
@@ -128,6 +130,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     private readonly presence: PresenceService,
     private readonly pairing: PairingService,
     private readonly secretLinks: SecretLinksService,
+    private readonly voice: VoiceService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -281,7 +284,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // Respect a chat's /mute (routine outcomes only; approvals bypass this).
     const chatState = await this.prisma.channelChatState.findUnique({
       where: { channelId_chatId: { channelId: dest.channel.id, chatId: dest.externalThreadId } },
-      select: { muted: true },
+      select: { muted: true, voice: true },
     });
     if (chatState?.muted) return;
 
@@ -296,6 +299,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     let text = `${header}\n\n${body}`;
     if (status === 'done' && task.prUrl) text += `\n\n${task.prUrl}`;
     await this.send(dest.channel.id, dest.externalThreadId, text);
+    if (status === 'done' && chatState?.voice) await this.speakReply(dest.channel.id, dest.externalThreadId, body);
     // Also deliver any new attachments the agent produced (screenshots as
     // photos, everything else — reports, archives, etc. — as documents).
     await this.sendRunAttachments(dest.channel.id, dest.externalThreadId, taskId).catch((err) =>
@@ -527,6 +531,49 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     return adapter.sendMessage(chatId, text);
   }
 
+  /** A voice message: transcribe it, show what was heard, then handle it exactly like typed text. */
+  private async handleVoice(row: ChannelRow, e: Extract<IncomingEvent, { type: 'voice' }>): Promise<void> {
+    const reply = (text: string) => this.send(row.id, e.chatId, text);
+    if (!this.voice.sttReady()) {
+      await reply('🎤 Voice messages are not set up yet — an operator can enable them in Settings → Voice.');
+      return;
+    }
+    if (e.durationSec && e.durationSec > MAX_AUDIO_SECONDS) {
+      await reply(`🎤 That message is too long (${Math.round(e.durationSec)} s) — please keep it under ${MAX_AUDIO_SECONDS / 60} minutes.`);
+      return;
+    }
+    let text: string;
+    try {
+      text = await this.voice.transcribe(Buffer.from(e.data, 'base64'), e.mime);
+    } catch (err) {
+      await reply(`🎤 ⚠️ ${(err as Error).message}`);
+      return;
+    }
+    if (!text) {
+      await reply('🤔 I could not make out any words — could you say it again?');
+      return;
+    }
+    // The echo lets the person catch a mishearing before the agent acts on it.
+    await reply(`🎤 «${text}»`);
+    await this.handleIncoming(row, { type: 'message', chatId: e.chatId, userId: e.userId, userName: e.userName, text, isReply: e.isReply, messageId: e.messageId });
+  }
+
+  /** Also speak a final answer, when the chat has voice replies on. Never blocks or fails the text reply. */
+  private async speakReply(channelId: string, chatId: string, text: string): Promise<void> {
+    if (!this.voice.ttsReady()) return;
+    const row = await this.channels.getRow(channelId).catch(() => null);
+    if (!row) return;
+    const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
+    if (!adapter.sendVoice) return;
+    try {
+      const { audio, mime, truncated } = await this.voice.speak(text, 'opus');
+      await adapter.sendVoice(chatId, { data: audio, mime }, truncated ? '🔊 (shortened — the full answer is in the text above)' : undefined);
+    } catch (err) {
+      this.logger.warn(`voice reply failed: ${(err as Error).message}`);
+      await this.send(channelId, chatId, `🔊 Could not make the voice version: ${(err as Error).message.slice(0, 200)}`);
+    }
+  }
+
   /** The bot token was just saved: switch the channel on if it was waiting for it, (re)start polling, and report connectivity. */
   async onSecretSaved(channelId: string): Promise<{ ok: boolean; info?: string; error?: string }> {
     const row = await this.channels.getRow(channelId);
@@ -691,6 +738,11 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       await this.approvals
         .decide(e.approvalId, e.decision, { displayName: `${row.kind}:${e.userName ?? e.userId}` })
         .catch((err) => this.logger.warn(`decide failed: ${(err as Error).message}`));
+      return;
+    }
+
+    if (e.type === 'voice') {
+      await this.handleVoice(row, e);
       return;
     }
 

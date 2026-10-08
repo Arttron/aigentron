@@ -1,3 +1,4 @@
+import { VoiceService } from '../voice/voice.service';
 import { Injectable } from '@nestjs/common';
 import { isTerminalStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -47,6 +48,7 @@ export class ChannelCommandService {
     private readonly providers: ProvidersService,
     private readonly agents: AgentRegistryService,
     private readonly settings: SettingsService,
+    private readonly voice: VoiceService,
   ) {}
 
   isCommand(text: string): boolean {
@@ -97,6 +99,8 @@ export class ChannelCommandService {
         return this.listModels(ctx);
       case '/model':
         return this.setModel(ctx, arg);
+      case '/voice':
+        return this.voiceCmd(ctx, arg.toLowerCase());
       case '/agents':
         return this.listAgents(ctx);
       case '/agent':
@@ -299,6 +303,17 @@ export class ChannelCommandService {
       `Model: ${state.model ?? `${defProvider} (default)`}`,
       `Muted: ${state.muted ? 'yes' : 'no'}`,
     ].join('\n');
+  }
+
+  /** `/voice on|off` — also send final answers as a voice message in this chat (text is always sent). */
+  private async voiceCmd(ctx: CommandCtx, arg: string): Promise<string> {
+    const st = await this.channels.chatState(ctx.channelId, ctx.chatId);
+    if (arg !== 'on' && arg !== 'off') {
+      return `🔊 Voice replies are ${st.voice ? 'ON' : 'OFF'} in this chat — /voice on or /voice off.${this.voice.ttsReady() ? '' : '\n(Not set up yet: an operator enables it in Settings → Voice.)'}`;
+    }
+    if (arg === 'on' && !this.voice.ttsReady()) return '🔇 Voice replies are not set up yet — an operator can enable them in Settings → Voice.';
+    await this.channels.setChatState(ctx.channelId, ctx.chatId, { voice: arg === 'on' });
+    return arg === 'on' ? '🔊 Voice replies ON — final answers also arrive as a voice message (text always comes too). /voice off to stop.' : '🔇 Voice replies OFF — text only.';
   }
 
   private async mute(ctx: CommandCtx, on: boolean): Promise<string> {

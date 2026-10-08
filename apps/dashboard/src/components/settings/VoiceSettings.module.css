@@ -1,0 +1,51 @@
+.block {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-sm);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.head input {
+  width: auto;
+}
+.test {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: var(--inset-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.meter {
+  height: 8px;
+  margin: 8px 0;
+  border-radius: 4px;
+  background: var(--bg);
+  box-shadow: var(--inset-sm);
+  overflow: hidden;
+}
+.meterBar {
+  --lvl: 0;
+  height: 100%;
+  width: 100%;
+  transform-origin: left;
+  transform: scaleX(var(--lvl));
+  background: var(--accent);
+  transition: transform 60ms linear;
+}
+.heard {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: var(--inset-sm);
+}

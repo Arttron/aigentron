@@ -1,0 +1,39 @@
+/* Same strip, same place and same chip size as the controls of voice mode (VoiceMode.module.css), so switching modes never moves them. */
+.wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 14px;
+}
+.gap {
+  flex: 1;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 18px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  box-shadow: var(--raised-xs);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.chip:hover {
+  color: var(--text);
+}
+.ico {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+}
+.on {
+  color: var(--accent);
+  box-shadow: var(--inset-sm);
+}

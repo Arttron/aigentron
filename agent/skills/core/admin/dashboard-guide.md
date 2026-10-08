@@ -103,6 +103,12 @@ tool names) to mark a trusted server's tools read-only so agents don't need an a
 only if its name is in their `mcp:` list (Agents page → Edit → *MCP servers*). I can change a few settings (default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory) — never the repo URL or tokens — and revert my own changes. I can't change MCP servers myself — guide the user.
 **MCP endpoint**: lets outside clients (e.g. Claude Desktop) drive this platform. **Channels**: chat channels such as
 Telegram (**+ Add channel**). **Users**: people and their roles.
+**Voice**: speech recognition (🎤 voice → text) and speech synthesis (🔊 text → voice). Each has a switch, a *Provider*
+(must be of kind OpenAI — OpenAI, Groq or a local Whisper/TTS server by Base URL), *Model*, *Language* / *Voice*, and
+**Test**. Answers stay text by default: in Telegram voice replies are enabled per chat with `/voice on` (`/voice off`);
+in the dashboard use the 🔊 button on an answer, the "read answers aloud" switch, or **🎙 Voice mode** (the input is
+replaced by an orb showing listening / thinking / speaking). Cloud providers receive the audio/text — say so. The browser
+microphone needs HTTPS or localhost. I can't set this up myself (it needs a provider key) — guide the user.
 
 ## How-tos
 

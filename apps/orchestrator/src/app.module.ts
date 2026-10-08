@@ -33,6 +33,7 @@ import { AccessModule } from './access/access.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { ResourcesModule } from './resources/resources.module';
 import { PacksModule } from './packs/packs.module';
+import { VoiceModule } from './voice/voice.module';
 import { StatsModule } from './stats/stats.module';
 import { HealthController } from './health/health.controller';
 
@@ -53,6 +54,7 @@ import { HealthController } from './health/health.controller';
     SchedulesModule,
     ResourcesModule,
     PacksModule,
+    VoiceModule,
     PreflightModule,
     PrismaModule,
     BusModule,

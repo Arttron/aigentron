@@ -196,6 +196,11 @@ export function TaskDetailPage() {
   const phone = useIsPhone();
   const [tab, setTab] = useState<'chat' | 'files' | 'tasks'>('chat');
   const relatedCount = (task?.subtasks?.length ?? 0) + (task?.linksOut?.length ?? 0);
+  // The agent's latest final answer (read aloud in voice-only mode; a new id = a new answer).
+  const lastReply = (() => {
+    const l = [...lines].reverse().find((x) => x.kind === 'result' && x.text.trim());
+    return l ? { id: l.id, text: l.text } : null;
+  })();
   const pendingApprovals = task?.approvals.filter((a) => a.status === 'pending') ?? [];
   const terminal = task ? isTerminalStatus(task.status) : false;
   // Hide verbose intermediate 'assistant' lines unless debug mode is on
@@ -303,7 +308,7 @@ export function TaskDetailPage() {
         </div>
 
         {tab === 'chat' && (
-          <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} compact />
+          <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact />
         )}
       </div>
     );
@@ -372,7 +377,7 @@ export function TaskDetailPage() {
             <SectionTitle>Conversation</SectionTitle>
             <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} />
           </Card>
-          <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} />
+          <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} />
 
           <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} />
           <TaskRelations task={task} onChange={refreshTask} />

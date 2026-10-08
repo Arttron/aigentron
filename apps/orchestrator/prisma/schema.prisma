@@ -269,6 +269,8 @@ model ChannelChatState {
   model        String? // provider (model endpoint) name
   // When true, suppress routine task-outcome posts to this chat (approvals still sent).
   muted        Boolean  @default(false)
+  // When true, final answers in this chat are also sent as a voice message (needs Settings → Voice).
+  voice        Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

@@ -4,8 +4,20 @@ import { SERVER_EVENT, CLIENT_EVENT, type AgentLogEvent, type TaskStatus } from 
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import type { StateName } from '@/lib/mascot';
-import { ASSISTANT_RESET_EVENT, edgeTabFor, readEdgeTab, useFloatDrag, writeEdgeTab, type EdgeTab } from '@/lib/float-position';
+import {
+  ASSISTANT_RESET_EVENT,
+  edgeTabFor,
+  readEdgeTab,
+  useFloatDrag,
+  writeEdgeTab,
+  type EdgeTab,
+} from '@/lib/float-position';
 import { MascotView } from './MascotView';
+import { MicButton } from './MicButton';
+import { VoiceToggles } from './VoiceToggles';
+import { SpeakButton } from './SpeakButton';
+import { VoiceMode } from './VoiceMode';
+import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
 import styles from './AdminChat.module.css';
 
 const ADMIN = 'admin';
@@ -54,6 +66,9 @@ export function AdminChat() {
   const [taskId, setTaskId] = useState<string | null>(() => readId());
   // Tucked away: only a slim tab on the right edge remains (remembered per browser).
   const float = useFloatDrag();
+  const voiceCfg = useVoice();
+  const [voiceOnly, setVoiceOnly] = useVoiceOnly();
+  const [autoSpeak, setAutoSpeak] = useAutoSpeak();
   // `tab` = where the "show" tab sits while the assistant is tucked away (nearest edge, bubble's height); null = shown.
   const [tab, setTab] = useState<EdgeTab | null>(() => readEdgeTab());
   useEffect(() => {
@@ -63,7 +78,9 @@ export function AdminChat() {
   }, []);
   const hideAssistant = () => {
     const r = float.ref.current?.getBoundingClientRect();
-    const next = r ? edgeTabFor(r, { w: window.innerWidth, h: window.innerHeight }) : ({ side: 'right', bottom: 24 } as EdgeTab);
+    const next = r
+      ? edgeTabFor(r, { w: window.innerWidth, h: window.innerHeight })
+      : ({ side: 'right', bottom: 24 } as EdgeTab);
     setTab(next);
     writeEdgeTab(next);
   };
@@ -171,7 +188,8 @@ export function AdminChat() {
         const p = providers.find((x) => x.name === name);
         if (!name || !p) setProviderIssue('No default provider is configured.');
         else if (!p.model) setProviderIssue(`Provider "${p.name}" has no default model.`);
-        else if (!p.secretSet && p.kind !== 'ollama' && p.authMode !== 'codex-login') setProviderIssue(`Provider "${p.name}" has no API key/token.`);
+        else if (!p.secretSet && p.kind !== 'ollama' && p.authMode !== 'codex-login')
+          setProviderIssue(`Provider "${p.name}" has no API key/token.`);
         else setProviderIssue(null);
       },
     );
@@ -197,7 +215,11 @@ export function AdminChat() {
       .listTasks({ pageSize: 100 })
       .then((p) => {
         if (!live) return;
-        setActiveTasks(new Set(p.items.filter((t) => t.status === 'running' || t.status === 'queued').map((t) => t.id)));
+        setActiveTasks(
+          new Set(
+            p.items.filter((t) => t.status === 'running' || t.status === 'queued').map((t) => t.id),
+          ),
+        );
       })
       .catch(() => undefined);
     api
@@ -244,24 +266,43 @@ export function AdminChat() {
   const base: StateName = busy ? 'thinking' : 'idle';
   const mood: StateName = flash ?? base;
   // Visual accent around the mascot — the animation's own differences between states are subtle at small sizes.
-  const accent = flash ? flash : open ? (waitingApproval ? 'waiting' : working ? 'busy' : 'idle') : pendingApprovals > 0 ? 'waiting' : busy ? 'busy' : 'idle';
+  const accent = flash
+    ? flash
+    : open
+      ? waitingApproval
+        ? 'waiting'
+        : working
+          ? 'busy'
+          : 'idle'
+      : pendingApprovals > 0
+        ? 'waiting'
+        : busy
+          ? 'busy'
+          : 'idle';
 
-  const send = async () => {
-    const body = text.trim();
+  /** Send `override` (voice mode / dictation) or what is in the text box. */
+  const send = async (override?: string) => {
+    const body = (override ?? text).trim();
     if (!body || sending) return;
     setSending(true);
     setError(null);
     try {
       if (!taskId) {
-        const t = await api.createTask({ prompt: body, title: 'Chat with admin', agentName: ADMIN, autostart: true });
+        const t = await api.createTask({
+          prompt: body,
+          title: 'Chat with admin',
+          agentName: ADMIN,
+          autostart: true,
+        });
         writeId(t.id);
         setTaskId(t.id);
       } else {
         await api.followUp(taskId, body);
       }
-      setText('');
+      if (override === undefined) setText('');
     } catch (e) {
       setError((e as Error).message);
+      if (override !== undefined) throw e;
     } finally {
       setSending(false);
     }
@@ -274,6 +315,20 @@ export function AdminChat() {
   };
 
   const failed = status === 'failed';
+
+  // The latest answer: shown/spoken in voice mode, and read aloud when "read replies aloud" is on.
+  const lastAdmin = [...msgs].reverse().find((m) => m.from === 'admin') ?? null;
+  const spokenRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (spokenRef.current === undefined) {
+      spokenRef.current = lastAdmin?.id ?? null; // whatever was there on load is not "new"
+      return;
+    }
+    if (!lastAdmin || lastAdmin.id === spokenRef.current) return;
+    spokenRef.current = lastAdmin.id;
+    if (autoSpeak && !voiceOnly && voiceCfg?.ttsReady)
+      void speakText(lastAdmin.text).catch(() => undefined);
+  }, [lastAdmin, autoSpeak, voiceOnly, voiceCfg]);
 
   // Let the approval dock step aside while the panel occupies the bottom-right corner.
   useEffect(() => {
@@ -294,7 +349,12 @@ export function AdminChat() {
             <span className={styles.spacer} />
             {taskId && (
               <>
-                <Link className={styles.headBtn} to={`/tasks/${taskId}`} onClick={() => setOpen(false)} title="Open as a task">
+                <Link
+                  className={styles.headBtn}
+                  to={`/tasks/${taskId}`}
+                  onClick={() => setOpen(false)}
+                  title="Open as a task"
+                >
                   ↗
                 </Link>
                 <button className={styles.headBtn} onClick={newChat} title="Start a new chat">
@@ -310,8 +370,9 @@ export function AdminChat() {
           <div className={styles.body}>
             {msgs.length === 0 && (
               <div className={styles.hint}>
-                Hi! I can help you set up agents — describe what you want to get done and I&rsquo;ll suggest
-                and create the right agents for it. Every change is shown to you for approval first.
+                Hi! I can help you set up agents — describe what you want to get done and I&rsquo;ll
+                suggest and create the right agents for it. Every change is shown to you for
+                approval first.
               </div>
             )}
             {providerIssue && !taskId && (
@@ -326,11 +387,14 @@ export function AdminChat() {
             {msgs.map((m) => (
               <div key={m.id} className={m.from === 'me' ? styles.me : styles.admin}>
                 {m.text}
+                {m.id === lastAdmin?.id && autoSpeak && <SpeakButton text={m.text} abs />}
               </div>
             ))}
             {working && <div className={styles.typing}>Admin is typing…</div>}
             {waitingApproval && (
-              <div className={styles.typing}>Waiting for your approval — see the card at the bottom right.</div>
+              <div className={styles.typing}>
+                Waiting for your approval — see the card at the bottom right.
+              </div>
             )}
             {failed && (
               <div className={styles.warn}>
@@ -340,24 +404,53 @@ export function AdminChat() {
             <div ref={endRef} />
           </div>
 
-          <div className={styles.composer}>
-            <textarea
-              className={styles.input}
-              rows={2}
-              value={text}
-              placeholder="Write a message…"
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              disabled={sending}
-            />
-            <button className={styles.send} onClick={() => void send()} disabled={sending || !text.trim()}>
-              ➤
-            </button>
+          <div className={styles.dockArea}>
+            {voiceOnly && voiceCfg?.sttReady ? (
+              <VoiceMode
+                onSend={(t) => send(t)}
+                reply={lastAdmin ? { id: lastAdmin.id, text: lastAdmin.text } : null}
+                working={working}
+                onClose={() => setVoiceOnly(false)}
+              />
+            ) : (
+              <>
+                <VoiceToggles
+                  stt={voiceCfg?.sttReady ?? false}
+                  tts={voiceCfg?.ttsReady ?? false}
+                  autoSpeak={autoSpeak}
+                  onAutoSpeak={setAutoSpeak}
+                  onVoiceMode={() => setVoiceOnly(true)}
+                />
+                <div className={styles.composer}>
+                  <textarea
+                    className={styles.input}
+                    rows={2}
+                    value={text}
+                    placeholder="Write a message…"
+                    onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        void send();
+                      }
+                    }}
+                    disabled={sending}
+                  />
+                  <MicButton
+                    className={styles.adminMic}
+                    onText={(t) => setText((x) => (x.trim() ? `${x.trimEnd()} ${t}` : t))}
+                    onError={(m) => setError(m)}
+                  />
+                  <button
+                    className={styles.send}
+                    onClick={() => void send()}
+                    disabled={sending || !text.trim()}
+                  >
+                    ➤
+                  </button>
+                </div>
+              </>
+            )}
           </div>
           {error && <div className={styles.error}>{error}</div>}
         </div>
@@ -379,7 +472,11 @@ export function AdminChat() {
         <div
           ref={float.ref}
           className={styles.float}
-          style={float.pos ? { right: float.pos.right, bottom: float.pos.bottom, touchAction: 'none' } : { touchAction: 'none' }}
+          style={
+            float.pos
+              ? { right: float.pos.right, bottom: float.pos.bottom, touchAction: 'none' }
+              : { touchAction: 'none' }
+          }
           {...float.handlers}
         >
           <button

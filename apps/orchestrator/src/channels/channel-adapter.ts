@@ -75,6 +75,20 @@ export type IncomingEvent =
       messageId?: string;
     }
   | {
+      /** A voice message / audio file / round video note — to be transcribed and handled as text. */
+      type: 'voice';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      /** Audio bytes, base64-encoded. */
+      data: string;
+      mime: string;
+      /** Length in seconds, when the transport says. */
+      durationSec?: number;
+      isReply: boolean;
+      messageId?: string;
+    }
+  | {
       /** The human reacted (with an emoji) to a message we sent. */
       type: 'reaction';
       chatId: string;
@@ -103,6 +117,8 @@ export interface ChannelAdapter {
    *  "processing…" status line) — existing buttons/keyboard are preserved.
    *  Best-effort, optional — not every transport supports editing. */
   editMessage?(chatId: string, messageId: string, text: string): Promise<void>;
+  /** Post spoken audio. Ogg/Opus shows as a voice message; other formats are sent as an audio file. Optional. */
+  sendVoice?(chatId: string, audio: { data: Buffer; mime: string }, caption?: string): Promise<void>;
   /** Post an image (e.g. an agent screenshot). Optional — not every transport supports it. */
   sendImage?(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void>;
   /** Post an arbitrary file as a downloadable document (anything the image path
