@@ -14,3 +14,12 @@ dist
 !.env.example
 .workspace
 *.log
+
+# live/runtime agent state must not be baked into images (templates live in agent/catalog)
+agent/agents
+agent/runs
+agent/attachments
+agent/.sync
+agent/.snapshots
+
+agent/.codex-home

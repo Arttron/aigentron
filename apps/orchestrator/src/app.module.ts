@@ -17,6 +17,11 @@ import { SkillConsolidationModule } from './agent-registry/skill-consolidation.m
 import { ProvidersModule } from './providers/providers.module';
 import { McpModule } from './mcp/mcp.module';
 import { McpHostModule } from './mcp-host/mcp-host.module';
+import { InternalMcpModule } from './internal-mcp/internal-mcp.module';
+import { CodexModule } from './codex/codex.module';
+import { ResearchModule } from './research/research.module';
+import { SecurityModule } from './security/security.module';
+import { MaintenanceModule } from './maintenance/maintenance.module';
 import { LitellmModule } from './litellm/litellm.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { PreviewModule } from './preview/preview.module';
@@ -52,6 +57,11 @@ import { HealthController } from './health/health.controller';
     ProvidersModule,
     McpModule,
     McpHostModule,
+    InternalMcpModule,
+    CodexModule,
+    ResearchModule,
+    SecurityModule,
+    MaintenanceModule,
     LitellmModule,
     AttachmentsModule,
     PreviewModule,

@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import { z } from 'zod';
 import {
   INTERNAL_MCP_SERVER,
   REPORT_STATUS_TOOL,
@@ -9,15 +8,37 @@ import {
   SCHEDULE_CHECK_TOOL,
   PREVIEW_TOOL,
   PROPOSE_LEARNED_SKILL_TOOL,
+  PROPOSE_AGENT_TOOL,
+  PROPOSE_SKILL_TOOL,
+  CATALOG_LIST_TOOL,
+  CATALOG_GET_TOOL,
+  AGENTS_LIST_TOOL,
+  AGENT_GET_TOOL,
+  TASKS_LIST_TOOL,
+  PROPOSE_TASK_ACTION_TOOL,
+  PROPOSE_AGENT_DELETE_TOOL,
+  PROVIDERS_LIST_TOOL,
+  PROVIDER_TEST_TOOL,
+  PROPOSE_PROVIDER_TOOL,
+  MAINTENANCE_REPORT_TOOL,
+  PROPOSE_CLEANUP_TOOL,
+  REQUEST_SECRET_TOOL,
+  TASK_DIAGNOSE_TOOL,
+  USAGE_REPORT_TOOL,
+  PROPOSE_SETTINGS_TOOL,
+  PROPOSE_UNDO_TOOL,
+  ADMIN_HISTORY_TOOL,
+  PROPOSE_TASK_TOOL,
+  PROPOSE_BATCH_TOOL,
 } from '@lds/shared';
 import { buildAgentEnv } from './env';
 import { writeAgentSettings } from './settings';
 import { emptyUsage } from './usage';
+import { buildInternalToolSpecs } from './internal-tools';
 import type {
   AgentEvent,
   AgentEventHandler,
   AgentRunResult,
-  ReportedStatus,
   RunAgentParams,
 } from './types';
 
@@ -92,165 +113,29 @@ type SdkModule = { query: QueryFn; tool: ToolFn; createSdkMcpServer: CreateSdkMc
 const esmImport = new Function('s', 'return import(s)') as (s: string) => Promise<SdkModule>;
 
 /**
- * Build an in-process MCP server exposing `report_task_status` (+ `heartbeat`),
- * whose handlers call the caller's callbacks. Returns null when neither callback
- * is wired. Tools appear to the agent as `mcp__lds__report_task_status` etc.
+ * Build an in-process MCP server exposing the internal control-plane tools
+ * (`report_task_status`, `heartbeat`, …), whose handlers call the caller's
+ * callbacks. Returns null when none is wired. Tools appear to the agent as
+ * `mcp__lds_internal__<name>`. The tool definitions live in internal-tools.ts so
+ * the Codex runtime can serve the very same ones over HTTP MCP.
  */
 function buildStatusServer(
   params: RunAgentParams,
   tool: ToolFn,
   createSdkMcpServer: CreateSdkMcpServerFn,
 ): unknown | null {
-  if (
-    !params.onReportStatus &&
-    !params.onHeartbeat &&
-    !params.onCreateSubtask &&
-    !params.onCheckSubtasks &&
-    !params.onScheduleCheck &&
-    !params.onStartPreview &&
-    !params.onProposeLearnedSkill
-  ) {
-    return null;
-  }
-  const tools: unknown[] = [];
-
-  if (params.onReportStatus) {
-    tools.push(
-      tool(
-        'report_task_status',
-        "Report the final outcome of this task. Call this exactly once, at the very end: status 'done' when the work is complete, 'blocked' when you need a human to proceed (put what you need in `handoff`), or 'failed' when you could not do it. This is the authoritative signal that ends the task.",
-        {
-          status: z.enum(['done', 'failed', 'blocked']),
-          summary: z.string().optional(),
-          files: z.array(z.string()).optional(),
-          handoff: z.string().optional(),
-        },
-        async (args): Promise<ToolResult> => {
-          const report = args as unknown as ReportedStatus;
-          params.onReportStatus?.(report);
-          return { content: [{ type: 'text', text: `Recorded task status: ${report.status}.` }] };
-        },
-      ),
-    );
-  }
-
-  if (params.onHeartbeat) {
-    tools.push(
-      tool(
-        'heartbeat',
-        'Optional: signal you are still making progress on a long task. Call every few steps with a one-line note. Does NOT end the task — use report_task_status for that.',
-        { progress: z.string().optional() },
-        async (args): Promise<ToolResult> => {
-          params.onHeartbeat?.({ progress: typeof args.progress === 'string' ? args.progress : undefined });
-          return { content: [{ type: 'text', text: 'Heartbeat noted.' }] };
-        },
-      ),
-    );
-  }
-
-  if (params.onCreateSubtask) {
-    tools.push(
-      tool(
-        'create_subtask',
-        'Decompose this task into an independent subtask. Use it to split work into scoped units — each subtask runs on its own (its own worktree and agent) and starts immediately. Give a clear `prompt` (a full instruction, not a title), an optional short `title`, and optionally the specialist `agent` to run it (e.g. backend, frontend, coder). Returns the new subtask id. Prefer this over doing everything yourself when the work has distinct parts.',
-        {
-          prompt: z.string(),
-          title: z.string().optional(),
-          agent: z.string().optional(),
-        },
-        async (args): Promise<ToolResult> => {
-          const created = await params.onCreateSubtask!({
-            prompt: String(args.prompt),
-            title: typeof args.title === 'string' ? args.title : undefined,
-            agent: typeof args.agent === 'string' ? args.agent : undefined,
-          });
-          return {
-            content: [
-              { type: 'text', text: `Created and queued subtask ${created.id} — "${created.title}".` },
-            ],
-          };
-        },
-      ),
-    );
-  }
-
-  if (params.onCheckSubtasks) {
-    tools.push(
-      tool(
-        'check_subtasks',
-        "Check the current status and latest result of the subtasks you created for this task. Use it to see progress before deciding what to do next. You are also resumed automatically once all subtasks finish, so you don't need to poll in a loop.",
-        {},
-        async (): Promise<ToolResult> => {
-          const subs = await params.onCheckSubtasks!();
-          const text = subs.length
-            ? subs.map((s) => `- [${s.id}] «${s.title}» → ${s.status}: ${s.summary}`).join('\n')
-            : 'No subtasks yet.';
-          return { content: [{ type: 'text', text }] };
-        },
-      ),
-    );
-  }
-
-  if (params.onScheduleCheck) {
-    tools.push(
-      tool(
-        'schedule_check',
-        "Ask to be re-run after a delay — use this instead of claiming you'll 'check back in N minutes' (your run ends now and won't resume on its own). Give `delaySeconds` (30–3600) and an optional `note` of what to re-check. When it fires you're resumed with that note; re-check then (e.g. poll CI via the github MCP), and if it's still not done, call schedule_check again to keep watching. Report your status now and stop — don't sleep or loop in-run.",
-        {
-          delaySeconds: z.number(),
-          note: z.string().optional(),
-        },
-        async (args): Promise<ToolResult> => {
-          const { delaySeconds } = await params.onScheduleCheck!({
-            delaySeconds: Number(args.delaySeconds),
-            note: typeof args.note === 'string' ? args.note : undefined,
-          });
-          return {
-            content: [{ type: 'text', text: `Scheduled a re-check in ${delaySeconds}s. Ending this run now.` }],
-          };
-        },
-      ),
-    );
-  }
-
-  if (params.onStartPreview) {
-    tools.push(
-      tool(
-        'preview_worktree',
-        'Start (or reuse) a live dev server for THIS task\'s worktree and get its URL, so you can preview your own in-progress changes in the browser (not the base app). Call it before navigating/screenshotting with the browser tools, then open the returned URL. The server is torn down automatically when the task finishes.',
-        {},
-        async (): Promise<ToolResult> => {
-          const { url } = await params.onStartPreview!();
-          return {
-            content: [
-              { type: 'text', text: `Preview of your worktree is live at ${url} — navigate the browser there.` },
-            ],
-          };
-        },
-      ),
-    );
-  }
-
-  if (params.onProposeLearnedSkill) {
-    tools.push(
-      tool(
-        'propose_learned_skill',
-        "Propose writing a durable, fleet-wide observation to agent/skills/learned/<name>.md — something future agent runs (not just this one) should know, e.g. a project-specific quirk or gotcha you had to work around. This is NOT for task-specific notes (use report_task_status for those) and NOT for one-off facts — only for things worth a human approving as standing guidance. A human must approve the write before it lands (this call blocks until they decide); `content` should be complete markdown (this REPLACES the file, not appends). Keep it under 16KB — consolidate rather than let it grow unbounded.",
-        {
-          name: z.string().describe('lowercase-with-hyphens, no extension, e.g. "checkout-service-quirks"'),
-          content: z.string(),
-        },
-        async (args): Promise<ToolResult> => {
-          const result = await params.onProposeLearnedSkill!({
-            name: String(args.name),
-            content: String(args.content),
-          });
-          return { content: [{ type: 'text', text: result.message }] };
-        },
-      ),
-    );
-  }
-
+  const specs = buildInternalToolSpecs(params);
+  if (!specs.length) return null;
+  const tools = specs.map((spec) =>
+    tool(
+      spec.name,
+      spec.description,
+      spec.shape,
+      async (args): Promise<ToolResult> => ({
+        content: [{ type: 'text', text: await spec.handler(args as Record<string, unknown>) }],
+      }),
+    ),
+  );
   return createSdkMcpServer({ name: INTERNAL_MCP_SERVER, version: '1.0.0', tools });
 }
 
@@ -264,6 +149,32 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
   if (params.onStartPreview) names.push(PREVIEW_TOOL);
   if (params.onProposeLearnedSkill) names.push(PROPOSE_LEARNED_SKILL_TOOL);
+  if (params.admin) {
+    names.push(
+      CATALOG_LIST_TOOL,
+      CATALOG_GET_TOOL,
+      AGENTS_LIST_TOOL,
+      AGENT_GET_TOOL,
+      PROPOSE_AGENT_TOOL,
+      PROPOSE_SKILL_TOOL,
+      TASKS_LIST_TOOL,
+      PROPOSE_TASK_ACTION_TOOL,
+      PROPOSE_AGENT_DELETE_TOOL,
+      PROVIDERS_LIST_TOOL,
+      PROVIDER_TEST_TOOL,
+      PROPOSE_PROVIDER_TOOL,
+      MAINTENANCE_REPORT_TOOL,
+      PROPOSE_CLEANUP_TOOL,
+      REQUEST_SECRET_TOOL,
+      TASK_DIAGNOSE_TOOL,
+      USAGE_REPORT_TOOL,
+      PROPOSE_SETTINGS_TOOL,
+      PROPOSE_UNDO_TOOL,
+      ADMIN_HISTORY_TOOL,
+      PROPOSE_TASK_TOOL,
+      PROPOSE_BATCH_TOOL,
+    );
+  }
   return names;
 }
 
@@ -426,6 +337,7 @@ export async function runAgent(
 
   try {
     for await (const msg of stream) {
+      params.onProgress?.();
       if (msg.type === 'system' && msg.subtype === 'init') {
         result.sessionId = msg.session_id ?? result.sessionId;
         const mcp = msg.mcp_servers?.length

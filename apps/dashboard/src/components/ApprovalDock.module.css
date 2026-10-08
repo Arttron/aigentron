@@ -1,7 +1,7 @@
 .dock {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  bottom: 128px; /* leave room for the admin chat bubble */
   z-index: 1000;
   width: min(380px, calc(100vw - 32px));
   max-height: min(70vh, 640px);
@@ -56,4 +56,12 @@
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
+}
+
+/* Chat panel open: approvals sit to its left on wide screens (they stay on top where there's no room). */
+@media (min-width: 900px) {
+  :global(body.admin-chat-open) .dock {
+    right: 412px;
+    bottom: 16px;
+  }
 }

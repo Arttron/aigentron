@@ -66,6 +66,9 @@ export class SettingsService {
         repoBranch: process.env.REPO_BRANCH?.trim() || 'main',
         githubToken: cleanEnv(process.env.GITHUB_TOKEN),
         defaultProvider: 'ollama-local',
+        // Fresh installs start with only the built-in admin agent; existing
+        // rows keep whatever default they already have.
+        defaultAgent: 'admin',
       },
     });
     this.logger.log('Seeded AppSettings from environment');

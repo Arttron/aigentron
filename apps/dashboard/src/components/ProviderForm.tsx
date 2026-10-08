@@ -15,7 +15,7 @@ export interface ProviderFormValues {
   tpm: string;
 }
 
-const KINDS: ProviderKind[] = ['anthropic', 'openai', 'deepseek', 'ollama'];
+const KINDS: ProviderKind[] = ['anthropic', 'openai', 'deepseek', 'ollama', 'codex'];
 
 /** Best-effort default kind from a base URL (mirrors the server). */
 function defaultKind(url: string): ProviderKind {
@@ -109,7 +109,18 @@ export function ProviderForm({
         </Field>
       )}
       <Field label="Kind (upstream family — sets the LiteLLM backend)">
-        <select value={values.kind} onChange={(e) => set('kind', e.target.value as ProviderKind)}>
+        <select
+          value={values.kind}
+          onChange={(e) => {
+            const kind = e.target.value as ProviderKind;
+            // Codex signs in with a ChatGPT subscription by default; leaving codex resets to a normal mode.
+            setValues((s) => ({
+              ...s,
+              kind,
+              authMode: kind === 'codex' ? 'codex-login' : s.authMode === 'codex-login' ? 'auth-token' : s.authMode,
+            }));
+          }}
+        >
           {KINDS.map((k) => (
             <option key={k} value={k}>
               {k}
@@ -117,6 +128,7 @@ export function ProviderForm({
           ))}
         </select>
       </Field>
+      {values.kind !== 'codex' && (
       <Field label="Base URL (blank = the family's native default)">
         <input
           value={values.baseUrl}
@@ -133,12 +145,29 @@ export function ProviderForm({
           </Muted>
         )}
       </Field>
+      )}
       <Field label="Auth mode">
         <select value={values.authMode} onChange={(e) => set('authMode', e.target.value as ProviderFormValues['authMode'])}>
-          <option value="auth-token">auth-token</option>
-          <option value="api-key">api-key</option>
-          <option value="oauth-token">oauth-token (Claude subscription)</option>
+          {values.kind === 'codex' ? (
+            <>
+              <option value="codex-login">codex-login (ChatGPT subscription)</option>
+              <option value="api-key">api-key (OpenAI API key)</option>
+            </>
+          ) : (
+            <>
+              <option value="auth-token">auth-token</option>
+              <option value="api-key">api-key</option>
+              <option value="oauth-token">oauth-token (Claude subscription)</option>
+            </>
+          )}
         </select>
+        {values.authMode === 'codex-login' && (
+          <Muted className={styles.note}>
+            Runs agents on the OpenAI Codex CLI using your ChatGPT subscription — no key stored here. Sign in
+            once on the server: <code>codex login --device-auth</code> (with <code>CODEX_HOME</code> set to the
+            shared auth dir, <code>agent/.codex-home</code> by default), then use “Test”.
+          </Muted>
+        )}
         {values.authMode === 'oauth-token' && (
           <Muted className={styles.note}>
             Run <code>claude setup-token</code> locally (or <code>scripts/cli-auth.sh &lt;name&gt;</code>) and
@@ -148,6 +177,7 @@ export function ProviderForm({
           </Muted>
         )}
       </Field>
+      {values.authMode !== 'codex-login' && (
       <Field
         label={
           initial?.secretSet
@@ -164,6 +194,7 @@ export function ProviderForm({
           placeholder={initial?.secretSet ? 'leave blank to keep' : 'secret'}
         />
       </Field>
+      )}
       <Field label="Default model (optional — agents can pick their own)">
         <Row>
           <input

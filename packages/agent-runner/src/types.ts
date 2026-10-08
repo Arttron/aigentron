@@ -16,6 +16,24 @@ export interface HookWiring {
   sharedDistPath: string;
 }
 
+/** Options specific to the Codex runtime (provider kind `codex`). */
+export interface CodexRunOptions {
+  /**
+   * Per-run CODEX_HOME: config.toml, hooks.json, AGENTS.md, auth.json and the
+   * `sessions/` that make `exec resume` work. Must be stable per task (follow-ups
+   * resume from it) and must NOT live under /tmp (Codex refuses helper binaries there).
+   */
+  home: string;
+  /** Shared home holding the signed-in auth.json: copied into `home` before a run, synced back after (token refresh). */
+  authHome: string;
+  /** API key (authMode api-key) — exported as CODEX_API_KEY instead of using the ChatGPT login. */
+  apiKey?: string;
+  /** Codex binary (default `codex`). */
+  bin?: string;
+  /** Orchestrator-served HTTP MCP exposing the internal tools (report_task_status, …). */
+  internalMcp?: { url: string; token: string };
+}
+
 export interface RunAgentParams {
   prompt: string;
   /** Working directory the agent runs in — the worktree root, or a subdir of it. */
@@ -47,6 +65,8 @@ export interface RunAgentParams {
    * route `<provider>/<model>`, so the subagent runs on its own provider).
    */
   agents?: Record<string, SubagentDefinition>;
+  /** Codex runtime options; present only for provider kind `codex`. */
+  codex?: CodexRunOptions;
   abortController?: AbortController;
   /** Approval hook wiring. When omitted, no PreToolUse hook is configured. */
   hook?: HookWiring;
@@ -67,6 +87,8 @@ export interface RunAgentParams {
    * fires each time it's called (feeds the no-progress watchdog / liveness).
    */
   onHeartbeat?: (beat: { progress?: string }) => void;
+  /** Fires for every raw message from the runtime (even ones we don't surface, e.g. model reasoning) — liveness for the watchdog. */
+  onProgress?: () => void;
   /**
    * When set, the agent gets a `create_subtask` tool to decompose its task into
    * independent child tasks. Each call creates + enqueues a subtask and resolves
@@ -98,6 +120,62 @@ export interface RunAgentParams {
    * to show the agent (approved/denied/budget-exceeded reason).
    */
   onProposeLearnedSkill?: (input: { name: string; content: string }) => Promise<{ ok: boolean; message: string }>;
+  /**
+   * When set (admin agent only), the agent gets the catalog/agent-management
+   * tools: `catalog_list`, `catalog_get`, `agents_list` (read-only) and
+   * `propose_agent`, `propose_skill` (human-approved writes — gated in classify.ts).
+   */
+  admin?: AdminToolsWiring;
+}
+
+/** Callbacks behind the admin agent's tools; each resolves with text shown to the agent. */
+export interface AdminToolsWiring {
+  catalogList: () => Promise<string>;
+  catalogGet: (name: string) => Promise<string>;
+  agentsList: () => Promise<string>;
+  /** Full file (frontmatter + prompt) of an existing agent — needed to edit it with propose_agent. */
+  agentGet: (name: string) => Promise<string>;
+  proposeAgent: (input: { name: string; content: string }) => Promise<{ ok: boolean; message: string }>;
+  proposeSkill: (input: { name: string; content: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Platform tasks (read-only listing; no approval needed). */
+  tasksList: (input: { status?: string; limit?: number; order?: string; olderThanDays?: number }) => Promise<string>;
+  /** Cancel/delete explicit tasks — human-approved before anything happens. */
+  proposeTaskAction: (input: { action: 'cancel' | 'delete'; taskIds: string[]; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Providers: read-only overview and connectivity check (never include secrets). */
+  providersList: () => Promise<string>;
+  providerTest: (name: string) => Promise<string>;
+  /** Create/update a provider's configuration (no secret) and optionally make it default — human-approved. */
+  proposeProvider: (input: {
+    name: string;
+    kind: string;
+    model: string;
+    authMode: string;
+    baseUrl?: string;
+    makeDefault?: boolean;
+    reason: string;
+  }) => Promise<{ ok: boolean; message: string }>;
+  /** Several related changes behind one approval — human-approved as a whole. */
+  proposeBatch: (input: { items: { kind: string; args: Record<string, unknown> }[]; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Start a task for another agent on the user's behalf — human-approved. */
+  proposeTask: (input: { agentName: string; prompt: string; title?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** The admin's own change journal (what it changed, which changes can be reverted). */
+  adminHistory: (input: { limit?: number }) => Promise<string>;
+  /** Change a few platform settings — human-approved, previous values are journaled for undo. */
+  proposeSettings: (input: { changes: Record<string, unknown>; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Revert an earlier admin change from the journal — human-approved. */
+  proposeUndo: (input: { changeId: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Why did a task end the way it did: status, error, agent/provider, reported summary, approvals, last messages. */
+  taskDiagnose: (taskId: string) => Promise<string>;
+  /** Token / request / cost usage per provider over the last N days. */
+  usageReport: (input: { days?: number }) => Promise<string>;
+  /** Ask the human to enter a secret in a secure field; resolves with whether it was saved (never the value). */
+  requestSecret: (input: { target: 'provider' | 'github_token'; name?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Disk-usage report of what runs leave behind (run folders, old worktrees, agent branches). */
+  maintenanceReport: () => Promise<string>;
+  /** Delete old run folders / worktrees (/ branches) — human-approved. */
+  proposeCleanup: (input: { runs: boolean; worktrees: boolean; deleteBranches: boolean; olderThanDays?: number; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Delete an agent — human-approved. */
+  proposeAgentDelete: (input: { name: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
 }
 
 /** A subtask a lead agent asks to create via the `create_subtask` tool. */

@@ -1,0 +1,198 @@
+.bubble {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 950;
+  width: 104px;
+  height: 104px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 22px;
+  /* barely-there disc: just enough to separate the mascot from busy pages */
+  background: color-mix(in srgb, var(--card-bg, #fff) 22%, transparent);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  box-shadow: none;
+  color: inherit;
+  transition: background 200ms ease, transform 150ms ease;
+}
+.bubble:hover {
+  background: color-mix(in srgb, var(--card-bg, #fff) 45%, transparent);
+  transform: scale(1.04);
+}
+.dot {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 2px solid #fff;
+}
+.panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 960;
+  width: min(380px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card-bg, #fff);
+  color: inherit;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+.sub {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.spacer {
+  flex: 1;
+}
+.headBtn {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  text-decoration: none;
+  padding: 2px 6px;
+}
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.me,
+.admin {
+  max-width: 85%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.me {
+  align-self: flex-end;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.admin {
+  align-self: flex-start;
+  background: rgba(127, 127, 127, 0.18);
+  border-bottom-left-radius: 3px;
+}
+.hint,
+.typing {
+  font-size: 13px;
+  opacity: 0.7;
+}
+.warn {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: rgba(255, 170, 0, 0.15);
+}
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid rgba(127, 127, 127, 0.25);
+}
+.input {
+  flex: 1;
+  resize: none;
+  padding: 8px;
+  font: inherit;
+  font-size: 14px;
+  border-radius: 8px;
+}
+.send {
+  width: 40px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--accent, #3b82f6);
+  color: #fff;
+  font-size: 16px;
+}
+.send:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.error {
+  padding: 0 12px 10px;
+  font-size: 12px;
+  color: #ef4444;
+}
+
+/* ---- accents: make the mascot's state readable even when the animation's own differences are subtle ---- */
+.headMascot,
+.bubbleRing {
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  transition: box-shadow 200ms ease;
+}
+.headMascot {
+  flex: none;
+}
+.bubbleRing {
+  width: 100%;
+  height: 100%;
+}
+[data-accent='busy'] {
+  animation: ring-busy 1.4s ease-in-out infinite;
+}
+[data-accent='waiting'] {
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.85);
+  animation: ring-wait 1.1s ease-in-out infinite;
+}
+[data-accent='error'] {
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.85);
+  animation: ring-error 2.2s ease-out 1;
+}
+[data-accent='success'] {
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.85);
+  animation: ring-success 2.2s ease-out 1;
+}
+@keyframes ring-busy {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.0); }
+  50% { box-shadow: 0 0 0 5px rgba(59, 130, 246, 0.45); }
+}
+@keyframes ring-wait {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.9); }
+  50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.35); }
+}
+@keyframes ring-error {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.9); }
+  30% { box-shadow: 0 0 0 7px rgba(239, 68, 68, 0.6); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+}
+@keyframes ring-success {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.9); }
+  30% { box-shadow: 0 0 0 7px rgba(34, 197, 94, 0.6); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-accent] { animation: none; }
+}

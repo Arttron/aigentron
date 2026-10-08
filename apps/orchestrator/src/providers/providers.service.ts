@@ -3,6 +3,7 @@ import { resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared'
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { LitellmService, defaultKind, stripSelfPrefix } from '../litellm/litellm.service';
+import { CodexService } from '../codex/codex.service';
 
 type ProviderRow = NonNullable<Awaited<ReturnType<PrismaService['provider']['findUnique']>>>;
 
@@ -10,7 +11,7 @@ export interface ProviderPatch {
   kind?: string;
   baseUrl?: string | null;
   model?: string;
-  authMode?: 'api-key' | 'auth-token' | 'oauth-token';
+  authMode?: 'api-key' | 'auth-token' | 'oauth-token' | 'codex-login';
   secret?: string | null;
   rpm?: number | null;
   tpm?: number | null;
@@ -30,6 +31,7 @@ export class ProvidersService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
     private readonly litellm: LitellmService,
+    private readonly codex: CodexService,
   ) {}
 
 
@@ -71,6 +73,7 @@ export class ProvidersService implements OnModuleInit {
    */
   private async syncRoute(row: ProviderRow): Promise<void> {
     if (!this.litellm.enabled) return;
+    if (row.kind === 'codex') return; // Codex runs on its own runtime — no LiteLLM route
     try {
       await this.litellm.deleteRoutesFor(row.name);
       // Gateway-verbatim provider: nothing to register (see servesVerbatim).
@@ -197,6 +200,15 @@ export class ProvidersService implements OnModuleInit {
   async test(name: string): Promise<ProviderTestResult> {
     const p = toProvider(await this.getRow(name));
     if (!p.model) return { ok: false, error: `provider "${name}" has no model` };
+    if (p.kind === 'codex') {
+      if (p.authMode === 'api-key') {
+        return p.secret
+          ? { ok: true, model: p.model }
+          : { ok: false, error: 'no API key set for this Codex provider' };
+      }
+      const st = await this.codex.status();
+      return st.loggedIn ? { ok: true, model: p.model } : { ok: false, error: st.message };
+    }
     if (p.authMode === 'oauth-token') {
       // The Claude Agent SDK handles this token's auth internally; we don't
       // know its exact request shape, so don't guess at an HTTP probe — an
@@ -325,20 +337,22 @@ export class ProvidersService implements OnModuleInit {
   /** Models the provider's endpoint advertises (for the agent's model picker). */
   async listModels(name: string): Promise<ProviderModelsResult> {
     const p = toProvider(await this.getRow(name));
+    if (p.kind === 'codex') return { ok: true, models: CODEX_MODELS };
     if (p.authMode === 'oauth-token') {
       // Same reasoning as test(): don't guess at the OAuth token's request shape.
       return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
     }
-    return this.fetchModels({ kind: p.kind || defaultKind(p.baseUrl), baseUrl: p.baseUrl, authMode: p.authMode, secret: p.secret });
+    return this.fetchModels({ kind: p.kind || defaultKind(p.baseUrl), baseUrl: p.baseUrl, authMode: p.authMode === 'api-key' ? 'api-key' : 'auth-token', secret: p.secret });
   }
 
   /** Same as listModels but for unsaved params — lets the form preview models. */
   async previewModels(input: {
     kind?: string;
     baseUrl?: string | null;
-    authMode?: 'api-key' | 'auth-token' | 'oauth-token';
+    authMode?: 'api-key' | 'auth-token' | 'oauth-token' | 'codex-login';
     secret?: string | null;
   }): Promise<ProviderModelsResult> {
+    if (input.kind === 'codex') return { ok: true, models: CODEX_MODELS };
     if (input.authMode === 'oauth-token') {
       return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
     }
@@ -448,16 +462,22 @@ function anthropicBase(baseUrl: string | null): string {
   return (baseUrl || 'https://api.anthropic.com').replace(/\/$/, '');
 }
 
+/** Native endpoints of the OpenAI-style families, used when a provider leaves "Base URL" blank (the form promises that). */
+const DEFAULT_OAI_BASE: Record<string, string> = {
+  openai: 'https://api.openai.com/v1',
+  deepseek: 'https://api.deepseek.com/v1',
+};
+
 /** Base for an OpenAI-style upstream (Ollama exposes it under /v1). */
 function oaiBase(kind: string, baseUrl: string | null): string {
-  const base = (baseUrl || '').replace(/\/$/, '');
+  const base = (baseUrl || DEFAULT_OAI_BASE[kind] || '').replace(/\/$/, '');
   return kind === 'ollama' ? `${base}/v1` : base;
 }
 
 /** Build auth headers for a direct upstream test/model-list, by kind. */
 function authHeaders(
   kind: string,
-  p: { authMode: 'api-key' | 'auth-token' | 'oauth-token'; secret: string | null },
+  p: { authMode: 'api-key' | 'auth-token' | 'oauth-token' | 'codex-login'; secret: string | null },
 ): {
   headers: Record<string, string>;
   error?: string;
@@ -530,7 +550,10 @@ export interface ProviderModelsResult {
   error?: string;
 }
 
-const KNOWN_AUTH_MODES = ['api-key', 'auth-token', 'oauth-token'] as const;
+const KNOWN_AUTH_MODES = ['api-key', 'auth-token', 'oauth-token', 'codex-login'] as const;
+
+/** Codex model names offered in the picker (any other name can be typed in). */
+const CODEX_MODELS = ['gpt-6.1-sol'];
 
 function toProvider(row: ProviderRow): Provider {
   return {

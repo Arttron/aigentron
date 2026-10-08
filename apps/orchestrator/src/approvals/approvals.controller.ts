@@ -48,6 +48,14 @@ export class ApprovalsController {
     return this.approvals.get(id);
   }
 
+  /** Fulfil a secret request: the value goes straight to storage (never into the agent's context). */
+  @Post(':id/secret')
+  @UseGuards(RolesGuard)
+  @Roles('reviewer', 'operator', 'admin')
+  submitSecret(@Param('id') id: string, @Body() body: { value?: string }, @CurrentUser() user: UserRow) {
+    return this.approvals.submitSecret(id, String(body?.value ?? ''), { id: user.id, displayName: user.displayName });
+  }
+
   /** Human verdict for a pending approval. */
   @Post(':id/decision')
   @UseGuards(RolesGuard)

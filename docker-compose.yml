@@ -11,6 +11,9 @@ name: local-dev-server
 # container reaches it via http://host.docker.internal:11434.
 # ----------------------------------------------------------------------
 
+# Published ports bind to 127.0.0.1 by default (these services have no authentication and LiteLLM/Postgres ship with
+# dev credentials). Set BIND_ADDRESS=0.0.0.0 in .env only when you deliberately expose the stack — then also set
+# LITELLM_MASTER_KEY, MCP_TOKEN and put it behind a VPN or an authenticating proxy.
 services:
   postgres:
     image: postgres:16-alpine
@@ -19,7 +22,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: orchestrator
     ports:
-      - "5432:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # Creates the separate `litellm` database on a fresh volume.
@@ -34,7 +37,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -65,7 +68,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "4000:4000"
+      - "${BIND_ADDRESS:-127.0.0.1}:4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -88,7 +91,7 @@ services:
       - "--allowed-hosts"
       - "playwright-mcp:8931,localhost:8931"
     ports:
-      - "8931:8931"
+      - "${BIND_ADDRESS:-127.0.0.1}:8931:8931"
 
   # Dev server for the project under development (./project), so the playwright
   # MCP has a reachable preview target on the compose network at
@@ -111,7 +114,7 @@ services:
     # hardcodes 3080 (ignores PORT), so it's project-dev:3080; a PORT-honoring
     # project would be project-dev:3000. Adjust the playwright skill URL to match.
     ports:
-      - "3100:3080"
+      - "${BIND_ADDRESS:-127.0.0.1}:3100:3080"
     volumes:
       - ${PROJECT_HOST_PATH:-./project}:/workspace/repo
 
@@ -145,6 +148,7 @@ services:
       # Shared workspace: all tasks work in the main repo dir (no per-task
       # worktree isolation); execution is serialized (concurrency 1).
       WORKSPACE_SHARED: ${WORKSPACE_SHARED:-true}
+      BIND_ADDRESS: ${BIND_ADDRESS:-127.0.0.1}
       # Public dashboard URL for channel deep links (/web command).
       DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-http://localhost:3000}
     # Join the project's DB network (external) so agent bash / verify / preview —
@@ -158,7 +162,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "${ORCHESTRATOR_PORT:-3001}:3001"
+      - "${BIND_ADDRESS:-127.0.0.1}:${ORCHESTRATOR_PORT:-3001}:3001"
     volumes:
       # Live source for hot-reload…
       - .:/app
@@ -179,6 +183,9 @@ services:
       # Agent operational files (skills + generated per-run settings), kept out
       # of the project. Add skills as markdown under ./agent/skills/.
       - ${AGENT_HOST_PATH:-./agent}:/workspace/agent
+      # Credentials (shared Codex sign-in…) live in a named volume, NOT in ./agent: agent runs can see their own
+      # file tree, and ./agent sits inside the repo checkout.
+      - secrets:/workspace/secrets
     depends_on:
       postgres:
         condition: service_healthy
@@ -216,7 +223,7 @@ services:
       VITE_ORCHESTRATOR_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
       VITE_ORCHESTRATOR_WS_URL: http://localhost:${ORCHESTRATOR_PORT:-3001}
     ports:
-      - "${DASHBOARD_PORT:-3000}:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${DASHBOARD_PORT:-3000}:3000"
     volumes:
       - .:/app
       - /app/node_modules
@@ -234,6 +241,7 @@ networks:
     external: true
 
 volumes:
+  secrets:
   pgdata:
   redisdata:
   worktrees:

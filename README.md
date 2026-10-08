@@ -108,6 +108,13 @@ remote server (e.g. a small AWS instance) as **one container**: orchestrator + d
 separate LiteLLM service. SQLite + an in-process queue replace them. Full design in
 [`docs/plan-single-container.md`](docs/plan-single-container.md).
 
+> **Admin assistant from the terminal:** `aigentron-admin` (bare-metal/minimal image) or `make admin` (dev compose) opens the
+> same chat as the dashboard bubble — handy for first-time setup on a headless server. Approvals are answered at the prompt and
+> API keys are typed into a hidden prompt that goes straight to the server, never through the chat.
+>
+> Where the project, agent files, secrets and env files live in each mode, and how cleanup works:
+> [`docs/workspace-layout.md`](docs/workspace-layout.md).
+
 **Status:** builds and runs correctly (verified end to end, including a real agent task
 against a real local Ollama through the self-managed LiteLLM). No container registry is
 involved — every path below builds `infra/minimal.Dockerfile` locally from source; the

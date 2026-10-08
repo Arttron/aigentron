@@ -2,6 +2,9 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { INTERNAL_MCP_SERVER } from '@lds/shared';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AppConfigService } from '../config/app-config.service';
+import { effectiveReadOnly, readOnlyFromAnnotations, stripRegistryKeys, type McpToolInfo } from './mcp-annotations';
+import { discoverTools } from './mcp-discovery';
 
 type McpRow = NonNullable<Awaited<ReturnType<PrismaService['mcpServer']['findUnique']>>>;
 
@@ -74,18 +77,31 @@ export type McpConfig = Record<string, unknown>;
 export class McpService {
   private readonly logger = new Logger(McpService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly appConfig: AppConfigService,
+  ) {}
 
   private async ensureSeeded(): Promise<void> {
     // Idempotent: adds any missing defaults without overwriting user edits.
     // Filtered here (not `createMany({skipDuplicates:true})`) since that
     // option isn't supported on SQLite.
     const existing = await this.prisma.mcpServer.findMany({
-      where: { name: { in: DEFAULT_MCP_SERVERS.map((s) => s.name) } },
+      where: { name: { in: [...DEFAULT_MCP_SERVERS.map((s) => s.name), 'research'] } },
       select: { name: true },
     });
     const existingNames = new Set(existing.map((s) => s.name));
-    const missing = DEFAULT_MCP_SERVERS.filter((s) => !existingNames.has(s.name));
+    // The built-in research server lives in this very process; its URL depends on the configured API base.
+    const researchSeed = {
+      name: 'research',
+      config: {
+        type: 'http',
+        url: `${this.appConfig.approvalsApiUrl.replace(/\/$/, '')}/api/research-mcp`,
+        // Declared read-only for the approval classifier (all four tools only read official sources).
+        readOnlyTools: ['*'],
+      },
+    };
+    const missing = [...DEFAULT_MCP_SERVERS, researchSeed].filter((s) => !existingNames.has(s.name));
     if (!missing.length) return;
     await this.prisma.mcpServer.createMany({ data: missing as Prisma.McpServerCreateManyInput[] });
     this.logger.log(`Seeded ${missing.length} default MCP server(s)`);
@@ -114,10 +130,58 @@ export class McpService {
     if (!names.length) return {};
     const rows = await this.prisma.mcpServer.findMany({ where: { name: { in: names } } });
     const map: Record<string, McpConfig> = {};
-    for (const row of rows) map[row.name] = substituteSecrets(row.config, secrets) as McpConfig;
+    for (const row of rows) {
+      // Registry-only keys (classifier hints) are not part of the SDK/Codex server config — never forward them.
+      const runtimeConfig = stripRegistryKeys((row.config ?? {}) as Record<string, unknown>);
+      map[row.name] = substituteSecrets(runtimeConfig, secrets) as McpConfig;
+    }
     const missing = names.filter((n) => !(n in map));
     if (missing.length) this.logger.warn(`Unknown MCP servers ignored: ${missing.join(', ')}`);
     return map;
+  }
+
+  /**
+   * Operator-declared read-only tools per MCP server (`readOnlyTools` in the server's config JSON:
+   * `["*"]` or a list of tool names). Fed to the approval classifier so a trusted read-only server
+   * (a search/fetch tool, a docs server…) doesn't need an approval on every call. Cached briefly:
+   * it is consulted on every gated-looking tool call.
+   */
+  async readOnlyMap(): Promise<Record<string, string[]>> {
+    const now = Date.now();
+    if (this.roCache && now - this.roCache.at < 5000) return this.roCache.map;
+    const rows = await this.prisma.mcpServer.findMany({ select: { name: true, config: true } });
+    const map: Record<string, string[]> = {};
+    for (const r of rows) {
+      const ro = effectiveReadOnly(r.config as Record<string, unknown> | null);
+      if (ro) map[r.name] = ro;
+    }
+    this.roCache = { at: now, map };
+    return map;
+  }
+  private roCache?: { at: number; map: Record<string, string[]> };
+
+  /**
+   * Ask the server for its tools (with annotations) and remember which ones it declares read-only.
+   * They only take effect when the operator set `"trustAnnotations": true` on the server — a server
+   * can claim anything about itself, so this is opt-in. New/unannotated tools stay gated.
+   */
+  async discover(name: string): Promise<{ trusted: boolean; tools: (McpToolInfo & { readOnly: boolean })[] }> {
+    const row = await this.getRow(name);
+    const config = (row.config ?? {}) as Record<string, unknown>;
+    let tools: McpToolInfo[];
+    try {
+      tools = await discoverTools(stripRegistryKeys(config));
+    } catch (err) {
+      throw new BadRequestException(`Could not list tools of "${name}": ${(err as Error).message}`);
+    }
+    const readOnly = readOnlyFromAnnotations(tools);
+    await this.prisma.mcpServer.update({
+      where: { name },
+      data: { config: { ...config, discoveredReadOnly: readOnly } as Prisma.InputJsonValue },
+    });
+    this.roCache = undefined;
+    const ro = new Set(readOnly);
+    return { trusted: config.trustAnnotations === true, tools: tools.map((t) => ({ ...t, readOnly: ro.has(t.name) })) };
   }
 
   async create(name: string, config: McpConfig): Promise<McpRow> {

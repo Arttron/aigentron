@@ -26,7 +26,7 @@ export interface Provider {
   /** Upstream endpoint; null/empty = the family's native default. */
   baseUrl: string | null;
   model: string;
-  authMode: 'api-key' | 'auth-token' | 'oauth-token';
+  authMode: 'api-key' | 'auth-token' | 'oauth-token' | 'codex-login';
   /** API key, auth token, or CLI-minted OAuth token, per authMode. */
   secret: string | null;
   /** Upstream family for LiteLLM routing: anthropic | openai | deepseek | ollama. */

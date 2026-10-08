@@ -1,9 +1,10 @@
 import { IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 
-const KINDS = ['anthropic', 'openai', 'deepseek', 'ollama'] as const;
+const KINDS = ['anthropic', 'openai', 'deepseek', 'ollama', 'codex'] as const;
 // oauth-token: a CLI-minted subscription token (e.g. `claude setup-token`) —
 // bypasses LiteLLM, see @lds/shared resolveProvider().
-const AUTH_MODES = ['api-key', 'auth-token', 'oauth-token'] as const;
+// codex-login: signed in with a ChatGPT subscription via the Codex CLI (kind `codex`); no secret stored.
+const AUTH_MODES = ['api-key', 'auth-token', 'oauth-token', 'codex-login'] as const;
 
 export class CreateProviderDto {
   @IsString()

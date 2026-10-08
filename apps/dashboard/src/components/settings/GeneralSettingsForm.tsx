@@ -119,6 +119,12 @@ export function GeneralSettingsForm() {
             onChange={(e) => set('workspaceSubdir', e.target.value)}
             placeholder="(repo root)"
           />
+          {/[:@\\]|^\/|\.\./.test(form.workspaceSubdir ?? '') && (
+            <ErrorText>
+              This looks like a URL or an absolute path, not a folder inside the repository. A git address belongs in
+              “Repo URL”; here use a relative folder such as <code>apps/web</code>, or leave it empty for the repo root.
+            </ErrorText>
+          )}
         </Field>
         <Muted className={styles.note}>
           With a repo set, each task branches off the latest <code>{form.repoBranch || 'main'}</code>;

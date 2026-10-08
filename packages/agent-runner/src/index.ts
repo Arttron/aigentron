@@ -3,3 +3,8 @@ export { runAgent } from './run';
 export { emptyUsage, addUsage } from './usage';
 export { writeAgentSettings } from './settings';
 export { buildAgentEnv } from './env';
+export { buildInternalToolSpecs } from './internal-tools';
+export type { InternalToolSpec, InternalToolHandlers } from './internal-tools';
+export { claudeCodeRuntime, codexRuntime, runtimeForProviderKind } from './runtime';
+export type { AgentRuntime } from './runtime';
+export { runCodex, mapCodexEvent, renderCodexConfig, scrubRunHome, INTERNAL_MCP_TOKEN_ENV } from './codex';

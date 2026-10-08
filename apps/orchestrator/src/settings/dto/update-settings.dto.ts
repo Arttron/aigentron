@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 /** PUT /api/settings body. All fields optional; only present ones are changed. */
 export class UpdateSettingsDto {
@@ -59,6 +59,12 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
   @MaxLength(300)
+  // A folder path INSIDE the repo ("apps/web"): no URLs/ssh addresses ("git@host:org/repo.git" belongs in Repo URL),
+  // no absolute paths, no `..`. Empty = the repo root.
+  @Matches(/^(?!\/)(?!.*(:|@|\\|(^|\/)\.\.(\/|$)))[^\s]*$/, {
+    message:
+      'Project subdirectory must be a folder path inside the repository (e.g. apps/web) — not a URL or git address (that goes in "Repo URL"), not an absolute path, no "..". Leave it empty for the repo root.',
+  })
   workspaceSubdir?: string;
 
   @IsOptional()

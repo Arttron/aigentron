@@ -1,3 +1,4 @@
+import { parseBudgetLimit } from '../agent/run-guards';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
@@ -29,6 +30,11 @@ export class AppConfigService {
   /** Directory for agent operational files (skills, generated settings) — kept
    *  out of the project so worktrees only ever contain project files. */
   readonly agentDir: string;
+  /**
+   * Credentials that agents must never find inside their own file tree (the shared Codex sign-in, …).
+   * Sibling of the agent dir by default: `/workspace/secrets` (compose), `/data/secrets` (minimal/bare).
+   */
+  readonly secretsDir: string;
   /** The currently-running release's OWN copy of `agent/` (read-only reference) —
    *  distinct from `agentDir` above, which is the live/persistent copy a human may
    *  have hand-edited. Used by AgentFilesSyncService to bring platform-maintained
@@ -51,6 +57,11 @@ export class AppConfigService {
   readonly agentConcurrency: number;
   /** Hard ceiling on a single agent run; aborts so it can't wedge a slot. */
   readonly agentRunTimeoutMs: number;
+  /** No-progress watchdog: abort a run that emitted no event for this long (0 = off). Not applied while approvals are pending or a tool is running. */
+  readonly agentIdleTimeoutMs: number;
+  /** Soft token budgets checked before each run (0 = unlimited): per task, and per rolling 24 h across all tasks. */
+  readonly budgetTokensPerTask: number;
+  readonly budgetTokensPerDay: number;
   /**
    * Strict completion contract: when true, a run that finishes cleanly but never
    * calls report_task_status is marked `stalled` (rather than proceeding to the
@@ -139,6 +150,7 @@ export class AppConfigService {
     this.workspaceRepoPath = process.env.WORKSPACE_REPO_PATH ?? '/workspace/repo';
     this.worktreesRoot = process.env.WORKTREES_ROOT ?? '/workspace/.worktrees';
     this.agentDir = process.env.AGENT_DIR ?? '/workspace/agent';
+    this.secretsDir = process.env.SECRETS_DIR ?? join(this.agentDir, '..', 'secrets');
     this.shippedAgentDir = process.env.SHIPPED_AGENT_DIR ?? defaultShippedAgentDir();
     this.agentMaxTurns = parseInt(process.env.AGENT_MAX_TURNS ?? '40', 10);
     this.maxContinuations = parseInt(process.env.MAX_CONTINUATIONS ?? '2', 10);
@@ -153,6 +165,9 @@ export class AppConfigService {
       ? 1
       : parseInt(process.env.AGENT_CONCURRENCY ?? '2', 10);
     this.agentRunTimeoutMs = parseInt(process.env.AGENT_RUN_TIMEOUT_MS ?? '600000', 10);
+    this.agentIdleTimeoutMs = Math.max(0, parseInt(process.env.AGENT_IDLE_TIMEOUT_MS ?? '240000', 10) || 0);
+    this.budgetTokensPerTask = parseBudgetLimit(process.env.BUDGET_TOKENS_PER_TASK);
+    this.budgetTokensPerDay = parseBudgetLimit(process.env.BUDGET_TOKENS_PER_DAY);
     this.requireStatusReport = /^(1|true|yes)$/i.test(process.env.REQUIRE_STATUS_REPORT ?? '');
 
     this.approvalsApiUrl = process.env.APPROVALS_API_URL ?? `http://localhost:${this.port}`;

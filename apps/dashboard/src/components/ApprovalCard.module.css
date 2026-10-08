@@ -47,3 +47,22 @@
   font-size: 12px;
   margin-top: 8px;
 }
+
+.proposal {
+  margin: 8px 0;
+}
+.proposalHead {
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.proposalBody {
+  max-height: 320px;
+  overflow: auto;
+  margin: 4px 0;
+  padding: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(127, 127, 127, 0.12);
+  border-radius: 6px;
+}

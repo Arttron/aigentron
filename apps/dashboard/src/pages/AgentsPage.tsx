@@ -44,6 +44,7 @@ const emptyForm: Form = {
 
 export function AgentsPage() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [templates, setTemplates] = useState<AgentInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [skillOptions, setSkillOptions] = useState<string[]>([]);
   const [mcpOptions, setMcpOptions] = useState<McpServerInfo[]>([]);
@@ -119,6 +120,40 @@ export function AgentsPage() {
         mcp: a.mcp ?? [],
         instructions: a.instructions ?? '',
       });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  // Templates are only needed by the "+ New agent" form; failing to load them just hides the picker.
+  useEffect(() => {
+    api.listAgentTemplates().then(setTemplates).catch(() => setTemplates([]));
+  }, []);
+
+  /** Pre-fill the new-agent form from a shipped template. The name and provider stay the user's choice. */
+  const applyTemplate = async (templateName: string) => {
+    if (!templateName) return;
+    setError(null);
+    try {
+      const t = await api.getAgentTemplate(templateName);
+      setForm((f) =>
+        f
+          ? {
+              ...f,
+              name: f.name.trim() ? f.name : agents.some((a) => a.name === t.name) ? '' : t.name,
+              description: t.description ?? '',
+              fallbackProviders: t.fallbackProviders ?? [],
+              model: t.model ?? '',
+              skills: t.skills ?? [],
+              allowedTools: (t.allowedTools ?? []).join(', '),
+              disallowedTools: (t.disallowedTools ?? []).join(', '),
+              mcp: t.mcp ?? [],
+              instructions: t.instructions ?? '',
+              // keep the user's provider unless the template pins one that exists here
+              provider: t.provider && providers.some((p) => p.name === t.provider) ? t.provider : f.provider,
+            }
+          : f,
+      );
     } catch (e) {
       setError((e as Error).message);
     }
@@ -206,9 +241,13 @@ export function AgentsPage() {
               <Button size="sm" onClick={() => edit(a.name)}>
                 Edit
               </Button>
-              <Button variant="red" size="sm" onClick={() => remove(a.name)}>
-                ✕
-              </Button>
+              {a.name.toLowerCase() === 'admin' ? (
+                <Badge tone="neutral">built-in</Badge>
+              ) : (
+                <Button variant="red" size="sm" onClick={() => remove(a.name)}>
+                  ✕
+                </Button>
+              )}
             </li>
           ))}
         </ul>
@@ -217,6 +256,18 @@ export function AgentsPage() {
       {form && (
         <Card as="form" onSubmit={save}>
           <SectionTitle>{isNew ? 'New agent' : `Edit: ${form.name}`}</SectionTitle>
+          {isNew && templates.length > 0 && (
+            <Field label="Start from a template (optional — fills the fields below, you can edit everything)">
+              <select value="" onChange={(e) => void applyTemplate(e.target.value)}>
+                <option value="">— choose a template —</option>
+                {templates.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.name} — {(t.description ?? '').slice(0, 70)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
           {isNew && (
             <Field label="Name (filename)">
               <input

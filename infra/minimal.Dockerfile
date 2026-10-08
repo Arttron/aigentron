@@ -52,6 +52,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   # default otherwise (only the full profile's dev image had it).
   && curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 
+# OpenAI Codex CLI — second agent runtime (provider kind `codex`); pinned, tolerant of an offline build.
+ARG CODEX_VERSION=0.160.1
+RUN npm install -g @openai/codex@${CODEX_VERSION} || echo "WARN: codex CLI not installed — codex providers won't work until it is"
+# Console access to the built-in admin agent: `docker exec -it <container> aigentron-admin`
+RUN printf '#!/bin/sh\nexec node /app/infra/admin-cli.mjs "$@"\n' > /usr/local/bin/aigentron-admin && chmod +x /usr/local/bin/aigentron-admin
+
+
 WORKDIR /app
 
 # Baked in at build time from the repo-root VERSION file (see publish/sync-public.sh

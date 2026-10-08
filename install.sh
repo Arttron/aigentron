@@ -588,6 +588,13 @@ WantedBy=multi-user.target
 EOF
 
   log "Enabling + (re)starting the aigentron service"
+  # Console access to the admin agent from any shell on this server. Points at the `current` symlink, so updates apply.
+  cat > /usr/local/bin/aigentron-admin <<SHIM
+#!/bin/sh
+exec node "$CURRENT_LINK/infra/admin-cli.mjs" "\$@"
+SHIM
+  chmod +x /usr/local/bin/aigentron-admin
+
   systemctl daemon-reload
   systemctl enable aigentron
   # `enable --now` is a no-op start on an already-active unit — on an upgrade
@@ -599,6 +606,8 @@ EOF
   log "Dashboard + API: http://localhost:3001"
   log "Logs:             journalctl -u aigentron -f"
   log ""
-  log "Run the setup wizard to configure providers, channels, agents, skills, and a repo:"
+  log "Talk to the admin assistant from this terminal (set up providers, agents, … by chatting):"
+  log "  aigentron-admin"
+  log "Or run the guided setup wizard:"
   log "  node \"$CURRENT_LINK/infra/setup-wizard.mjs\""
 fi

@@ -8,6 +8,7 @@ import { AgentExecutor } from '../agent/agent-executor';
 import { SettingsService } from '../settings/settings.service';
 import { PreviewService } from '../preview/preview.service';
 import { ApprovalsService } from '../approvals/approvals.service';
+import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { VerificationService, type VerifyResult } from './verification.service';
 import { TaskQueue, type TaskJobData } from './queue.constants';
 
@@ -46,6 +47,7 @@ export class TaskWorkerService implements OnModuleInit {
     private readonly verification: VerificationService,
     private readonly preview: PreviewService,
     private readonly approvals: ApprovalsService,
+    private readonly agents: AgentRegistryService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -81,6 +83,13 @@ export class TaskWorkerService implements OnModuleInit {
 
     try {
       const task = await this.tasks.get(taskId);
+      // Chat agents (e.g. the built-in admin) have no repo/worktree/verify/publish
+      // lifecycle: every turn just runs and settles as done.
+      const chatAgent = task.agentName ? await this.agents.get(task.agentName).catch(() => null) : null;
+      if (chatAgent?.mode === 'chat') {
+        await this.processChat(taskId, followUpPrompt, attachments);
+        return;
+      }
       // Shared mode: every task works in the main repo dir. Otherwise reuse an
       // existing per-task worktree on follow-ups, or create one.
       const wt = this.config.workspaceShared
@@ -261,6 +270,32 @@ export class TaskWorkerService implements OnModuleInit {
         this.logger.warn(`fan-in failed for ${taskId}: ${(err as Error).message}`),
       );
     }
+  }
+
+  /** One chat turn: run the agent in the agent-config dir and settle as done (or failed on a run error). */
+  private async processChat(taskId: string, followUpPrompt?: string, attachments?: string[]): Promise<void> {
+    const outcome = await this.executor.run({
+      taskId,
+      worktreePath: this.config.agentDir,
+      branch: '',
+      followUpPrompt,
+      attachments,
+    });
+    const after = await this.tasks.get(taskId);
+    if (isTerminalStatus(after.status)) return; // cancelled mid-turn — leave it
+    if (outcome.errored && outcome.reported !== 'done') {
+      const why = outcome.timedOut ? 'chat turn timed out' : (outcome.finalText ?? 'chat turn failed');
+      await this.tasks.setStatus(taskId, 'failed', why.slice(0, 500));
+      this.logger.warn(`Chat task ${taskId} failed: ${why.slice(0, 200)}`);
+      return;
+    }
+    if (outcome.reported === 'blocked' && outcome.reportedSummary) {
+      // e.g. a token budget stopped the turn before it started — say so instead of silently "done".
+      await this.tasks.setStatus(taskId, 'blocked', outcome.reportedSummary.slice(0, 500));
+      return;
+    }
+    await this.tasks.setStatus(taskId, 'done');
+    this.logger.log(`Chat task ${taskId} turn finished`);
   }
 
   /**

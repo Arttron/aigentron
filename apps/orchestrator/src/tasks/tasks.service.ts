@@ -84,7 +84,14 @@ export class TasksService {
       agent = await this.agents.get(dto.agentName);
     } else {
       const def = await this.settings.defaultAgent();
-      if (def) agent = await this.agents.get(def).catch(() => null);
+      if (def) {
+        agent = await this.agents.get(def).catch(() => null);
+        if (!agent) {
+          this.logger.warn(
+            `Default agent "${def}" does not exist — the task will run without an agent definition. Pick an existing default in Settings.`,
+          );
+        }
+      }
     }
     const title = dto.title?.trim() || deriveTitle(dto.prompt);
     // A subtask's parent must exist; reject a dangling parentId early.

@@ -18,8 +18,9 @@ mkdir -p "$DATA_DIR/agent" "$DATA_DIR/repo" "$DATA_DIR/worktrees" "$(dirname "${
 # The baked-in agent defs (agent/agents/*.md, skills) live at $APP_DIR/agent;
 # AGENT_DIR points at the persisted $DATA_DIR/agent so user edits survive a
 # container recreate / upgrade. Seed the defaults once — never overwrite on
-# later boots, or an edited/removed default would keep reverting.
-if [ ! -d "$DATA_DIR/agent/agents" ]; then
+# later boots, or an edited/removed default would keep reverting. (The admin-seeded
+# marker also blocks a re-copy if the orchestrator's seed step ever failed mid-way.)
+if [ ! -d "$DATA_DIR/agent/agents" ] && [ ! -f "$DATA_DIR/agent/.sync/admin-seeded" ]; then
   echo "[entrypoint] seeding default agent defs into $DATA_DIR/agent…"
   cp -r "$APP_DIR/agent/." "$DATA_DIR/agent/"
 fi

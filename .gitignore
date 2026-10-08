@@ -44,3 +44,11 @@ coverage/
 
 # local Claude Code settings (never commit)
 .claude/settings.local.json
+
+# live (user-owned) agents + admin seed marker + pre-write snapshots; templates live in agent/catalog/
+/agent/agents/
+/agent/.sync/
+/agent/.snapshots/
+
+# Codex login tokens (CODEX_HOME for the orchestrator container) — NEVER commit
+/agent/.codex-home/

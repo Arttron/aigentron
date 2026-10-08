@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 
 /** A named agent definition loaded from <agentDir>/agents/<name>.md. */
@@ -20,6 +20,11 @@ export interface AgentDef {
   disallowedTools?: string[];
   /** MCP server names this agent connects to (from the MCP registry). */
   mcp?: string[];
+  /**
+   * `chat`: conversational agent — tasks run without a git worktree, verify gate,
+   * publish step or required status report, and each reply settles the task as done.
+   */
+  mode?: 'chat';
   /** The agent's system-prompt body. */
   instructions: string;
 }
@@ -28,6 +33,9 @@ export interface AgentDef {
 export type AgentSummary = Omit<AgentDef, 'instructions'>;
 
 const NAME_RE = /^[\w-]+$/;
+/** Built-in agents: can't be deleted, and a save can't clobber them via the create/edit API. */
+export const BUILTIN_AGENTS = ['admin'];
+export const isBuiltinAgent = (name: string): boolean => BUILTIN_AGENTS.includes(name.toLowerCase());
 
 /**
  * File-based registry of named agents. Each ./agent/agents/<name>.md has YAML-ish
@@ -76,7 +84,7 @@ export class AgentRegistryService {
     return defs
       .filter((d): d is AgentDef => d !== null)
       .map(
-        ({ name, description, provider, fallbackProviders, model, skills, allowedTools, disallowedTools, mcp }) => ({
+        ({ name, description, provider, fallbackProviders, model, skills, allowedTools, disallowedTools, mcp, mode }) => ({
           name,
           description,
           provider,
@@ -86,6 +94,7 @@ export class AgentRegistryService {
           allowedTools,
           disallowedTools,
           mcp,
+          mode,
         }),
       );
   }
@@ -112,11 +121,28 @@ export class AgentRegistryService {
       allowedTools?: string[];
       disallowedTools?: string[];
       mcp?: string[];
+      mode?: 'chat';
       instructions: string;
     },
   ): Promise<AgentDef> {
     if (!NAME_RE.test(name)) {
       throw new BadRequestException('Agent name must be alphanumeric/dash/underscore');
+    }
+    if (isBuiltinAgent(name)) {
+      // Built-ins keep their prompt/tools/skills; only routing (provider/model/fallbacks)
+      // may be changed, so the dashboard and setup wizard can still point them at a model.
+      const existing = await this.get(name);
+      def = {
+        ...existing,
+        provider: def.provider,
+        fallbackProviders: def.fallbackProviders,
+        model: def.model,
+      };
+    }
+    // `mode` isn't editable in the UI/API payloads — keep what the file already has.
+    if (def.mode === undefined) {
+      const prior = await this.get(name).catch(() => null);
+      if (prior?.mode) def = { ...def, mode: prior.mode };
     }
     await mkdir(this.dir, { recursive: true });
     await writeFile(join(this.dir, `${name}.md`), serializeAgent(def));
@@ -127,6 +153,9 @@ export class AgentRegistryService {
   /** Delete an agent file. */
   async remove(name: string): Promise<void> {
     if (!NAME_RE.test(name)) throw new NotFoundException(`Agent not found: ${name}`);
+    if (isBuiltinAgent(name)) {
+      throw new ForbiddenException(`"${name}" is a built-in agent and can't be deleted`);
+    }
     try {
       await unlink(join(this.dir, `${name}.md`));
     } catch {
@@ -137,38 +166,46 @@ export class AgentRegistryService {
 
   private async parseFile(filename: string): Promise<AgentDef> {
     const raw = await readFile(join(this.dir, filename), 'utf8');
-    const fallbackName = filename.replace(/\.md$/, '');
-    const meta: Record<string, string> = {};
-    let body = raw;
-
-    const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-    if (fm) {
-      body = fm[2] ?? '';
-      for (const rawLine of (fm[1] ?? '').split(/\r?\n/)) {
-        const line = rawLine.trim();
-        // Skip blanks and full-line comments; tolerate CRLF and quoted values.
-        if (!line || line.startsWith('#')) continue;
-        const idx = line.indexOf(':');
-        if (idx === -1) continue;
-        const key = line.slice(0, idx).trim();
-        if (!key) continue;
-        meta[key] = unquote(line.slice(idx + 1).trim());
-      }
-    }
-
-    return {
-      name: meta.name || fallbackName,
-      description: meta.description || '',
-      provider: meta.provider || undefined,
-      fallbackProviders: csv(meta.fallbackProviders),
-      model: meta.model || undefined,
-      skills: csv(meta.skills),
-      allowedTools: csv(meta.allowedTools),
-      disallowedTools: csv(meta.disallowedTools),
-      mcp: csv(meta.mcp),
-      instructions: body.trim(),
-    };
+    const base = filename.replace(/\.md$/, '');
+    // The identity is the file name, never a `name:` line inside the file —
+    // otherwise any agent could claim to be `admin` and inherit its tools.
+    return { ...parseAgentMarkdown(raw, base), name: base };
   }
+}
+
+/** Parse an agent .md (frontmatter + prompt body); `fallbackName` is used when the file has no `name:`. */
+export function parseAgentMarkdown(raw: string, fallbackName: string): AgentDef {
+  const meta: Record<string, string> = {};
+  let body = raw;
+
+  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (fm) {
+    body = fm[2] ?? '';
+    for (const rawLine of (fm[1] ?? '').split(/\r?\n/)) {
+      const line = rawLine.trim();
+      // Skip blanks and full-line comments; tolerate CRLF and quoted values.
+      if (!line || line.startsWith('#')) continue;
+      const idx = line.indexOf(':');
+      if (idx === -1) continue;
+      const key = line.slice(0, idx).trim();
+      if (!key) continue;
+      meta[key] = unquote(line.slice(idx + 1).trim());
+    }
+  }
+
+  return {
+    name: meta.name || fallbackName,
+    description: meta.description || '',
+    provider: meta.provider || undefined,
+    fallbackProviders: csv(meta.fallbackProviders),
+    model: meta.model || undefined,
+    skills: csv(meta.skills),
+    allowedTools: csv(meta.allowedTools),
+    disallowedTools: csv(meta.disallowedTools),
+    mcp: csv(meta.mcp),
+    mode: meta.mode === 'chat' ? 'chat' : undefined,
+    instructions: body.trim(),
+  };
 }
 
 /** Strip a single pair of surrounding single/double quotes, if present. */
@@ -205,6 +242,7 @@ function serializeAgent(def: {
   allowedTools?: string[];
   disallowedTools?: string[];
   mcp?: string[];
+  mode?: 'chat';
   instructions: string;
 }): string {
   const oneLine = (s: string) => s.replace(/[\r\n]+/g, ' ').trim();
@@ -219,6 +257,7 @@ function serializeAgent(def: {
     csvLine('allowedTools', def.allowedTools),
     csvLine('disallowedTools', def.disallowedTools),
     csvLine('mcp', def.mcp),
+    def.mode ? `mode: ${def.mode}` : null,
   ].filter(Boolean);
   return `---\n${fm.join('\n')}\n---\n${def.instructions.trim()}\n`;
 }

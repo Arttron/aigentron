@@ -30,9 +30,15 @@ ENV PNPM_HOME=/pnpm \
     NODE_ENV=development \
     CI=true
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+# OpenAI Codex CLI — second agent runtime (provider kind `codex`); pinned, tolerant of an offline build.
+ARG CODEX_VERSION=0.160.1
+RUN npm install -g @openai/codex@${CODEX_VERSION} || echo "WARN: codex CLI not installed — codex providers won't work until it is"
 # Fixed store path baked into the image (see infra notes) keeps node_modules
 # consistent on boot so installs stay non-interactive.
 RUN pnpm config set store-dir /pnpm/store --global
+
+# Console access to the built-in admin agent: `docker exec -it <container> aigentron-admin`
+RUN printf '#!/bin/sh\nexec node /app/infra/admin-cli.mjs "$@"\n' > /usr/local/bin/aigentron-admin && chmod +x /usr/local/bin/aigentron-admin
 
 WORKDIR /app
 

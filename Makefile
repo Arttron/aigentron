@@ -1,13 +1,25 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help up down logs ps build pull-models migrate seed dev clean
+.PHONY: help up down logs ps build pull-models migrate seed dev clean init-env check-admin-skills admin test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-up: ## Build & start the whole stack (postgres, redis, ollama, orchestrator, dashboard)
+admin: ## Chat with the built-in admin agent in this terminal (needs the stack running)
+	$(COMPOSE) exec orchestrator node /app/infra/admin-cli.mjs
+
+init-env: ## Create .env if missing; on a fresh install generate a random LITELLM_MASTER_KEY
+	@sh infra/init-env.sh
+
+test: ## Run the unit tests (classifier, validators, SSRF/text helpers, event mappers) + the admin-skills drift check
+	@pnpm test
+
+check-admin-skills: ## Fail if the admin agent's skills drift from its real tools
+	@node scripts/check-admin-skills.mjs
+
+up: init-env ## Build & start the whole stack (postgres, redis, ollama, orchestrator, dashboard)
 	$(COMPOSE) up -d --build
 
 down: ## Stop the stack

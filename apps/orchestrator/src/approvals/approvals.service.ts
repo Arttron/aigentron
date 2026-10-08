@@ -1,7 +1,19 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import {
   classifyToolCall,
   CONTINUE_RUN_TOOL,
+  PROPOSE_AGENT_DELETE_TOOL,
+  PROPOSE_AGENT_TOOL,
+  PROPOSE_BATCH_TOOL,
+  PROPOSE_CLEANUP_TOOL,
+  PROPOSE_PROVIDER_TOOL,
+  PROPOSE_SETTINGS_TOOL,
+  PROPOSE_SKILL_TOOL,
+  PROPOSE_TASK_ACTION_TOOL,
+  PROPOSE_TASK_TOOL,
+  PROPOSE_UNDO_TOOL,
+  REQUEST_SECRET_TOOL,
   type ApprovalRequest,
   type ApprovalStatus,
   type HookCheckInput,
@@ -13,6 +25,10 @@ import { AgentEventBus } from '../bus/agent-event-bus';
 import { SettingsService } from '../settings/settings.service';
 import { TasksService, serializeTask } from '../tasks/tasks.service';
 import { Prisma } from '../generated/prisma/client';
+import { PlatformAdminService } from '../agent-registry/platform-admin.service';
+import { exceptionCutoff, exceptionSignature, exceptionTtlDays } from './exception-signature';
+import { McpService } from '../mcp/mcp.service';
+import { ProvidersService } from '../providers/providers.service';
 
 /** Prisma row shape for an approval (Json/Date fields). */
 type ApprovalRow = Awaited<ReturnType<PrismaService['approvalRequest']['create']>>;
@@ -41,6 +57,21 @@ export function serializeApproval(row: ApprovalRow): ApprovalRequest {
  * pending approvals and the agent blocks on `waitForVerdict` until a human
  * decides — or the request times out and we fail closed (deny).
  */
+/** Tools whose requests are pre-validated before any approval is opened. */
+const ADMIN_PROPOSAL_TOOLS = new Set<string>([
+  PROPOSE_TASK_ACTION_TOOL,
+  PROPOSE_BATCH_TOOL,
+  PROPOSE_TASK_TOOL,
+  PROPOSE_SETTINGS_TOOL,
+  PROPOSE_UNDO_TOOL,
+  REQUEST_SECRET_TOOL,
+  PROPOSE_CLEANUP_TOOL,
+  PROPOSE_PROVIDER_TOOL,
+  PROPOSE_AGENT_DELETE_TOOL,
+  PROPOSE_AGENT_TOOL,
+  PROPOSE_SKILL_TOOL,
+]);
+
 @Injectable()
 export class ApprovalsService {
   private readonly logger = new Logger(ApprovalsService.name);
@@ -51,6 +82,7 @@ export class ApprovalsService {
     private readonly settings: SettingsService,
     private readonly tasks: TasksService,
     private readonly config: AppConfigService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   /**
@@ -58,16 +90,31 @@ export class ApprovalsService {
    * ones create a pending approval and move the task to `needs_approval`.
    */
   async check(input: HookCheckInput): Promise<HookCheckResponse> {
+    const readOnlyMcp = input.toolName.startsWith('mcp__')
+      ? await this.moduleRef.get(McpService, { strict: false }).readOnlyMap().catch(() => ({}))
+      : undefined;
     const verdict = classifyToolCall(input.toolName, input.toolInput, {
       workspaceRoot: input.workspaceRoot,
+      readOnlyMcp,
     });
     if (!verdict.dangerous) {
       return { allow: true };
     }
 
+    // Admin platform proposals are validated BEFORE a card is opened: a human should never be asked to
+    // approve a request that is going to be rejected anyway (e.g. a model that invented task ids).
+    if (ADMIN_PROPOSAL_TOOLS.has(input.toolName)) {
+      const platform = this.moduleRef.get(PlatformAdminService, { strict: false });
+      const refusal = await platform.precheck(input.toolName, input.toolInput, input.taskId).catch(() => null);
+      if (refusal) {
+        this.logger.warn(`Refused ${input.toolName} before approval (task ${input.taskId}): ${refusal}`);
+        return { allow: false, reason: refusal };
+      }
+    }
+
     // Honor allowlist exceptions added from the approval dialog (task-scoped or
     // global) — a matching call is auto-approved without asking again.
-    if (await this.isAllowedByException(input.taskId, input.toolName, verdict.summary)) {
+    if (await this.isAllowedByException(input.taskId, input.toolName, exceptionSignature(input.toolName, verdict.summary, input.toolInput))) {
       this.logger.log(`Auto-approved by exception: ${input.toolName} — ${verdict.summary}`);
       return { allow: true };
     }
@@ -159,9 +206,14 @@ export class ApprovalsService {
     id: string,
     decision: 'approve' | 'deny',
     resolver?: { id?: string; displayName: string },
-    options?: { taskException?: boolean; globalException?: boolean },
+    options?: { taskException?: boolean; globalException?: boolean; viaSecret?: boolean },
   ): Promise<ApprovalRequest> {
     const current = await this.getRow(id);
+    // A secret request is only fulfilled by actually submitting the secret (submitSecret) — a bare Approve would unblock
+    // the agent with nothing saved. Cancel (deny) is always fine.
+    if (current.toolName === REQUEST_SECRET_TOOL && decision === 'approve' && !options?.viaSecret) {
+      throw new BadRequestException('This request needs the secret value — enter it in the secure field (or press Cancel).');
+    }
     if (current.status !== 'pending') {
       throw new ConflictException(`Approval ${id} already resolved (${current.status})`);
     }
@@ -210,6 +262,28 @@ export class ApprovalsService {
     return serializeApproval(updated);
   }
 
+  /**
+   * Fulfil a `request_secret` approval: store the value where it belongs, then approve. The value is applied here and
+   * nowhere else — it is not logged, not put in the approval row, not returned.
+   */
+  async submitSecret(id: string, value: string, resolver?: { id?: string; displayName: string }): Promise<ApprovalRequest> {
+    const row = await this.getRow(id);
+    if (row.toolName !== REQUEST_SECRET_TOOL) throw new BadRequestException('This approval is not a secret request.');
+    if (row.status !== 'pending') throw new ConflictException(`Request ${id} already resolved (${row.status})`);
+    const secret = (value ?? '').trim();
+    if (!secret || secret.length > 4000) throw new BadRequestException('Enter the key/token (up to 4000 characters).');
+    const input = (row.toolInput ?? {}) as { target?: string; name?: string };
+    if (input.target === 'provider' && input.name) {
+      await this.moduleRef.get(ProvidersService, { strict: false }).update(input.name, { secret });
+    } else if (input.target === 'github_token') {
+      await this.settings.update({ githubToken: secret });
+    } else {
+      throw new BadRequestException('Unknown secret target.');
+    }
+    this.logger.log(`Secret for ${input.target}${input.name ? ` "${input.name}"` : ''} entered by ${resolver?.displayName ?? 'human'} (value not logged)`);
+    return this.decide(id, 'approve', resolver, { viaSecret: true });
+  }
+
   /** How many continuation prompts this task has already had (its "grind" count). */
   async continuationCount(taskId: string): Promise<number> {
     return this.prisma.approvalRequest.count({
@@ -256,11 +330,15 @@ export class ApprovalsService {
     toolName: string,
     signature: string,
   ): Promise<boolean> {
+    // Exceptions expire (APPROVAL_EXCEPTION_TTL_DAYS, default 30; 0 = never): a "don't ask again" given months ago
+    // should not silently keep authorising things forever.
+    const cutoff = exceptionCutoff(exceptionTtlDays(process.env.APPROVAL_EXCEPTION_TTL_DAYS));
     const match = await this.prisma.approvalException.findFirst({
       where: {
         toolName,
         signature,
         OR: [{ scope: 'global' }, { scope: 'task', taskId }],
+        ...(cutoff ? { createdAt: { gte: cutoff } } : {}),
       },
       select: { id: true },
     });
@@ -271,11 +349,15 @@ export class ApprovalsService {
   private async addException(
     scope: 'task' | 'global',
     taskId: string | null,
-    approval: { toolName: string; summary: string },
+    approval: { toolName: string; summary: string; toolInput?: unknown },
   ): Promise<void> {
-    const where = { scope, taskId, toolName: approval.toolName, signature: approval.summary };
+    const where = { scope, taskId, toolName: approval.toolName, signature: exceptionSignature(approval.toolName, approval.summary, approval.toolInput) };
     const existing = await this.prisma.approvalException.findFirst({ where, select: { id: true } });
-    if (existing) return;
+    if (existing) {
+      // Re-granting refreshes the clock, otherwise an expired row would block a fresh exception forever.
+      await this.prisma.approvalException.update({ where: { id: existing.id }, data: { createdAt: new Date() } });
+      return;
+    }
     await this.prisma.approvalException.create({ data: where });
     this.logger.log(`Added ${scope} approval exception: ${approval.toolName} — ${approval.summary}`);
   }

@@ -26,6 +26,12 @@ export class McpController {
     return this.mcp.list();
   }
 
+  /** Connects to the server and refreshes its read-only tool list from the tools' annotations. */
+  @Post(':name/discover')
+  discover(@Param('name') name: string) {
+    return this.mcp.discover(name);
+  }
+
   @Post()
   create(@Body() dto: CreateMcpDto) {
     return this.mcp.create(dto.name, dto.config);

@@ -41,6 +41,10 @@ const execFileAsync = promisify(execFile);
  * concept to reconcile against) and skills/learned/* is agent-written with
  * its own approval/snapshot flow (SkillsLearnedService); neither belongs here.
  */
+/** Live path of the built-in admin agent; its shipped source is `builtin/admin.md`. */
+const ADMIN_AGENT_REL = join('agents', 'admin.md');
+const SHIPPED_SOURCE: Record<string, string> = { [ADMIN_AGENT_REL]: join('builtin', 'admin.md') };
+
 @Injectable()
 export class AgentFilesSyncService implements OnApplicationBootstrap {
   private readonly logger = new Logger(AgentFilesSyncService.name);
@@ -57,14 +61,14 @@ export class AgentFilesSyncService implements OnApplicationBootstrap {
     if (await sameRealDir(this.config.agentDir, this.config.shippedAgentDir)) return;
 
     for (const rel of await this.managedFiles()) {
-      await this.syncOne(rel).catch((err) =>
+      await this.syncOne(rel, SHIPPED_SOURCE[rel]).catch((err) =>
         this.logger.warn(`Sync skipped for ${rel}: ${(err as Error).message}`),
       );
     }
   }
 
   private async managedFiles(): Promise<string[]> {
-    const out = ['SOUL.md'];
+    const out = ['SOUL.md', ADMIN_AGENT_REL];
     const coreDir = join(this.config.shippedAgentDir, 'skills', 'core');
     try {
       const files = await readdir(coreDir, { recursive: true });
@@ -77,8 +81,8 @@ export class AgentFilesSyncService implements OnApplicationBootstrap {
     return out;
   }
 
-  private async syncOne(rel: string): Promise<void> {
-    const shippedPath = join(this.config.shippedAgentDir, rel);
+  private async syncOne(rel: string, shippedRel: string = rel): Promise<void> {
+    const shippedPath = join(this.config.shippedAgentDir, shippedRel);
     const livePath = join(this.config.agentDir, rel);
     const basePath = join(this.config.agentDir, '.sync', 'base', rel);
 
@@ -86,6 +90,9 @@ export class AgentFilesSyncService implements OnApplicationBootstrap {
     if (shipped === null) return; // this release ships nothing at this path — leave live alone
 
     const live = await readOrNull(livePath);
+    // The built-in admin is seeded by AdminAgentSeedService (once, honoring a user's
+    // deletion); here we only keep an EXISTING copy current — never resurrect it.
+    if (live === null && shippedRel !== rel) return;
     if (live === null) {
       // New file as of this release (or never seeded) — adopt it, no merge needed.
       await writeManaged(livePath, shipped);

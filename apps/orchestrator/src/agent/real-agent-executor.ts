@@ -4,9 +4,12 @@ import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
 import {
-  runAgent,
+  runtimeForProviderKind,
   addUsage,
   emptyUsage,
+  type AdminToolsWiring,
+  type CodexRunOptions,
+  type InternalToolHandlers,
   type AgentEvent,
   type HookWiring,
   type ReportedStatus,
@@ -20,12 +23,18 @@ import { encodeAttachments } from '../prisma/agent-event-attachments';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentEventBus } from '../bus/agent-event-bus';
 import { SettingsService } from '../settings/settings.service';
-import { AgentRegistryService, type AgentDef } from '../agent-registry/agent-registry.service';
+import { AgentRegistryService, isBuiltinAgent, type AgentDef } from '../agent-registry/agent-registry.service';
 import { SkillsLearnedService } from '../agent-registry/skills-learned.service';
+import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
+import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
+import { CodexService } from '../codex/codex.service';
+import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
+import { PlatformAdminService } from '../agent-registry/platform-admin.service';
 import { ProvidersService } from '../providers/providers.service';
 import { McpService } from '../mcp/mcp.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PreviewService } from '../preview/preview.service';
+import { budgetExceeded, isIdleStuck } from './run-guards';
 import { AgentExecutor, type AgentRunOutcome, type TaskRunContext } from './agent-executor';
 
 /** Per-skill and total caps (chars) on skill content folded into the prompt. */
@@ -98,6 +107,11 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly attachments: AttachmentsService,
     private readonly preview: PreviewService,
     private readonly skillsLearned: SkillsLearnedService,
+    private readonly catalog: AgentCatalogService,
+    private readonly proposals: AgentProposalsService,
+    private readonly platformAdmin: PlatformAdminService,
+    private readonly internalMcp: InternalMcpService,
+    private readonly codex: CodexService,
   ) {
     super();
   }
@@ -122,20 +136,18 @@ export class RealAgentExecutor extends AgentExecutor {
         : attachmentPaths.map((p) => basename(p));
     // Agent cwd: the worktree root, or the configured subdir within it. The
     // worktree root stays the write boundary (passed separately to the runner).
-    const workDir = await this.settings.workDir(ctx.worktreePath);
+    const chat = agentDef?.mode === 'chat';
+    const workDir = chat ? ctx.worktreePath : await this.settings.workDir(ctx.worktreePath);
     // Orient every agent (lead AND delegated sub-agents share this cwd): its cwd
     // IS the project (a per-task worktree checkout), so none of them hunt for a
     // "main project" elsewhere or hedge about the location.
-    const projectMap = await buildProjectMap(workDir);
-    const orientation = buildOrientation(
-      workDir,
-      ctx.worktreePath,
-      task.branch,
-      this.config.workspaceShared,
-      projectMap,
-    );
-    // Other registered agents become delegatable subagents (each on its own provider).
-    const agents = await this.buildSubagents(task.agentName, defaultProvider, orientation);
+    const projectMap = chat ? '' : await buildProjectMap(workDir);
+    const orientation = chat
+      ? buildChatOrientation(workDir)
+      : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared, projectMap);
+    // Other registered agents become delegatable subagents (each on its own provider);
+    // a chat agent talks to the user directly and delegates to no one.
+    const agents = chat ? {} : await this.buildSubagents(task.agentName, defaultProvider, orientation);
     if (Object.keys(agents).length) {
       this.logger.log(`Task ${task.id} subagents: [${Object.keys(agents).join(', ')}]`);
     }
@@ -180,9 +192,14 @@ export class RealAgentExecutor extends AgentExecutor {
       mcpServers,
       agents,
       appendSystemPrompt: `${orientation}\n\n${appendSystemPrompt}`,
+      chat,
       attachmentPaths,
       messageAttachments,
     };
+    const overBudget = await this.checkBudget(ctx.taskId);
+    if (overBudget) {
+      return { reported: 'blocked', reportedSummary: overBudget, errored: false, timedOut: false };
+    }
     let last: AgentRunOutcome = { reported: null, errored: true, timedOut: false };
     let note: string | undefined;
     for (let i = 0; i < chain.length; i++) {
@@ -204,6 +221,55 @@ export class RealAgentExecutor extends AgentExecutor {
       this.logger.warn(`Task ${ctx.taskId}: ${note}`);
     }
     return last;
+  }
+
+  /** Callbacks behind the admin agent's catalog/propose tools (see AdminToolsWiring). */
+  private adminTools(taskId: string, sessionId: string): AdminToolsWiring {
+    return {
+      catalogList: async () => {
+        const items = await this.catalog.list();
+        return items.length
+          ? items.map((a) => `- ${a.name}: ${a.description}`).join('\n')
+          : 'No templates are shipped with this release.';
+      },
+      catalogGet: async (name) => {
+        try {
+          return (await this.catalog.get(name)).content;
+        } catch {
+          return `No template named "${name}". Use catalog_list to see the available ones.`;
+        }
+      },
+      agentsList: async () => {
+        const [agents, skills] = await Promise.all([this.agents.list(), this.agents.listSkills()]);
+        const a = agents.length ? agents.map((x) => `- ${x.name}: ${x.description}`).join('\n') : '(none)';
+        return `Agents:\n${a}\n\nSkills: ${skills.length ? skills.join(', ') : '(none)'}`;
+      },
+      agentGet: async (name) => {
+        try {
+          return await readFile(join(this.config.agentDir, 'agents', `${basename(name)}.md`), 'utf8');
+        } catch {
+          return `No agent named "${name}". Use agents_list to see what exists.`;
+        }
+      },
+      proposeAgent: (input) => this.proposals.proposeAgent(taskId, sessionId, input.name, input.content),
+      proposeSkill: (input) => this.proposals.proposeSkill(taskId, sessionId, input.name, input.content),
+      tasksList: (input) => this.platformAdmin.tasksList(input),
+      proposeBatch: (input) => this.platformAdmin.proposeBatch(taskId, sessionId, input),
+      proposeTask: (input) => this.platformAdmin.proposeTask(taskId, sessionId, input),
+      adminHistory: (input) => this.platformAdmin.adminHistory(input),
+      proposeSettings: (input) => this.platformAdmin.proposeSettings(taskId, sessionId, input),
+      proposeUndo: (input) => this.platformAdmin.proposeUndo(taskId, sessionId, input),
+      taskDiagnose: (id) => this.platformAdmin.taskDiagnose(id),
+      usageReport: (input) => this.platformAdmin.usageReport(input),
+      requestSecret: (input) => this.platformAdmin.requestSecret(taskId, sessionId, input),
+      maintenanceReport: () => this.platformAdmin.maintenanceReport(),
+      proposeCleanup: (input) => this.platformAdmin.proposeCleanup(taskId, sessionId, input),
+      providersList: () => this.platformAdmin.providersList(),
+      providerTest: (name) => this.platformAdmin.providerTest(name),
+      proposeProvider: (input) => this.platformAdmin.proposeProvider(taskId, sessionId, input),
+      proposeTaskAction: (input) => this.platformAdmin.proposeTaskAction(taskId, sessionId, input),
+      proposeAgentDelete: (input) => this.platformAdmin.proposeAgentDelete(taskId, sessionId, input),
+    };
   }
 
   /**
@@ -251,6 +317,19 @@ export class RealAgentExecutor extends AgentExecutor {
    * agent's reported status. Returns the outcome plus whether the failure (if
    * any) is a provider-level error worth failing over to the next provider.
    */
+  /** Soft token budgets (env, opt-in): returns the reason a run must not start, or null. */
+  private async checkBudget(taskId: string): Promise<string | null> {
+    const { budgetTokensPerTask: perTask, budgetTokensPerDay: perDay } = this.config;
+    if (!perTask && !perDay) return null;
+    const sum = async (where: { taskId?: string; startedAt?: { gte: Date } }): Promise<number> => {
+      const a = await this.prisma.agentSession.aggregate({ where, _sum: { inputTokens: true, outputTokens: true } });
+      return (a._sum.inputTokens ?? 0) + (a._sum.outputTokens ?? 0);
+    };
+    const task = perTask ? await sum({ taskId }) : 0;
+    const day = perDay ? await sum({ startedAt: { gte: new Date(Date.now() - 24 * 3600_000) } }) : 0;
+    return budgetExceeded({ task, day }, { perTask, perDay });
+  }
+
   private async attempt(opts: {
     ctx: TaskRunContext;
     workDir: string;
@@ -262,6 +341,8 @@ export class RealAgentExecutor extends AgentExecutor {
     mcpServers: Record<string, Record<string, unknown>>;
     agents: Record<string, SubagentDefinition>;
     appendSystemPrompt: string;
+    /** Conversational agent: no forced status-report resume. */
+    chat?: boolean;
     attachmentPaths: string[];
     messageAttachments: string[];
     resumeSessionId?: string;
@@ -271,7 +352,11 @@ export class RealAgentExecutor extends AgentExecutor {
     // Prepend referenced-task context (if any) to the message the agent sees.
     const rawPrompt = ctx.followUpPrompt ?? opts.basePrompt;
     const prompt = opts.refContext ? `${opts.refContext}\n${rawPrompt}` : rawPrompt;
-    const modelEnv = await this.resolveModelEnv(provider, model);
+    const isCodex = provider.kind === 'codex';
+    // Codex talks to OpenAI itself (ChatGPT login / API key) — no Anthropic env, no LiteLLM route.
+    const modelEnv: AgentModelEnv = isCodex ? { ANTHROPIC_MODEL: model } : await this.resolveModelEnv(provider, model);
+    // Session ids are runtime-specific; only resume a session this runtime created.
+    const resumeSessionId = untagSessionId(opts.resumeSessionId, isCodex);
     this.logger.log(
       `Task ${ctx.taskId} → provider ${provider.name} (${model})` +
         (Object.keys(opts.mcpServers).length ? ` · mcp=[${Object.keys(opts.mcpServers).join(', ')}]` : ''),
@@ -322,7 +407,11 @@ export class RealAgentExecutor extends AgentExecutor {
     // it still streams live either way, just isn't replayed on the next page load.
     const alwaysPersist = (kind: AgentEvent['kind']) => kind === 'prompt' || kind === 'result';
 
+    let lastEventAt = Date.now();
+    let lastEventKind = 'system';
     const onEvent = (event: AgentEvent): void => {
+      lastEventAt = Date.now();
+      lastEventKind = event.kind;
       if (event.kind === 'system') capturedSessionId = event.sessionId || capturedSessionId;
       const current = seq++;
       let attachments: string[] = event.kind === 'prompt' ? (event.attachments ?? []) : [];
@@ -389,9 +478,51 @@ export class RealAgentExecutor extends AgentExecutor {
       timedOut = true;
       abortController.abort();
     }, timeoutMs);
+    // No-progress watchdog: a run that goes silent (stuck provider stream, hung model call) is
+    // aborted long before the overall ceiling. Waiting on a human or a running tool is not "stuck".
+    const idleMs = this.config.agentIdleTimeoutMs;
+    const idleTimer =
+      idleMs > 0
+        ? setInterval(() => {
+            if (!isIdleStuck({ now: Date.now(), lastEventAt, lastEventKind, approvalsPending: false, idleMs })) return;
+            void this.prisma.approvalRequest
+              .count({ where: { taskId: ctx.taskId, status: 'pending' } })
+              .then((pending) => {
+                if (pending > 0 || !isIdleStuck({ now: Date.now(), lastEventAt, lastEventKind, approvalsPending: false, idleMs })) return;
+                onEvent({ kind: 'stderr', text: `agent made no progress for ${Math.round(idleMs / 1000)}s — aborting (AGENT_IDLE_TIMEOUT_MS)` });
+                timedOut = true;
+                abortController.abort();
+              })
+              .catch(() => undefined);
+          }, Math.min(15_000, Math.max(1_000, Math.floor(idleMs / 4))))
+        : null;
+    idleTimer?.unref?.();
+
+    // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
+    const toolHandlers: InternalToolHandlers = {
+      onReportStatus,
+      onHeartbeat,
+      onCreateSubtask: ctx.onCreateSubtask,
+      onCheckSubtasks: ctx.onCheckSubtasks,
+      onScheduleCheck: ctx.onScheduleCheck,
+      onStartPreview: () => this.preview.getOrStart(ctx.taskId, opts.workDir),
+      onProposeLearnedSkill: (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
+      // Agent-management tools: the built-in admin agent only.
+      admin: agentDef?.name === 'admin' ? this.adminTools(ctx.taskId, session.id) : undefined,
+    };
+    const internalReg = isCodex ? this.internalMcp.register(toolHandlers) : null;
+    const codexOpts: CodexRunOptions | undefined = isCodex
+      ? {
+          home: join(this.config.agentDir, 'runs', ctx.taskId, 'codex-home'),
+          authHome: this.codex.authHome,
+          apiKey: provider.authMode === 'api-key' ? (provider.secret ?? undefined) : undefined,
+          bin: this.codex.bin,
+          internalMcp: internalReg ? { url: internalReg.url, token: internalReg.token } : undefined,
+        }
+      : undefined;
 
     try {
-      const result = await runAgent(
+      const result = await runtimeForProviderKind(provider.kind).run(
         {
           prompt: withAttachments(prompt, opts.attachmentPaths),
           cwd: opts.workDir,
@@ -400,7 +531,7 @@ export class RealAgentExecutor extends AgentExecutor {
           providerLabel: provider.name,
           modelLabel: model,
           maxTurns: this.config.agentMaxTurns,
-          resumeSessionId: opts.resumeSessionId,
+          resumeSessionId,
           appendSystemPrompt: opts.appendSystemPrompt,
           allowedTools: agentDef?.allowedTools,
           // Block SendMessage so the lead delegates via the Task tool.
@@ -412,14 +543,11 @@ export class RealAgentExecutor extends AgentExecutor {
           attachmentsDir: this.attachments.dir(ctx.taskId),
           abortController,
           hook,
-          onReportStatus,
-          onHeartbeat,
-          onCreateSubtask: ctx.onCreateSubtask,
-          onCheckSubtasks: ctx.onCheckSubtasks,
-          onScheduleCheck: ctx.onScheduleCheck,
-          onStartPreview: () => this.preview.getOrStart(ctx.taskId, opts.workDir),
-          onProposeLearnedSkill: (input) =>
-            this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
+          codex: codexOpts,
+          onProgress: () => {
+            lastEventAt = Date.now();
+          },
+          ...toolHandlers,
         },
         onEvent,
       );
@@ -428,6 +556,7 @@ export class RealAgentExecutor extends AgentExecutor {
       // race it, and a late firing would stamp timedOut/abort onto a run that
       // actually completed. (finally still clears it on the throw paths.)
       clearTimeout(timer);
+      if (idleTimer) clearInterval(idleTimer);
       await writeChain;
 
       const finalSessionId = result.sessionId ?? capturedSessionId;
@@ -450,9 +579,10 @@ export class RealAgentExecutor extends AgentExecutor {
       // Boundary for the salvage below: events at seq >= this belong to the
       // reporting-resume turn, not the original run.
       const preResumeSeq = seq;
-      if (!reported.value && !abortController.signal.aborted && !willFailover && finalSessionId) {
+      if (!opts.chat && !reported.value && !abortController.signal.aborted && !willFailover && finalSessionId) {
         const resumeUsage = await this.reportingResume({
           sessionId: finalSessionId,
+          codex: codexOpts,
           workDir: opts.workDir,
           worktreePath: ctx.worktreePath,
           settingsDir: join(this.config.agentDir, 'runs', ctx.taskId),
@@ -501,7 +631,7 @@ export class RealAgentExecutor extends AgentExecutor {
         where: { id: session.id },
         data: {
           status: result.isError ? 'errored' : 'completed',
-          claudeSessionId: finalSessionId,
+          claudeSessionId: tagSessionId(finalSessionId, isCodex),
           endedAt: new Date(),
           inputTokens: usage.inputTokens,
           outputTokens: usage.outputTokens,
@@ -539,7 +669,7 @@ export class RealAgentExecutor extends AgentExecutor {
       await this.prisma.agentSession
         .update({
           where: { id: session.id },
-          data: { status: 'errored', claudeSessionId: capturedSessionId, endedAt: new Date() },
+          data: { status: 'errored', claudeSessionId: tagSessionId(capturedSessionId, isCodex), endedAt: new Date() },
         })
         .catch(() => undefined);
       this.publishAgentStatus(ctx.taskId, session.id, 'errored');
@@ -568,6 +698,8 @@ export class RealAgentExecutor extends AgentExecutor {
       };
     } finally {
       clearTimeout(timer);
+      if (idleTimer) clearInterval(idleTimer);
+      internalReg?.dispose();
       if (this.active.get(ctx.taskId) === abortController) this.active.delete(ctx.taskId);
     }
   }
@@ -585,6 +717,8 @@ export class RealAgentExecutor extends AgentExecutor {
    */
   private async reportingResume(opts: {
     sessionId: string;
+    /** Codex options when the run's provider is a codex one (selects the runtime). */
+    codex?: CodexRunOptions;
     workDir: string;
     worktreePath: string;
     settingsDir: string;
@@ -608,7 +742,7 @@ export class RealAgentExecutor extends AgentExecutor {
       text: '↻ run ended without report_task_status — resuming once to record the outcome',
     });
     try {
-      const r = await runAgent(
+      const r = await runtimeForProviderKind(opts.provider.kind).run(
         {
           prompt: REPORTING_RESUME_PROMPT,
           cwd: opts.workDir,
@@ -618,6 +752,7 @@ export class RealAgentExecutor extends AgentExecutor {
           modelLabel: opts.model,
           maxTurns: REPORTING_RESUME_MAX_TURNS,
           resumeSessionId: opts.sessionId,
+          codex: opts.codex,
           appendSystemPrompt: opts.appendSystemPrompt,
           allowedTools: opts.allowedTools,
           disallowedTools: [...(opts.disallowedTools ?? []), 'SendMessage'],
@@ -761,7 +896,7 @@ export class RealAgentExecutor extends AgentExecutor {
     }
     const summaries = await this.agents.list().catch(() => []);
     for (const s of summaries) {
-      if (s.name === leadName) continue;
+      if (s.name === leadName || isBuiltinAgent(s.name)) continue; // built-ins aren't delegation targets
       const def = await this.agents.get(s.name).catch(() => null);
       if (!def) continue;
       const model = await this.subagentModel(def, defaultProvider).catch(() => null);
@@ -782,6 +917,11 @@ export class RealAgentExecutor extends AgentExecutor {
   private async subagentModel(def: AgentDef, defaultProvider: string): Promise<string | null> {
     const provider = await this.providers.get(def.provider ?? defaultProvider).catch(() => null);
     if (!provider) return null;
+    if (provider.kind === 'codex') {
+      // A Claude lead can't delegate to a Codex-runtime agent via the SDK Task tool.
+      this.logger.debug(`Subagent provider "${provider.name}" is codex — not offered as a subagent`);
+      return null;
+    }
     if (isOauthToken(provider)) {
       // Can't share a subagent slot on the lead's connection — see buildSubagents.
       this.logger.debug(`Subagent provider "${provider.name}" is oauth-token — not offered as a subagent`);
@@ -839,10 +979,18 @@ export class RealAgentExecutor extends AgentExecutor {
         // other declared skills stay opt-in via `want`.
         const isLearned = (f: string) => f.split(/[\\/]/).includes('learned');
         files = files.filter((f) => isLearned(f) || want.has(basename(f)));
+      } else {
+        // Skills under core/admin/ document the admin agent's own toolbox and UI guide; they are opt-in
+        // only (an agent with no `skills:` line otherwise inherits everything, which would hand every
+        // agent instructions for tools it doesn't have).
+        files = files.filter((f) => !f.split(/[\\/]/).includes('admin'));
       }
       files.sort();
 
-      if (this.config.skillsLazy) {
+      // Lazy mode hands the agent an index plus a path to `Read`; an agent that can't read files (e.g. the
+      // tools-only admin) would never see the content, so its skills are always inlined.
+      const canRead = !(agent?.disallowedTools ?? []).some((t) => /^read$/i.test(t));
+      if (this.config.skillsLazy && canRead) {
         // Read-on-demand: inject only a short index (name + description + path).
         // Keeps the always-present guidance tiny; the agent reads the full file
         // when it's about to do related work.
@@ -925,6 +1073,29 @@ export class RealAgentExecutor extends AgentExecutor {
 /** A CLI-minted OAuth/subscription token — bypasses LiteLLM, see resolveModelEnv/subagentModel. */
 function isOauthToken(provider: Pick<Provider, 'authMode'>): boolean {
   return provider.authMode === 'oauth-token';
+}
+
+/** Session ids are runtime-specific: Codex thread ids are stored with a `codex:` prefix. */
+function tagSessionId(id: string | null, codex: boolean): string | null {
+  return id && codex ? `codex:${id}` : id;
+}
+/** The raw id this runtime can resume, or undefined if the stored session belongs to the other runtime. */
+function untagSessionId(stored: string | undefined, codex: boolean): string | undefined {
+  if (!stored) return undefined;
+  const isCodexId = stored.startsWith('codex:');
+  if (codex) return isCodexId ? stored.slice('codex:'.length) : undefined;
+  return isCodexId ? undefined : stored;
+}
+
+/** Orientation for a chat agent: no repo, no worktree — just a conversation. */
+function buildChatOrientation(workDir: string): string {
+  return [
+    '## Your context',
+    'You are in a live chat with the user — answer conversationally and keep replies focused.',
+    `- working directory: \`${workDir}\` (the platform's agent configuration: agents/, skills/, catalog/)`,
+    '- there is no project repository, git branch or dev server here; do not run builds or tests',
+    '- you do NOT need to call report_task_status — your reply is the result of each turn',
+  ].join('\n');
 }
 
 /**
@@ -1028,6 +1199,7 @@ const FAILOVER_PATTERNS: readonly RegExp[] = [
   /rate.?limit|too many requests|overloaded|capacity|temporarily unavailable/i,
   /internal server error|bad gateway|service unavailable|gateway timeout/i,
   /unauthorized|forbidden|authentication|invalid.*(api.?key|token)/i,
+  /not signed in|failed to start \w+: spawn \S+ ENOENT/i,
   // A status code only when qualified by a status keyword (HTTP/status/code/error).
   /\b(?:http|status(?:\s*code)?|code|error)\b[^0-9a-z]{0,8}(?:401|403|404|408|409|429|5\d\d)\b/i,
   /model.*(not found|not exist|unavailable|does not support)|no endpoints|unsupported model|invalid model/i,

@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
 import { AgentRegistryService } from './agent-registry.service';
+import { AgentCatalogService } from './agent-catalog.service';
 import { AgentBodyDto, CreateAgentDto } from './dto/agent.dto';
 
 function split(csv?: string): string[] | undefined {
@@ -27,7 +28,10 @@ function toDef(dto: AgentBodyDto) {
 
 @Controller('agents')
 export class AgentRegistryController {
-  constructor(private readonly registry: AgentRegistryService) {}
+  constructor(
+    private readonly registry: AgentRegistryService,
+    private readonly catalog: AgentCatalogService,
+  ) {}
 
   /** List available named agents (without their full instructions). */
   @Get()
@@ -39,6 +43,17 @@ export class AgentRegistryController {
   @Get('skills')
   skills() {
     return this.registry.listSkills();
+  }
+
+  /** Shipped agent templates (declared before :name) — starting points for the "+ New agent" form. */
+  @Get('catalog')
+  templates() {
+    return this.catalog.list();
+  }
+
+  @Get('catalog/:name')
+  template(@Param('name') name: string) {
+    return this.catalog.getDef(name);
   }
 
   /** Full agent definition (including instructions) for editing. */

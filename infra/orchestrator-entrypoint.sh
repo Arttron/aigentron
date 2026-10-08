@@ -23,6 +23,10 @@ else
   echo "$LOCKFILE_HASH" > "$LOCKFILE_STAMP"
 fi
 
+# The Node process does not see compose `environment:` values (its env comes from .env via dotenvx), but the
+# security self-check needs the host interface the ports are published on — hand it over through a file.
+printf '%s' "${BIND_ADDRESS:-}" > /tmp/lds-bind-address
+
 # Storage driver by DATABASE_URL scheme (docs/plan-single-container.md Phase
 # 2): `file:` = sqlite (minimal/single-container profile), else postgres
 # (`full` profile — the default, unchanged behavior below).

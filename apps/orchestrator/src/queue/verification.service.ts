@@ -31,7 +31,13 @@ export class VerificationService {
     for (const cmd of commands) {
       this.logger.log(`verify: ${cmd}`);
       try {
-        await exec('sh', ['-c', cmd], { cwd, timeout: 10 * 60_000, maxBuffer: 8 * 1024 * 1024 });
+        await exec('sh', ['-c', cmd], {
+          cwd,
+          timeout: 10 * 60_000,
+          maxBuffer: 8 * 1024 * 1024,
+          // Minimal env: verify runs repo scripts that agents may have edited — never hand them the orchestrator's secrets.
+          env: Object.fromEntries(['PATH', 'HOME', 'LANG', 'LC_ALL', 'TZ', 'TMPDIR', 'CI', 'NODE_ENV', 'XDG_CACHE_HOME', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY'].flatMap((k) => (process.env[k] !== undefined ? [[k, process.env[k]!]] : []))),
+        });
       } catch (err) {
         const e = err as { stdout?: string; stderr?: string; message?: string };
         const body = (e.stdout ?? '') + (e.stderr ?? '') || e.message || 'command failed';

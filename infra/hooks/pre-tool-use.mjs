@@ -70,6 +70,31 @@ async function fetchJson(url, init, timeoutMs) {
   }
 }
 
+/**
+ * Tool policy for runtimes without native allow/deny lists (Codex). Claude Code enforces
+ * `allowedTools`/`disallowedTools` itself, so the env vars are only set for Codex runs.
+ * Codex's file editor `apply_patch` counts as Write/Edit; the shell is `Bash`.
+ */
+function policyDenial(toolName) {
+  const csv = (v) => (v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const denied = csv(process.env.LDS_DISALLOWED_TOOLS);
+  const allowed = csv(process.env.LDS_ALLOWED_TOOLS);
+  const aliases =
+    toolName === 'apply_patch'
+      ? ['apply_patch', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit']
+      : /^web_?search$/i.test(toolName)
+        ? [toolName, 'WebSearch', 'WebFetch']
+        : [toolName];
+  if (denied.length && aliases.some((a) => denied.includes(a))) {
+    return `tool ${toolName} is disabled for this agent`;
+  }
+  // Our own control-plane tools must stay reachable even under an exclusive whitelist.
+  if (allowed.length && !toolName.startsWith('mcp__lds_internal__') && !aliases.some((a) => allowed.includes(a))) {
+    return `tool ${toolName} is not in this agent's allowed tools`;
+  }
+  return null;
+}
+
 async function main() {
   const raw = await readStdin();
   let input = {};
@@ -83,6 +108,9 @@ async function main() {
   const toolInput =
     input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
   const workspaceRoot = process.env.LDS_WORKSPACE_ROOT || input.cwd || undefined;
+
+  const denial = policyDenial(toolName);
+  if (denial) return decide('deny', denial);
 
   const approvalsUrl = process.env.LDS_APPROVALS_URL;
   const taskId = process.env.LDS_TASK_ID;

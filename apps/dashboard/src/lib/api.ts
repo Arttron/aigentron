@@ -88,10 +88,10 @@ export type TaskDetail = Task & {
 };
 
 /** An AI model endpoint (from GET /api/providers; secret masked). */
-export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama';
+export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'codex';
 // oauth-token: a CLI-minted subscription token (e.g. `claude setup-token`) —
 // bypasses LiteLLM; see @lds/shared resolveProvider().
-export type ProviderAuthMode = 'api-key' | 'auth-token' | 'oauth-token';
+export type ProviderAuthMode = 'api-key' | 'auth-token' | 'oauth-token' | 'codex-login';
 
 export interface ProviderInfo {
   name: string;
@@ -376,6 +376,33 @@ export const api = {
 
   listAgents: () => fetch(`${API_BASE}/agents`, { cache: 'no-store' }).then(unwrap<AgentInfo[]>),
 
+  /** Shipped agent templates (summaries) and one template's full definition. */
+  /** One entry of the admin's change journal (for the undo card). */
+  getAdminAudit: (id: string) =>
+    fetch(`${API_BASE}/admin-audit/${encodeURIComponent(id)}`, { cache: 'no-store' }).then(
+      unwrap<{ id: string; ts: string; tool: string; summary: string; undone?: boolean; undo?: { kind: string; name?: string; before?: unknown } }>,
+    ),
+
+  /** Fulfil an agent's secret request: the value goes straight to the server's storage, never through the chat. */
+  submitSecret: (approvalId: string, value: string) =>
+    fetch(`${API_BASE}/approvals/${encodeURIComponent(approvalId)}/secret`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ value }),
+    }).then(unwrap<unknown>),
+
+  /** Dry run of the housekeeping cleanup: how much WOULD be removed (nothing is deleted). */
+  maintenanceDryRun: (body: { runs?: boolean; worktrees?: boolean; deleteBranches?: boolean; olderThanDays?: number }) =>
+    fetch(`${API_BASE}/maintenance/cleanup`, {
+      method: 'POST',
+      headers: authHeaders(true),
+      body: JSON.stringify({ ...body, dryRun: true }),
+    }).then(unwrap<{ runsRemoved: number; runBytes: number; worktreesRemoved: number; branchesDeleted: number }>),
+
+  listAgentTemplates: () => fetch(`${API_BASE}/agents/catalog`, { cache: 'no-store' }).then(unwrap<AgentInfo[]>),
+  getAgentTemplate: (name: string) =>
+    fetch(`${API_BASE}/agents/catalog/${encodeURIComponent(name)}`, { cache: 'no-store' }).then(unwrap<AgentDetail>),
+
   getAgent: (name: string) =>
     fetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, { cache: 'no-store' }).then(
       unwrap<AgentDetail>,
@@ -412,6 +439,11 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify({ config }),
     }).then(unwrap<McpServerInfo>),
+
+  discoverMcp: (name: string) =>
+    fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}/discover`, { method: 'POST' }).then(
+      unwrap<{ trusted: boolean; tools: { name: string; readOnly: boolean }[] }>,
+    ),
 
   deleteMcp: (name: string) =>
     fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(

@@ -14,8 +14,8 @@ export interface LitellmRoute {
 }
 
 /** Upstream API family → LiteLLM backend prefix. */
-export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama';
-export const PROVIDER_KINDS: ProviderKind[] = ['anthropic', 'openai', 'deepseek', 'ollama'];
+export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'codex';
+export const PROVIDER_KINDS: ProviderKind[] = ['anthropic', 'openai', 'deepseek', 'ollama', 'codex'];
 
 /** litellm_params that strip the agent's extended-thinking for non-Anthropic models. */
 const NO_REASONING = {
