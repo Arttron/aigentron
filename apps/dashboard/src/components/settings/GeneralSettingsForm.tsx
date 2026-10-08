@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type AgentInfo, type ChannelInfo, type Settings, type SettingsUpdate } from '@/lib/api';
 import { Card, SectionTitle, Field, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { resetAssistant } from '@/lib/float-position';
 import { applyThemePref, getThemePref, type ThemePref } from '@/lib/theme';
 import styles from './GeneralSettingsForm.module.css';
 
@@ -18,6 +19,7 @@ export function GeneralSettingsForm() {
   // Client-side only (per-browser, not part of SettingsUpdate/the server API) —
   // applies immediately on change, not gated behind "Save settings".
   const [themePref, setThemePref] = useState<ThemePref>('system');
+  const [assistantReset, setAssistantReset] = useState(false);
 
   useEffect(() => {
     setThemePref(getThemePref());
@@ -273,6 +275,24 @@ export function GeneralSettingsForm() {
         <Muted className={styles.note}>
           Applies immediately — this is a per-browser preference, not part of "Save settings"
           below. "System" follows your OS's light/dark setting.
+        </Muted>
+        <Field label="Assistant">
+          <Row>
+            <Button
+              onClick={() => {
+                resetAssistant();
+                setAssistantReset(true);
+                setTimeout(() => setAssistantReset(false), 2000);
+              }}
+            >
+              Reset position / show
+            </Button>
+            {assistantReset && <Muted>done — the assistant is back in its corner</Muted>}
+          </Row>
+        </Field>
+        <Muted className={styles.note}>
+          The assistant bubble can be dragged anywhere and tucked away to a slim tab on the right edge. If it gets lost or
+          hidden, this puts it back (per-browser, like the theme). Double-clicking the bubble does the same.
         </Muted>
         <label className={styles.checkRow}>
           <input

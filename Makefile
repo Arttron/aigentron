@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help up down logs ps build pull-models migrate seed dev clean init-env check-admin-skills admin test
+.PHONY: help up down logs ps build pull-models migrate seed dev clean init-env check-admin-skills admin test build-dashboard tunnel-up
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -9,6 +9,12 @@ help: ## Show this help
 
 admin: ## Chat with the built-in admin agent in this terminal (needs the stack running)
 	$(COMPOSE) exec orchestrator node /app/infra/admin-cli.mjs
+
+build-dashboard: ## Build the dashboard SPA that the orchestrator serves on its own port (same-origin; needed for remote access)
+	pnpm --filter @lds/dashboard build
+
+tunnel-up: build-dashboard ## Start the stack plus the Cloudflare Tunnel (TUNNEL_TOKEN in .env; see docs/remote-access.md)
+	$(COMPOSE) --profile tunnel up -d
 
 init-env: ## Create .env if missing; on a fresh install generate a random LITELLM_MASTER_KEY
 	@sh infra/init-env.sh

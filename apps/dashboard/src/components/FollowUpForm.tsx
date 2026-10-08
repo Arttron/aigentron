@@ -5,6 +5,7 @@ import { getSocket } from '@/lib/socket';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useLook } from '@/lib/transcript-look';
+import { useIsShort } from '@/lib/use-media';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import styles from './FollowUpForm.module.css';
 
@@ -17,7 +18,13 @@ interface Staged {
  *  (rejects past this), this is just for a clear inline hint before that. */
 const MAX_QUEUE = 3;
 
-const IMAGE_EXT: Record<string, string> = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', webp: 'webp', gif: 'gif' };
+const IMAGE_EXT: Record<string, string> = {
+  png: 'png',
+  jpg: 'jpeg',
+  jpeg: 'jpeg',
+  webp: 'webp',
+  gif: 'gif',
+};
 /** The queue only stores filenames — infer a mime from the extension so a
  *  re-opened edit still shows an image thumbnail instead of the generic icon. */
 function inferMime(name: string): string {
@@ -37,12 +44,18 @@ export function FollowUpForm({
   taskId,
   terminal,
   onSend,
+  compact = false,
 }: {
   taskId: string;
   terminal: boolean;
+  /** Phone layout: a slim box pinned to the bottom (full-screen sheet in landscape). */
+  compact?: boolean;
   onSend: (prompt: string, attachments: string[], references: string[]) => Promise<void>;
 }) {
   const [look] = useLook();
+  const short = useIsShort();
+  const [sheet, setSheet] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<Staged[]>([]);
   const [references, setReferences] = useState<string[]>([]);
@@ -74,6 +87,23 @@ export function FollowUpForm({
       socket.off(SERVER_EVENT.followUpQueue, onQueue);
     };
   }, [taskId]);
+
+  // While the full-screen composer is open the floating assistant steps aside (CSS keys off this flag).
+  useEffect(() => {
+    if (!sheet) return;
+    document.documentElement.dataset.sheet = '1';
+    return () => {
+      delete document.documentElement.dataset.sheet;
+    };
+  }, [sheet]);
+
+  // Grow the compact box with its content (up to ~5 lines); shrink back after sending.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!compact || !el || sheet) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 124)}px`;
+  }, [text, compact, sheet]);
 
   const pickFiles = async (files: FileList | null) => {
     if (!files?.length) return;
@@ -119,9 +149,14 @@ export function FollowUpForm({
         setQueue(updated);
         setEditingId(null);
       } else {
-        await onSend(text.trim(), staged.map((s) => s.name), references);
+        await onSend(
+          text.trim(),
+          staged.map((s) => s.name),
+          references,
+        );
       }
       clearComposer();
+      setSheet(false);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -156,7 +191,13 @@ export function FollowUpForm({
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     // Enter sends, Shift+Enter makes a new line (⌘/Ctrl+Enter also sends). Not while an IME is composing.
-    if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent as KeyboardEvent).isComposing) {
+    // On a touch keyboard Enter is a new line (the ➤ button sends); ⌘/Ctrl+Enter still sends.
+    if (
+      e.key === 'Enter' &&
+      !e.shiftKey &&
+      !(e.nativeEvent as KeyboardEvent).isComposing &&
+      (!compact || e.metaKey || e.ctrlKey)
+    ) {
       e.preventDefault();
       void send();
     }
@@ -179,28 +220,18 @@ export function FollowUpForm({
         ? 'Send'
         : `Queue${queue.length ? ` (${queue.length + 1}/${MAX_QUEUE})` : ''}`;
 
-  return (
-    <Card>
-      <SectionTitle className={styles.flush}>{editingId ? 'Edit queued message' : 'Message'}</SectionTitle>
-      <div className={cn(styles.composer, look === 'terminal' && styles.term)}>
-        {look === 'terminal' && <span className={styles.promptMark} aria-hidden>you&gt;</span>}
-        <textarea
-          className={styles.input}
-          aria-label="Message"
-          placeholder="Type a message — Enter sends, Shift+Enter adds a line. Attach images/PDFs with 📎"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={3}
-        />
-      </div>
-
+  const chipsEl = (
+    <>
       {staged.length > 0 && (
         <div className={styles.staged}>
           {staged.map((a, i) => (
             <span key={`${a.name}-${i}`} className={styles.chip}>
               {a.mime.startsWith('image/') ? (
-                <img src={api.attachmentUrl(taskId, a.name)} alt={a.name} className={styles.chipThumb} />
+                <img
+                  src={api.attachmentUrl(taskId, a.name)}
+                  alt={a.name}
+                  className={styles.chipThumb}
+                />
               ) : (
                 <span className={styles.chipDoc}>📄</span>
               )}
@@ -217,7 +248,10 @@ export function FollowUpForm({
           ))}
         </div>
       )}
-
+    </>
+  );
+  const fileEl = (
+    <>
       <input
         ref={fileRef}
         type="file"
@@ -226,38 +260,10 @@ export function FollowUpForm({
         className={styles.hidden}
         onChange={(e) => pickFiles(e.target.files)}
       />
-
-      <Row wrap className={styles.actions}>
-        <select className={styles.attachSelect} value="" onChange={onAttachKind} title="Attach" disabled={uploading}>
-          <option value="">{uploading ? 'Uploading…' : '📎 Attach…'}</option>
-          <option value="file">🖼 Image / file</option>
-          <option value="task">🔗 Task</option>
-        </select>
-        {(showRefs || references.length > 0) && (
-          <TaskReferencePicker value={references} onChange={setReferences} excludeId={taskId} />
-        )}
-        {editingId ? (
-          <>
-            <Button variant="primary" onClick={send} disabled={!canSend}>
-              {primaryLabel}
-            </Button>
-            <Button onClick={cancelEdit}>Cancel</Button>
-          </>
-        ) : (
-          <Button variant="primary" onClick={send} disabled={!canSend}>
-            {primaryLabel}
-          </Button>
-        )}
-        {editingId && <Muted className={styles.hint}>editing a queued message</Muted>}
-        {!editingId && !terminal && (
-          <Muted className={styles.hint}>
-            run in progress — this queues and sends automatically once it finishes
-          </Muted>
-        )}
-        {queueFull && <Muted className={styles.hint}>queue full ({MAX_QUEUE}) — edit or remove one below</Muted>}
-        {error && <ErrorText>{error}</ErrorText>}
-      </Row>
-
+    </>
+  );
+  const queueEl = (
+    <>
       {queue.length > 0 && (
         <div className={styles.queue}>
           <div className={styles.queueHead}>
@@ -289,7 +295,12 @@ export function FollowUpForm({
                 >
                   ✎
                 </button>
-                <button type="button" className={styles.qBtn} title="Remove" onClick={() => removeQueued(m.id)}>
+                <button
+                  type="button"
+                  className={styles.qBtn}
+                  title="Remove"
+                  onClick={() => removeQueued(m.id)}
+                >
                   ✕
                 </button>
               </div>
@@ -297,6 +308,152 @@ export function FollowUpForm({
           })}
         </div>
       )}
+    </>
+  );
+
+  if (compact) {
+    const sendBtn = (
+      <Button
+        variant="primary"
+        onClick={send}
+        disabled={!canSend}
+        aria-label={editingId ? 'Save changes' : 'Send'}
+      >
+        {sending ? '…' : editingId ? 'Save' : '➤'}
+      </Button>
+    );
+    if (short && !sheet) {
+      // Landscape phone: one slim line; tapping it opens the full-screen composer.
+      return (
+        <div className={styles.bar}>
+          <button type="button" className={styles.fake} onClick={() => setSheet(true)}>
+            {text.trim() ? (text.trim().split('\n')[0] ?? '') : 'Message…'}
+          </button>
+          {sendBtn}
+        </div>
+      );
+    }
+    return (
+      <div className={sheet ? styles.sheet : styles.dock}>
+        {sheet && (
+          <div className={styles.sheetHead}>
+            <b>{editingId ? 'Edit queued message' : 'Message'}</b>
+            <Button onClick={() => setSheet(false)}>Close</Button>
+          </div>
+        )}
+        {chipsEl}
+        {(showRefs || references.length > 0) && (
+          <TaskReferencePicker value={references} onChange={setReferences} excludeId={taskId} />
+        )}
+        {queueEl}
+        <div className={styles.dockRow}>
+          <select
+            className={styles.attachIcon}
+            value=""
+            onChange={onAttachKind}
+            title="Attach"
+            aria-label="Attach"
+            disabled={uploading}
+          >
+            <option value="">{uploading ? '…' : '📎'}</option>
+            <option value="file">🖼 Image / file</option>
+            <option value="task">🔗 Task</option>
+          </select>
+          <textarea
+            ref={taRef}
+            className={styles.dockInput}
+            aria-label="Message"
+            placeholder={terminal ? 'Message…' : 'Message (queued until the run ends)…'}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={sheet ? 8 : 1}
+          />
+          {sendBtn}
+        </div>
+        {editingId && (
+          <Row>
+            <Muted className={styles.hint}>editing a queued message</Muted>
+            <Button size="sm" onClick={cancelEdit}>
+              Cancel
+            </Button>
+          </Row>
+        )}
+        {queueFull && (
+          <Muted className={styles.hint}>queue full ({MAX_QUEUE}) — edit or remove one</Muted>
+        )}
+        {error && <ErrorText>{error}</ErrorText>}
+        {fileEl}
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <SectionTitle className={styles.flush}>
+        {editingId ? 'Edit queued message' : 'Message'}
+      </SectionTitle>
+      <div className={cn(styles.composer, look === 'terminal' && styles.term)}>
+        {look === 'terminal' && (
+          <span className={styles.promptMark} aria-hidden>
+            you&gt;
+          </span>
+        )}
+        <textarea
+          className={styles.input}
+          aria-label="Message"
+          placeholder="Type a message — Enter sends, Shift+Enter adds a line. Attach images/PDFs with 📎"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          rows={3}
+        />
+      </div>
+
+      {chipsEl}
+
+      {fileEl}
+
+      <Row wrap className={styles.actions}>
+        <select
+          className={styles.attachSelect}
+          value=""
+          onChange={onAttachKind}
+          title="Attach"
+          disabled={uploading}
+        >
+          <option value="">{uploading ? 'Uploading…' : '📎 Attach…'}</option>
+          <option value="file">🖼 Image / file</option>
+          <option value="task">🔗 Task</option>
+        </select>
+        {(showRefs || references.length > 0) && (
+          <TaskReferencePicker value={references} onChange={setReferences} excludeId={taskId} />
+        )}
+        {editingId ? (
+          <>
+            <Button variant="primary" onClick={send} disabled={!canSend}>
+              {primaryLabel}
+            </Button>
+            <Button onClick={cancelEdit}>Cancel</Button>
+          </>
+        ) : (
+          <Button variant="primary" onClick={send} disabled={!canSend}>
+            {primaryLabel}
+          </Button>
+        )}
+        {editingId && <Muted className={styles.hint}>editing a queued message</Muted>}
+        {!editingId && !terminal && (
+          <Muted className={styles.hint}>
+            run in progress — this queues and sends automatically once it finishes
+          </Muted>
+        )}
+        {queueFull && (
+          <Muted className={styles.hint}>queue full ({MAX_QUEUE}) — edit or remove one below</Muted>
+        )}
+        {error && <ErrorText>{error}</ErrorText>}
+      </Row>
+
+      {queueEl}
     </Card>
   );
 }

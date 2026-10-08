@@ -1,17 +1,23 @@
-Aigentron v0.1.28
+Aigentron v0.1.29
 
-A terminal-style conversation view, and a few fixes on top of 0.1.27.
+Use the dashboard from your phone, and reach it from anywhere over HTTPS.
 
-Conversation
-- The task conversation now reads like a terminal: you> / agent> / done> prompts, a blinking cursor while the agent works,
-  and each tool call folded into one quiet line with its result (click to expand).
-- Two looks, switchable above the conversation and remembered per browser: "terminal" (light-green text on near-black in the
-  dark theme, deep-green ink on warm paper in the light theme — both checked for contrast) and "classic".
-- "messages only" hides the tool steps; a "↓ latest" button appears when you scroll up during a run.
-- Replies are rendered as Markdown (headings, lists, quotes, code blocks with a copy button, links). The renderer is
-  built in, never inserts raw HTML, and only opens http(s)/mailto links.
-- The message box: Enter sends, Shift+Enter adds a line (Cmd/Ctrl+Enter still sends).
+Phone layout
+- The task page works like an app on a phone: a compact header (with a ⋯ menu), Chat | Files | Tasks tabs, the
+  conversation filling the screen and the message box pinned to the bottom (Enter adds a line, ➤ sends).
+- In landscape the message box is one slim line that opens a full-screen composer.
+- Every page was checked at phone width: task list, settings tabs, usage stats, agents and the add/edit windows.
+  Tab strips scroll sideways, rows wrap, tables scroll inside their card; no more page sliding off to the side.
+- A "↑" button jumps back to the top of long lists.
+- No floating theme switch on phones (Settings → General still has the choice).
 
-Fixes
-- No more "Permission deny rule NotebookRead / LS matches no known tool" warnings when the admin or researcher starts.
-- The admin's local change journal (admin-audit.jsonl) is no longer part of the repository or the images.
+The assistant
+- Drag the assistant anywhere on the screen; it remembers where you put it.
+- Tuck it away to a slim tab on the nearest edge (at the same height); tap the tab to bring it back.
+- Settings → General → Assistant → "Reset position / show" puts it back in its corner if it ever gets lost.
+- The open assistant chat is readable in the dark theme again (it was a white panel with light text).
+
+Remote access
+- Optional Cloudflare Tunnel profile for docker compose (make tunnel-up), PUBLIC_URL, and a step-by-step guide:
+  docs/remote-access.md. No ports are opened on the server; put Cloudflare Access in front.
+  The API still has no login of its own — see the guide.

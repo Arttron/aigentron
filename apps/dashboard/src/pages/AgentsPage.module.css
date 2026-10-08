@@ -52,3 +52,19 @@
   font-size: 13px;
   line-height: 1.5;
 }
+
+@media (max-width: 640px) {
+  .item {
+    flex-wrap: wrap;
+    gap: 6px 10px;
+  }
+  .name {
+    min-width: 0;
+    flex: 1 1 60%;
+  }
+  .desc {
+    order: 5;
+    flex: 1 1 100%;
+    white-space: normal;
+  }
+}

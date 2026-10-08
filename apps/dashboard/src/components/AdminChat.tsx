@@ -4,6 +4,7 @@ import { SERVER_EVENT, CLIENT_EVENT, type AgentLogEvent, type TaskStatus } from 
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import type { StateName } from '@/lib/mascot';
+import { ASSISTANT_RESET_EVENT, edgeTabFor, readEdgeTab, useFloatDrag, writeEdgeTab, type EdgeTab } from '@/lib/float-position';
 import { MascotView } from './MascotView';
 import styles from './AdminChat.module.css';
 
@@ -51,6 +52,25 @@ function toMsg(kind: string, text: string, id: string): Msg | null {
 export function AdminChat() {
   const [open, setOpen] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(() => readId());
+  // Tucked away: only a slim tab on the right edge remains (remembered per browser).
+  const float = useFloatDrag();
+  // `tab` = where the "show" tab sits while the assistant is tucked away (nearest edge, bubble's height); null = shown.
+  const [tab, setTab] = useState<EdgeTab | null>(() => readEdgeTab());
+  useEffect(() => {
+    const show = () => setTab(null);
+    window.addEventListener(ASSISTANT_RESET_EVENT, show);
+    return () => window.removeEventListener(ASSISTANT_RESET_EVENT, show);
+  }, []);
+  const hideAssistant = () => {
+    const r = float.ref.current?.getBoundingClientRect();
+    const next = r ? edgeTabFor(r, { w: window.innerWidth, h: window.innerHeight }) : ({ side: 'right', bottom: 24 } as EdgeTab);
+    setTab(next);
+    writeEdgeTab(next);
+  };
+  const showAssistant = () => {
+    setTab(null);
+    writeEdgeTab(null);
+  };
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [text, setText] = useState('');
@@ -343,18 +363,50 @@ export function AdminChat() {
         </div>
       )}
       {/* Closed: the mascot IS the launcher. Open: it lives in the panel header instead (no ✕ in its place). */}
-      {!open && (
+      {!open && tab && (
         <button
-          className={styles.bubble}
-          onClick={() => setOpen(true)}
-          aria-label="Chat with admin"
-          title="Chat with admin"
+          className={`${styles.edgeTab} ${tab.side === 'left' ? styles.edgeLeft : ''}`}
+          style={{ ['--tab-bottom' as string]: `${tab.bottom}px` }}
+          onClick={showAssistant}
+          aria-label="Show the assistant"
+          title="Show the assistant"
         >
-          <div className={styles.bubbleRing} data-accent={accent}>
-            <MascotView state={mood} size={100} />
-          </div>
-          {pendingApprovals > 0 && <span className={styles.dot} />}
+          {tab.side === 'left' ? '›' : '‹'}
+          {pendingApprovals > 0 && <span className={styles.edgeDot} />}
         </button>
+      )}
+      {!open && !tab && (
+        <div
+          ref={float.ref}
+          className={styles.float}
+          style={float.pos ? { right: float.pos.right, bottom: float.pos.bottom, touchAction: 'none' } : { touchAction: 'none' }}
+          {...float.handlers}
+        >
+          <button
+            className={styles.bubble}
+            onClick={() => {
+              if (!float.wasDrag()) setOpen(true);
+            }}
+            onDoubleClick={float.reset}
+            aria-label="Chat with admin"
+            title="Chat with admin — drag to move, double-click to put it back"
+          >
+            <div className={styles.bubbleRing} data-accent={accent}>
+              <MascotView state={mood} size={100} />
+            </div>
+            {pendingApprovals > 0 && <span className={styles.dot} />}
+          </button>
+          <button
+            type="button"
+            className={styles.hideBtn}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={hideAssistant}
+            aria-label="Hide the assistant"
+            title="Hide the assistant"
+          >
+            ›
+          </button>
+        </div>
       )}
     </>
   );

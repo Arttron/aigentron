@@ -45,3 +45,9 @@
 .error {
   margin-top: 8px;
 }
+
+/* Rows with several buttons wrap instead of running off a narrow screen. */
+.head {
+  flex-wrap: wrap;
+  gap: 8px;
+}

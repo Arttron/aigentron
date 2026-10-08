@@ -121,51 +121,60 @@ export function StatsPage() {
         {data && data.providers.length > 0 && <UsageChart providers={data.providers} />}
 
         {data && rows.length > 0 && (
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                {COLS.map((c) => (
-                  <th
-                    key={c.key}
-                    className={cn(styles.th, c.num && styles.num)}
-                    onClick={() => toggleSort(c.key)}
-                    aria-sort={
-                      sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'
-                    }
-                  >
-                    {c.label}
-                    {sort.key === c.key && (
-                      <span className={styles.arrow}>{sort.dir === 'asc' ? '▲' : '▼'}</span>
-                    )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((p) => (
-                <tr key={p.provider}>
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
                   {COLS.map((c) => (
+                    <th
+                      key={c.key}
+                      className={cn(styles.th, c.num && styles.num)}
+                      onClick={() => toggleSort(c.key)}
+                      aria-sort={
+                        sort.key === c.key
+                          ? sort.dir === 'asc'
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'
+                      }
+                    >
+                      {c.label}
+                      {sort.key === c.key && (
+                        <span className={styles.arrow}>{sort.dir === 'asc' ? '▲' : '▼'}</span>
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((p) => (
+                  <tr key={p.provider}>
+                    {COLS.map((c) => (
+                      <td
+                        key={c.key}
+                        className={cn(c.num && styles.num, c.key === 'estCostUsd' && styles.cost)}
+                      >
+                        {c.key === 'provider' ? p.provider : cell(c.key, p[c.key] as number)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className={styles.totals}>
+                  <td>Total</td>
+                  {COLS.slice(1).map((c) => (
                     <td
                       key={c.key}
-                      className={cn(c.num && styles.num, c.key === 'estCostUsd' && styles.cost)}
+                      className={cn(styles.num, c.key === 'estCostUsd' && styles.cost)}
                     >
-                      {c.key === 'provider' ? p.provider : cell(c.key, p[c.key] as number)}
+                      {cell(c.key, data.totals[c.key as keyof typeof data.totals])}
                     </td>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className={styles.totals}>
-                <td>Total</td>
-                {COLS.slice(1).map((c) => (
-                  <td key={c.key} className={cn(styles.num, c.key === 'estCostUsd' && styles.cost)}>
-                    {cell(c.key, data.totals[c.key as keyof typeof data.totals])}
-                  </td>
-                ))}
-              </tr>
-            </tfoot>
-          </table>
+              </tfoot>
+            </table>
+          </div>
         )}
 
         <Muted className={styles.note}>

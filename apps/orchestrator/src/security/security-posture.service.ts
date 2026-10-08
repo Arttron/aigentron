@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { Injectable, Logger, type OnApplicationBootstrap } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
+import { publicOrigin } from '../config/cors';
 
 const PUBLIC_DEFAULT_LITELLM_KEY = 'sk-lds-master-dev';
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
@@ -28,6 +29,13 @@ export class SecurityPostureService implements OnApplicationBootstrap {
   }
 
   onApplicationBootstrap(): void {
+    const publicUrl = publicOrigin(process.env.PUBLIC_URL);
+    if (publicUrl) {
+      this.logger.warn(
+        `PUBLIC_URL=${publicUrl}: the dashboard is meant to be reachable from the internet. The API has NO built-in login yet — ` +
+          'it must sit behind an authenticating layer (e.g. Cloudflare Access). See docs/remote-access.md.',
+      );
+    }
     const bind = this.bindAddress();
     const exposed = !bind || !LOOPBACK.has(bind);
     if (!exposed) {

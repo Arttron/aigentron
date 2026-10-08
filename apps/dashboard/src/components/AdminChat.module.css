@@ -1,10 +1,19 @@
-.bubble {
+.float {
   position: fixed;
   right: 12px;
   bottom: 12px;
   z-index: 950;
   width: 104px;
   height: 104px;
+  cursor: grab;
+}
+.float:active {
+  cursor: grabbing;
+}
+.bubble {
+  position: relative;
+  width: 100%;
+  height: 100%;
   padding: 0;
   display: grid;
   place-items: center;
@@ -13,7 +22,7 @@
   cursor: pointer;
   font-size: 22px;
   /* barely-there disc: just enough to separate the mascot from busy pages */
-  background: color-mix(in srgb, var(--card-bg, #fff) 22%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 22%, transparent);
   -webkit-backdrop-filter: blur(3px);
   backdrop-filter: blur(3px);
   box-shadow: none;
@@ -21,7 +30,7 @@
   transition: background 200ms ease, transform 150ms ease;
 }
 .bubble:hover {
-  background: color-mix(in srgb, var(--card-bg, #fff) 45%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 45%, transparent);
   transform: scale(1.04);
 }
 .dot {
@@ -45,7 +54,7 @@
   flex-direction: column;
   border-radius: 12px;
   overflow: hidden;
-  background: var(--card-bg, #fff);
+  background: var(--bg-elev);
   color: inherit;
   border: 1px solid rgba(127, 127, 127, 0.3);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
@@ -92,8 +101,8 @@
 }
 .me {
   align-self: flex-end;
-  background: var(--accent, #3b82f6);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   border-bottom-right-radius: 3px;
 }
 .admin {
@@ -131,8 +140,8 @@
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  background: var(--accent, #3b82f6);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 16px;
 }
 .send:disabled {
@@ -142,7 +151,7 @@
 .error {
   padding: 0 12px 10px;
   font-size: 12px;
-  color: #ef4444;
+  color: var(--red);
 }
 
 /* ---- accents: make the mascot's state readable even when the animation's own differences are subtle ---- */
@@ -195,4 +204,108 @@
 }
 @media (prefers-reduced-motion: reduce) {
   [data-accent] { animation: none; }
+}
+
+/* Phones: a smaller floating assistant; the open chat takes the whole screen. */
+@media (max-width: 640px) {
+  .float {
+    width: 72px;
+    height: 72px;
+    right: 8px;
+    bottom: 8px;
+  }
+  .panel {
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+  }
+}
+
+/* ---- tucked away: a slim tab on the right edge brings the assistant back ---- */
+.edgeTab {
+  position: fixed;
+  right: 0;
+  bottom: var(--tab-bottom, 24px);
+  z-index: 950;
+  width: 22px;
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: 10px 0 0 10px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  box-shadow: var(--raised-xs);
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.75;
+}
+.edgeTab:hover,
+.edgeTab:focus-visible {
+  opacity: 1;
+  color: var(--accent);
+}
+.edgeLeft {
+  right: auto;
+  left: 0;
+  border-radius: 0 10px 10px 0;
+}
+.edgeLeft .edgeDot {
+  left: auto;
+  right: 4px;
+}
+.edgeDot {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+.hideBtn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  box-shadow: var(--raised-xs);
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.8;
+}
+.hideBtn:hover,
+.hideBtn:focus-visible {
+  opacity: 1;
+  color: var(--text);
+}
+
+/* On the pinned phone task screen the assistant moves up so it never covers the message box. */
+:global(html[data-pinned]) .float {
+  bottom: 84px;
+  width: 52px;
+  height: 52px;
+}
+:global(html[data-pinned]) .edgeTab {
+  bottom: max(var(--tab-bottom, 24px), 96px);
+}
+
+:global(html[data-sheet]) .float,
+:global(html[data-sheet]) .edgeTab {
+  display: none;
+}
+
+/* The mascot fills whatever size the floating bubble has (72px on phones, 52px on the pinned task screen). */
+.bubbleRing > * {
+  width: 100% !important;
+  height: 100% !important;
 }

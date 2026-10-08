@@ -1,5 +1,10 @@
 .tabs {
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none; /* swipe to scroll; the active tab is kept in view */
   gap: 4px;
   padding: 5px;
   background: var(--bg);
@@ -8,7 +13,12 @@
   margin-bottom: 18px;
 }
 
+.tabs::-webkit-scrollbar {
+  display: none;
+}
 .tab {
+  flex: none;
+  white-space: nowrap;
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);

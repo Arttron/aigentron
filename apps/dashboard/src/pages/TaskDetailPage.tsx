@@ -9,6 +9,8 @@ import {
 } from '@lds/shared';
 import { api, type TaskDetail } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { useIsPhone } from '@/lib/use-media';
+import { Tabs } from '@/components/ui/Tabs';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { Transcript, type LogLine } from '@/components/Transcript';
@@ -91,7 +93,13 @@ export function TaskDetailPage() {
           const key = lineKey(e.agentSessionId, e.seq);
           if (seen.current.has(key)) continue;
           seen.current.add(key);
-          initial.push({ id: key, kind: e.kind, text: e.text, attachments: e.attachments, ts: e.createdAt });
+          initial.push({
+            id: key,
+            kind: e.kind,
+            text: e.text,
+            attachments: e.attachments,
+            ts: e.createdAt,
+          });
         }
         setLines(initial);
       })
@@ -185,6 +193,9 @@ export function TaskDetailPage() {
     refreshTask();
   };
 
+  const phone = useIsPhone();
+  const [tab, setTab] = useState<'chat' | 'files' | 'tasks'>('chat');
+  const relatedCount = (task?.subtasks?.length ?? 0) + (task?.linksOut?.length ?? 0);
   const pendingApprovals = task?.approvals.filter((a) => a.status === 'pending') ?? [];
   const terminal = task ? isTerminalStatus(task.status) : false;
   // Hide verbose intermediate 'assistant' lines unless debug mode is on
@@ -197,6 +208,105 @@ export function TaskDetailPage() {
       { id: 'seed-prompt', kind: 'prompt', text: task.prompt, ts: task.createdAt },
       ...visibleLines,
     ];
+  }
+
+  // Phone: an app-like shell. Header + tabs on top, the conversation fills what is left, the message box is pinned to the bottom.
+  useEffect(() => {
+    if (!phone || !task) return;
+    document.documentElement.dataset.pinned = '1';
+    return () => {
+      delete document.documentElement.dataset.pinned;
+    };
+  }, [phone, !!task]);
+
+  if (phone && task) {
+    return (
+      <div className={styles.shell}>
+        <div className={styles.shellHead}>
+          <BackLink href="/">←</BackLink>
+          <span className={styles.shellTitle} title={task.title}>
+            {task.title}
+          </span>
+          <StatusBadge status={task.status} />
+          <details className={styles.menu}>
+            <summary aria-label="Task menu">⋯</summary>
+            <div className={styles.menuBody}>
+              <Muted>
+                {task.agentName ?? 'default agent'} · {task.branch ?? 'no branch yet'} ·{' '}
+                {task.sessions.length} session
+                {task.sessions.length === 1 ? '' : 's'}
+              </Muted>
+              {task.worktreePath && (
+                <Muted>
+                  📁 <code>{subdir ? `${task.worktreePath}/${subdir}` : task.worktreePath}</code>
+                </Muted>
+              )}
+              {task.prUrl && (
+                <ButtonLink href={task.prUrl} target="_blank" rel="noreferrer">
+                  Pull Request ↗
+                </ButtonLink>
+              )}
+              {!task.prUrl && task.pushedTo && (
+                <ButtonLink href={task.pushedTo} target="_blank" rel="noreferrer">
+                  Pushed ↗
+                </ButtonLink>
+              )}
+              {!terminal && (
+                <Button variant="red" onClick={cancel} disabled={busy}>
+                  Cancel task
+                </Button>
+              )}
+              <Button variant="red" onClick={remove} disabled={busy}>
+                Delete task
+              </Button>
+            </div>
+          </details>
+        </div>
+
+        {error && <ErrorText>{error}</ErrorText>}
+
+        {pendingApprovals.length > 0 && (
+          <div className={styles.shellApprovals}>
+            <SectionTitle>Pending approvals ({pendingApprovals.length})</SectionTitle>
+            {pendingApprovals.map((a) => (
+              <ApprovalCard key={a.id} approval={a} />
+            ))}
+          </div>
+        )}
+
+        <div className={styles.shellTabs}>
+          <Tabs
+            tabs={[
+              { id: 'chat', label: 'Chat' },
+              { id: 'files', label: 'Files' },
+              { id: 'tasks', label: `Tasks${relatedCount ? ` (${relatedCount})` : ''}` },
+            ]}
+            active={tab}
+            onChange={setTab}
+          />
+        </div>
+
+        <div className={tab === 'chat' ? styles.paneChat : styles.paneScroll}>
+          {tab === 'chat' && (
+            <Transcript
+              taskId={id}
+              lines={visibleLines}
+              status={task.status}
+              terminal={terminal}
+              fill
+            />
+          )}
+          {tab === 'files' && (
+            <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} />
+          )}
+          {tab === 'tasks' && <TaskRelations task={task} onChange={refreshTask} />}
+        </div>
+
+        {tab === 'chat' && (
+          <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} compact />
+        )}
+      </div>
+    );
   }
 
   return (
@@ -249,10 +359,6 @@ export function TaskDetailPage() {
             </Muted>
           )}
 
-          <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} />
-
-          <TaskRelations task={task} onChange={refreshTask} />
-
           {pendingApprovals.length > 0 && (
             <Card>
               <SectionTitle>Pending approvals ({pendingApprovals.length})</SectionTitle>
@@ -266,8 +372,10 @@ export function TaskDetailPage() {
             <SectionTitle>Conversation</SectionTitle>
             <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} />
           </Card>
-
           <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} />
+
+          <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} />
+          <TaskRelations task={task} onChange={refreshTask} />
         </>
       )}
     </>

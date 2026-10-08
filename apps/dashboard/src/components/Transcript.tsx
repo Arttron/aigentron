@@ -63,11 +63,14 @@ export function Transcript({
   lines,
   status,
   terminal,
+  fill = false,
 }: {
   taskId: string;
   lines: LogLine[];
   status: TaskStatus;
   terminal: boolean;
+  /** Fill the height of the parent (phone layout) instead of a fixed maximum. */
+  fill?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [look, setLook] = useLook();
@@ -121,7 +124,7 @@ export function Transcript({
   const hidden = all.length - items.length;
 
   return (
-    <div className={styles.wrap} data-look={look}>
+    <div className={cn(styles.wrap, fill && styles.fill)} data-look={look}>
       <div className={styles.bar}>
         <span className={styles.seg} role="group" aria-label="Conversation style">
           {(['terminal', 'classic'] as const).map((v) => (

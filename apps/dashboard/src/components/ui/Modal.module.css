@@ -6,7 +6,7 @@
   align-items: flex-start;
   justify-content: center;
   padding: 8vh 16px 16px;
-  z-index: 100;
+  z-index: 1000; /* above the floating assistant and theme switch */
   overflow-y: auto;
 }
 

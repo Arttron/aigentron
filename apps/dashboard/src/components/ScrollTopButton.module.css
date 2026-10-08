@@ -1,30 +1,31 @@
-.toggle {
+.top {
   position: fixed;
   left: 16px;
-  bottom: 16px;
-  z-index: 900;
+  bottom: 70px; /* above the theme switch on wide screens */
+  z-index: 880;
   width: 44px;
   height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  line-height: 1;
-  background: var(--bg-elev-2);
   border: none;
   border-radius: var(--radius-pill);
+  background: var(--bg-elev-2);
+  color: var(--accent);
   box-shadow: var(--raised-sm);
+  font-size: 20px;
+  line-height: 1;
 }
-.toggle:hover {
+.top:hover {
   box-shadow: var(--raised-sm), 0 0 0 2px var(--accent-soft);
 }
-.toggle:active {
-  box-shadow: var(--inset-sm);
+.top:focus-visible {
+  outline: 2px solid var(--accent);
 }
-
-/* Phones: no floating theme switch (it follows the system; Settings → General has the choice). */
+/* Phones have no floating theme switch: sit in the corner. */
 @media (max-width: 640px), (max-height: 520px) and (orientation: landscape) {
-  .toggle {
-    display: none;
+  .top {
+    left: 12px;
+    bottom: 12px;
   }
 }

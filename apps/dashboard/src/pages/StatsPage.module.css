@@ -55,3 +55,8 @@
   display: block;
   padding: 16px 0;
 }
+
+.tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+}

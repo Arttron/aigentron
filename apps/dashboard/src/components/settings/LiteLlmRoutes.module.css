@@ -28,3 +28,17 @@
   color: var(--text-dim);
   word-break: break-all;
 }
+
+@media (max-width: 640px) {
+  .name {
+    flex: 1 1 100%;
+    word-break: break-all;
+  }
+  .arrow {
+    display: none;
+  }
+  .backend {
+    flex: 1 1 60%;
+    font-size: 12px;
+  }
+}
