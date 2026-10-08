@@ -424,3 +424,33 @@ model ManagedLitellmRoute {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// A recurring job: post a message to a chat on a schedule (no model, free), or start a task for an agent
+// (its updates then flow to the chat). `cron` is a standard 5-field expression evaluated in `timezone`.
+model Schedule {
+  id         String    @id @default(cuid())
+  name       String    @unique
+  enabled    Boolean   @default(true)
+  cron       String
+  timezone   String    @default("UTC")
+  // message | task
+  kind       String
+  // message text, or the task prompt
+  text       String
+  agentName  String?
+  channelId  String?
+  chatId     String?
+  // optional quiet hours (HH:MM, in `timezone`): runs that fall inside are skipped
+  quietStart String?
+  quietEnd   String?
+  nextRunAt  DateTime?
+  lastRunAt  DateTime?
+  // ok | skipped | error
+  lastStatus String?
+  lastError  String?
+  createdBy  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([enabled, nextRunAt])
+}

@@ -32,6 +32,31 @@ the password; their role decides what they may do. Agents on the server can't us
 set or read passwords — send the user to those screens. Forgotten: another operator resets it in Users, or `make reset-password` on the
 server (removes all). Details: `docs/authentication.md`.
 
+## Starter packs
+
+On the Agents page, **Starter packs**: ready-made teams for a kind of project — *English learning* (tutor, curriculum planner, quiz maker), *Home renovation* (planner,
+estimator, interior designer, materials advisor), *Software team* (PM, architect, backend, frontend, designer, reviewer). **Install** adds the agents, a skill, starter notes in
+the library (a profile/brief to fill in) and prepared schedules (**switched off**). It never overwrites anything you already have, so pressing it again only fills gaps. I can do it
+for you (`propose_pack_install`) and help fill in the notes.
+
+## Resources — the project's shared knowledge
+
+📚 **Resources** (link in the header of the task list): a library of notes, images, PDFs and any files. **Every agent of the project sees it** — its prompt carries the list (title, one-line description, tags) and it reads what is relevant, so a clear description matters more than the file name. Upload (button or drag & drop, up to 25 MB each, 500 MB total), or write a note (Markdown); give tags; optionally limit an item to chosen agents (none ticked = all). Typical contents: house measurements and reference photos (renovation), a learner profile and a vocabulary list (language learning), a style guide, a price list. Agents never change these files; people edit them here, and I can add or change text notes (`propose_resource`, with approval) and search them (`resources_search`).
+
+## Channels (Telegram) and getting a new chat in
+
+Settings → **Channels**. Telegram needs a bot (create one with @BotFather) and its token — the token is entered in a secure field, never in the chat. Only chats on the channel's
+allow-list can use the bot. When someone writes to the bot from a chat that is **not** allowed, the bot replies with that chat's id and the dashboard shows a yellow
+"is this you?" line under the channel with **Allow / Dismiss** (it forgets strangers after an hour). I can set the whole thing up (`propose_channel`, `request_secret`,
+`channels_list`). When a request for a key comes through Telegram, the bot sends a one-time link (needs `PUBLIC_URL`) to a small page where the key is typed — the link works once, for 10 minutes, and can only fill that one value.
+
+## Schedules (reminders and periodic tasks)
+
+Settings → **Schedules**: recurring jobs. Each one has a time ("every day at 09:30", weekdays, certain days, every N hours, or a raw cron), a time zone,
+optional quiet hours, and what it does — **post a message** to a chat (free, for reminders) or **start a task** for an agent (uses model budget; its updates arrive
+in that chat). Buttons: Run now (try it), Turn on/off, Edit, Delete. A run missed while the server was off is skipped, not fired late. I can create/change/delete them
+(`propose_schedule`, with approval) and list them (`schedules_list`).
+
 ## Public access (domains, Cloudflare)
 
 To open the dashboard from outside, the user has two ways (or both): **A. built-in** — passwords (above) plus Settings → General → **Access**, a list of

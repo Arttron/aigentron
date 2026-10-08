@@ -1,3 +1,4 @@
+import { PacksCard } from '@/components/PacksCard';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type AgentInfo, type McpServerInfo, type ProviderInfo } from '@/lib/api';
@@ -224,6 +225,8 @@ export function AgentsPage() {
           <ErrorText>{error}</ErrorText>
         </Card>
       )}
+
+      <PacksCard />
 
       <Card>
         <Row spaceBetween>

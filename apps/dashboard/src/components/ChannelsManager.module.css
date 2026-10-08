@@ -51,3 +51,16 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.pairing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--amber-soft);
+  font-size: 13px;
+}

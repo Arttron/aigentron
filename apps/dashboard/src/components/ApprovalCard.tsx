@@ -6,6 +6,11 @@ import {
   PROPOSE_BATCH_TOOL,
   PROPOSE_CLEANUP_TOOL,
   PROPOSE_PROVIDER_TOOL,
+  PROPOSE_SCHEDULE_TOOL,
+  PROPOSE_CHANNEL_TOOL,
+  PROPOSE_RESOURCE_TOOL,
+  PROPOSE_PACK_INSTALL_TOOL,
+  describeSchedule,
   PROPOSE_SETTINGS_TOOL,
   PROPOSE_SKILL_TOOL,
   PROPOSE_TASK_ACTION_TOOL,
@@ -14,7 +19,7 @@ import {
   REQUEST_SECRET_TOOL,
   type ApprovalRequest,
 } from '@lds/shared';
-import { api } from '@/lib/api';
+import { api, type PackInfo } from '@/lib/api';
 import { Button, Row, Muted, ErrorText } from '@/components/ui';
 import styles from './ApprovalCard.module.css';
 
@@ -57,7 +62,7 @@ function SecretEntry({ approval, onDone, onError }: { approval: ApprovalRequest;
   const i = (approval.toolInput ?? {}) as { target?: string; name?: string; reason?: string };
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
-  const label = i.target === 'github_token' ? 'GitHub token' : `API key / token for provider "${i.name}"`;
+  const label = i.target === 'github_token' ? 'GitHub token' : i.target === 'channel' ? `bot token for the channel "${i.name}"` : `API key / token for provider "${i.name}"`;
   const save = async () => {
     if (!value.trim()) return;
     setBusy(true);
@@ -101,6 +106,157 @@ function SecretEntry({ approval, onDone, onError }: { approval: ApprovalRequest;
 const PREVIEW_TASKS = 12;
 
 /** What an admin-agent platform action will touch: the task list (sampled) or the agent to delete. */
+function PackPreview({ approval }: { approval: ApprovalRequest }) {
+  const i = (approval.toolInput ?? {}) as { name?: string; timezone?: string; reason?: string };
+  const [pack, setPack] = useState<PackInfo | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .getPack(i.name ?? '')
+      .then((p) => live && setPack(p))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [i.name]);
+  return (
+    <div className={styles.proposal}>
+      <div className={styles.proposalHead}>
+        <b>
+          Install the pack "{pack ? `${pack.icon ?? ''} ${pack.title}` : i.name}"
+        </b>
+      </div>
+      {i.reason && <div className={styles.proposalHead}>Reason: {i.reason}</div>}
+      <pre className={styles.proposalBody}>
+        {pack
+          ? [
+              pack.description,
+              '',
+              `agents:     ${[...(pack.agents ?? []), ...(pack.catalogAgents ?? [])].join(', ') || '—'}`,
+              `skills:     ${(pack.skills ?? []).join(', ') || '—'}`,
+              `library:    ${(pack.resources ?? []).map((r) => r.title).join('; ') || '—'}`,
+              `schedules:  ${(pack.schedules ?? []).map((s) => s.name).join('; ') || '—'}  (created SWITCHED OFF${i.timezone ? `, time zone ${i.timezone}` : ''})`,
+              '',
+              'Anything that already exists is left untouched.',
+            ].join('\n')
+          : 'Loading the pack contents…'}
+      </pre>
+    </div>
+  );
+}
+
+function ResourcePreview({ approval }: { approval: ApprovalRequest }) {
+  const i = (approval.toolInput ?? {}) as { action?: string; id?: string; title?: string; description?: string; tags?: string[]; agents?: string[]; text?: string; reason?: string };
+  const verb = i.action === 'delete' ? 'Delete' : i.action === 'update' ? 'Change' : 'Add';
+  return (
+    <div className={styles.proposal}>
+      <div className={styles.proposalHead}>
+        <b>
+          {verb} note {i.title ? `"${i.title}"` : `(${i.id})`} in the project library
+        </b>
+        {i.action !== 'delete' && ' — every agent will read it as project knowledge'}
+      </div>
+      {i.reason && <div className={styles.proposalHead}>Reason: {i.reason}</div>}
+      {i.action !== 'delete' && (
+        <pre className={styles.proposalBody}>
+          {[
+            i.description ? `about:  ${i.description}` : '',
+            i.tags?.length ? `tags:   ${i.tags.join(', ')}` : '',
+            i.agents?.length ? `for:    ${i.agents.join(', ')}` : 'for:    all agents',
+            i.text ? `\n${i.text}` : '',
+          ]
+            .filter((l) => l !== '')
+            .join('\n')}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function ChannelPreview({ approval }: { approval: ApprovalRequest }) {
+  const i = (approval.toolInput ?? {}) as {
+    action?: string;
+    name?: string;
+    kind?: string;
+    enabled?: boolean;
+    defaultAgent?: string;
+    allowChatId?: string;
+    removeChatId?: string;
+    reason?: string;
+  };
+  const verb = i.action === 'delete' ? 'Delete' : i.action === 'update' ? 'Change' : 'Create';
+  return (
+    <div className={styles.proposal}>
+      <div className={styles.proposalHead}>
+        <b>
+          {verb} chat channel "{i.name}"
+        </b>
+      </div>
+      {i.reason && <div className={styles.proposalHead}>Reason: {i.reason}</div>}
+      {i.action !== 'delete' && (
+        <pre className={styles.proposalBody}>
+          {[
+            i.kind ? `kind:      ${i.kind}` : '',
+            i.action === 'create' ? 'starts:    switched OFF — turns on when the bot token is entered (next, in a secure field)' : '',
+            i.enabled !== undefined ? `switch:    ${i.enabled ? 'ON' : 'OFF'}` : '',
+            i.defaultAgent ? `agent:     tasks from this channel go to "${i.defaultAgent}"` : '',
+            i.allowChatId ? `ALLOW chat ${i.allowChatId} — it will be able to create tasks and approve actions` : '',
+            i.removeChatId ? `remove chat ${i.removeChatId} from the allowed chats` : '',
+          ]
+            .filter(Boolean)
+            .join('\n')}
+        </pre>
+      )}
+      {i.action === 'delete' && <div className={styles.proposalHead}>The bot stops listening; nothing else is deleted.</div>}
+    </div>
+  );
+}
+
+function SchedulePreview({ approval }: { approval: ApprovalRequest }) {
+  const i = (approval.toolInput ?? {}) as {
+    action?: string;
+    name?: string;
+    cron?: string;
+    timezone?: string;
+    kind?: string;
+    text?: string;
+    agentName?: string;
+    channel?: string;
+    chatId?: string;
+    quietStart?: string;
+    quietEnd?: string;
+    enabled?: boolean;
+    reason?: string;
+  };
+  const verb = i.action === 'delete' ? 'Delete' : i.action === 'update' ? 'Change' : 'Create';
+  return (
+    <div className={styles.proposal}>
+      <div className={styles.proposalHead}>
+        <b>
+          {verb} schedule "{i.name}"
+        </b>
+        {i.action === 'delete' && ' — the job stops for good'}
+      </div>
+      {i.reason && <div className={styles.proposalHead}>Reason: {i.reason}</div>}
+      {i.action !== 'delete' && (
+        <pre className={styles.proposalBody}>
+          {[
+            i.cron ? `when:     ${describeSchedule(i.cron, i.timezone || 'UTC')}   [${i.cron}]` : '',
+            i.kind === 'task' ? `does:     starts a TASK for agent "${i.agentName}" each time (uses model budget)` : '',
+            i.kind === 'message' ? 'does:     posts a message (no model, free)' : '',
+            i.channel ? `where:    ${i.channel}${i.chatId ? `, chat ${i.chatId}` : ''}` : '',
+            i.quietStart ? `quiet:    ${i.quietStart}–${i.quietEnd} (runs inside are skipped)` : '',
+            i.enabled === false ? 'enabled:  no (created switched off)' : '',
+            i.text ? `${i.kind === 'task' ? 'prompt' : 'message'}:\n${i.text}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n')}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function ProviderPreview({ approval }: { approval: ApprovalRequest }) {
   const i = (approval.toolInput ?? {}) as {
     name?: string;
@@ -316,6 +472,10 @@ function PlatformActionPreview({ approval }: { approval: ApprovalRequest }) {
   if (approval.toolName === PROPOSE_BATCH_TOOL) return <BatchPreview approval={approval} />;
   if (approval.toolName === PROPOSE_CLEANUP_TOOL) return <CleanupPreview approval={approval} />;
   if (approval.toolName === PROPOSE_PROVIDER_TOOL) return <ProviderPreview approval={approval} />;
+  if (approval.toolName === PROPOSE_SCHEDULE_TOOL) return <SchedulePreview approval={approval} />;
+  if (approval.toolName === PROPOSE_CHANNEL_TOOL) return <ChannelPreview approval={approval} />;
+  if (approval.toolName === PROPOSE_RESOURCE_TOOL) return <ResourcePreview approval={approval} />;
+  if (approval.toolName === PROPOSE_PACK_INSTALL_TOOL) return <PackPreview approval={approval} />;
   return <TaskActionPreview approval={approval} />;
 }
 
@@ -399,7 +559,11 @@ export function ApprovalCard({
     approval.toolName === PROPOSE_UNDO_TOOL ||
     approval.toolName === PROPOSE_TASK_TOOL ||
     approval.toolName === PROPOSE_BATCH_TOOL ||
-    approval.toolName === PROPOSE_PROVIDER_TOOL;
+    approval.toolName === PROPOSE_PROVIDER_TOOL ||
+    approval.toolName === PROPOSE_SCHEDULE_TOOL ||
+    approval.toolName === PROPOSE_CHANNEL_TOOL ||
+    approval.toolName === PROPOSE_RESOURCE_TOOL ||
+    approval.toolName === PROPOSE_PACK_INSTALL_TOOL;
   const isSecret = approval.toolName === REQUEST_SECRET_TOOL;
   const isProposal = isContentProposal || isPlatformAction || isSecret;
 

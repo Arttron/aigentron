@@ -107,6 +107,8 @@ export function isThisMachine(addr: string | undefined, ownAddresses: readonly s
 
 /** Open without a session: liveness and the sign-in endpoints themselves. */
 export function isPublicRoute(path: string): boolean {
+  // /api/secret-links/<token>: the one-time token is the credential (see SecretLinksService).
+  if (path.startsWith('/api/secret-links/')) return true;
   return path === '/api/health' || path === '/api/auth/status' || path === '/api/auth/login' || path === '/api/auth/setup' || path === '/api/auth/logout';
 }
 

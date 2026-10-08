@@ -65,6 +65,8 @@ describe('requests', () => {
   it('classifies routes', () => {
     expect(isPublicRoute('/api/health')).toBe(true);
     expect(isPublicRoute('/api/tasks')).toBe(false);
+    expect(isPublicRoute('/api/secret-links/abc123')).toBe(true); // the one-time token is the credential
+    expect(isPublicRoute('/api/secret-linksX')).toBe(false);
     expect(isMachineRoute('/api/approvals/check')).toBe(true);
     expect(isMachineRoute('/api/approvals/abc/wait')).toBe(true);
     expect(isMachineRoute('/api/approvals/abc/decision')).toBe(false); // the human verdict is NOT a machine route

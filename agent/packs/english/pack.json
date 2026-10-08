@@ -1,0 +1,41 @@
+{
+  "title": "English learning",
+  "icon": "🇬🇧",
+  "description": "A personal English tutor team: a tutor for daily conversation and lessons, a curriculum planner and a quiz maker. They learn your level and goals from the library, keep a progress log in the project folder and can remind you in chat.",
+  "audience": "Someone learning English on their own.",
+  "agents": ["english-tutor", "english-curriculum", "english-quizmaster"],
+  "skills": ["english-teaching"],
+  "resources": [
+    {
+      "file": "resources/learner-profile.md",
+      "title": "Learner profile",
+      "description": "Who the learner is: level, goals, interests, available time, native language, known weak spots. English agents read this first. FILL IT IN.",
+      "tags": ["english", "profile"],
+      "agents": []
+    },
+    {
+      "file": "resources/trusted-resources.md",
+      "title": "Trusted English resources",
+      "description": "Websites, channels and books the agents should use and recommend (and which to avoid). Edit the list to your taste.",
+      "tags": ["english", "sources"],
+      "agents": []
+    }
+  ],
+  "schedules": [
+    {
+      "name": "English — daily lesson",
+      "cron": "0 19 * * *",
+      "kind": "task",
+      "agent": "english-tutor",
+      "text": "Run today's English lesson for me. First read my learner profile and the progress log, then give me a short (10–15 minute) lesson with 3–5 interactive steps and wait for my answers."
+    },
+    {
+      "name": "English — weekly review",
+      "cron": "0 18 * * 0",
+      "kind": "task",
+      "agent": "english-curriculum",
+      "text": "Do my weekly English review: read the progress log, summarise what improved and what keeps going wrong, and propose next week's focus and a small plan."
+    }
+  ],
+  "after": "1) Open 📚 Resources → \"Learner profile\" and fill it in (level, goals, time, native language). 2) Open Settings → Schedules, pick the chat for the two prepared schedules and turn them on. 3) Start with a task for english-tutor: \"Assess my level with a short chat\"."
+}

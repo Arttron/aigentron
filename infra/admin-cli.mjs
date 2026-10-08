@@ -245,6 +245,34 @@ async function describe(a) {
     if (ids.length > 12) lines.push(dim(`  … and ${ids.length - 12} more`));
   } else if (t === 'propose_agent_delete') {
     lines.push(`Delete agent ${bold(i.name)} (a snapshot is kept)${i.reason ? ` — ${i.reason}` : ''}`);
+  } else if (t === 'propose_pack_install') {
+    lines.push(`Install the content pack ${bold(i.name)}${i.timezone ? ` (time zone ${i.timezone})` : ''}${i.reason ? ` — ${i.reason}` : ''}`);
+    lines.push('  adds its agents, skills, library notes and schedules (schedules start SWITCHED OFF); existing items are left untouched');
+  } else if (t === 'propose_resource') {
+    const verb = i.action === 'delete' ? 'DELETE' : i.action === 'update' ? 'Change' : 'Add';
+    lines.push(`${verb} note ${bold(i.title || i.id || '?')} in the project library${i.reason ? ` — ${i.reason}` : ''}`);
+    if (i.action !== 'delete') {
+      if (i.description) lines.push(`  about: ${i.description}`);
+      lines.push(`  for: ${i.agents?.length ? i.agents.join(', ') : 'all agents'}${i.tags?.length ? `   tags: ${i.tags.join(', ')}` : ''}`);
+      if (i.text) lines.push(`  ${trunc(String(i.text).replace(/\s+/g, ' '), 200)}`);
+    }
+  } else if (t === 'propose_channel') {
+    const verb = i.action === 'delete' ? 'DELETE' : i.action === 'update' ? 'Change' : 'Create';
+    lines.push(`${verb} chat channel ${bold(i.name)}${i.reason ? ` — ${i.reason}` : ''}`);
+    if (i.action === 'create') lines.push('  starts switched OFF — turns on when the bot token is entered');
+    if (i.defaultAgent) lines.push(`  tasks from it go to agent "${i.defaultAgent}"`);
+    if (i.allowChatId) lines.push(`  ALLOW chat ${i.allowChatId} — it can create tasks and approve actions`);
+    if (i.removeChatId) lines.push(`  remove chat ${i.removeChatId}`);
+  } else if (t === 'propose_schedule') {
+    const verb = i.action === 'delete' ? 'DELETE' : i.action === 'update' ? 'Change' : 'Create';
+    lines.push(`${verb} schedule ${bold(i.name)}${i.reason ? ` — ${i.reason}` : ''}`);
+    if (i.action !== 'delete') {
+      if (i.cron) lines.push(`  when: ${i.cron}  (${i.timezone || 'UTC'})`);
+      if (i.kind) lines.push(i.kind === 'task' ? `  starts a TASK for agent "${i.agentName}" each time (uses model budget)` : '  posts a message (no model, free)');
+      if (i.channel) lines.push(`  where: ${i.channel}${i.chatId ? `, chat ${i.chatId}` : ''}`);
+      if (i.quietStart) lines.push(`  quiet hours: ${i.quietStart}–${i.quietEnd}`);
+      if (i.text) lines.push(`  ${i.kind === 'task' ? 'prompt' : 'message'}: ${trunc(String(i.text), 160)}`);
+    }
   } else if (t === 'propose_provider') {
     lines.push(
       `Provider ${bold(i.name)}${i.makeDefault ? '  → make it the DEFAULT' : ''}`,

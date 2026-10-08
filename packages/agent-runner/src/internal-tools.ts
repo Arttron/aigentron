@@ -23,6 +23,7 @@ export type InternalToolHandlers = Pick<
   | 'onCreateSubtask'
   | 'onCheckSubtasks'
   | 'onScheduleCheck'
+  | 'onSearchResources'
   | 'onStartPreview'
   | 'onProposeLearnedSkill'
   | 'admin'
@@ -109,6 +110,20 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         });
         return `Scheduled a re-check in ${delaySeconds}s. Ending this run now.`;
       },
+    });
+  }
+
+  if (params.onSearchResources) {
+    specs.push({
+      name: 'resources_search',
+      description:
+        "Search the project's shared resource library (notes, images, PDFs, documents that people keep for all agents). Give a `query` (words that must all match title/description/tags) and/or a `tag`; with neither it lists the newest entries. Each result has the file path — READ that path to use the resource (images and PDFs are readable too). Use it when a task may be covered by project material the prompt's resource list did not show.",
+      shape: { query: z.string().optional(), tag: z.string().optional() },
+      handler: (args) =>
+        params.onSearchResources!({
+          query: typeof args.query === 'string' ? args.query : undefined,
+          tag: typeof args.tag === 'string' ? args.tag : undefined,
+        }),
     });
   }
 
@@ -264,6 +279,142 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           ).message,
       },
       {
+        name: 'packs_list',
+        description:
+          "List the ready-made content packs (e.g. English learning, Home renovation, Software team): what each contains (agents, skills, library notes, prepared schedules) and how much of it is already installed. Read-only. Offer the matching pack when the user describes such a project.",
+        shape: {},
+        handler: () => admin.packsList(),
+      },
+      {
+        name: 'propose_pack_install',
+        description:
+          "Install a content pack by `name` (from packs_list): its agents, skills, starter notes in the project library and prepared schedules (the schedules are created SWITCHED OFF — nothing runs until the user turns them on and picks a chat). Anything that already exists is left untouched, so it is safe to re-run. Ask the user's time zone and pass it as `timezone` (IANA, e.g. Europe/Kyiv) so the prepared schedules match. `reason` is required. A human reviews and must approve; this call blocks until they decide. Afterwards tell the user the \"next steps\" from the result (usually: fill in the profile note, choose a chat for the schedules).",
+        shape: { name: z.string(), timezone: z.string().optional(), reason: z.string() },
+        handler: async (args) =>
+          (
+            await admin.proposePackInstall({
+              name: String(args.name),
+              timezone: typeof args.timezone === 'string' && args.timezone.trim() ? args.timezone.trim() : undefined,
+              reason: String(args.reason ?? ''),
+            })
+          ).message,
+      },
+      {
+        name: 'propose_resource',
+        description:
+          "Add, change or delete a TEXT NOTE in the project's resource library — shared knowledge every agent reads (use it for things like a learner profile, house measurements, a style guide, a glossary). `action`: create | update | delete. create: `title`, `text` (Markdown), optional `description` (one line — shown to agents so they know when to read it), `tags`, `agents` (names of agents it is meant for; leave out for all). update: `id` (from resources_search) + the fields to change; `text` replaces the whole note. delete: `id`. Files and images are uploaded by the user in the dashboard (Resources) — you cannot create those. A human reviews and must approve; this call blocks until they decide. Search first (resources_search) to avoid duplicates.",
+        shape: {
+          action: z.enum(['create', 'update', 'delete']),
+          id: z.string().optional(),
+          title: z.string().optional(),
+          description: z.string().optional(),
+          tags: z.array(z.string()).optional(),
+          agents: z.array(z.string()).optional(),
+          text: z.string().optional(),
+          reason: z.string(),
+        },
+        handler: async (args) => {
+          const arr = (k: string) => (Array.isArray(args[k]) ? (args[k] as unknown[]).map(String) : undefined);
+          const str = (k: string) => (typeof args[k] === 'string' ? (args[k] as string) : undefined);
+          return (
+            await admin.proposeResource({
+              action: args.action as 'create' | 'update' | 'delete',
+              id: str('id')?.trim() || undefined,
+              title: str('title'),
+              description: str('description'),
+              tags: arr('tags'),
+              agents: arr('agents'),
+              text: str('text'),
+              reason: String(args.reason ?? ''),
+            })
+          ).message;
+        },
+      },
+      {
+        name: 'channels_list',
+        description:
+          'List the chat channels (Telegram): name, on/off, whether the bot token is set, a live connectivity check, the allowed chats, the default agent, and the chats that have written to the bot but are NOT allowed yet (with their chat id and first message) — those are who to ask the user about before allowing. Read-only.',
+        shape: {},
+        handler: () => admin.channelsList(),
+      },
+      {
+        name: 'propose_channel',
+        description:
+          "Create, change or delete a chat channel. `action`: create | update | delete; `name` identifies it. create: `kind` \"telegram\" — the channel is created SWITCHED OFF and has no token yet; next call request_secret (target \"channel\", name = the channel name) so the user enters the BotFather token in a secure field (never in the chat) — it then switches on by itself. update: `enabled`, `defaultAgent` (an existing agent for tasks from this channel), `allowChatId` (let that chat control the platform — only for a chat id the user confirmed, usually one listed as waiting in channels_list), `removeChatId`. A chat that is allowed can create tasks and approve actions, so only allow the user's own chats. `reason` is required. A human reviews and must approve; this call blocks until they decide.",
+        shape: {
+          action: z.enum(['create', 'update', 'delete']),
+          name: z.string(),
+          kind: z.string().optional(),
+          enabled: z.boolean().optional(),
+          defaultAgent: z.string().optional(),
+          allowChatId: z.string().optional(),
+          removeChatId: z.string().optional(),
+          reason: z.string(),
+        },
+        handler: async (args) => {
+          const opt = (k: string) => (typeof args[k] === 'string' && String(args[k]).trim() ? String(args[k]).trim() : undefined);
+          return (
+            await admin.proposeChannel({
+              action: args.action as 'create' | 'update' | 'delete',
+              name: String(args.name),
+              kind: opt('kind'),
+              enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined,
+              defaultAgent: opt('defaultAgent'),
+              allowChatId: opt('allowChatId'),
+              removeChatId: opt('removeChatId'),
+              reason: String(args.reason ?? ''),
+            })
+          ).message;
+        },
+      },
+      {
+        name: 'schedules_list',
+        description:
+          'List the recurring jobs (reminders and periodic tasks): name, when it runs (in words), kind, target chat/agent, next run, last result. Read-only.',
+        shape: {},
+        handler: () => admin.schedulesList(),
+      },
+      {
+        name: 'propose_schedule',
+        description:
+          "Create, change or delete a recurring job. `action`: create | update | delete; `name` identifies it. For create/update: `cron` (5 fields: minute hour day-of-month month day-of-week, e.g. \"30 9 * * *\" = every day 09:30, \"0 18 * * 0\" = Sundays 18:00, \"0 8 * * 1-5\" = weekdays 08:00; not more often than every 5 minutes), `timezone` (IANA, e.g. Europe/Kyiv — ask the user, don't guess), `kind`: \"message\" (posts `text` to a chat — no model, free; use it for plain reminders) or \"task\" (starts a task with `text` as the prompt for `agentName` each time — uses model budget; its updates go to the chat), `channel` (channel NAME) + `chatId` (must already be an allowed chat of that channel — see channels_list), optional quiet hours `quietStart`/`quietEnd` (HH:MM, runs inside are skipped), optional `enabled`. `reason` is required. A human reviews and must approve; this call blocks until they decide. Schedules cannot be part of propose_batch — call this once per job.",
+        shape: {
+          action: z.enum(['create', 'update', 'delete']),
+          name: z.string(),
+          cron: z.string().optional(),
+          timezone: z.string().optional(),
+          kind: z.enum(['message', 'task']).optional(),
+          text: z.string().optional(),
+          agentName: z.string().optional(),
+          channel: z.string().optional(),
+          chatId: z.string().optional(),
+          quietStart: z.string().optional(),
+          quietEnd: z.string().optional(),
+          enabled: z.boolean().optional(),
+          reason: z.string(),
+        },
+        handler: async (args) => {
+          const opt = (k: string) => (typeof args[k] === 'string' && String(args[k]).trim() ? String(args[k]).trim() : undefined);
+          return (
+            await admin.proposeSchedule({
+              action: args.action as 'create' | 'update' | 'delete',
+              name: String(args.name),
+              cron: opt('cron'),
+              timezone: opt('timezone'),
+              kind: opt('kind') as 'message' | 'task' | undefined,
+              text: typeof args.text === 'string' ? args.text : undefined,
+              agentName: opt('agentName'),
+              channel: opt('channel'),
+              chatId: opt('chatId'),
+              quietStart: opt('quietStart'),
+              quietEnd: opt('quietEnd'),
+              enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined,
+              reason: String(args.reason ?? ''),
+            })
+          ).message;
+        },
+      },
+      {
         name: 'propose_batch',
         description:
           "Propose SEVERAL related changes behind ONE approval (the user approves once instead of N times). Use it whenever a request needs 2+ changes (e.g. create three agents + a provider, set up an agent and start its first task). `items` (1–12, applied IN ORDER; later items may refer to agents created by earlier ones): each is {kind, args} where kind/args are: agent {name, content}; skill {name, content}; agent_delete {name, reason}; provider {name, kind, model, authMode, baseUrl?, makeDefault?, reason}; settings {changes, reason}; task {agentName, prompt, title?, reason}; task_action {action, taskIds, reason}. Not allowed in a batch: secrets (use request_secret), cleanup, undo. The whole batch is validated first — if any item is invalid nothing is shown and you get the reasons; otherwise the user sees every item on one card. Items are journaled one by one (each can be reverted). If an item fails while applying, the batch stops there and the result says which items were applied.",
@@ -352,12 +503,12 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'request_secret',
         description:
-          "Ask the user to enter an API key / token in a SECURE field (a card in the dashboard, a hidden prompt in the console) — the value goes straight to the server and you never see it. `target`: 'provider' (the key/token of the provider `name`) or 'github_token' (the GitHub token in Settings). `reason`: one line shown to the user. Blocks until they save or cancel; returns whether it was saved. NEVER ask the user to type a key in the chat — use this.",
-        shape: { target: z.enum(['provider', 'github_token']), name: z.string().optional(), reason: z.string() },
+          "Ask the user to enter an API key / token in a SECURE field (a card in the dashboard, a hidden prompt in the console) — the value goes straight to the server and you never see it. `target`: 'provider' (the key/token of the provider `name`), 'github_token' (the GitHub token in Settings) or 'channel' (the bot token of the channel `name`). On a phone/Telegram the user gets a one-time secure link instead of a card. `reason`: one line shown to the user. Blocks until they save or cancel; returns whether it was saved. NEVER ask the user to type a key in the chat — use this.",
+        shape: { target: z.enum(['provider', 'github_token', 'channel']), name: z.string().optional(), reason: z.string() },
         handler: async (args) =>
           (
             await admin.requestSecret({
-              target: args.target as 'provider' | 'github_token',
+              target: args.target as 'provider' | 'github_token' | 'channel',
               name: typeof args.name === 'string' && args.name.trim() ? args.name.trim() : undefined,
               reason: String(args.reason ?? ''),
             })

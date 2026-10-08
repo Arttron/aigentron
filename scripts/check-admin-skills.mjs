@@ -13,11 +13,13 @@ const admin = readFileSync('agent/builtin/admin.md', 'utf8');
 // Tool names registered inside the `if (params.admin)` block.
 const block = code.slice(code.indexOf('if (params.admin)'));
 const inCode = [...block.matchAll(/^\s+name: '([a-z_]+)'/gm)].map((m) => m[1]);
+// General tools every agent has (e.g. resources_search) may also be documented for the admin.
+const anyTool = new Set([...code.matchAll(/^\s+name: '([a-z_]+)'/gm)].map((m) => m[1]));
 // Tool names documented as `name` in table rows.
 const inDoc = new Set([...doc.matchAll(/^\|\s*`([a-z_]+)`\s*\|/gm)].map((m) => m[1]));
 
 const missingInDoc = inCode.filter((n) => !inDoc.has(n));
-const staleInDoc = [...inDoc].filter((n) => !inCode.includes(n));
+const staleInDoc = [...inDoc].filter((n) => !anyTool.has(n));
 const skillsLine = admin.match(/^skills:\s*(.+)$/m)?.[1] ?? '';
 const skillsOk = ['admin-tools', 'dashboard-guide'].every((s) => skillsLine.includes(s));
 

@@ -194,6 +194,72 @@ export interface ChannelSecretState {
 }
 
 /** A communication channel; secret fields masked to a hint. */
+export interface PackInfo {
+  name: string;
+  title: string;
+  icon?: string;
+  description: string;
+  audience?: string;
+  agents?: string[];
+  catalogAgents?: string[];
+  skills?: string[];
+  resources?: { file: string; title: string; description?: string; tags?: string[] }[];
+  schedules?: { name: string; cron: string; agent: string; text: string }[];
+  after?: string;
+  installed: { agents: number; skills: number; resources: number; schedules: number };
+  total: { agents: number; skills: number; resources: number; schedules: number };
+}
+
+export interface PackInstallResult {
+  pack: string;
+  added: { agents: string[]; skills: string[]; resources: string[]; schedules: string[] };
+  skipped: string[];
+  problems: string[];
+  after?: string;
+  summary: string;
+}
+
+export interface ResourceInfo {
+  id: string;
+  title: string;
+  description: string;
+  tags: string[];
+  kind: 'text' | 'image' | 'pdf' | 'file';
+  originalName: string;
+  mime: string;
+  size: number;
+  /** Empty = for every agent. */
+  agents: string[];
+  source: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Only on the single-resource fetch of a text resource. */
+  text?: string;
+}
+
+export interface ScheduleInfo {
+  id: string;
+  name: string;
+  enabled: boolean;
+  cron: string;
+  timezone: string;
+  /** Human description, e.g. "every day at 09:30 (Europe/Kyiv)". */
+  when: string;
+  kind: 'message' | 'task';
+  text: string;
+  agentName: string | null;
+  channelId: string | null;
+  chatId: string | null;
+  quietStart: string | null;
+  quietEnd: string | null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+}
+
+export type ScheduleInput = Partial<Pick<ScheduleInfo, 'name' | 'enabled' | 'cron' | 'timezone' | 'kind' | 'text' | 'agentName' | 'channelId' | 'chatId' | 'quietStart' | 'quietEnd'>>;
+
 export interface ChannelInfo {
   id: string;
   name: string;
@@ -454,6 +520,45 @@ export const api = {
     fetch(`${API_BASE}/channels/kinds`, { cache: 'no-store', headers: authHeaders() }).then(
       unwrap<ChannelKindMeta[]>,
     ),
+
+  listPairings: (channelId: string) =>
+    fetch(`${API_BASE}/channels/${encodeURIComponent(channelId)}/pairings`, { cache: 'no-store' }).then(
+      unwrap<{ chatId: string; userName: string | null; firstText: string | null; attempts: number; lastSeen: string }[]>,
+    ),
+  allowPairing: (channelId: string, chatId: string) =>
+    fetch(`${API_BASE}/channels/${encodeURIComponent(channelId)}/pairings/${encodeURIComponent(chatId)}/allow`, { method: 'POST' }).then(unwrap<unknown>),
+  dismissPairing: (channelId: string, chatId: string) =>
+    fetch(`${API_BASE}/channels/${encodeURIComponent(channelId)}/pairings/${encodeURIComponent(chatId)}`, { method: 'DELETE' }).then(unwrap<unknown>),
+  listPacks: () => fetch(`${API_BASE}/packs`, { cache: 'no-store' }).then(unwrap<PackInfo[]>),
+  getPack: (name: string) => fetch(`${API_BASE}/packs/${encodeURIComponent(name)}`, { cache: 'no-store' }).then(unwrap<PackInfo>),
+  installPack: (name: string, timezone?: string) =>
+    fetch(`${API_BASE}/packs/${encodeURIComponent(name)}/install`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ timezone }) }).then(unwrap<PackInstallResult>),
+  listResources: () =>
+    fetch(`${API_BASE}/resources`, { cache: 'no-store' }).then(
+      unwrap<{ items: ResourceInfo[]; usage: { count: number; bytes: number; maxCount: number; maxBytes: number } }>,
+    ),
+  getResource: (id: string) => fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { cache: 'no-store' }).then(unwrap<ResourceInfo>),
+  createNote: (body: { title: string; description?: string; tags?: string[]; agents?: string[]; text: string }) =>
+    fetch(`${API_BASE}/resources`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ResourceInfo>),
+  /** Raw-body upload: always octet-stream so the server's JSON parser never touches the bytes. */
+  uploadResource: (file: File) =>
+    fetch(`${API_BASE}/resources/upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-filename': encodeURIComponent(file.name) },
+      body: file,
+    }).then(unwrap<ResourceInfo>),
+  updateResource: (id: string, body: { title?: string; description?: string; tags?: string[]; agents?: string[]; text?: string }) =>
+    fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ResourceInfo>),
+  deleteResource: (id: string) => fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
+  resourceUrl: (id: string) => `${API_BASE}/resources/${encodeURIComponent(id)}/file`,
+
+  listSchedules: () => fetch(`${API_BASE}/schedules`, { cache: 'no-store' }).then(unwrap<ScheduleInfo[]>),
+  createSchedule: (body: ScheduleInput) =>
+    fetch(`${API_BASE}/schedules`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ScheduleInfo>),
+  updateSchedule: (id: string, body: ScheduleInput) =>
+    fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ScheduleInfo>),
+  deleteSchedule: (id: string) => fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
+  runSchedule: (id: string) => fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/run`, { method: 'POST' }).then(unwrap<{ status: string; error?: string }>),
 
   listChannels: () =>
     fetch(`${API_BASE}/channels`, { cache: 'no-store', headers: authHeaders() }).then(

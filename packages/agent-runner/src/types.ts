@@ -106,6 +106,11 @@ export interface RunAgentParams {
    */
   onScheduleCheck?: (input: { delaySeconds: number; note?: string }) => Promise<{ delaySeconds: number }>;
   /**
+   * When set, the agent gets a `resources_search` tool over the project's shared library (notes, images, documents):
+   * matching entries with the file path to Read. Wired for every agent.
+   */
+  onSearchResources?: (input: { query?: string; tag?: string }) => Promise<string>;
+  /**
    * When set, the agent gets a `preview_worktree` tool that starts (or reuses) an
    * ephemeral dev server for this task's worktree and returns its URL, so the
    * browser MCP can screenshot the agent's own changes rather than the base app.
@@ -154,6 +159,49 @@ export interface AdminToolsWiring {
     makeDefault?: boolean;
     reason: string;
   }) => Promise<{ ok: boolean; message: string }>;
+  /** Recurring jobs: read-only listing, and create/change/delete — human-approved. */
+  schedulesList: () => Promise<string>;
+  proposeSchedule: (input: {
+    action: 'create' | 'update' | 'delete';
+    name: string;
+    cron?: string;
+    timezone?: string;
+    kind?: 'message' | 'task';
+    text?: string;
+    agentName?: string;
+    channel?: string;
+    chatId?: string;
+    quietStart?: string;
+    quietEnd?: string;
+    enabled?: boolean;
+    reason: string;
+  }) => Promise<{ ok: boolean; message: string }>;
+  /** Content packs: read-only overview, and install one — human-approved (never overwrites; schedules arrive switched off). */
+  packsList: () => Promise<string>;
+  proposePackInstall: (input: { name: string; timezone?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Text notes in the project's resource library: create/update/delete — human-approved. (Reading/searching: the general resources_search tool.) */
+  proposeResource: (input: {
+    action: 'create' | 'update' | 'delete';
+    id?: string;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    agents?: string[];
+    text?: string;
+    reason: string;
+  }) => Promise<{ ok: boolean; message: string }>;
+  /** Chat channels: read-only overview (connectivity, allowed chats, chats waiting for approval) and create/change/delete — human-approved. */
+  channelsList: () => Promise<string>;
+  proposeChannel: (input: {
+    action: 'create' | 'update' | 'delete';
+    name: string;
+    kind?: string;
+    enabled?: boolean;
+    defaultAgent?: string;
+    allowChatId?: string;
+    removeChatId?: string;
+    reason: string;
+  }) => Promise<{ ok: boolean; message: string }>;
   /** Several related changes behind one approval — human-approved as a whole. */
   proposeBatch: (input: { items: { kind: string; args: Record<string, unknown> }[]; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Start a task for another agent on the user's behalf — human-approved. */
@@ -169,7 +217,7 @@ export interface AdminToolsWiring {
   /** Token / request / cost usage per provider over the last N days. */
   usageReport: (input: { days?: number }) => Promise<string>;
   /** Ask the human to enter a secret in a secure field; resolves with whether it was saved (never the value). */
-  requestSecret: (input: { target: 'provider' | 'github_token'; name?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  requestSecret: (input: { target: 'provider' | 'github_token' | 'channel'; name?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Disk-usage report of what runs leave behind (run folders, old worktrees, agent branches). */
   maintenanceReport: () => Promise<string>;
   /** Delete old run folders / worktrees (/ branches) — human-approved. */

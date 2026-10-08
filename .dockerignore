@@ -24,3 +24,4 @@ agent/.snapshots
 
 agent/.codex-home
 agent/admin-audit.jsonl
+agent/resources

@@ -1,0 +1,27 @@
+{
+  "title": "Software team",
+  "icon": "💻",
+  "description": "The standard software-development fleet: a PM that plans and delegates, an architect, backend and frontend engineers, a designer and a reviewer. Point the project at your repository (Settings → General) and give tasks to the PM.",
+  "audience": "A developer who wants agents to work on a codebase.",
+  "catalogAgents": ["pm", "architect", "backend", "frontend", "designer", "reviewer"],
+  "skills": [],
+  "resources": [
+    {
+      "file": "resources/project-conventions.md",
+      "title": "Project conventions",
+      "description": "How this codebase is built and checked: stack, folders, naming, commands (run / test / lint), branch and commit rules, definition of done. Agents follow it. FILL IT IN.",
+      "tags": ["dev", "conventions"],
+      "agents": []
+    }
+  ],
+  "schedules": [
+    {
+      "name": "Dev — weekly health check",
+      "cron": "0 9 * * 1",
+      "kind": "task",
+      "agent": "reviewer",
+      "text": "Weekly health check of the repository: read the project conventions, run the lint/test/typecheck commands, look at outdated or vulnerable dependencies and recent failing CI runs, and report what needs attention (no code changes) with the most important first."
+    }
+  ],
+  "after": "1) Settings → General: set the repository (and a GitHub token) or work in a local folder. 2) Fill in 📚 Resources → \"Project conventions\" (commands, stack, rules). 3) Give a task to the PM: \"Implement …\". For Telegram control, ask the admin: \"connect Telegram\"."
+}

@@ -30,6 +30,9 @@ import { ChannelsModule } from './channels/channels.module';
 import { EventsModule } from './events/events.module';
 import { AuthModule } from './auth/auth.module';
 import { AccessModule } from './access/access.module';
+import { SchedulesModule } from './schedules/schedules.module';
+import { ResourcesModule } from './resources/resources.module';
+import { PacksModule } from './packs/packs.module';
 import { StatsModule } from './stats/stats.module';
 import { HealthController } from './health/health.controller';
 
@@ -47,6 +50,9 @@ import { HealthController } from './health/health.controller';
     AppConfigModule,
     AuthModule,
     AccessModule,
+    SchedulesModule,
+    ResourcesModule,
+    PacksModule,
     PreflightModule,
     PrismaModule,
     BusModule,

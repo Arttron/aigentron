@@ -17,6 +17,7 @@ export function ChannelsManager() {
   const [kinds, setKinds] = useState<ChannelKindMeta[]>([]);
   const [modal, setModal] = useState<ModalState>(null);
   const [results, setResults] = useState<Record<string, ChannelTestResult>>({});
+  const [waiting, setWaiting] = useState<Record<string, { chatId: string; userName: string | null; firstText: string | null }[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -29,6 +30,26 @@ export function ChannelsManager() {
       setError((e as Error).message);
     }
   }, []);
+
+  // Chats that wrote to a bot but are not allowed yet: refreshed while this tab is open.
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const list = await api.listChannels();
+        const entries = await Promise.all(list.filter((c) => c.enabled).map(async (c) => [c.id, await api.listPairings(c.id).catch(() => [])] as const));
+        if (live) setWaiting(Object.fromEntries(entries.filter(([, v]) => v.length)));
+      } catch {
+        /* not fatal */
+      }
+    };
+    void load();
+    const t = setInterval(load, 5000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [channels.length]);
 
   useEffect(() => {
     refresh();
@@ -113,6 +134,26 @@ export function ChannelsManager() {
                 ? ` · ${(c.config.allowedChatIds as string[]).length} allowed chat(s)`
                 : ' · no allowed chats'}
             </Muted>
+            {(waiting[c.id] ?? []).map((w) => (
+              <div key={w.chatId} className={styles.pairing}>
+                <span>
+                  👋 <strong>chat {w.chatId}</strong>
+                  {w.userName ? ` (${w.userName})` : ''} wrote to the bot{w.firstText ? `: “${w.firstText}”` : ''} — is this you?
+                </span>
+                <Row>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => void api.allowPairing(c.id, w.chatId).then(refresh).catch((e) => setError((e as Error).message))}
+                  >
+                    Allow
+                  </Button>
+                  <Button size="sm" onClick={() => void api.dismissPairing(c.id, w.chatId).then(() => setWaiting((x) => ({ ...x, [c.id]: (x[c.id] ?? []).filter((y) => y.chatId !== w.chatId) })))}>
+                    Dismiss
+                  </Button>
+                </Row>
+              </div>
+            ))}
             {r && (
               <div className={r.ok ? styles.ok : styles.fail}>
                 {r.ok ? `✓ connected as ${r.info}` : `✗ ${r.error}`}

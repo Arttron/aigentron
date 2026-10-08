@@ -70,7 +70,11 @@ export class ChannelsService {
     return row;
   }
 
-  async create(patch: ChannelPatch): Promise<ChannelRow> {
+  /**
+   * `draft` = created by the admin before its secret exists: the required secret may be missing and the channel stays
+   * switched off until the token is entered (request_secret) — see ChannelManagerService.onSecretSaved.
+   */
+  async create(patch: ChannelPatch, opts: { draft?: boolean } = {}): Promise<ChannelRow> {
     if (!patch.name?.trim()) throw new BadRequestException('name is required');
     const def = getKind(patch.kind ?? '');
     if (!def || !def.available) {
@@ -79,13 +83,13 @@ export class ChannelsService {
     }
     const config = normalizeConfig(def.fields, patch.config, {});
     for (const f of def.fields) {
-      if (f.required && !config[f.key]) throw new BadRequestException(`${f.label} is required`);
+      if (f.required && !config[f.key] && !(opts.draft && f.secret)) throw new BadRequestException(`${f.label} is required`);
     }
     return this.prisma.channel.create({
       data: {
         name: patch.name.trim(),
         kind: def.kind,
-        enabled: patch.enabled ?? true,
+        enabled: opts.draft ? false : (patch.enabled ?? true),
         config: config as Prisma.InputJsonValue,
       },
     });
@@ -104,6 +108,22 @@ export class ChannelsService {
         config: config as Prisma.InputJsonValue,
       },
     });
+  }
+
+  /** Add (or remove) one chat id on the allow-list, leaving the rest of the config untouched. */
+  async setChatAllowed(id: string, chatId: string, allowed: boolean): Promise<ChannelRow> {
+    const row = await this.getRow(id);
+    const cur = this.allowedChatIds(row);
+    const next = allowed ? Array.from(new Set([...cur, String(chatId).trim()])) : cur.filter((c) => c !== String(chatId).trim());
+    return this.update(id, { config: { allowedChatIds: next } });
+  }
+
+  /** Store a secret field (e.g. the bot token) without it ever passing through the API body of a normal edit. */
+  async setSecret(id: string, key: string, value: string): Promise<ChannelRow> {
+    const row = await this.getRow(id);
+    const def = getKind(row.kind);
+    if (!def?.fields.some((f) => f.key === key && f.secret)) throw new BadRequestException(`"${key}" is not a secret of this channel.`);
+    return this.update(id, { config: { [key]: value } });
   }
 
   async remove(id: string): Promise<void> {

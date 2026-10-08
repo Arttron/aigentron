@@ -8,6 +8,10 @@ import {
   PROPOSE_BATCH_TOOL,
   PROPOSE_CLEANUP_TOOL,
   PROPOSE_PROVIDER_TOOL,
+  PROPOSE_SCHEDULE_TOOL,
+  PROPOSE_CHANNEL_TOOL,
+  PROPOSE_RESOURCE_TOOL,
+  PROPOSE_PACK_INSTALL_TOOL,
   PROPOSE_SETTINGS_TOOL,
   PROPOSE_TASK_TOOL,
   PROPOSE_UNDO_TOOL,
@@ -23,6 +27,13 @@ import { SettingsService } from '../settings/settings.service';
 import { MaintenanceService } from '../maintenance/maintenance.service';
 import { StatsService } from '../stats/stats.service';
 import { AdminAuditService, type AuditEntry } from './admin-audit.service';
+import type { SchedulesService } from '../schedules/schedules.service';
+import { ChannelsService } from '../channels/channels.service';
+import { PairingService } from '../channels/pairing.service';
+import { ResourcesService } from '../resources/resources.service';
+import { cleanTags, validateMeta } from '../resources/resources-core';
+import type { PacksService } from '../packs/packs.service';
+import { describeSchedule } from '../schedules/schedule-core';
 import { validateProviderProposal, validateSettingsChanges, type ProviderProposal } from './admin-validation';
 
 export { validateProviderProposal, validateSettingsChanges };
@@ -41,6 +52,44 @@ const STATUSES = ['queued', 'running', 'needs_approval', 'done', 'failed', 'canc
  *
  * TasksService is resolved lazily (module cycle: tasks → queue → agent executor → this service).
  */
+export interface ResourceProposal {
+  action: 'create' | 'update' | 'delete';
+  id?: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  agents?: string[];
+  text?: string;
+  reason: string;
+}
+
+export interface ChannelProposal {
+  action: 'create' | 'update' | 'delete';
+  name: string;
+  kind?: string;
+  enabled?: boolean;
+  defaultAgent?: string;
+  allowChatId?: string;
+  removeChatId?: string;
+  reason: string;
+}
+
+export interface ScheduleProposal {
+  action: 'create' | 'update' | 'delete';
+  name: string;
+  cron?: string;
+  timezone?: string;
+  kind?: 'message' | 'task';
+  text?: string;
+  agentName?: string;
+  channel?: string;
+  chatId?: string;
+  quietStart?: string;
+  quietEnd?: string;
+  enabled?: boolean;
+  reason: string;
+}
+
 @Injectable()
 export class PlatformAdminService {
   private readonly logger = new Logger(PlatformAdminService.name);
@@ -54,6 +103,43 @@ export class PlatformAdminService {
     private readonly agents: AgentRegistryService,
     private readonly audit: AdminAuditService,
   ) {}
+
+  private schedulesCache?: SchedulesService;
+  private channelsCache?: ChannelsService;
+  private packsCache?: PacksService;
+  /** Lazy + dynamic import: packs → scheduler → channel manager → approvals → this file. */
+  private async packsSvc(): Promise<PacksService> {
+    if (!this.packsCache) {
+      const { PacksService: Cls } = await import('../packs/packs.service');
+      this.packsCache = this.moduleRef.get(Cls, { strict: false });
+    }
+    return this.packsCache;
+  }
+  private resourcesCache?: ResourcesService;
+  private get resources(): ResourcesService {
+    if (!this.resourcesCache) this.resourcesCache = this.moduleRef.get(ResourcesService, { strict: false });
+    return this.resourcesCache;
+  }
+  private pairingCache?: PairingService;
+  private get pairing(): PairingService {
+    if (!this.pairingCache) this.pairingCache = this.moduleRef.get(PairingService, { strict: false });
+    return this.pairingCache;
+  }
+  /**
+   * Loaded lazily with a dynamic import: SchedulesService pulls in the channel manager → approvals → this file, and a
+   * static import closes that cycle at module-load time (Nest then sees an undefined provider).
+   */
+  private async schedulesSvc(): Promise<SchedulesService> {
+    if (!this.schedulesCache) {
+      const { SchedulesService: Cls } = await import('../schedules/schedules.service');
+      this.schedulesCache = this.moduleRef.get(Cls, { strict: false });
+    }
+    return this.schedulesCache;
+  }
+  private get channelsSvc(): ChannelsService {
+    if (!this.channelsCache) this.channelsCache = this.moduleRef.get(ChannelsService, { strict: false });
+    return this.channelsCache;
+  }
 
   private get tasks(): TasksService {
     if (!this.tasksCache) this.tasksCache = this.moduleRef.get(TasksService, { strict: false });
@@ -118,7 +204,12 @@ export class PlatformAdminService {
     if (toolName === REQUEST_SECRET_TOOL) {
       const target = str(toolInput.target);
       if (target === 'github_token') return null;
-      if (target !== 'provider') return 'Refused: target must be "provider" or "github_token".';
+      if (target === 'channel') {
+        const cname = str(toolInput.name).trim();
+        const ch = cname ? (await this.channelsSvc.list()).find((c) => c.name === cname) : undefined;
+        return ch ? null : `Refused: no channel named "${cname}". Create it first (propose_channel) or check channels_list.`;
+      }
+      if (target !== 'provider') return 'Refused: target must be "provider", "github_token" or "channel".';
       const name = str(toolInput.name).trim();
       const row = name ? await this.providers.list().then((rows) => rows.find((r) => r.name === name)) : undefined;
       if (!row) return `Refused: no provider named "${name}". Create it first (propose_provider) or check providers_list.`;
@@ -131,6 +222,22 @@ export class PlatformAdminService {
       if (toolInput.runs === false && !toolInput.worktrees && !toolInput.deleteBranches) return 'Refused: select something to clean (runs, worktrees or deleteBranches).';
       if (toolInput.deleteBranches && !toolInput.worktrees) return 'Refused: deleteBranches applies to the branches of removed worktrees — set worktrees too.';
       return null;
+    }
+    if (toolName === PROPOSE_PACK_INSTALL_TOOL) {
+      const why = await this.checkPack(str(toolInput.name), str(toolInput.timezone));
+      return why ? `Refused: ${why}` : null;
+    }
+    if (toolName === PROPOSE_RESOURCE_TOOL) {
+      const why = await this.checkResource(toolInput as unknown as ResourceProposal);
+      return why ? `Refused: ${why}` : null;
+    }
+    if (toolName === PROPOSE_CHANNEL_TOOL) {
+      const why = await this.checkChannel(toolInput as unknown as ChannelProposal);
+      return why ? `Refused: ${why}` : null;
+    }
+    if (toolName === PROPOSE_SCHEDULE_TOOL) {
+      const why = await this.checkSchedule(toolInput as unknown as ScheduleProposal);
+      return why ? `Refused: ${why}` : null;
     }
     if (toolName === PROPOSE_PROVIDER_TOOL) {
       const why = validateProviderProposal(toolInput as Partial<ProviderProposal>);
@@ -299,6 +406,309 @@ export class PlatformAdminService {
     }
   }
 
+  // ---- content packs ---------------------------------------------------------
+
+  async packsList(): Promise<string> {
+    const packs = await (await this.packsSvc()).list();
+    if (!packs.length) return 'No content packs are shipped with this release.';
+    return packs
+      .map(
+        (p) =>
+          `${p.name} — ${p.icon ?? ''} ${p.title}: ${p.description}\n  contains: ${p.total.agents} agent(s) [${[...(p.agents ?? []), ...(p.catalogAgents ?? [])].join(', ')}], ${p.total.skills} skill(s), ${p.total.resources} library note(s), ${p.total.schedules} prepared schedule(s)\n  installed here: agents ${p.installed.agents}/${p.total.agents}, skills ${p.installed.skills}/${p.total.skills}, notes ${p.installed.resources}/${p.total.resources}, schedules ${p.installed.schedules}/${p.total.schedules}`,
+      )
+      .join('\n');
+  }
+
+  private async checkPack(name: string, timezone: string): Promise<string | null> {
+    const packs = await (await this.packsSvc()).list();
+    if (!packs.some((p) => p.name === name)) return `no pack named "${name}". Available: ${packs.map((p) => p.name).join(', ') || 'none'} (see packs_list).`;
+    if (timezone) {
+      const { isValidTimezone } = await import('../schedules/schedule-core');
+      if (!isValidTimezone(timezone)) return `unknown time zone "${timezone}" (use e.g. Europe/Kyiv, America/New_York, UTC).`;
+    }
+    return null;
+  }
+
+  async proposePackInstall(currentTaskId: string, sessionId: string, input: { name: string; timezone?: string; reason: string }): Promise<ProposalResult> {
+    const why = await this.checkPack(input.name, input.timezone ?? '');
+    if (why) return { ok: false, message: `Rejected: ${why}` };
+    const denied = await this.proposals.requireApproval(
+      currentTaskId,
+      sessionId,
+      PROPOSE_PACK_INSTALL_TOOL,
+      { ...input },
+      (i) => i.name === input.name && (i.timezone ?? '') === (input.timezone ?? ''),
+    );
+    if (denied) return denied;
+    const svc = await this.packsSvc();
+    const { describeReport } = await import('../packs/packs.service');
+    const report = await svc.install(input.name, { timezone: input.timezone, by: 'admin agent' });
+    await this.audit.record({ taskId: currentTaskId, tool: 'propose_pack_install', summary: `Installed pack "${input.name}": ${report.added.agents.length} agent(s), ${report.added.skills.length} skill(s), ${report.added.resources.length} note(s), ${report.added.schedules.length} schedule(s)` });
+    return { ok: report.problems.length === 0, message: describeReport(report) };
+  }
+
+  // ---- project resources -----------------------------------------------------
+
+  /** Why a resource proposal can't be accepted (null = fine). */
+  private async checkResource(p: ResourceProposal): Promise<string | null> {
+    if (!['create', 'update', 'delete'].includes(p.action)) return 'action must be create, update or delete.';
+    if (p.action === 'create') {
+      const bad = validateMeta({ title: p.title, description: p.description });
+      if (bad) return bad;
+      if (!p.text?.trim()) return 'give the note text.';
+      if (p.text.length > 200_000) return 'the note is too long (max ~200 000 characters).';
+      return null;
+    }
+    if (!p.id) return 'give the resource id (from resources_search).';
+    const r = await this.resources.get(p.id).catch(() => null);
+    if (!r) return `no resource with id "${p.id}". Use resources_search.`;
+    if (p.action === 'delete') return null;
+    if (p.text !== undefined && r.kind !== 'text') return 'only text notes can be edited — files and images are replaced in the dashboard.';
+    if (p.title !== undefined || p.description !== undefined) {
+      const bad = validateMeta({ title: p.title ?? r.title, description: p.description ?? r.description });
+      if (bad) return bad;
+    }
+    return null;
+  }
+
+  async proposeResource(currentTaskId: string, sessionId: string, input: ResourceProposal): Promise<ProposalResult> {
+    const why = await this.checkResource(input);
+    if (why) return { ok: false, message: `Rejected: ${why}` };
+    const denied = await this.proposals.requireApproval(
+      currentTaskId,
+      sessionId,
+      PROPOSE_RESOURCE_TOOL,
+      { ...input },
+      (i) =>
+        i.action === input.action &&
+        (i.id ?? '') === (input.id ?? '') &&
+        (i.title ?? '') === (input.title ?? '') &&
+        String(i.text ?? '') === String(input.text ?? '') &&
+        (i.description ?? '') === (input.description ?? ''),
+    );
+    if (denied) return denied;
+    if (input.action === 'delete') {
+      const r = await this.resources.get(input.id!);
+      await this.resources.remove(input.id!);
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Deleted resource "${r.title}"` });
+      return { ok: true, message: `Resource "${r.title}" deleted.` };
+    }
+    if (input.action === 'create') {
+      const r = await this.resources.createNote({ title: input.title, description: input.description, tags: cleanTags(input.tags), agents: input.agents, text: input.text ?? '', source: 'note' });
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Added note "${r.title}"` });
+      return { ok: true, message: `Note "${r.title}" added to the resource library (id ${r.id}). Agents will see it in their resource list.` };
+    }
+    const r = await this.resources.update(input.id!, { title: input.title, description: input.description, tags: input.tags ? cleanTags(input.tags) : undefined, agents: input.agents, text: input.text });
+    await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Changed note "${r.title}"` });
+    return { ok: true, message: `Resource "${r.title}" updated.` };
+  }
+
+  // ---- chat channels ---------------------------------------------------------
+
+  async channelsList(): Promise<string> {
+    const rows = await this.channelsSvc.list();
+    if (!rows.length) return 'There are no channels yet. Create one with propose_channel (then request_secret for its bot token).';
+    const out: string[] = [];
+    for (const r of rows) {
+      const allowed = this.channelsSvc.allowedChatIds(r);
+      const conn = !this.channelsSvc.isConfigured(r)
+        ? 'NO TOKEN yet'
+        : r.enabled
+          ? await this.channelsSvc
+              .test(r.id)
+              .then((t) => (t.ok ? `connected${t.info ? ` (${t.info})` : ''}` : `NOT connected: ${t.error ?? '?'}`))
+              .catch((e) => `NOT connected: ${(e as Error).message}`)
+          : 'token set, switched off';
+      const waiting = this.pairing.list(r.id);
+      out.push(
+        `${r.name} | ${r.kind} | ${r.enabled ? 'on' : 'off'} | ${conn} | allowed chats: ${allowed.join(', ') || 'none'} | default agent: ${this.channelsSvc.defaultAgent(r) ?? '(default lead)'}` +
+          (waiting.length
+            ? `\n  WAITING to be allowed: ${waiting.map((w) => `chat ${w.chatId}${w.userName ? ` (${w.userName})` : ''}${w.firstText ? ` wrote: "${w.firstText}"` : ''}`).join('; ')}`
+            : ''),
+      );
+    }
+    return ['name | kind | on/off | connection | allowed chats | default agent', ...out].join('\n');
+  }
+
+  /** Why a channel proposal can't be accepted (null = fine). */
+  private async checkChannel(p: ChannelProposal): Promise<string | null> {
+    if (!['create', 'update', 'delete'].includes(p.action)) return 'action must be create, update or delete.';
+    const name = p.name?.trim();
+    if (!name || !(await import('../schedules/schedule-core')).isValidScheduleName(name)) return 'give a short channel name (letters of any language, digits, spaces and . _ - – — : ( ) ; max 60).';
+    const existing = (await this.channelsSvc.list()).find((c) => c.name === name);
+    if (p.action === 'create') {
+      if (existing) return `a channel named "${name}" already exists — use action update.`;
+      if ((p.kind ?? 'telegram') !== 'telegram') return 'only kind "telegram" is available for now.';
+    } else if (!existing) {
+      return `no channel named "${name}". Use channels_list.`;
+    }
+    if (p.action === 'delete') return null;
+    if (p.defaultAgent && !(await this.agents.get(p.defaultAgent).catch(() => null))) return `no agent named "${p.defaultAgent}".`;
+    for (const [label, id] of [['allowChatId', p.allowChatId], ['removeChatId', p.removeChatId]] as const) {
+      if (id && !/^-?\d{3,20}$/.test(id.trim())) return `${label} must be a Telegram chat id (digits, may start with -), e.g. 477581596.`;
+    }
+    if (p.enabled === true && existing && !this.channelsSvc.isConfigured(existing)) return 'it has no bot token yet — call request_secret (target channel) first; it switches on by itself once the token is saved.';
+    if (p.enabled === true && p.action === 'create') return 'a new channel starts switched off and turns on by itself when its token is saved — leave `enabled` out.';
+    return null;
+  }
+
+  async proposeChannel(currentTaskId: string, sessionId: string, input: ChannelProposal): Promise<ProposalResult> {
+    const why = await this.checkChannel(input);
+    if (why) return { ok: false, message: `Rejected: ${why}` };
+    const name = input.name.trim();
+    const denied = await this.proposals.requireApproval(
+      currentTaskId,
+      sessionId,
+      PROPOSE_CHANNEL_TOOL,
+      { ...input, name },
+      (i) =>
+        i.action === input.action &&
+        String(i.name ?? '').trim() === name &&
+        (i.kind ?? '') === (input.kind ?? '') &&
+        (i.enabled ?? null) === (input.enabled ?? null) &&
+        (i.defaultAgent ?? '') === (input.defaultAgent ?? '') &&
+        (i.allowChatId ?? '') === (input.allowChatId ?? '') &&
+        (i.removeChatId ?? '') === (input.removeChatId ?? ''),
+    );
+    if (denied) return denied;
+
+    const { ChannelManagerService } = await import('../channels/channel-manager.service');
+    const manager = this.moduleRef.get(ChannelManagerService, { strict: false });
+    const existing = (await this.channelsSvc.list()).find((c) => c.name === name);
+    if (input.action === 'delete') {
+      await this.channelsSvc.remove(existing!.id);
+      await manager.reload();
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_channel', summary: `Deleted channel "${name}"` });
+      return { ok: true, message: `Channel "${name}" deleted.` };
+    }
+    if (input.action === 'create') {
+      const row = await this.channelsSvc.create({ name, kind: input.kind ?? 'telegram', config: input.defaultAgent ? { defaultAgent: input.defaultAgent } : {} }, { draft: true });
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_channel', summary: `Created channel "${name}" (switched off, waiting for its bot token)` });
+      void row;
+      return {
+        ok: true,
+        message: `Channel "${name}" created, switched OFF — it has no bot token yet. Next: call request_secret (target "channel", name "${name}") so the user can enter the token from @BotFather in a secure field (never in the chat). It switches on by itself once the token is saved.`,
+      };
+    }
+    // update
+    const notes: string[] = [];
+    if (input.defaultAgent !== undefined || input.enabled !== undefined) {
+      await this.channelsSvc.update(existing!.id, {
+        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+        ...(input.defaultAgent !== undefined ? { config: { defaultAgent: input.defaultAgent } } : {}),
+      });
+      if (input.enabled !== undefined) notes.push(input.enabled ? 'switched on' : 'switched off');
+      if (input.defaultAgent) notes.push(`default agent → ${input.defaultAgent}`);
+    }
+    if (input.removeChatId) {
+      await this.channelsSvc.setChatAllowed(existing!.id, input.removeChatId.trim(), false);
+      notes.push(`chat ${input.removeChatId} removed`);
+    }
+    if (input.allowChatId) {
+      await this.channelsSvc.setChatAllowed(existing!.id, input.allowChatId.trim(), true);
+      this.pairing.dismiss(existing!.id, input.allowChatId.trim());
+      notes.push(`chat ${input.allowChatId} allowed`);
+    }
+    await manager.reload();
+    if (input.allowChatId) await manager.onChatAllowed(existing!.id, input.allowChatId.trim());
+    await this.audit.record({ taskId: currentTaskId, tool: 'propose_channel', summary: `Channel "${name}": ${notes.join(', ') || 'no change'}` });
+    return { ok: true, message: `Channel "${name}" updated: ${notes.join(', ') || 'nothing changed'}.${input.allowChatId ? ' The chat was told it is connected.' : ''}` };
+  }
+
+  // ---- schedules -------------------------------------------------------------
+
+  async schedulesList(): Promise<string> {
+    const rows = await (await this.schedulesSvc()).list();
+    if (!rows.length) return 'There are no schedules yet.';
+    const chans = new Map((await this.channelsSvc.list()).map((c) => [c.id, c.name]));
+    return [
+      'name | when | kind → target | enabled | next run | last result',
+      ...rows.map(
+        (r) =>
+          `${r.name} | ${describeSchedule(r.cron, r.timezone)}${r.quietStart ? ` (quiet ${r.quietStart}–${r.quietEnd})` : ''} | ${r.kind}${r.kind === 'task' ? ` → agent ${r.agentName}` : ''}${r.channelId ? ` → ${chans.get(r.channelId) ?? '?'} chat ${r.chatId}` : ''} | ${r.enabled ? 'yes' : 'NO'} | ${r.nextRunAt?.toISOString().slice(0, 16) ?? '-'} | ${r.lastStatus ?? 'never run'}${r.lastError ? ` (${r.lastError})` : ''}`,
+      ),
+    ].join('\n');
+  }
+
+  /** Turn the admin's request into the service's input (channel NAME → id; the chat defaults to the channel's only allowed chat). */
+  private async scheduleInput(p: ScheduleProposal): Promise<{ input: Record<string, unknown>; error?: string }> {
+    const input: Record<string, unknown> = {
+      name: p.name?.trim(),
+      cron: p.cron,
+      timezone: p.timezone,
+      kind: p.kind,
+      text: p.text,
+      agentName: p.agentName,
+      quietStart: p.quietStart,
+      quietEnd: p.quietEnd,
+      enabled: p.enabled,
+    };
+    if (p.channel) {
+      const ch = (await this.channelsSvc.list()).find((c) => c.name.toLowerCase() === p.channel!.trim().toLowerCase());
+      if (!ch) return { input, error: `no channel named "${p.channel}". Use channels_list to see them.` };
+      const allowed = this.channelsSvc.allowedChatIds(ch);
+      const chat = p.chatId?.trim() || (allowed.length === 1 ? allowed[0] : undefined);
+      if (!chat) return { input, error: `channel "${ch.name}" has ${allowed.length || 'no'} allowed chats — say which chatId to use.` };
+      input.channelId = ch.id;
+      input.chatId = chat;
+    }
+    return { input };
+  }
+
+  /** Why a schedule proposal can't be accepted (null = fine). */
+  private async checkSchedule(p: ScheduleProposal): Promise<string | null> {
+    if (!['create', 'update', 'delete'].includes(p.action)) return 'action must be create, update or delete.';
+    const name = p.name?.trim();
+    if (!name) return 'give the schedule name.';
+    const existing = (await (await this.schedulesSvc()).list()).find((s) => s.name === name);
+    if (p.action === 'delete') return existing ? null : `no schedule named "${name}". Use schedules_list.`;
+    if (p.action === 'update' && !existing) return `no schedule named "${name}" to update. Use schedules_list (or action create).`;
+    if (p.action === 'create' && existing) return `a schedule named "${name}" already exists — use action update.`;
+    const { input, error } = await this.scheduleInput(p);
+    if (error) return error;
+    return (await this.schedulesSvc()).validate(input, existing ?? undefined);
+  }
+
+  async proposeSchedule(currentTaskId: string, sessionId: string, input: ScheduleProposal): Promise<ProposalResult> {
+    const why = await this.checkSchedule(input);
+    if (why) return { ok: false, message: `Rejected: ${why}` };
+    const name = input.name.trim();
+    const denied = await this.proposals.requireApproval(
+      currentTaskId,
+      sessionId,
+      PROPOSE_SCHEDULE_TOOL,
+      { ...input, name },
+      (i) =>
+        i.action === input.action &&
+        String(i.name ?? '').trim() === name &&
+        (i.cron ?? '') === (input.cron ?? '') &&
+        (i.timezone ?? '') === (input.timezone ?? '') &&
+        (i.kind ?? '') === (input.kind ?? '') &&
+        String(i.text ?? '') === String(input.text ?? '') &&
+        (i.agentName ?? '') === (input.agentName ?? '') &&
+        (i.channel ?? '') === (input.channel ?? '') &&
+        (i.chatId ?? '') === (input.chatId ?? ''),
+    );
+    if (denied) return denied;
+
+    const existing = (await (await this.schedulesSvc()).list()).find((s) => s.name === name);
+    if (input.action === 'delete') {
+      await (await this.schedulesSvc()).remove(existing!.id);
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_schedule', summary: `Deleted schedule "${name}" (${describeSchedule(existing!.cron, existing!.timezone)})` });
+      return { ok: true, message: `Schedule "${name}" deleted.` };
+    }
+    const { input: data } = await this.scheduleInput(input);
+    const svc = await this.schedulesSvc();
+    const row = input.action === 'create' ? await svc.create(data, 'admin agent') : await svc.update(existing!.id, data);
+    const when = describeSchedule(row.cron, row.timezone);
+    await this.audit.record({ taskId: currentTaskId, tool: 'propose_schedule', summary: `${input.action === 'create' ? 'Created' : 'Updated'} schedule "${name}": ${when}` });
+    this.logger.log(`Admin ${input.action} schedule "${name}" (${when})`);
+    return {
+      ok: true,
+      message: `Schedule "${name}" ${input.action === 'create' ? 'created' : 'updated'}: ${when}. Next run: ${row.nextRunAt?.toISOString().slice(0, 16).replace('T', ' ')} UTC.${row.kind === 'message' ? '' : ' Each run starts a task and uses model budget.'}`,
+    };
+  }
+
   async proposeProvider(currentTaskId: string, sessionId: string, input: ProviderProposal): Promise<ProposalResult> {
     const why = validateProviderProposal(input);
     if (why) return { ok: false, message: `Rejected: ${why}` };
@@ -412,7 +822,7 @@ export class PlatformAdminService {
   async requestSecret(
     currentTaskId: string,
     sessionId: string,
-    input: { target: 'provider' | 'github_token'; name?: string; reason: string },
+    input: { target: 'provider' | 'github_token' | 'channel'; name?: string; reason: string },
   ): Promise<ProposalResult> {
     const why = await this.precheck(REQUEST_SECRET_TOOL, input as unknown as Record<string, unknown>, currentTaskId);
     if (why) return { ok: false, message: why };
@@ -429,6 +839,16 @@ export class PlatformAdminService {
       if (!row?.secret) return { ok: false, message: 'The request was closed without a key being saved (approving without entering the key does nothing).' };
       await this.audit.record({ taskId: currentTaskId, tool: 'request_secret', summary: `Key entered by the user for provider "${input.name}"` });
       return { ok: true, message: `The key for provider "${input.name}" was saved (you cannot see it). You can verify it with provider_test.` };
+    }
+    if (input.target === 'channel') {
+      const ch = (await this.channelsSvc.list()).find((c) => c.name === input.name);
+      if (!ch || !this.channelsSvc.isConfigured(ch)) return { ok: false, message: 'The request was closed without a token being saved (approving without entering it does nothing).' };
+      await this.audit.record({ taskId: currentTaskId, tool: 'request_secret', summary: `Bot token entered by the user for channel "${input.name}"` });
+      const check: { ok: boolean; info?: string; error?: string } = await this.channelsSvc.test(ch.id).catch((e) => ({ ok: false, error: (e as Error).message }));
+      return {
+        ok: true,
+        message: `The bot token for channel "${input.name}" was saved (you cannot see it) and the channel was switched on. Connection check: ${check.ok ? `OK${check.info ? ` (${check.info})` : ''}` : `FAILED — ${check.error ?? 'unknown error'} (the token may be wrong)`}. Next: ask the user to send any message to the bot, then call channels_list — their chat appears as waiting — and propose_channel with allowChatId.`,
+      };
     }
     const s = await this.settings.get();
     if (!s.githubToken) return { ok: false, message: 'The request was closed without a token being saved.' };

@@ -8,6 +8,10 @@ import {
   PROPOSE_BATCH_TOOL,
   PROPOSE_CLEANUP_TOOL,
   PROPOSE_PROVIDER_TOOL,
+  PROPOSE_SCHEDULE_TOOL,
+  PROPOSE_CHANNEL_TOOL,
+  PROPOSE_RESOURCE_TOOL,
+  PROPOSE_PACK_INSTALL_TOOL,
   PROPOSE_SETTINGS_TOOL,
   PROPOSE_SKILL_TOOL,
   PROPOSE_TASK_ACTION_TOOL,
@@ -29,6 +33,7 @@ import { PlatformAdminService } from '../agent-registry/platform-admin.service';
 import { exceptionCutoff, exceptionSignature, exceptionTtlDays } from './exception-signature';
 import { McpService } from '../mcp/mcp.service';
 import { ProvidersService } from '../providers/providers.service';
+import { ChannelsService } from '../channels/channels.service';
 
 /** Prisma row shape for an approval (Json/Date fields). */
 type ApprovalRow = Awaited<ReturnType<PrismaService['approvalRequest']['create']>>;
@@ -70,6 +75,10 @@ const ADMIN_PROPOSAL_TOOLS = new Set<string>([
   PROPOSE_AGENT_DELETE_TOOL,
   PROPOSE_AGENT_TOOL,
   PROPOSE_SKILL_TOOL,
+  PROPOSE_SCHEDULE_TOOL,
+  PROPOSE_CHANNEL_TOOL,
+  PROPOSE_RESOURCE_TOOL,
+  PROPOSE_PACK_INSTALL_TOOL,
 ]);
 
 @Injectable()
@@ -277,6 +286,14 @@ export class ApprovalsService {
       await this.moduleRef.get(ProvidersService, { strict: false }).update(input.name, { secret });
     } else if (input.target === 'github_token') {
       await this.settings.update({ githubToken: secret });
+    } else if (input.target === 'channel' && input.name) {
+      const channels = this.moduleRef.get(ChannelsService, { strict: false });
+      const row = (await channels.list()).find((c) => c.name === input.name);
+      if (!row) throw new BadRequestException(`No channel named "${input.name}".`);
+      await channels.setSecret(row.id, 'botToken', secret);
+      // Switch the channel on and start it (lazy import: the manager imports this service).
+      const { ChannelManagerService } = await import('../channels/channel-manager.service');
+      await this.moduleRef.get(ChannelManagerService, { strict: false }).onSecretSaved(row.id).catch(() => undefined);
     } else {
       throw new BadRequestException('Unknown secret target.');
     }

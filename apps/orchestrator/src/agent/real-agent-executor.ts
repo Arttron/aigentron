@@ -28,6 +28,7 @@ import { SkillsLearnedService } from '../agent-registry/skills-learned.service';
 import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
 import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
+import { ResourcesService } from '../resources/resources.service';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -112,6 +113,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly platformAdmin: PlatformAdminService,
     private readonly internalMcp: InternalMcpService,
     private readonly codex: CodexService,
+    private readonly resources: ResourcesService,
   ) {
     super();
   }
@@ -267,6 +269,13 @@ export class RealAgentExecutor extends AgentExecutor {
       providersList: () => this.platformAdmin.providersList(),
       providerTest: (name) => this.platformAdmin.providerTest(name),
       proposeProvider: (input) => this.platformAdmin.proposeProvider(taskId, sessionId, input),
+      packsList: () => this.platformAdmin.packsList(),
+      proposePackInstall: (input) => this.platformAdmin.proposePackInstall(taskId, sessionId, input),
+      proposeResource: (input) => this.platformAdmin.proposeResource(taskId, sessionId, input),
+      channelsList: () => this.platformAdmin.channelsList(),
+      proposeChannel: (input) => this.platformAdmin.proposeChannel(taskId, sessionId, input),
+      schedulesList: () => this.platformAdmin.schedulesList(),
+      proposeSchedule: (input) => this.platformAdmin.proposeSchedule(taskId, sessionId, input),
       proposeTaskAction: (input) => this.platformAdmin.proposeTaskAction(taskId, sessionId, input),
       proposeAgentDelete: (input) => this.platformAdmin.proposeAgentDelete(taskId, sessionId, input),
     };
@@ -505,6 +514,7 @@ export class RealAgentExecutor extends AgentExecutor {
       onCreateSubtask: ctx.onCreateSubtask,
       onCheckSubtasks: ctx.onCheckSubtasks,
       onScheduleCheck: ctx.onScheduleCheck,
+      onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
       onStartPreview: () => this.preview.getOrStart(ctx.taskId, opts.workDir),
       onProposeLearnedSkill: (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.
@@ -1029,6 +1039,11 @@ export class RealAgentExecutor extends AgentExecutor {
       }
     } catch {
       // no skills directory — base instructions only
+    }
+    // The project's shared resource library (an agent that cannot read files — the tools-only admin — gets the tool instead).
+    if (agent?.mode !== 'chat' && !(agent?.disallowedTools ?? []).some((t) => /^read$/i.test(t))) {
+      const block = await this.resources.promptIndex(agent?.name);
+      if (block) parts.push(block);
     }
     return parts.join('\n\n');
   }

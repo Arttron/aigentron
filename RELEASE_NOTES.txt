@@ -1,39 +1,31 @@
-Aigentron v0.1.30
+Aigentron v0.1.31
 
-Sign-in. The dashboard and API now have real passwords — one per user.
+For people who are not programmers: reminders, a shared library for your project, ready-made starter packs, and Telegram set up by the assistant.
 
-!! After updating, set a password (a banner in the dashboard asks for it). Until you do, the instance stays open
-   exactly as before. If it is reachable from the internet, do this first.
+Update note: this release adds one database table (schedules). It is created automatically when the server starts.
 
-Sign-in
-- Every user has their own password. The login screen lists the users (name + role): pick yours, type the password.
-  The first password (Settings → General → Security) becomes the default operator's; operators/admins give the others theirs in
-  Settings → Users. Roles are real now: the signed-in user acts, a request header can no longer pretend to be someone else.
-- With a password set, agents running on the server can no longer use the HTTP API to approve their own requests or change
-  settings. Their own hook/MCP routes keep working, and answer only from the server itself (not through a tunnel).
-- The console (aigentron-admin), the setup wizard and cli-auth.sh ask for the password once (or read LDS_ADMIN_USER / LDS_ADMIN_PASSWORD).
-- Forgot it? Another operator resets it in Users; otherwise `make reset-password` on the server (removes all passwords).
-- Docs: docs/authentication.md.
+Reminders and recurring tasks (Settings → Schedules)
+- Post a message to a chat on a schedule (free — no model involved) or start a task for an agent each time (its updates arrive in the chat).
+- Set the time in plain words — every day, weekdays, certain days of the week, every N hours — with your time zone and optional quiet hours.
+  "Run now" tries a schedule; a run missed while the server was off is skipped, not fired hours late.
+- The admin can create and change them for you.
 
-Allowed domains
-- Settings → General → Access: the domain names the server answers to (wildcards ok); everything else gets 421.
-  localhost, IP addresses and single-word names always work, so port forwarding / ssh -L / the local network behave as before, and the
-  page refuses a list that would lock out the address you are using. Empty = no restriction (as before).
-- Cloudflare Access is described as an alternative or an extra layer in docs/remote-access.md (and the admin knows about it).
+Project library (📚 Resources)
+- A shared library of notes, images, PDFs and any files that every agent of the project can use as knowledge: house measurements, a learner's
+  profile, a style guide, reference photos. Agents see the titles and descriptions, read what is relevant and never modify the files.
+- Upload by button or drag & drop, write notes, add tags, limit an item to chosen agents. The admin can add and edit text notes.
 
-Safer approvals
-- Every route to the sign-in password file is gated: writes, edits, globs, cd/find tricks, `make reset-password`.
-- "Don't ask again" for an MCP tool covers only the same arguments and expires (30 days); `curl | sh` needs approval; the admin's
-  change journal and undo are validated; verification commands run with a minimal environment; Codex per-run files are private.
-- Fixed: with a password set, approval-gated actions could fail with "authorization error" when the agent hook reached the server by
-  its service name. Gated actions (and the admin's delete cards) work again.
+Starter packs (Agents → Starter packs)
+- English learning: a tutor, a curriculum planner and a quiz maker, with a learner profile and a list of trusted resources.
+- Home renovation: a planner, an estimator, an interior designer and a materials advisor, with a brief, measurements and a budget to fill in.
+- Software team: the standard fleet (PM, architect, backend, frontend, designer, reviewer).
+- Installing never overwrites what you already have; prepared schedules start switched off. Or just tell the admin what you want to do.
 
-Admin
-- Bulk task actions now report the real number of tasks left; the admin keeps going in rounds of 200 until it is proven done.
+Telegram, set up by the admin
+- The assistant creates the channel, asks for the bot token in a secure field (never in the chat) and checks the connection.
+- A chat that writes to the bot but is not allowed yet shows up in Settings → Channels with Allow / Dismiss, and the bot tells the person their chat id.
+- Keys requested through Telegram arrive as a one-time link (10 minutes, one use) when PUBLIC_URL is set.
 
-Interface
-- The task page, settings tabs, users, agents and stats work on a phone; the message box is pinned to the bottom, landscape opens a
-  full-screen composer, tab strips scroll, a ↑ button jumps to the top. The Users tab is a card per user with real buttons; text and
-  buttons have breathing room.
-- The assistant can be dragged anywhere, tucked to a slim tab on the nearest edge, and reset in Settings → General.
-- Optional Cloudflare Tunnel profile (make tunnel-up) with PUBLIC_URL; guide in docs/remote-access.md.
+Also
+- Names of schedules, channels and library items may use letters of any language.
+- Fixes found while testing: a dependency cycle that stopped the server from starting, and an upload route that could eat JSON files.

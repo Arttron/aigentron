@@ -55,3 +55,6 @@ coverage/
 
 # Runtime journal of the admin agent — local data, never shipped
 /agent/admin-audit.jsonl
+
+# Project resource library (user content) — never shipped
+/agent/resources/

@@ -3,3 +3,4 @@ export * from './routing';
 export * from './classify';
 export * from './events';
 export * from './dto';
+export * from './schedule';

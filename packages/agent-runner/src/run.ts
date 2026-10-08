@@ -6,6 +6,7 @@ import {
   CREATE_SUBTASK_TOOL,
   CHECK_SUBTASKS_TOOL,
   SCHEDULE_CHECK_TOOL,
+  RESOURCES_SEARCH_TOOL,
   PREVIEW_TOOL,
   PROPOSE_LEARNED_SKILL_TOOL,
   PROPOSE_AGENT_TOOL,
@@ -20,6 +21,13 @@ import {
   PROVIDERS_LIST_TOOL,
   PROVIDER_TEST_TOOL,
   PROPOSE_PROVIDER_TOOL,
+  SCHEDULES_LIST_TOOL,
+  PROPOSE_SCHEDULE_TOOL,
+  CHANNELS_LIST_TOOL,
+  PROPOSE_CHANNEL_TOOL,
+  PROPOSE_RESOURCE_TOOL,
+  PACKS_LIST_TOOL,
+  PROPOSE_PACK_INSTALL_TOOL,
   MAINTENANCE_REPORT_TOOL,
   PROPOSE_CLEANUP_TOOL,
   REQUEST_SECRET_TOOL,
@@ -147,6 +155,7 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onCreateSubtask) names.push(CREATE_SUBTASK_TOOL);
   if (params.onCheckSubtasks) names.push(CHECK_SUBTASKS_TOOL);
   if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
+  if (params.onSearchResources) names.push(RESOURCES_SEARCH_TOOL);
   if (params.onStartPreview) names.push(PREVIEW_TOOL);
   if (params.onProposeLearnedSkill) names.push(PROPOSE_LEARNED_SKILL_TOOL);
   if (params.admin) {
@@ -163,6 +172,13 @@ function internalToolNames(params: RunAgentParams): string[] {
       PROVIDERS_LIST_TOOL,
       PROVIDER_TEST_TOOL,
       PROPOSE_PROVIDER_TOOL,
+      SCHEDULES_LIST_TOOL,
+      PROPOSE_SCHEDULE_TOOL,
+      CHANNELS_LIST_TOOL,
+      PROPOSE_CHANNEL_TOOL,
+      PROPOSE_RESOURCE_TOOL,
+      PACKS_LIST_TOOL,
+      PROPOSE_PACK_INSTALL_TOOL,
       MAINTENANCE_REPORT_TOOL,
       PROPOSE_CLEANUP_TOOL,
       REQUEST_SECRET_TOOL,

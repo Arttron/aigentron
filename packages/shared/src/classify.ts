@@ -30,6 +30,8 @@ export const CONTINUE_RUN_TOOL = '__continue_run__';
 /** Schedule a delayed re-run of this task ("check back in N seconds"). */
 export const SCHEDULE_CHECK_TOOL = `${INTERNAL_TOOL_PREFIX}schedule_check`;
 /** Start (or reuse) an ephemeral dev server for this task's worktree, for preview. */
+/** Read-only search over the project's resource library (notes/images/documents). Free for every agent. */
+export const RESOURCES_SEARCH_TOOL = `${INTERNAL_TOOL_PREFIX}resources_search`;
 export const PREVIEW_TOOL = `${INTERNAL_TOOL_PREFIX}preview_worktree`;
 /**
  * Propose a write to agent/skills/learned/<name>.md (roadmap Phase 6 — skill
@@ -85,6 +87,17 @@ export const REQUEST_SECRET_TOOL = `${INTERNAL_TOOL_PREFIX}request_secret`;
 /** Housekeeping: reading the disk-usage report is free; deleting run folders / worktrees / branches is a gated proposal. */
 export const MAINTENANCE_REPORT_TOOL = `${INTERNAL_TOOL_PREFIX}maintenance_report`;
 export const PROPOSE_CLEANUP_TOOL = `${INTERNAL_TOOL_PREFIX}propose_cleanup`;
+/** Recurring jobs (reminders / periodic tasks): listing is free; create/change/delete is a gated proposal. */
+export const SCHEDULES_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}schedules_list`;
+export const PROPOSE_SCHEDULE_TOOL = `${INTERNAL_TOOL_PREFIX}propose_schedule`;
+/** Chat channels (Telegram): listing (with connectivity + chats waiting to be allowed) is free; create/change/delete is gated. The bot token is entered through request_secret, never here. */
+/** The admin writes/changes/deletes a text note in the project's resource library (approval). */
+export const PROPOSE_RESOURCE_TOOL = `${INTERNAL_TOOL_PREFIX}propose_resource`;
+/** Content packs (ready-made sets of agents, skills, library notes and switched-off schedules): listing is free; installing is a gated proposal. */
+export const PACKS_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}packs_list`;
+export const PROPOSE_PACK_INSTALL_TOOL = `${INTERNAL_TOOL_PREFIX}propose_pack_install`;
+export const CHANNELS_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}channels_list`;
+export const PROPOSE_CHANNEL_TOOL = `${INTERNAL_TOOL_PREFIX}propose_channel`;
 
 /** Tiny stable string hash (two FNV-1a passes, 64 bits, hex) — keeps approval summaries distinct per content. */
 function shortHash(text: string): string {
@@ -420,6 +433,58 @@ export function classifyToolCall(
       dangerous: true,
       summary: `propose_cleanup ${targets.join('+') || 'nothing'} older than ${toolInput.olderThanDays ?? 'default'} day(s) #${shortHash(JSON.stringify([toolInput.runs, toolInput.worktrees, toolInput.deleteBranches, toolInput.olderThanDays]))}`,
       reason: `admin agent proposing to delete: ${targets.join(', ') || 'nothing'}${typeof toolInput.reason === 'string' && toolInput.reason ? ` — ${toolInput.reason.slice(0, 200)}` : ''}`,
+    };
+  }
+  if (name === PROPOSE_PACK_INSTALL_TOOL.toLowerCase()) {
+    const pack = typeof toolInput.name === 'string' ? toolInput.name : '?';
+    return {
+      dangerous: true,
+      summary: `propose_pack_install ${pack} #${shortHash(JSON.stringify([toolInput.name, toolInput.timezone]))}`,
+      reason: `admin agent proposing to install the content pack "${pack}": its agents, skills, starter library notes and schedules (schedules start SWITCHED OFF). Anything that already exists is left untouched.`,
+    };
+  }
+  if (name === PROPOSE_RESOURCE_TOOL.toLowerCase()) {
+    const s = (k: string) => (typeof toolInput[k] === 'string' ? (toolInput[k] as string) : '');
+    const action = s('action') || '?';
+    return {
+      dangerous: true,
+      summary: `propose_resource ${action} "${s('title') || s('id') || '?'}" #${shortHash(JSON.stringify([toolInput.action, toolInput.id, toolInput.title, toolInput.description, toolInput.tags, toolInput.agents, toolInput.text]))}`,
+      reason:
+        action === 'delete'
+          ? `admin agent proposing to DELETE the resource ${s('id')} from the project library`
+          : `admin agent proposing to ${action === 'create' ? 'add' : 'change'} the note "${s('title') || s('id')}" in the project resource library (every agent will read it as project knowledge): ${s('text').replace(/\s+/g, ' ').slice(0, 200)}`,
+    };
+  }
+  if (name === PROPOSE_CHANNEL_TOOL.toLowerCase()) {
+    const s = (k: string) => (typeof toolInput[k] === 'string' ? (toolInput[k] as string) : '');
+    const action = s('action') || '?';
+    const bits = [
+      s('kind') && `kind ${s('kind')}`,
+      typeof toolInput.enabled === 'boolean' && (toolInput.enabled ? 'switch ON' : 'switch OFF'),
+      s('defaultAgent') && `default agent "${s('defaultAgent')}"`,
+      s('allowChatId') && `ALLOW chat ${s('allowChatId')} to control the platform`,
+      s('removeChatId') && `remove chat ${s('removeChatId')}`,
+    ].filter(Boolean);
+    return {
+      dangerous: true,
+      summary: `propose_channel ${action} "${s('name') || '?'}" #${shortHash(JSON.stringify([toolInput.action, toolInput.name, toolInput.kind, toolInput.enabled, toolInput.defaultAgent, toolInput.allowChatId, toolInput.removeChatId]))}`,
+      reason:
+        action === 'delete'
+          ? `admin agent proposing to DELETE the chat channel "${s('name')}"`
+          : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the chat channel "${s('name')}"${bits.length ? `: ${bits.join(', ')}` : ''}. A chat on its allow-list can create tasks and approve actions — no secret is part of this request`,
+    };
+  }
+  if (name === PROPOSE_SCHEDULE_TOOL.toLowerCase()) {
+    const s = (k: string) => (typeof toolInput[k] === 'string' ? (toolInput[k] as string) : '');
+    const action = s('action') || '?';
+    const text = s('text').replace(/\s+/g, ' ').slice(0, 140);
+    return {
+      dangerous: true,
+      summary: `propose_schedule ${action} "${s('name') || '?'}" #${shortHash(JSON.stringify([toolInput.action, toolInput.name, toolInput.cron, toolInput.timezone, toolInput.kind, toolInput.text, toolInput.agentName, toolInput.channel, toolInput.chatId, toolInput.quietStart, toolInput.quietEnd, toolInput.enabled]))}`,
+      reason:
+        action === 'delete'
+          ? `admin agent proposing to DELETE the schedule "${s('name')}"`
+          : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the schedule "${s('name')}": ${s('cron') || '(same time)'} ${s('timezone')} — ${s('kind') || '(same kind)'}${text ? `: ${text}` : ''}${s('kind') === 'task' ? ` — it runs a task with agent "${s('agentName')}" each time and uses model budget` : ''}`,
     };
   }
   if (name === PROPOSE_PROVIDER_TOOL.toLowerCase()) {

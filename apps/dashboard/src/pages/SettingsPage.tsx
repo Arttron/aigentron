@@ -9,6 +9,7 @@ import { McpManager } from '@/components/McpManager';
 import { McpEndpointManager } from '@/components/settings/McpEndpointManager';
 import { ChannelsManager } from '@/components/ChannelsManager';
 import { UsersManager } from '@/components/UsersManager';
+import { SchedulesManager } from '@/components/SchedulesManager';
 
 const TABS = [
   { id: 'general', label: 'General' },
@@ -17,6 +18,7 @@ const TABS = [
   { id: 'mcp', label: 'MCP servers' },
   { id: 'mcp-endpoint', label: 'MCP endpoint' },
   { id: 'channels', label: 'Channels' },
+  { id: 'schedules', label: 'Schedules' },
   { id: 'users', label: 'Users' },
 ] as const satisfies ReadonlyArray<TabDef<string>>;
 
@@ -43,6 +45,7 @@ export function SettingsPage() {
       {tab === 'mcp' && <McpManager />}
       {tab === 'mcp-endpoint' && <McpEndpointManager />}
       {tab === 'channels' && <ChannelsManager />}
+      {tab === 'schedules' && <SchedulesManager />}
       {tab === 'users' && <UsersManager />}
     </>
   );

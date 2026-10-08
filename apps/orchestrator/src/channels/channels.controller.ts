@@ -11,6 +11,7 @@ import {
 import { IsBoolean, IsObject, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { ChannelsService, type ChannelConfig } from './channels.service';
 import { ChannelManagerService } from './channel-manager.service';
+import { PairingService } from './pairing.service';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
 
@@ -50,6 +51,7 @@ export class ChannelsController {
   constructor(
     private readonly channels: ChannelsService,
     private readonly manager: ChannelManagerService,
+    private readonly pairing: PairingService,
   ) {}
 
   /** Kind metadata for the add/edit picker + dynamic form. */
@@ -83,6 +85,27 @@ export class ChannelsController {
     await this.channels.remove(id);
     await this.manager.reload();
     return { id, deleted: true };
+  }
+
+  /** Chats that wrote to the bot but are not allowed yet — approve one to let it in. */
+  @Get(':id/pairings')
+  async pairings(@Param('id') id: string) {
+    await this.channels.getRow(id);
+    return this.pairing.list(id).map((p) => ({ chatId: p.chatId, userName: p.userName ?? null, firstText: p.firstText ?? null, attempts: p.attempts, lastSeen: new Date(p.lastSeen).toISOString() }));
+  }
+
+  @Post(':id/pairings/:chatId/allow')
+  async allow(@Param('id') id: string, @Param('chatId') chatId: string) {
+    await this.channels.setChatAllowed(id, chatId, true);
+    this.pairing.dismiss(id, chatId);
+    await this.manager.onChatAllowed(id, chatId);
+    return { id, chatId, allowed: true };
+  }
+
+  @Delete(':id/pairings/:chatId')
+  async dismiss(@Param('id') id: string, @Param('chatId') chatId: string) {
+    this.pairing.dismiss(id, chatId);
+    return { id, chatId, dismissed: true };
   }
 
   @Post(':id/test')

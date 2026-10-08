@@ -1,0 +1,41 @@
+{
+  "title": "Home renovation",
+  "icon": "🏠",
+  "description": "A renovation team for a home project: a planner (scope, order of works, timeline), an estimator (budget and material quantities with stated assumptions), an interior designer (style, layout, colours from your photos) and a materials advisor. Keep your brief, measurements and budget in the library; drop photos into tasks.",
+  "audience": "Someone planning a repair or renovation of an apartment or house.",
+  "agents": ["renovation-planner", "renovation-estimator", "interior-designer", "materials-advisor"],
+  "skills": ["renovation-practice"],
+  "resources": [
+    {
+      "file": "resources/project-brief.md",
+      "title": "Renovation brief",
+      "description": "The project in one page: rooms, what to change, style, budget ceiling, deadline, constraints. All renovation agents read it first. FILL IT IN.",
+      "tags": ["renovation", "brief"],
+      "agents": []
+    },
+    {
+      "file": "resources/measurements.md",
+      "title": "Measurements",
+      "description": "Room dimensions, ceiling heights, window and door sizes, positions of utilities. Estimates and layouts rely on these numbers — add rooms as you measure.",
+      "tags": ["renovation", "measurements"],
+      "agents": []
+    },
+    {
+      "file": "resources/budget.md",
+      "title": "Budget and spending",
+      "description": "Total budget, what is already spent or ordered, reserve. The estimator keeps within it; update after purchases.",
+      "tags": ["renovation", "budget"],
+      "agents": []
+    }
+  ],
+  "schedules": [
+    {
+      "name": "Renovation — weekly check-in",
+      "cron": "0 10 * * 1",
+      "kind": "task",
+      "agent": "renovation-planner",
+      "text": "Weekly renovation check-in: read the brief, measurements and budget, look at the latest task results, and tell me in a short list what should happen this week, what decisions I owe, and what could slip. Ask about anything missing."
+    }
+  ],
+  "after": "1) Open 📚 Resources and fill in \"Renovation brief\", \"Measurements\" and \"Budget and spending\". 2) Upload photos of the rooms there too (give each a one-line description: which room, which wall, which side). 3) Start with a task for renovation-planner: \"Make a plan and rough order of works for the project in the brief\". Photos of one specific thing (a wall, a bathroom) are best attached to the task itself."
+}

@@ -9,10 +9,14 @@ import { AgentsPage } from './pages/AgentsPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { StatsPage } from './pages/StatsPage';
+import { SecretLinkPage } from './pages/SecretLinkPage';
+import { ResourcesPage } from './pages/ResourcesPage';
 
 installAuthFetch();
 
 const router = createBrowserRouter([
+  // Outside <App/> on purpose: no sign-in gate, no chat widget — the one-time token in the URL is the credential.
+  { path: '/secret/:token', element: <SecretLinkPage /> },
   {
     element: <App />,
     children: [
@@ -21,6 +25,7 @@ const router = createBrowserRouter([
       { path: '/tasks/:id', element: <TaskDetailPage /> },
       { path: '/settings', element: <SettingsPage /> },
       { path: '/stats', element: <StatsPage /> },
+      { path: '/resources', element: <ResourcesPage /> },
     ],
   },
 ]);

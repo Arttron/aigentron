@@ -4,7 +4,7 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import { isTerminalStatus, type AgentLogEvent, type TaskStatus } from '@lds/shared';
+import { REQUEST_SECRET_TOOL, isTerminalStatus, type AgentLogEvent, type TaskStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentEventBus, type BusEvent } from '../bus/agent-event-bus';
 import { Readable } from 'node:stream';
@@ -15,9 +15,21 @@ import { AttachmentsService } from '../attachments/attachments.service';
 import { PresenceService } from '../presence/presence.service';
 import { ChannelsService } from './channels.service';
 import { ChannelCommandService } from './channel-commands.service';
+import { PairingService } from './pairing.service';
+import { SecretLinksService, secretLabel } from '../approvals/secret-links.service';
 import type { ChannelAdapter, IncomingEvent, MessageButton } from './channel-adapter';
 
 type ChannelRow = Awaited<ReturnType<ChannelsService['getRow']>>;
+
+/** The part of an approval a chat message needs. */
+interface ApprovalMsg {
+  id: string;
+  taskId: string;
+  summary: string;
+  reason: string;
+  toolName?: string;
+  toolInput?: unknown;
+}
 
 /** Grace period before an unattended dashboard approval is pushed to channels. */
 const ESCALATE_DELAY_MS = 10_000;
@@ -114,6 +126,8 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     private readonly attachments: AttachmentsService,
     private readonly commands: ChannelCommandService,
     private readonly presence: PresenceService,
+    private readonly pairing: PairingService,
+    private readonly secretLinks: SecretLinksService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -377,18 +391,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     return ev?.text?.trim() || null;
   }
 
-  private async onApprovalCreated(approval: {
-    id: string;
-    taskId: string;
-    summary: string;
-    reason: string;
-  }): Promise<void> {
+  private async onApprovalCreated(approval: ApprovalMsg): Promise<void> {
     // Channel-originated task → always ask in its own thread.
     const dest = await this.channels.threadForTask(approval.taskId);
     if (dest) {
       const adapter = this.adapters.get(dest.channel.id) ?? this.channels.buildAdapter(dest.channel);
-      await adapter
-        .sendApproval(dest.externalThreadId, approval)
+      await this.postApproval(adapter, dest.externalThreadId, approval)
         .then(({ messageId }) => this.recordApprovalMessage(approval.id, dest.channel.id, dest.externalThreadId, messageId, approval.taskId))
         .catch((err) => this.logger.warn(`sendApproval failed: ${(err as Error).message}`));
       return;
@@ -404,12 +412,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     this.escalationTimers.add(timer);
   }
 
-  private async escalateIfUnattended(approval: {
-    id: string;
-    taskId: string;
-    summary: string;
-    reason: string;
-  }): Promise<void> {
+  private async escalateIfUnattended(approval: ApprovalMsg): Promise<void> {
     if (this.presence.anyoneFocused()) return; // someone is watching the dock
     const row = await this.prisma.approvalRequest.findUnique({
       where: { id: approval.id },
@@ -423,18 +426,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
    * Fan an approval out to every enabled channel's allowed chats (used when a
    * dashboard task needs a decision but no one is online to see the UI).
    */
-  private async broadcastApproval(approval: {
-    id: string;
-    taskId: string;
-    summary: string;
-    reason: string;
-  }): Promise<void> {
+  private async broadcastApproval(approval: ApprovalMsg): Promise<void> {
     const rows = (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r));
     for (const row of rows) {
       const adapter = this.adapters.get(row.id) ?? this.channels.buildAdapter(row);
       for (const chatId of this.channels.allowedChatIds(row)) {
-        await adapter
-          .sendApproval(chatId, approval)
+        await this.postApproval(adapter, chatId, approval)
           .then(({ messageId }) => this.recordApprovalMessage(approval.id, row.id, chatId, messageId, approval.taskId))
           .catch((err) => this.logger.warn(`broadcast approval failed: ${(err as Error).message}`));
       }
@@ -511,6 +508,42 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     await adapter
       .resolveApprovalMessage?.(ref.chatId, ref.messageId, outcome)
       .catch((err) => this.logger.warn(`resolveApprovalMessage failed: ${(err as Error).message}`));
+  }
+
+  /**
+   * Post an approval to a chat. A secret request gets NO approve button (a plain "Approve" cannot supply a key): the message
+   * explains what is needed and, when a public address is configured, carries a one-time link to a secure page. The key is
+   * never typed into the chat.
+   */
+  private async postApproval(adapter: ChannelAdapter, chatId: string, approval: ApprovalMsg): Promise<{ messageId: string }> {
+    if (approval.toolName !== REQUEST_SECRET_TOOL) return adapter.sendApproval(chatId, approval);
+    const input = (approval.toolInput ?? {}) as { target?: string; name?: string; reason?: string };
+    const link = this.secretLinks.create(approval.id);
+    const text =
+      `🔐 The assistant needs ${secretLabel(input)}.${input.reason ? `\n${input.reason}` : ''}\n\n` +
+      (link
+        ? `Open this one-time link (valid 10 minutes) and enter it there — never type a key into this chat:\n${link}`
+        : 'Open the dashboard: a card with a secure field is waiting there. (Set PUBLIC_URL to get a one-time link here instead.)');
+    return adapter.sendMessage(chatId, text);
+  }
+
+  /** The bot token was just saved: switch the channel on if it was waiting for it, (re)start polling, and report connectivity. */
+  async onSecretSaved(channelId: string): Promise<{ ok: boolean; info?: string; error?: string }> {
+    const row = await this.channels.getRow(channelId);
+    if (!row.enabled && this.channels.isConfigured(row)) await this.channels.update(channelId, { enabled: true });
+    await this.reload();
+    return this.channels.test(channelId);
+  }
+
+  /** A chat was just put on the allow-list: apply it and say hello there. */
+  async onChatAllowed(channelId: string, chatId: string): Promise<void> {
+    await this.reload();
+    await this.send(channelId, chatId, '✅ This chat is connected. Send a message to talk to the assistant, or /help for commands.');
+  }
+
+  /** Post plain text to a chat of a channel (scheduled reminders, pairing replies). False when it could not be delivered. */
+  async sendText(channelId: string, chatId: string, text: string): Promise<boolean> {
+    return (await this.send(channelId, chatId, text)) !== null;
   }
 
   private async send(
@@ -632,6 +665,18 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // Authorize: only allowlisted chats may drive the channel (deny by default).
     if (!this.channels.allowedChatIds(row).includes(e.chatId)) {
       this.logger.warn(`Ignoring ${e.type} from unauthorized chat ${e.chatId}`);
+      // A stranger who wrote to the bot: remember it so the owner can allow it (Settings → Channels, or via the admin),
+      // and tell the person their chat id. They still cannot do anything until allowed.
+      if (e.type === 'message') {
+        const { reply } = this.pairing.record(channelId, { chatId: e.chatId, userId: e.userId, userName: e.userName, text: e.text });
+        if (reply) {
+          await this.send(
+            channelId,
+            e.chatId,
+            `👋 This chat is not connected yet.\nIts id: ${e.chatId}\nThe owner can allow it in the dashboard (Settings → Channels) or by telling the admin assistant "allow chat ${e.chatId}".`,
+          );
+        }
+      }
       return;
     }
 

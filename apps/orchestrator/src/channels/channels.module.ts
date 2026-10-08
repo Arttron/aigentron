@@ -5,6 +5,7 @@ import { ChannelsService } from './channels.service';
 import { ChannelManagerService } from './channel-manager.service';
 import { ChannelCommandService } from './channel-commands.service';
 import { ChannelsController } from './channels.controller';
+import { PairingService } from './pairing.service';
 
 /**
  * External communication channels (Telegram first): CRUD + a runtime manager
@@ -14,7 +15,7 @@ import { ChannelsController } from './channels.controller';
 @Module({
   imports: [TasksModule, ApprovalsModule],
   controllers: [ChannelsController],
-  providers: [ChannelsService, ChannelManagerService, ChannelCommandService],
-  exports: [ChannelsService],
+  providers: [ChannelsService, ChannelManagerService, ChannelCommandService, PairingService],
+  exports: [ChannelsService, ChannelManagerService, PairingService],
 })
 export class ChannelsModule {}
