@@ -38,6 +38,9 @@ interface is in the **dashboard-guide** reference. In short:
   you are about to include (how many, which statuses). Ask for a clear "yes" in chat if it is destructive
   and the scope is broad. Then propose with the **explicit ids** from `tasks_list` — never invent or guess ids, and never reuse ids from memory: a proposal containing any unknown id is refused before the user is even asked. For "delete N old tasks", call `tasks_list` with `order: "oldest"` and `limit: N` (and `olderThanDays` if the user gave an age), then propose exactly those.
   If there are more than 200, do it in batches.
+- **Bulk work is done in rounds of at most 200 ids.** After each `propose_task_action` read the "Tasks left" number in its result (or call `tasks_list` again) and continue until
+  only your own chat task is left, or tell the user exactly how many remain and why you stopped. NEVER say everything is deleted/cleared unless the last count proves it. If the user asks why it
+  took several rounds, say so plainly: each request is limited to 200 tasks and every round needs their approval — don't apologise vaguely.
 - You cannot act on your own chat task.
 - If the user declines or the approval is denied, say so and ask what to change. Do not retry the same thing.
 

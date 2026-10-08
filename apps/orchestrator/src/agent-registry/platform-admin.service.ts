@@ -175,7 +175,8 @@ export class PlatformAdminService {
     const lines = rows.map(
       (t) => `${t.id} | ${t.status} | ${t.agentName ?? '-'} | ${t.createdAt.toISOString().slice(0, 16)} | ${t.title}`,
     );
-    return `${total} matching task(s); showing the ${rows.length} ${oldest ? 'OLDEST' : 'newest'} (id | status | agent | created | title):\n${lines.join('\n')}`;
+    const more = total > rows.length ? `\nNOT SHOWN: ${total - rows.length} more match. Act on these, then call tasks_list again — do not tell the user it is finished while more remain.` : '';
+    return `${total} matching task(s); showing the ${rows.length} ${oldest ? 'OLDEST' : 'newest'} (id | status | agent | created | title):\n${lines.join('\n')}${more}`;
   }
 
   async proposeTaskAction(
@@ -222,9 +223,12 @@ export class PlatformAdminService {
     this.logger.log(`Admin ${input.action}: ${ok} ok, ${failed.length} failed (task ${currentTaskId})`);
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_task_action', summary: `${input.action === 'delete' ? 'Deleted' : 'Cancelled'} ${ok} task(s) — ${input.reason.slice(0, 80)}` });
     const verb = input.action === 'delete' ? 'Deleted' : 'Cancelled';
+    // The real number left (this chat's own task is one of them) — so "everything is gone" is never a guess.
+    const left = await this.prisma.task.count().catch(() => null);
+    const leftNote = left === null ? '' : ` Tasks left on the platform right now: ${left} (including this chat's own task).${left > 1 && input.action === 'delete' ? ' If the user asked to clear more, call tasks_list again — the limit is 200 per request.' : ''}`;
     return {
       ok: failed.length === 0,
-      message: `${verb} ${ok} of ${ids.length} task(s).${failed.length ? ` Failed: ${failed.slice(0, 5).join('; ')}${failed.length > 5 ? '…' : ''}` : ''}`,
+      message: `${verb} ${ok} of ${ids.length} task(s).${failed.length ? ` Failed: ${failed.slice(0, 5).join('; ')}${failed.length > 5 ? '…' : ''}` : ''}${leftNote}`,
     };
   }
 

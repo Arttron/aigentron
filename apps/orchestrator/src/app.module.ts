@@ -28,6 +28,8 @@ import { PreviewModule } from './preview/preview.module';
 import { PresenceModule } from './presence/presence.service';
 import { ChannelsModule } from './channels/channels.module';
 import { EventsModule } from './events/events.module';
+import { AuthModule } from './auth/auth.module';
+import { AccessModule } from './access/access.module';
 import { StatsModule } from './stats/stats.module';
 import { HealthController } from './health/health.controller';
 
@@ -43,6 +45,8 @@ import { HealthController } from './health/health.controller';
       exclude: ['/api/*splat'],
     }),
     AppConfigModule,
+    AuthModule,
+    AccessModule,
     PreflightModule,
     PrismaModule,
     BusModule,

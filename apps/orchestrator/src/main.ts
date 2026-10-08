@@ -3,6 +3,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AppConfigService } from './config/app-config.service';
+import { AccessService } from './access/access.service';
 
 /**
  * Keep the orchestrator alive on benign socket write failures. A broken pipe
@@ -40,6 +41,13 @@ async function bootstrap(): Promise<void> {
   installProcessGuards();
   const app = await NestFactory.create(AppModule);
   const config = app.get(AppConfigService);
+  // Domain allow-list (Settings → General → Access). Applies to everything, the dashboard files included. Local names, IPs and
+  // single-word hosts always pass, so port forwarding / ssh -L / opening the server by IP behave as before.
+  const access = app.get(AccessService);
+  app.use((req: { headers: { host?: string } }, res: { status: (n: number) => { type: (t: string) => { send: (b: string) => void } } }, next: () => void) => {
+    if (access.allows(req.headers.host)) return next();
+    res.status(421).type('text/plain').send('This address is not served here. If you own this server, allow the domain in Settings → General → Access, or open it by IP / localhost.');
+  });
   app.setGlobalPrefix('api');
   app.enableCors({
     origin: config.corsOrigin,

@@ -2,12 +2,15 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './globals.css';
+import { installAuthFetch } from './lib/auth';
 import { App } from './App';
 import { TaskListPage } from './pages/TaskListPage';
 import { AgentsPage } from './pages/AgentsPage';
 import { TaskDetailPage } from './pages/TaskDetailPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { StatsPage } from './pages/StatsPage';
+
+installAuthFetch();
 
 const router = createBrowserRouter([
   {

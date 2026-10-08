@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 COMPOSE := docker compose
 
-.PHONY: help up down logs ps build pull-models migrate seed dev clean init-env check-admin-skills admin test build-dashboard tunnel-up
+.PHONY: help up down logs ps build pull-models migrate seed dev clean init-env check-admin-skills admin test build-dashboard tunnel-up reset-password
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -15,6 +15,9 @@ build-dashboard: ## Build the dashboard SPA that the orchestrator serves on its 
 
 tunnel-up: build-dashboard ## Start the stack plus the Cloudflare Tunnel (TUNNEL_TOKEN in .env; see docs/remote-access.md)
 	$(COMPOSE) --profile tunnel up -d
+
+reset-password: ## Forgot the dashboard password? Removes it (sign-in turns off until you set a new one in Settings → Security)
+	$(COMPOSE) exec orchestrator sh -c 'rm -f "$${SECRETS_DIR:-/workspace/secrets}/auth.json" && echo "Password removed — open the dashboard and set a new one."'
 
 init-env: ## Create .env if missing; on a fresh install generate a random LITELLM_MASTER_KEY
 	@sh infra/init-env.sh

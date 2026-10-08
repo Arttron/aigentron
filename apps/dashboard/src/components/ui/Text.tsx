@@ -4,10 +4,10 @@ import styles from './Text.module.css';
 
 /** Dimmed secondary text. */
 export function Muted({ className, ...rest }: HTMLAttributes<HTMLSpanElement>) {
-  return <span className={cn(styles.muted, className)} {...rest} />;
+  return <span data-ui="text" className={cn(styles.muted, className)} {...rest} />;
 }
 
 /** Inline error text. */
 export function ErrorText({ className, ...rest }: HTMLAttributes<HTMLSpanElement>) {
-  return <span className={cn(styles.error, className)} {...rest} />;
+  return <span data-ui="text" className={cn(styles.error, className)} {...rest} />;
 }

@@ -141,6 +141,12 @@ const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string }> = 
     re: /\/proc\/[^\s/]+\/environ|\.codex-home|codex-home\/|(^|[\s/])auth\.json\b|\.git\/config\b|(^|[\s/])\.env(?!\.example)\b|\/\.(ssh|aws|gnupg|docker|kube)\/|\/run\/secrets\/|\/(workspace|data)\/secrets\b/,
     reason: 'touches a credentials file (env/tokens/secrets)',
   },
+  // The sign-in password lives in a `secrets` directory as auth.json: also catch the ways around a literal path
+  // (cd into it, globs like au*.json, find -name auth*, the make target that removes the password).
+  {
+    re: /\bcd\s+[^\n;&|]*\bsecrets\b|(^|[\s/"'])secrets\/|-i?name\s+["']?[^\s"']*auth|(^|[\s/"'=])au[*?[]|\bauth[\w.-]*[*?[]|\bmake\s+(set|reset)-password\b/,
+    reason: 'touches the credentials directory / sign-in password',
+  },
   { re: /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/i, reason: 'recursive force remove (rm -rf)' },
   { re: /\brm\s+-[a-z]*r[a-z]*\b/i, reason: 'recursive remove (rm -r)' },
   { re: /\bgit\s+push\b/i, reason: 'git push (publishes commits to a remote)' },
@@ -486,6 +492,9 @@ export function classifyToolCall(
     const paths = Array.from(patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm), (m) => m[1]!.trim());
     const summary = `apply_patch ${paths.join(', ') || '(no paths)'}`;
     for (const filePath of paths) {
+      if (isSecretPath(filePath)) {
+        return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)' };
+      }
       if (isProtectedPath(filePath)) {
         return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)' };
       }
@@ -502,6 +511,10 @@ export function classifyToolCall(
   if (WRITE_TOOLS.has(name)) {
     const filePath = extractPath(toolInput);
     const summary = `${toolName} ${filePath}`;
+    // Overwriting a credentials file (e.g. the sign-in password) is gated wherever the worktree boundary sits.
+    if (filePath && isSecretPath(filePath)) {
+      return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)' };
+    }
     // Protected files (charter / CI / git internals) must not be written silently.
     if (filePath && isProtectedPath(filePath)) {
       return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)' };
@@ -524,8 +537,11 @@ export function classifyToolCall(
 
   // Reading credentials is gated even though reading is otherwise free.
   if (name === 'read' || name === 'grep' || name === 'glob' || name === 'ls' || name === 'notebookread') {
-    const target = extractPath(toolInput);
-    if (target && isSecretPath(target)) {
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    // Grep filters by `glob`, Glob lists by `pattern` — both can name a credentials file without `path` doing so.
+    const targets = [extractPath(toolInput), str(toolInput.glob), name === 'glob' ? str(toolInput.pattern) : ''].filter(Boolean);
+    const target = targets.find((t) => isSecretPath(t));
+    if (target) {
       return {
         dangerous: true,
         summary: `${toolName} ${target}`,

@@ -20,7 +20,7 @@ export function Card<T extends ElementType = 'div'>({
 }: CardProps<T> & Omit<React.ComponentPropsWithoutRef<T>, keyof CardProps<T>>) {
   const Tag = (as ?? 'div') as ElementType;
   return (
-    <Tag className={cn(styles.card, className)} {...rest}>
+    <Tag data-ui="card" className={cn(styles.card, className)} {...rest}>
       {children}
     </Tag>
   );

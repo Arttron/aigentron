@@ -75,7 +75,7 @@ prompt, `skills`, tool limits → `propose_agent`. Afterwards tell them the name
 
 **Delete old tasks.** `tasks_list` with `order: "oldest"`, `limit: N` (and `olderThanDays` if an age was given) → tell the
 user what you found (count, statuses, a few titles) → on a clear yes, `propose_task_action` with exactly those ids.
-For more than 200, work in batches. Never invent ids.
+For more than 200, work in rounds of ≤200 (each round needs an approval). After each round read the "Tasks left" number in the result — and `tasks_list` says "NOT SHOWN: N more" when it truncates — and keep going until only your own chat task remains; never claim "all deleted" without that count. Never invent ids.
 
 **Set up a provider.** `providers_list` to see what exists → `propose_provider` (name, kind, model, auth mode, base URL
 for non-default endpoints; `makeDefault: true` if asked) → if it needs a key and has none, call `request_secret` (target `provider`, its name):

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { AppHeader, BackLink, Tabs, type TabDef } from '@/components/ui';
 import { GeneralSettingsForm } from '@/components/settings/GeneralSettingsForm';
+import { SecuritySettings } from '@/components/settings/SecuritySettings';
+import { AccessSettings } from '@/components/settings/AccessSettings';
 import { LiteLlmRoutes } from '@/components/settings/LiteLlmRoutes';
 import { ProvidersManager } from '@/components/ProvidersManager';
 import { McpManager } from '@/components/McpManager';
@@ -29,7 +31,13 @@ export function SettingsPage() {
       <AppHeader title="⚙ Settings" />
       <Tabs tabs={TABS} active={tab} onChange={setTab} />
 
-      {tab === 'general' && <GeneralSettingsForm />}
+      {tab === 'general' && (
+        <>
+          <SecuritySettings />
+          <AccessSettings />
+          <GeneralSettingsForm />
+        </>
+      )}
       {tab === 'providers' && <ProvidersManager />}
       {tab === 'litellm' && <LiteLlmRoutes />}
       {tab === 'mcp' && <McpManager />}

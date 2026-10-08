@@ -79,19 +79,28 @@ MODEL="${MODEL:-$DEFAULT_MODEL}"
 
 log "Registering provider \"$NAME\" (kind=$PROVIDER_KIND, authMode=oauth-token) with $ORCHESTRATOR_URL"
 
-EXISTS=$(curl -fsS "$ORCHESTRATOR_URL/api/providers" | grep -o "\"name\":\"$NAME\"" || true)
+# If the dashboard password is set, export LDS_ADMIN_PASSWORD=<password> and we sign in first (the session never touches disk).
+AUTH_ARGS=""
+if [ -n "${LDS_ADMIN_PASSWORD:-}" ]; then
+  TOK=$(curl -fsS -X POST "$ORCHESTRATOR_URL/api/auth/login" -H 'content-type: application/json' \
+ -d "$(printf '{"user":"%s","password":"%s"}' "${LDS_ADMIN_USER:-}" "$LDS_ADMIN_PASSWORD")" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+  [ -n "$TOK" ] && AUTH_ARGS="Authorization: Bearer $TOK"
+fi
+curlx() { if [ -n "$AUTH_ARGS" ]; then curl -fsS -H "$AUTH_ARGS" "$@"; else curl -fsS "$@"; fi; }
+
+EXISTS=$(curlx "$ORCHESTRATOR_URL/api/providers" | grep -o "\"name\":\"$NAME\"" || true)
 
 BODY=$(printf '{"kind":"%s","model":"%s","authMode":"oauth-token","secret":"%s"}' "$PROVIDER_KIND" "$MODEL" "$TOKEN")
 
 if [ -n "$EXISTS" ]; then
-  curl -fsS -X PUT "$ORCHESTRATOR_URL/api/providers/$NAME" \
+  curlx -X PUT "$ORCHESTRATOR_URL/api/providers/$NAME" \
     -H 'content-type: application/json' \
     -d "$BODY" >/dev/null
   log "Updated existing provider \"$NAME\"."
 else
   CREATE_BODY=$(printf '{"name":"%s","kind":"%s","model":"%s","authMode":"oauth-token","secret":"%s"}' \
     "$NAME" "$PROVIDER_KIND" "$MODEL" "$TOKEN")
-  curl -fsS -X POST "$ORCHESTRATOR_URL/api/providers" \
+  curlx -X POST "$ORCHESTRATOR_URL/api/providers" \
     -H 'content-type: application/json' \
     -d "$CREATE_BODY" >/dev/null
   log "Created provider \"$NAME\"."

@@ -2,9 +2,27 @@
 
 Goal: open the dashboard from a laptop or phone over HTTPS **without opening any port on the server**.
 
-> **Read this first.** The API and dashboard have **no built-in login yet** (planned, see `docs/BACKLOG.md`). Whoever reaches
-> the page is the operator: they can approve agent actions, start tasks and change settings. So the public hostname **must**
-> be protected by an authenticating layer — Cloudflare Access below — before you share the link or open it to anyone.
+## Two ways to protect public access — pick one, or use both
+
+| | **A. Built-in** (default, nothing to sign up for) | **B. Cloudflare Access** (alternative, or an extra layer) |
+|---|---|---|
+| What it does | Passwords per user (`docs/authentication.md`) + a list of **allowed domains** (Settings → General → Access) | Cloudflare asks visitors to sign in (Google / GitHub / e-mail one-time code) **before** your server sees them |
+| Who is let in | People with a password for this server | People you list in the Access policy |
+| Second factor | No (use a long passphrase) | Yes, effectively — the e-mail/identity provider |
+| The login page is visible to | anyone who can reach the address (names and roles are listed there) | nobody until they pass Cloudflare |
+| Works without Cloudflare | yes — any tunnel, VPN or port forward | no |
+| Setup | set passwords, optionally the domain list | a free Zero Trust application (5 minutes, steps below) |
+
+**Recommended for anything public:** A *and* B. If you only want one: A is enough for a private instance behind an unguessable passphrase;
+B is the better choice when the page will be opened from many places or shared with a team, because it also hides the login page.
+A random sub-domain is *not* a security measure on its own (names leak through DNS and certificate logs) — it only reduces noise.
+
+**What the server decides on its own:** with a domain list (or `PUBLIC_URL`) set, it answers only to those names. `localhost`, IP addresses
+and single-word names (a LAN host, a docker service) are **always** accepted, so opening the server by IP, an SSH tunnel
+(`ssh -L 3011:localhost:3011 server`) or a plain port forward works exactly as before — you can never lock yourself out of your own machine.
+The server cannot tell *who* is behind a domain — that is what the passwords (A) or Cloudflare Access (B) are for.
+
+> Set the passwords (`docs/authentication.md`) *before* exposing anything: without them whoever reaches the page is the operator.
 
 ## How it fits together
 
@@ -24,10 +42,10 @@ phone / laptop ──HTTPS──▶ Cloudflare (Access login) ──tunnel──
 1. Cloudflare dashboard → **Zero Trust** → **Networks → Tunnels → Create a tunnel** (type *Cloudflared*). Copy the **token**.
 2. In the tunnel → **Public Hostname**: hostname `dev.your-domain.com`, service type **HTTP**, URL `orchestrator:3001`
    (for the bare-metal install use `localhost:3001`). WebSockets work without extra settings.
-3. **Access → Applications → Add an application → Self-hosted**: the same hostname, a policy **Allow** for your e-mail(s)
-   or your identity provider (Google/GitHub/one-time e-mail code). Set a session length you are comfortable with.
-   Make the policy cover the **whole hostname** (not just `/`).
-4. Free plan covers up to 50 Access users.
+3. *(Way B — optional but recommended)* **Access → Applications → Add an application → Self-hosted**: the same hostname, a policy **Allow**
+   for your e-mail(s) or your identity provider (Google/GitHub/one-time e-mail code). Set a session length you are comfortable with.
+   Make the policy cover the **whole hostname** (not just `/`). Free plan: up to 50 Access users.
+4. *(Way A)* In the dashboard: Settings → General → **Access**, add `dev.your-domain.com` (or set `PUBLIC_URL`, which adds it automatically).
 
 ## Start it (dev / docker compose)
 
@@ -50,16 +68,16 @@ Minimal / bare-metal: install `cloudflared` on the host (`cloudflared service in
 
 ## What `PUBLIC_URL` does
 
-It adds that origin to the allowed origins and prints a reminder at startup that the API has no login of its own.
-It is advisory; it does not open anything.
+It adds that origin to the allowed origins, **adds its host to the allowed domains** (so only that name — plus local access — is served), and,
+if no dashboard password is set yet, prints a loud warning at startup and shows a red banner in the dashboard. It does not open anything.
 
 ## Things to know
 
 - **Everything under the hostname is behind Access** — including `/api/mcp` (the MCP entry point for outside clients),
   `/api/internal-mcp` and `/api/research-mcp`. Browsers pass through Access fine; a non-browser MCP client would need an
   Access *service token* or a separate bypass rule for `/api/mcp` (keep `MCP_TOKEN` set if you do that).
-- **Access is the only gate** until built-in auth exists. Agents run on the same machine and can still reach the orchestrator on
-  `localhost` (see the "API authentication and agent isolation" item in `docs/BACKLOG.md`); that is independent of how you expose it.
+- **Two layers (A and B above):** Cloudflare Access (who may reach the hostname) and the built-in passwords + domain list (who may use the app). The agent-facing
+  routes only answer from the same machine, so the tunnel never exposes them.
 - Postgres, Redis, LiteLLM and the research/playwright services are **not** exposed by the tunnel; keep their ports on `127.0.0.1`.
 - The "acting user" switcher in the dashboard only labels who did something; it is not authentication.
 - Using something else (Tailscale, your own reverse proxy with SSO)? Point it at `orchestrator:3001`, forward WebSocket upgrades for

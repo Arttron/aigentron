@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { USER_ROLES, type ChannelKind, type User, type UserRole } from '@lds/shared';
 import { api, getActingUserId } from '@/lib/api';
-import { Card, SectionTitle, Field, Row, Button, Modal, Badge, Muted, ErrorText } from '@/components/ui';
+import { passwordsApi } from '@/lib/auth';
+import { useAuth } from '@/lib/auth-context';
+import { Card, SectionTitle, Field, Row, Button, Modal, Muted, ErrorText } from '@/components/ui';
 import styles from './UsersManager.module.css';
 
 const CHANNELS: ChannelKind[] = ['dashboard', 'slack', 'telegram', 'email'];
@@ -18,6 +20,37 @@ export function UsersManager() {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const { status } = useAuth();
+  const signInOn = !!status?.configured;
+  const [hasPw, setHasPw] = useState<Record<string, boolean>>({});
+  const [pwFor, setPwFor] = useState<User | null>(null);
+  const [pw, setPw] = useState('');
+  const [pwError, setPwError] = useState<string | null>(null);
+
+  const loadPw = useCallback(async () => {
+    if (!signInOn) return;
+    const rows = await passwordsApi.overview();
+    setHasPw(Object.fromEntries(rows.map((r) => [r.id, r.hasPassword])));
+  }, [signInOn]);
+  useEffect(() => {
+    void loadPw();
+  }, [loadPw]);
+
+  const savePw = async () => {
+    if (!pwFor) return;
+    setPwError(null);
+    const r = await passwordsApi.set(pwFor.id, pw).catch(() => null);
+    if (!r?.ok) return setPwError(r?.data.error ?? 'Could not set the password.');
+    setPwFor(null);
+    setPw('');
+    await loadPw();
+  };
+  const removePw = async (user: User) => {
+    if (!window.confirm(`Remove ${user.displayName}'s password? They will not be able to sign in.`)) return;
+    const r = await passwordsApi.remove(user.id).catch(() => null);
+    if (!r?.ok) setError(r?.data.error ?? 'Could not remove the password.');
+    await loadPw();
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -94,36 +127,69 @@ export function UsersManager() {
         </Button>
       </Row>
       <Muted className={styles.hint}>
-        No auth in v1 — roles scope what the acting user may do at the API. Pick the acting user from
-        the 🎭 selector in the header.
+        {signInOn
+          ? 'Everyone signs in by picking their name and typing their own password; their role decides what they may do. Set or reset a person\'s password with 🔑 below.'
+          : 'Sign-in is off: roles scope what the acting user may do, picked from the 🎭 selector in the header. Turn sign-in on in Settings → General → Security — then each user gets their own password here.'}
       </Muted>
 
       {users.map((u) => (
-        <div key={u.id} className={styles.entry}>
-          <Row spaceBetween className={styles.head}>
-            <div className={styles.ident}>
-              <strong>{u.displayName}</strong>
-              <Badge tone="running">{u.role}</Badge>
-              {acting === u.id && <Badge tone="neutral">acting</Badge>}
-            </div>
-            <Row>
-              <Button size="sm" onClick={() => openEdit(u)}>
-                Edit
+        <div key={u.id} className={styles.card}>
+          <div className={styles.top}>
+            <strong className={styles.name}>{u.displayName}</strong>
+            <span className={styles.role}>
+              <span className={styles.dot} data-role={u.role} aria-hidden />
+              {u.role.replace('_', ' ')}
+            </span>
+          </div>
+          <div className={styles.facts}>
+            {signInOn && (
+              <span className={hasPw[u.id] ? styles.pwOn : styles.pwOff}>{hasPw[u.id] ? '🔑 has a password' : '⚠ no password — cannot sign in'}</span>
+            )}
+            {!signInOn && acting === u.id && <span className={styles.pwOn}>acting user</span>}
+            <span>
+              {u.identities.length
+                ? u.identities.map((i) => `${i.channel}:${i.externalId}`).join(' · ')
+                : 'no channel identities'}
+            </span>
+          </div>
+          <div className={styles.buttons}>
+            {signInOn && (
+              <Button
+                onClick={() => {
+                  setPwFor(u);
+                  setPw('');
+                  setPwError(null);
+                }}
+              >
+                🔑 {hasPw[u.id] ? 'Reset password' : 'Set password'}
               </Button>
-              <Button variant="red" size="sm" disabled={busy} onClick={() => remove(u)}>
-                Delete
-              </Button>
-            </Row>
-          </Row>
-          <Muted className={styles.meta}>
-            {u.identities.length
-              ? u.identities.map((i) => `${i.channel}:${i.externalId}`).join(' · ')
-              : 'no channel identities'}
-          </Muted>
+            )}
+            {signInOn && hasPw[u.id] && <Button onClick={() => removePw(u)}>Remove password</Button>}
+            <Button onClick={() => openEdit(u)}>Edit</Button>
+            <Button variant="red" disabled={busy} onClick={() => remove(u)}>
+              Delete
+            </Button>
+          </div>
         </div>
       ))}
 
       {error && <ErrorText className={styles.error}>{error}</ErrorText>}
+
+      {pwFor && (
+        <Modal title={`${hasPw[pwFor.id] ? 'Reset' : 'Set'} password: ${pwFor.displayName}`} onClose={() => setPwFor(null)}>
+          <Muted>They are signed out everywhere and use the new password from now on. Tell them the password in person — it is not shown again.</Muted>
+          <Field label="New password (at least 8 characters)">
+            <input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus />
+          </Field>
+          {pwError && <ErrorText>{pwError}</ErrorText>}
+          <Row>
+            <Button variant="primary" disabled={pw.length < 8} onClick={savePw}>
+              Save password
+            </Button>
+            <Button onClick={() => setPwFor(null)}>Cancel</Button>
+          </Row>
+        </Modal>
+      )}
 
       {modal && (
         <Modal

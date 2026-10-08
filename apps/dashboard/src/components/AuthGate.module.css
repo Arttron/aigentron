@@ -1,0 +1,71 @@
+.center {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.center > * {
+  width: min(380px, 100%);
+}
+.title {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+.banner,
+.bannerWarn {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  background: var(--amber-soft);
+  color: var(--text);
+}
+.bannerWarn {
+  background: var(--red-soft);
+}
+.dismiss {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.users {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+.user,
+.userOn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  box-shadow: var(--raised-xs);
+  font: inherit;
+  text-align: left;
+}
+.userOn {
+  box-shadow: var(--inset-sm), 0 0 0 2px var(--accent);
+}
+.role {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

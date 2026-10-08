@@ -24,6 +24,21 @@ shell or `docker exec -it <container> aigentron-admin`; dev compose: `make admin
 full content — and asks for keys in a **hidden prompt** that goes straight to the server (it is the console form of the secure key card).
 One-shot use: `aigentron-admin "how do I add a provider?"`. Useful for the very first setup when the dashboard isn't reachable.
 
+## Sign-in
+
+The dashboard can be protected by passwords: Settings → General → **Security** sets the first one (the default operator's; a banner
+appears until then), and Settings → **Users** → 🔑 gives every other user their own. At the login screen a person picks their name and types
+the password; their role decides what they may do. Agents on the server can't use the API to approve their own requests. I can't
+set or read passwords — send the user to those screens. Forgotten: another operator resets it in Users, or `make reset-password` on the
+server (removes all). Details: `docs/authentication.md`.
+
+## Public access (domains, Cloudflare)
+
+To open the dashboard from outside, the user has two ways (or both): **A. built-in** — passwords (above) plus Settings → General → **Access**, a list of
+allowed domain names (empty = any; `localhost`, IP addresses and single-word names always work, so a port forward / `ssh -L` is never affected); and
+**B. Cloudflare Access** — an alternative or extra layer: Cloudflare asks the visitor to sign in (e-mail code / Google / GitHub) before the server is reached; set up
+in the Cloudflare dashboard, steps in `docs/remote-access.md`. A random sub-domain alone is not protection. I can't change these settings — point the user to those screens or that doc.
+
 ## Approvals
 
 An agent that wants to do something risky stops and shows a card: **Approve** or **Deny**. Under **Options** you can tick

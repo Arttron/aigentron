@@ -1,14 +1,41 @@
 import { useEffect, useState } from 'react';
 import type { User } from '@lds/shared';
 import { api, getActingUserId, setActingUserId } from '@/lib/api';
+import { authApi } from '@/lib/auth';
+import { useAuth } from '@/lib/auth-context';
+import { reconnectSocket } from './AuthGate';
 import styles from './UserSwitcher.module.css';
 
 /**
- * Picks the "acting user" whose id is sent as `x-lds-user` on write actions.
- * No auth in v1 — this is an attribution/role selector, defaulting to the first
- * user (the seeded operator).
+ * With sign-in on: shows who is signed in (their role decides what they may do) and a sign-out link.
+ * Without it: picks the "acting user" whose id is sent as `x-lds-user` — an attribution/role selector.
  */
 export function UserSwitcher() {
+  const { status } = useAuth();
+  if (status?.configured && status.me) return <SignedIn name={status.me.displayName} role={status.me.role} />;
+  return <ActingUserPicker />;
+}
+
+function SignedIn({ name, role }: { name: string; role: string }) {
+  const out = async () => {
+    await authApi.logout().catch(() => undefined);
+    reconnectSocket();
+    window.location.assign('/');
+  };
+  return (
+    <span className={styles.wrap} title={`Signed in as ${name} (${role})`}>
+      <span aria-hidden>👤</span>
+      <span>
+        {name} · {role}
+      </span>
+      <button type="button" className={styles.signOut} onClick={out}>
+        Sign out
+      </button>
+    </span>
+  );
+}
+
+function ActingUserPicker() {
   const [users, setUsers] = useState<User[]>([]);
   const [current, setCurrent] = useState('');
 

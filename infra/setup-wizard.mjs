@@ -175,12 +175,27 @@ function guessKind(baseUrl) {
 
 // ---- orchestrator REST client ----
 
-async function api(method, path, body) {
+// If the dashboard password is already set, pass it as LDS_ADMIN_PASSWORD (it is used once to sign in).
+let sessionToken = '';
+async function signInFromEnv() {
+  const password = process.env.LDS_ADMIN_PASSWORD;
+  if (!password) throw new Error('The server has a sign-in password. Re-run with LDS_ADMIN_PASSWORD=<password> (and LDS_ADMIN_USER=<name> if several users have one) in the environment.');
+  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user: process.env.LDS_ADMIN_USER || undefined, password }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.token) throw new Error(`sign-in failed: ${j.error || r.status}`);
+  sessionToken = j.token;
+}
+async function api(method, path, body, retried = false) {
+  const headers = { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}) };
   const res = await fetch(`${BASE}/api${path}`, {
     method,
-    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && !retried) {
+    await signInFromEnv();
+    return api(method, path, body, true);
+  }
   const text = await res.text();
   let json;
   try {

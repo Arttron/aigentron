@@ -10,8 +10,8 @@
 //
 // Approvals the admin raises (agent edits, task cleanup, provider changes, …) are shown here and answered at the
 // prompt; API keys are typed into a HIDDEN prompt and go straight to the server's secret endpoint — never through
-// the chat or the model. No dependencies: Node >= 18 built-ins only. The server's HTTP API has no authentication,
-// so this talks to localhost by default.
+// the chat or the model. No dependencies: Node >= 18 built-ins only. When the server has a sign-in password
+// set, it asks for it once. It talks to localhost by default.
 // ----------------------------------------------------------------------
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
@@ -117,13 +117,57 @@ async function detectBase() {
   }
   return null;
 }
-async function api(path, { method = 'GET', body } = {}) {
+// Sign-in: when the server has a password set, the first call gets 401; we ask once (hidden), keep the session token in
+// a 0600 file next to the chat state and reuse it. LDS_ADMIN_PASSWORD works for non-interactive use.
+const sessionFile = () => join(dirname(stateFile), 'admin-session.json');
+let sessionToken = (() => {
+  try {
+    return JSON.parse(readFileSync(sessionFile(), 'utf8')).token || '';
+  } catch {
+    return '';
+  }
+})();
+async function signIn() {
+  // Who? LDS_ADMIN_USER (name or id), else the only user with a password, else ask (numbered list).
+  let user = process.env.LDS_ADMIN_USER || '';
+  if (!user) {
+    const st = await fetch(`${BASE}/api/auth/status`).then((r) => r.json()).catch(() => ({ users: [] }));
+    const users = st.users ?? [];
+    if (users.length > 1) {
+      if (!isTTY) throw new Error('Several users can sign in: set LDS_ADMIN_USER (name) and LDS_ADMIN_PASSWORD.');
+      users.forEach((u, i) => out(`  ${i + 1}) ${u.displayName} ${dim(`(${u.role})`)}`));
+      const pick = ((await ask('Sign in as (number or name) › ')) ?? '').trim();
+      user = users[Number(pick) - 1]?.id ?? pick;
+    }
+  }
+  const password = process.env.LDS_ADMIN_PASSWORD || (isTTY ? await ask('Password › ', { hidden: true }) : null);
+  if (!password) throw new Error('Sign-in required: run this in a terminal, or set LDS_ADMIN_PASSWORD.');
+  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user: user || undefined, password }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.token) throw new Error(j.error || `sign-in failed (${r.status})`);
+  sessionToken = j.token;
+  try {
+    mkdirSync(dirname(sessionFile()), { recursive: true });
+    writeFileSync(sessionFile(), JSON.stringify({ token: sessionToken }), { mode: 0o600 });
+  } catch {
+    /* not fatal: we just ask again next time */
+  }
+}
+async function api(path, { method = 'GET', body } = {}, retried = false) {
   const res = await fetch(`${BASE}/api${path}`, {
     method,
-    headers: { 'content-type': 'application/json', ...(opts.user ? { 'x-lds-user': opts.user } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(opts.user ? { 'x-lds-user': opts.user } : {}),
+      ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
+  if (res.status === 401 && !retried && /sign in required/i.test(text)) {
+    await signIn();
+    return api(path, { method, body }, true);
+  }
   if (!res.ok) {
     let msg = text;
     try {
@@ -401,7 +445,11 @@ async function main() {
   }
   try {
     await api('/agents/admin');
-  } catch {
+  } catch (e) {
+    if (/sign-in|sign in|password|^40[129]|^429/i.test(String(e.message))) {
+      console.error(String(e.message));
+      process.exit(1);
+    }
     console.error('The built-in "admin" agent is not available on this instance (it is added on first start of release 0.1.27+).');
     process.exit(2);
   }

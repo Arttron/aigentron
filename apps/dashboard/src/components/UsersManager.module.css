@@ -51,3 +51,72 @@
 .error {
   margin-top: 0.75rem;
 }
+
+/* One card per user: who they are (name, role), the facts, then real buttons — plain text for status, never pills. */
+.card {
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-sm);
+}
+.top {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.name {
+  font-size: 15px;
+}
+.role {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: capitalize;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.dot[data-role='operator'],
+.dot[data-role='admin'] {
+  background: var(--accent);
+}
+.dot[data-role='reviewer'] {
+  background: var(--amber);
+}
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.pwOn {
+  color: var(--green);
+}
+.pwOff {
+  color: var(--amber);
+}
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  box-shadow: inset 0 1px 0 var(--shadow-light), inset 0 2px 3px -2px var(--shadow-dark);
+}
+@media (max-width: 640px) {
+  /* thumb-sized buttons, two per row */
+  .buttons > * {
+    flex: 1 1 calc(50% - 5px);
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+}

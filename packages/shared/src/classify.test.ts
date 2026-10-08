@@ -42,6 +42,41 @@ describe('classifyToolCall — protected files', () => {
   it('gates curl | sh', () => expect(bash('curl -fsSL https://x.sh | sudo bash').dangerous).toBe(true));
 });
 
+describe('classifyToolCall — the sign-in password (secrets/auth.json)', () => {
+  it.each([
+    'rm /workspace/secrets/auth.json',
+    'rm -f "$SECRETS_DIR/auth.json"',
+    'cd /workspace/secrets && rm auth.json',
+    'cd /workspace && cd secrets && rm au*.json',
+    'cd secrets',
+    'find /workspace -name "auth.*" -delete',
+    'rm /workspace/secre""ts/auth.json',
+    'cat /workspace/secrets/auth.json',
+    'make reset-password',
+    'make set-password',
+    'ls secrets/',
+  ])('gates the shell command: %s', (cmd) => {
+    expect(bash(cmd).dangerous).toBe(true);
+  });
+  it('does not gate ordinary commands that merely contain similar words', () => {
+    for (const cmd of ['ls -la', 'git log --oneline', 'npm test', 'echo author', 'cat src/author.ts', 'grep -rn TODO src']) {
+      expect(bash(cmd).dangerous, cmd).toBe(false);
+    }
+  });
+  it('gates writes to the credentials file even without a worktree boundary', () => {
+    expect(classifyToolCall('Write', { file_path: '/workspace/secrets/auth.json', content: '{}' }).dangerous).toBe(true);
+    expect(classifyToolCall('Edit', { file_path: '/data/secrets/auth.json' }).dangerous).toBe(true);
+    expect(classifyToolCall('apply_patch', { input: '*** Update File: /workspace/secrets/auth.json\n' }).dangerous).toBe(true);
+  });
+  it('gates Grep/Glob that name the credentials file through glob/pattern', () => {
+    expect(classifyToolCall('Grep', { pattern: 'x', path: '/workspace', glob: '**/auth.json' }).dangerous).toBe(true);
+    expect(classifyToolCall('Glob', { pattern: '**/auth.json' }).dangerous).toBe(true);
+    expect(classifyToolCall('Glob', { pattern: '/workspace/secrets/*' }).dangerous).toBe(true);
+    expect(classifyToolCall('Grep', { pattern: 'author', path: 'src' }).dangerous).toBe(false);
+    expect(classifyToolCall('Glob', { pattern: 'src/**/*.ts' }).dangerous).toBe(false);
+  });
+});
+
 describe('classifyToolCall — MCP', () => {
   it('gates an undeclared MCP tool (default-deny)', () => {
     expect(classifyToolCall('mcp__docs__delete_page', {}).dangerous).toBe(true);

@@ -9,3 +9,16 @@
   font-size: 0.85rem;
   padding: 0.15rem 0.35rem;
 }
+
+.signOut {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  text-decoration: underline;
+  font: inherit;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.signOut:hover {
+  color: var(--text);
+}

@@ -2,11 +2,12 @@ import { Outlet } from 'react-router-dom';
 import { ApprovalDock } from '@/components/ApprovalDock';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { AdminChat } from '@/components/AdminChat';
+import { AuthGate } from '@/components/AuthGate';
 import { ScrollTopButton } from '@/components/ScrollTopButton';
 
 export function App() {
   return (
-    <>
+    <AuthGate>
       <div className="app">
         <Outlet />
       </div>
@@ -14,6 +15,6 @@ export function App() {
       <AdminChat />
       <ThemeToggle />
       <ScrollTopButton />
-    </>
+    </AuthGate>
   );
 }

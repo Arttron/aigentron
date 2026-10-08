@@ -99,7 +99,7 @@ export function McpManager() {
           <Button className={styles.saveBtn} disabled={busy} onClick={() => save(s.name)}>
             Save
           </Button>
-          <Button disabled={busy} onClick={() => discover(s.name)} title="Connect to the server and read its tools' read-only annotations">
+          <Button className={styles.saveBtn} disabled={busy} onClick={() => discover(s.name)} title="Connect to the server and read its tools' read-only annotations">
             Discover tools
           </Button>
           {found[s.name] && (

@@ -221,3 +221,24 @@ textarea {
     font-size: 16px; /* iOS Safari zooms into smaller fields on focus */
   }
 }
+
+/*
+ * Breathing room around text that follows buttons or fields. Buttons throw a shadow (~8px) downwards, so a note set right
+ * under a row of buttons, or a field right under a note, looked glued to it. `:where()` keeps specificity at zero so any
+ * component's own margin still wins.
+ */
+:where([data-ui='row'] + [data-ui='text']),
+:where(form > [data-ui='text']),
+:where([data-ui='card'] > [data-ui='text']),
+:where([data-ui='field'] + [data-ui='text']) {
+  display: block;
+  margin-top: 12px;
+}
+:where([data-ui='text'] + [data-ui='text']) {
+  margin-top: 6px;
+}
+:where([data-ui='text'] + [data-ui='field']),
+:where([data-ui='text'] + [data-ui='row']),
+:where([data-ui='text'] + form) {
+  margin-top: 14px;
+}

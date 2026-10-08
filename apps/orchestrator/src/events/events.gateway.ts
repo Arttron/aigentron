@@ -12,6 +12,8 @@ import { CLIENT_EVENT, ROOM, SERVER_EVENT } from '@lds/shared';
 import { AgentEventBus, type BusEvent } from '../bus/agent-event-bus';
 import { PresenceService } from '../presence/presence.service';
 import { resolveCorsOrigin } from '../config/cors';
+import { AuthService } from '../auth/auth.service';
+import { AccessService } from '../access/access.service';
 
 /**
  * Bridges the in-process event bus to connected dashboard clients over
@@ -31,6 +33,8 @@ export class EventsGateway
   constructor(
     private readonly bus: AgentEventBus,
     private readonly presence: PresenceService,
+    private readonly auth: AuthService,
+    private readonly access: AccessService,
   ) {}
 
   onModuleInit(): void {
@@ -45,11 +49,24 @@ export class EventsGateway
   private readonly focused = new Set<string>();
 
   handleConnection(client: Socket): void {
+    // A domain that is not allowed gets no live feed either (the HTTP middleware does not see WebSocket upgrades).
+    // Live task output is private: with a password set, only a signed-in browser may listen.
+    if (!this.access.allows(client.handshake.headers.host)) {
+      client.data.rejected = true;
+      client.disconnect(true);
+      return;
+    }
+    if (!this.auth.isAuthenticated(client.handshake.headers)) {
+      client.data.rejected = true;
+      client.disconnect(true);
+      return;
+    }
     void client.join(ROOM.global);
     this.presence.connect();
   }
 
   handleDisconnect(client: Socket): void {
+    if (client.data.rejected) return; // never counted as present
     this.presence.disconnect();
     if (this.focused.delete(client.id)) this.presence.blur();
   }
