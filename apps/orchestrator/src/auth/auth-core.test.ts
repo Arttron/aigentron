@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   LoginLimiter,
+  SignInGuard,
   canRemovePassword,
   hashPassword,
   isLoopback,
@@ -123,5 +124,29 @@ describe('canRemovePassword', () => {
     expect(canRemovePassword(users, new Set(['a', 'b']), 'a')).toBe(false); // a is the only manager with a password
     expect(canRemovePassword(users, new Set(['a', 'c']), 'a')).toBe(true);
     expect(canRemovePassword(users, new Set(['a', 'b']), 'b')).toBe(true); // a reviewer may go
+  });
+});
+
+describe('SignInGuard', () => {
+  it('a forged client header does not give unlimited guesses', () => {
+    const g = new SignInGuard();
+    let t = 0;
+    for (let i = 0; i < 49; i++) g.fail({ client: `fake-${i}`, peer: '10.0.0.5' }, t++);
+    expect(g.wait({ client: 'fake-new', peer: '10.0.0.5' }, t)).toBe(0);
+    g.fail({ client: 'fake-49', peer: '10.0.0.5' }, t++);
+    expect(g.wait({ client: 'fake-brand-new', peer: '10.0.0.5' }, t)).toBeGreaterThan(0);
+  });
+  it('one client is locked after 5 misses without locking others', () => {
+    const g = new SignInGuard();
+    for (let i = 0; i < 5; i++) g.fail({ client: 'a', peer: 'p' }, i);
+    expect(g.wait({ client: 'a', peer: 'p' }, 10)).toBeGreaterThan(0);
+    expect(g.wait({ client: 'b', peer: 'p' }, 10)).toBe(0);
+  });
+  it('a success does not reset the peer counter', () => {
+    const g = new SignInGuard();
+    for (let i = 0; i < 49; i++) g.fail({ client: `x${i}`, peer: 'p' }, i);
+    g.ok({ client: 'me', peer: 'p' });
+    g.fail({ client: 'y', peer: 'p' }, 100);
+    expect(g.wait({ client: 'z', peer: 'p' }, 101)).toBeGreaterThan(0);
   });
 });

@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { SESSION_COOKIE } from './auth-core';
+import { SESSION_COOKIE, type ClientId } from './auth-core';
 import { publicOrigin } from '../config/cors';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
@@ -12,10 +12,12 @@ type AuthedRequest = Request & { authUserId?: string };
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  private clientKey(req: Request): string {
-    // Behind a tunnel the peer is always the connector; Cloudflare puts the real client in cf-connecting-ip.
+  private clientKey(req: Request): ClientId {
+    // Behind a tunnel the peer is always the connector; Cloudflare puts the real client in cf-connecting-ip. That header can be forged
+    // by anyone connecting directly, so the peer address is counted too (see SignInGuard).
     const cf = req.headers['cf-connecting-ip'];
-    return (Array.isArray(cf) ? cf[0] : cf) || req.socket.remoteAddress || 'unknown';
+    const peer = req.socket.remoteAddress || 'unknown';
+    return { client: (Array.isArray(cf) ? cf[0] : cf) || peer, peer };
   }
 
   private setCookie(req: Request, res: Response, token: string): void {

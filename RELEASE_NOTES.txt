@@ -1,21 +1,14 @@
-Aigentron v0.1.32
+Aigentron v0.1.33
 
-For people who are not programmers: you can now talk to the assistant and hear its answers.
+For people who are not programmers: a small security fix and a tidier voice experience.
 
-Update note: this release adds one small database column (a per-chat "voice replies" switch). It is created automatically when the server starts.
+Security
+- Sign-in attempts are now limited more reliably: guessing a password could no longer be sped up by faking the "client address" header when connecting directly (home network, IP address, port forwarding). Behind a Cloudflare tunnel nothing changes for normal use.
 
-Voice (Settings → Voice)
-- Speech recognition: Telegram voice messages and the 🎤 button in the dashboard turn your speech into text.
-- Speech synthesis: answers can be read aloud. By default answers stay text — voice is switched on separately.
-- Works with OpenAI, Groq or any OpenAI-compatible server (including one on your own machine) — add it as a provider of kind OpenAI, pick it in Settings → Voice.
-- "Try it" on the same tab: hear the chosen voice and record yourself to see what is recognised. Cloud providers receive your audio / the read text — the page says so.
+Voice
+- Voice mode and the "Speak" switch sit in the same strip in both modes, with clearer icons, and nothing jumps when switching.
+- One read-aloud button on the latest answer only; it no longer moves the text.
+- Settings → Voice has a hands-on "Try it": hear the voice and record yourself to see what is recognised.
 
-In the dashboard
-- Voice mode: the message box is replaced by a calm orb that shows listening, thinking and speaking. Speak, pause, hear the answer; optional "keep listening".
-- "Speak" switch: read the latest answers aloud; one replay button on the latest answer.
-- The same controls sit in the same place in both modes, so nothing jumps.
-- The microphone needs https or localhost (a note in docs/voice.md).
-
-In Telegram
-- Send a voice message — the bot replies in text, with the recognised words echoed.
-- /voice on and /voice off — the bot answers with voice in that chat.
+Notes
+- Agents with a shell can still reach the server's sign-in key file; separating agents from it is the next planned security step (see docs/BACKLOG.md).

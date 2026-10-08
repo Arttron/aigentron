@@ -121,9 +121,9 @@ export function isMachineRoute(path: string): boolean {
   return /^\/api\/approvals\/check$/.test(path) || /^\/api\/approvals\/[^/]+\/wait$/.test(path) || path.startsWith('/api/internal-mcp') || path.startsWith('/api/research-mcp');
 }
 
-/** Failed sign-ins per key (client address): 5 misses → locked, doubling up to 15 minutes. */
+/** Failed sign-ins per key (client address): 5 misses → locked, doubling up to 15 minutes. Old failures are forgotten after an hour. */
 export class LoginLimiter {
-  private readonly fails = new Map<string, { count: number; until: number }>();
+  private readonly fails = new Map<string, { count: number; until: number; last: number }>();
   constructor(private readonly free = 5) {}
 
   /** Seconds the caller must wait (0 = may try). */
@@ -132,14 +132,43 @@ export class LoginLimiter {
     return f && f.until > now ? Math.ceil((f.until - now) / 1000) : 0;
   }
   fail(key: string, now = Date.now()): void {
-    const f = this.fails.get(key) ?? { count: 0, until: 0 };
+    let f = this.fails.get(key);
+    if (!f || now - f.last > 3_600_000) f = { count: 0, until: 0, last: now };
     f.count += 1;
+    f.last = now;
     if (f.count >= this.free) f.until = now + Math.min(15 * 60_000, 30_000 * 2 ** (f.count - this.free));
     this.fails.set(key, f);
     if (this.fails.size > 1000) this.fails.delete(this.fails.keys().next().value as string);
   }
   ok(key: string): void {
     this.fails.delete(key);
+  }
+}
+
+/** Who is signing in: `client` is the address we believe (possibly from a tunnel header), `peer` is the TCP peer we can trust. */
+export interface ClientId {
+  client: string;
+  peer: string;
+}
+
+/**
+ * The client address may come from a header (cf-connecting-ip behind a tunnel) that anyone connecting directly could forge to get a
+ * fresh counter on every try. So there is a second, looser counter on the TCP peer itself: forging buys at most a few dozen guesses,
+ * and behind a tunnel (where every request shares one peer) it only trips under a real flood.
+ */
+export class SignInGuard {
+  private readonly perClient = new LoginLimiter(5);
+  private readonly perPeer = new LoginLimiter(50);
+  wait(id: ClientId, now = Date.now()): number {
+    return Math.max(this.perClient.wait(id.client, now), this.perPeer.wait(id.peer, now));
+  }
+  fail(id: ClientId, now = Date.now()): void {
+    this.perClient.fail(id.client, now);
+    this.perPeer.fail(id.peer, now);
+  }
+  /** A success clears the personal counter only — never the peer's, or a known password could be used to reset the guard. */
+  ok(id: ClientId): void {
+    this.perClient.ok(id.client);
   }
 }
 
