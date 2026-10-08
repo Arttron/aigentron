@@ -1,103 +1,17 @@
-Aigentron v0.1.27
+Aigentron v0.1.28
 
-A built-in admin agent you can chat with to set up your agents — and a second
-agent runtime, OpenAI Codex.
+A terminal-style conversation view, and a few fixes on top of 0.1.27.
 
-Admin chat
-- New chat bubble on every dashboard page: talk to the admin like a support
-  chat. Describe what you want to get done and it suggests and creates the right
-  agents, starting from ready-made templates (pm, architect, backend, frontend,
-  designer, coder, reviewer, local-helper) that it tailors to your needs.
-- The admin can also tidy the platform: list tasks, cancel or delete specific
-  tasks, delete an agent. Every change goes through an approval card that shows
-  exactly what will happen (the full agent/skill text, or the list of tasks) and
-  nothing happens until you approve. It cannot touch settings, providers or
-  secrets, and it never reports something as done without a result to back it.
-- Fresh installs start with only the admin agent; the former default agents are
-  templates, not pre-installed. Existing installs are not changed: they keep
-  their agents and default agent, and simply get the admin added.
-- The admin has a mascot: an animated character on the chat bubble that thinks while
-  the admin works, celebrates when a reply lands and reacts when a task fails (loaded lazily; falls back to a
-  static icon, and stays still if your system prefers reduced motion).
-- The admin answers using your default provider — configure it in Settings
-  (the chat tells you if it isn't set up yet).
+Conversation
+- The task conversation now reads like a terminal: you> / agent> / done> prompts, a blinking cursor while the agent works,
+  and each tool call folded into one quiet line with its result (click to expand).
+- Two looks, switchable above the conversation and remembered per browser: "terminal" (light-green text on near-black in the
+  dark theme, deep-green ink on warm paper in the light theme — both checked for contrast) and "classic".
+- "messages only" hides the tool steps; a "↓ latest" button appears when you scroll up during a run.
+- Replies are rendered as Markdown (headings, lists, quotes, code blocks with a copy button, links). The renderer is
+  built in, never inserts raw HTML, and only opens http(s)/mailto links.
+- The message box: Enter sends, Shift+Enter adds a line (Cmd/Ctrl+Enter still sends).
 
-Codex runtime (new, experimental)
-- A new provider kind, "codex", runs agents on the OpenAI Codex CLI instead of
-  Claude Code, using your ChatGPT subscription (no API key) or an OpenAI API key.
-  Agents pick it simply by using that provider; failover chains work across
-  runtimes. The same approval gate, status reporting and subtasks apply.
-- Sign-in is manual for now: run `codex login --device-auth` on the server with
-  CODEX_HOME pointing at agent/.codex-home (never commit that folder). A
-  one-click sign-in from the dashboard is planned. The Codex CLI is included in
-  the Docker images; on a bare-metal install, install it yourself
-  (`npm i -g @openai/codex`).
-- Differences from Claude Code: no sub-agent delegation tool, coarser tool
-  restrictions (enforced by the approval hook), SSE-only MCP servers
-  (e.g. the Playwright container) are skipped.
-
-Admin from the console and secure keys
-- New command `aigentron-admin` (bare-metal install and the Docker images; `make admin` in the dev stack): the same admin chat in
-  a terminal. Approval cards are answered at the prompt and API keys go through a hidden prompt straight to the server.
-- API keys/tokens are never typed into a chat anymore: the admin asks through a secure field (dashboard card or console prompt);
-  the value is stored write-only and is not visible to the model, the transcript or the logs.
-- Fixed: a provider with a blank Base URL (OpenAI, DeepSeek) failed its connection test and model listing; it now uses the
-  family's default endpoint.
-
-More for the admin
-- Diagnostics: it can explain why a task failed or stalled (status, error, the agent's own summary, denied approvals,
-  last messages) and report token/request/cost usage per provider.
-- It can change a short list of settings (default agent, verification gate, concurrency, approval timeout, agent
-  instructions, branch, subdirectory) after your approval, shows old -> new, and keeps a journal of everything it changed so
-  any of it can be reverted ("undo"). Repo URL, tokens, channels and users stay out of its reach.
-- It can start a task for another agent on your behalf (approval required) and report the outcome.
-- Several related changes (e.g. three agents plus a provider, or an agent plus its first task) come as ONE approval card with
-  every item listed; the whole batch is validated first, applied in order, and each item stays individually revertible.
-
-Research tools
-- New built-in "research" tool server for regulatory/legal questions: search and fetch limited to
-  official sources (EU, UA, UK, US registries by default — editable in agent/research.json), full page
-  text with its edition/modification date, and a verify_quote check that confirms a quotation appears
-  verbatim in what was actually read. Only https, internal network addresses are unreachable, every
-  page is cached for reproducibility. Search needs a Brave key or a SearXNG instance; fetch works as is.
-- New "researcher" agent template (read-only: no shell, no file writes, no open web) that cites only
-  verified quotations with URL, clause and date.
-- MCP servers can now declare read-only tools (`readOnlyTools` in their config) so a trusted read-only
-  server no longer needs an approval for every call.
-
-Housekeeping and safer defaults
-- Credentials stay out of the agents' files: the shared Codex sign-in moved to a dedicated secrets
-  location (an older one is migrated automatically), and no run leaves a copy of it behind.
-- The docker compose stack now publishes its ports on 127.0.0.1 only (BIND_ADDRESS=0.0.0.0 to open them
-  deliberately); a boot-time check warns when an instance is reachable from the network with dev defaults.
-  `make init-env` creates .env and, on a fresh install, a random LiteLLM key.
-- Old task run folders are cleaned up automatically (RUNS_RETENTION_DAYS, default 14). Leftover worktrees from
-  the former per-task mode are cleaned only on request — the admin can propose it, showing exact numbers.
-- "Project subdirectory" in Settings now rejects git addresses/URLs with a clear message.
-- Agents page: "Start from a template" pre-fills the new-agent form.
-- New docs/workspace-layout.md: where everything lives per deployment mode, env files and variables, backups.
-
-Safer approvals, guard rails, tests
-- "Don't ask again" for an MCP tool now covers only the exact same arguments, and exceptions expire (30 days by default,
-  APPROVAL_EXCEPTION_TTL_DAYS).
-- Piping a download into a shell (curl ... | sh) now needs an approval.
-- A run that goes silent is aborted by a no-progress watchdog (AGENT_IDLE_TIMEOUT_MS); optional soft token budgets per task
-  and per day (BUDGET_TOKENS_PER_TASK / BUDGET_TOKENS_PER_DAY) stop runaway spend by blocking the task with an explanation.
-- MCP servers: "trustAnnotations" + "Discover tools" let tools that a server marks read-only skip approvals.
-- Hardening after a full review: the admin's change journal and undo are validated, verification commands run with a
-  minimal environment, Codex per-run files are private and scrubbed, the approval card always shows the full new value
-  of a settings change, and a chat is no longer forgotten after a network error.
-- Unit tests for the approval classifier, validators, SSRF guard and the Codex adapter (make test).
-
-Also in this release
-- Security: reading credential files (process environment, Codex/Claude sign-in
-  tokens, .env, .git/config, SSH/cloud keys) now needs your approval for every
-  agent, via file tools and shell commands alike. The admin agent has no shell,
-  file or network tools at all — only its platform tools.
-- Agent identity is the file name: a `name:` line inside an agent file can no
-  longer make an agent pass itself off as a built-in.
-- docker compose: the postgres/redis host ports are configurable
-  (POSTGRES_HOST_PORT / REDIS_HOST_PORT in .env) for machines where 5432/6379
-  are already taken.
-- Design notes for upcoming work (domain packs, agent store, knowledge base,
-  Codex runtime) were added under docs/.
+Fixes
+- No more "Permission deny rule NotebookRead / LS matches no known tool" warnings when the admin or researcher starts.
+- The admin's local change journal (admin-audit.jsonl) is no longer part of the repository or the images.

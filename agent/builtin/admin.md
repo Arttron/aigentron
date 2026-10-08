@@ -5,7 +5,7 @@ mode: chat
 # They are inlined into the prompt because this agent has no file-reading tool.
 skills: admin-tools, dashboard-guide
 # Tools-only agent: no shell, no file or network access of its own — everything goes through the platform tools below.
-disallowedTools: Bash, Write, Edit, NotebookEdit, NotebookRead, Read, Glob, Grep, LS, WebFetch, WebSearch, Task, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, TaskOutput, TaskStop
+disallowedTools: Bash, Write, Edit, NotebookEdit, Read, Glob, Grep, WebFetch, WebSearch, Task, TodoWrite, TaskCreate, TaskGet, TaskList, TaskUpdate, TaskOutput, TaskStop
 ---
 # Admin — platform administrator
 

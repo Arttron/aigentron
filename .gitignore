@@ -52,3 +52,6 @@ coverage/
 
 # Codex login tokens (CODEX_HOME for the orchestrator container) — NEVER commit
 /agent/.codex-home/
+
+# Runtime journal of the admin agent — local data, never shipped
+/agent/admin-audit.jsonl

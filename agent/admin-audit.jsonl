@@ -1,8 +1,0 @@
-{"id":"9ef7839d","ts":"2026-10-08T06:40:44.613Z","taskId":"cmuz63dgr00007uqok33z2fl7","tool":"propose_settings","summary":"Changed settings: verifyMaxAttempts — проверка отката","undo":{"kind":"settings","before":{"verifyMaxAttempts":2}},"undone":true}
-{"id":"0dc2eba5","ts":"2026-10-08T06:41:18.467Z","taskId":"cmuz63dgr00007uqok33z2fl7","tool":"propose_undo","summary":"Reverted change 9ef7839d: Changed settings: verifyMaxAttempts — проверка отката"}
-{"id":"3a3a379f","ts":"2026-10-08T06:43:19.992Z","taskId":"cmuz66kgm00007uqo1dtxel9s","tool":"propose_task","summary":"Started task cmuz66zhx00047uqodg7dz2dt for agent \"zz-researcher\" — Verified quotation of HSWA 1974 section 3(1)"}
-{"id":"b399bab6","ts":"2026-10-08T06:52:00.823Z","taskId":"cmuz6hmq000007uqofqdc9wr7","tool":"propose_agent","summary":"Created agent \"zz-a\"","undo":{"kind":"agent","name":"zz-a","snapshot":null},"undone":true}
-{"id":"8cd2e128","ts":"2026-10-08T06:52:00.826Z","taskId":"cmuz6hmq000007uqofqdc9wr7","tool":"propose_agent","summary":"Created agent \"zz-b\"","undo":{"kind":"agent","name":"zz-b","snapshot":null}}
-{"id":"55d246ac","ts":"2026-10-08T06:52:00.830Z","taskId":"cmuz6hmq000007uqofqdc9wr7","tool":"propose_task","summary":"Started task cmuz6i5do00047uqohiewbk2q for agent \"zz-a\" — Ответить одним словом «ок»"}
-{"id":"3052ae7d","ts":"2026-10-08T06:52:00.831Z","taskId":"cmuz6hmq000007uqofqdc9wr7","tool":"propose_batch","summary":"Batch: 3 of 3 change(s) applied — Create two minimal read-only advisors and start the requested task for zz-a in o"}
-{"id":"a4a456e6","ts":"2026-10-08T06:55:01.661Z","taskId":"cmuz6ls9u000e7uqorcgxwhzf","tool":"propose_undo","summary":"Reverted change b399bab6: Created agent \"zz-a\""}

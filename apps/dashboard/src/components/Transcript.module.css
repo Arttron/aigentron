@@ -1,6 +1,62 @@
+/*
+ * Conversation view. Two looks share one structure:
+ *  - classic:  the app's neumorphic surface and theme colours.
+ *  - terminal: monospace, prompt-style, "phosphor" colours that follow the light/dark theme —
+ *              dark = light-green text on near-black, light = deep-green ink on warm paper.
+ * All colours go through --t-* custom properties so contrast is set in one place per theme.
+ */
+.wrap {
+  position: relative;
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.seg {
+  display: inline-flex;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--inset-sm);
+  padding: 2px;
+}
+.segBtn {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  color: var(--text-dim);
+}
+.segBtn:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.segOn {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+.hiddenNote {
+  color: var(--text-dim);
+}
+
 .transcript {
-  background: var(--bg);
-  border: none;
+  --t-bg: var(--bg);
+  --t-text: var(--text);
+  --t-dim: var(--text-dim);
+  --t-accent: var(--accent);
+  --t-user: var(--accent);
+  --t-warn: var(--amber);
+  --t-err: var(--red);
+  --t-ok: var(--green);
+  --t-tool: var(--pastel-blue);
+  --t-link: var(--accent);
+  --t-code-bg: var(--bg-elev-2);
+  --t-rule: var(--border);
+
+  background: var(--t-bg);
+  color: var(--t-text);
   border-radius: var(--radius);
   box-shadow: var(--inset);
   padding: 14px;
@@ -8,6 +64,63 @@
   overflow-y: auto;
   font-family: var(--mono);
   font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* ---- terminal look: dark (default) ---- */
+.transcript[data-look='terminal'] {
+  --t-bg: #080d09;
+  --t-text: #c4f1cc; /* ≈ 14:1 on the background */
+  --t-dim: #78b887; /* ≈ 7.5:1 */
+  --t-accent: #4dff7c;
+  --t-user: #7dffa0;
+  --t-warn: #ffc857;
+  --t-err: #ff7b72;
+  --t-ok: #4dff7c;
+  --t-tool: #8fd9a0;
+  --t-link: #7dd3fc;
+  --t-code-bg: #101a12;
+  --t-rule: #1f3326;
+  box-shadow: inset 0 0 0 1px #1f3326, inset 0 0 28px rgba(77, 255, 124, 0.06);
+  text-shadow: 0 0 6px rgba(77, 255, 124, 0.18);
+  background-image: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.018) 0, rgba(255, 255, 255, 0.018) 1px, transparent 1px, transparent 3px);
+}
+/* ---- terminal look: light theme — "ink on paper", no glow ---- */
+:global(:root[data-theme='light']) .transcript[data-look='terminal'] {
+  --t-bg: #f4f1e3;
+  --t-text: #13301b; /* ≈ 12:1 */
+  --t-dim: #4b6b53; /* ≈ 5:1 */
+  --t-accent: #0b6a2b;
+  --t-user: #0b6a2b;
+  --t-warn: #8a5a00;
+  --t-err: #b3261e;
+  --t-ok: #0b6a2b;
+  --t-tool: #2c6b46;
+  --t-link: #0b57a4;
+  --t-code-bg: #e8e5d3;
+  --t-rule: #cfcab2;
+  box-shadow: inset 0 0 0 1px #cfcab2;
+  text-shadow: none;
+  background-image: none;
+}
+@media (prefers-color-scheme: light) {
+  :global(:root:not([data-theme])) .transcript[data-look='terminal'] {
+    --t-bg: #f4f1e3;
+    --t-text: #13301b;
+    --t-dim: #4b6b53;
+    --t-accent: #0b6a2b;
+    --t-user: #0b6a2b;
+    --t-warn: #8a5a00;
+    --t-err: #b3261e;
+    --t-ok: #0b6a2b;
+    --t-tool: #2c6b46;
+    --t-link: #0b57a4;
+    --t-code-bg: #e8e5d3;
+    --t-rule: #cfcab2;
+    box-shadow: inset 0 0 0 1px #cfcab2;
+    text-shadow: none;
+    background-image: none;
+  }
 }
 
 .line {
@@ -15,39 +128,51 @@
   word-break: break-word;
   padding: 1px 0;
 }
-
 .kind {
-  color: var(--text-dim);
+  color: var(--t-dim);
   margin-right: 8px;
   user-select: none;
 }
-
 .ts {
-  color: var(--text-dim);
+  color: var(--t-dim);
   margin-right: 8px;
   user-select: none;
   font-size: 11px;
 }
-
-/* User (request) messages — a chat bubble distinct from agent output. */
-.userMsg {
-  margin: 8px 0;
-  padding: 9px 12px;
-  background: var(--accent-soft);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--raised-xs);
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.userTag {
+.prompt {
   display: inline-block;
   margin-right: 8px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--t-user);
   user-select: none;
 }
+
+.userMsg {
+  margin: 10px 0 6px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--t-user);
+  background: var(--t-code-bg);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .userText {
-  color: var(--text);
+  color: var(--t-text);
+}
+.agentMsg {
+  margin: 6px 0;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: start;
+}
+.agentMsg .prompt {
+  color: var(--t-accent);
+}
+.final .prompt {
+  color: var(--t-ok);
+}
+.agentBody {
+  min-width: 0;
 }
 .thumbs {
   display: flex;
@@ -59,44 +184,108 @@
   width: 72px;
   height: 72px;
   object-fit: cover;
-  border: none;
   border-radius: var(--radius-sm);
   box-shadow: var(--raised-xs);
 }
 
-.assistant {
-  color: var(--text);
+/* Tool calls: one quiet line, details on demand. */
+.tool {
+  margin: 2px 0;
+  color: var(--t-tool);
 }
-.tool_use {
-  color: var(--accent);
+.tool summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
 }
+.tool summary::-webkit-details-marker {
+  display: none;
+}
+.tool summary:focus-visible {
+  outline: 2px solid var(--t-accent);
+}
+.toolMark {
+  color: var(--t-dim);
+  transition: transform 0.12s;
+}
+.tool[open] .toolMark {
+  transform: rotate(90deg);
+}
+.toolTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolDone {
+  color: var(--t-dim);
+  font-size: 11px;
+}
+.toolRun {
+  color: var(--t-warn);
+  font-size: 11px;
+}
+.toolBody {
+  margin: 4px 0 8px 16px;
+  padding: 8px 10px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--t-code-bg);
+  border: 1px solid var(--t-rule);
+  border-radius: 6px;
+  color: var(--t-text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 .delegation {
   color: var(--pastel-purple);
   font-weight: 600;
 }
-.tool_result {
-  color: var(--pastel-blue);
-}
 .system {
-  color: var(--text-dim);
-}
-.result {
-  color: var(--green);
+  color: var(--t-dim);
 }
 .stderr {
-  color: var(--red);
+  color: var(--t-err);
 }
 .working {
-  color: var(--amber);
-  animation: pulse 1.4s ease-in-out infinite;
+  color: var(--t-warn);
+  margin-top: 6px;
+}
+.cursor {
+  margin-left: 6px;
+  animation: blink 1.1s steps(1) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
 }
 
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
+.jump {
+  all: unset;
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  cursor: pointer;
+  padding: 3px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  box-shadow: var(--raised-sm);
+}
+.jump:focus-visible {
+  outline: 2px solid var(--text);
 }

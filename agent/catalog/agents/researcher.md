@@ -4,7 +4,7 @@ mcp: research
 skills: none
 # Tools-only: web pages are untrusted input, so this agent can neither write files nor run commands, and it reaches the
 # internet only through the `research` tool (official-source allow-list enforced by the tool itself).
-disallowedTools: Bash, Write, Edit, NotebookEdit, NotebookRead, Read, Glob, Grep, LS, WebFetch, WebSearch, Task, TodoWrite
+disallowedTools: Bash, Write, Edit, NotebookEdit, Read, Glob, Grep, WebFetch, WebSearch, Task, TodoWrite
 ---
 # Researcher — official-source research with verifiable citations
 

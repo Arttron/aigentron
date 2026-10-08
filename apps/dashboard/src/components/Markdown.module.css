@@ -1,0 +1,71 @@
+.md {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.md p {
+  margin: 0 0 0.6em;
+  white-space: pre-wrap;
+}
+.md p:last-child {
+  margin-bottom: 0;
+}
+.h {
+  font-weight: 700;
+  margin: 0.7em 0 0.3em;
+}
+.h[data-level='1'] {
+  font-size: 1.15em;
+}
+.md ul,
+.md ol {
+  margin: 0 0 0.6em;
+  padding-left: 1.6em;
+}
+.md blockquote {
+  margin: 0 0 0.6em;
+  padding-left: 10px;
+  border-left: 3px solid var(--t-dim, var(--text-dim));
+  color: var(--t-dim, var(--text-dim));
+  white-space: pre-wrap;
+}
+.md a {
+  color: var(--t-link, var(--accent));
+  text-decoration: underline;
+}
+.inlineCode {
+  font-family: var(--mono);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--t-code-bg, var(--bg-elev-2));
+}
+.codeWrap {
+  margin: 0.4em 0 0.7em;
+  border-radius: 6px;
+  background: var(--t-code-bg, var(--bg-elev-2));
+  border: 1px solid var(--t-rule, var(--border));
+  overflow: hidden;
+}
+.codeHead {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--t-dim, var(--text-dim));
+  border-bottom: 1px solid var(--t-rule, var(--border));
+}
+.copy {
+  all: unset;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.copy:focus-visible {
+  outline: 2px solid var(--t-accent, var(--accent));
+}
+.code {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}

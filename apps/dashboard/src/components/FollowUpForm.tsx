@@ -4,6 +4,7 @@ import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
 import { cn } from '@/lib/cn';
+import { useLook } from '@/lib/transcript-look';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import styles from './FollowUpForm.module.css';
 
@@ -41,6 +42,7 @@ export function FollowUpForm({
   terminal: boolean;
   onSend: (prompt: string, attachments: string[], references: string[]) => Promise<void>;
 }) {
+  const [look] = useLook();
   const [text, setText] = useState('');
   const [staged, setStaged] = useState<Staged[]>([]);
   const [references, setReferences] = useState<string[]>([]);
@@ -153,7 +155,8 @@ export function FollowUpForm({
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    // Enter sends, Shift+Enter makes a new line (⌘/Ctrl+Enter also sends). Not while an IME is composing.
+    if (e.key === 'Enter' && !e.shiftKey && !(e.nativeEvent as KeyboardEvent).isComposing) {
       e.preventDefault();
       void send();
     }
@@ -179,14 +182,18 @@ export function FollowUpForm({
   return (
     <Card>
       <SectionTitle className={styles.flush}>{editingId ? 'Edit queued message' : 'Message'}</SectionTitle>
-      <textarea
-        className={styles.input}
-        placeholder="Type a message… (⌘/Ctrl+Enter) — attach images/PDFs with 📎"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        rows={3}
-      />
+      <div className={cn(styles.composer, look === 'terminal' && styles.term)}>
+        {look === 'terminal' && <span className={styles.promptMark} aria-hidden>you&gt;</span>}
+        <textarea
+          className={styles.input}
+          aria-label="Message"
+          placeholder="Type a message — Enter sends, Shift+Enter adds a line. Attach images/PDFs with 📎"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          rows={3}
+        />
+      </div>
 
       {staged.length > 0 && (
         <div className={styles.staged}>
