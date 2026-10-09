@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, IsUrl, Matches, MaxLength, Min, ValidateIf } from 'class-validator';
 
 const KINDS = ['anthropic', 'openai', 'deepseek', 'ollama', 'codex'] as const;
 // oauth-token: a CLI-minted subscription token (e.g. `claude setup-token`) —
@@ -17,7 +17,9 @@ export class CreateProviderDto {
   @IsIn(KINDS)
   kind?: string;
 
-  @IsOptional()
+  // '' clears it (Update); otherwise it must be an http(s) address (localhost / LAN names allowed)
+  @ValidateIf((o: { baseUrl?: string }) => !!o.baseUrl)
+  @IsUrl({ require_protocol: true, require_tld: false, protocols: ['http', 'https'] }, { message: 'baseUrl must be an http(s) address, e.g. https://api.example.com/v1' })
   @IsString()
   @MaxLength(500)
   baseUrl?: string;
@@ -55,7 +57,9 @@ export class ModelsPreviewDto {
   @IsIn(KINDS)
   kind?: string;
 
-  @IsOptional()
+  // '' clears it (Update); otherwise it must be an http(s) address (localhost / LAN names allowed)
+  @ValidateIf((o: { baseUrl?: string }) => !!o.baseUrl)
+  @IsUrl({ require_protocol: true, require_tld: false, protocols: ['http', 'https'] }, { message: 'baseUrl must be an http(s) address, e.g. https://api.example.com/v1' })
   @IsString()
   @MaxLength(500)
   baseUrl?: string;
@@ -75,7 +79,9 @@ export class UpdateProviderDto {
   @IsIn(KINDS)
   kind?: string;
 
-  @IsOptional()
+  // '' clears it (Update); otherwise it must be an http(s) address (localhost / LAN names allowed)
+  @ValidateIf((o: { baseUrl?: string }) => !!o.baseUrl)
+  @IsUrl({ require_protocol: true, require_tld: false, protocols: ['http', 'https'] }, { message: 'baseUrl must be an http(s) address, e.g. https://api.example.com/v1' })
   @IsString()
   @MaxLength(500)
   baseUrl?: string;

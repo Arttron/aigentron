@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
@@ -173,6 +173,9 @@ export class ProvidersService implements OnModuleInit {
   }
 
   async create(input: { name: string } & ProviderPatch): Promise<ProviderRow> {
+    if (await this.prisma.provider.findUnique({ where: { name: input.name }, select: { name: true } })) {
+      throw new ConflictException(`A provider named "${input.name}" already exists — edit it instead.`);
+    }
     const row = await this.prisma.provider.create({
       data: {
         name: input.name,

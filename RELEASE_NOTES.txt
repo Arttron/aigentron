@@ -1,7 +1,11 @@
-Aigentron v0.1.41
+Aigentron v0.1.42
 
-For people who are not programmers: the terminal setup menu is easier to get out of.
+For people who are not programmers: the terminal setup menu no longer lets mistakes slip through quietly.
 
 Setup wizard (`aigentron`)
-- Every menu now ends with "← Back" (one level up) or "Exit" (where there is nothing above), so you are never stuck after choosing something like "Delete a provider".
-- Esc does the same from anywhere: in a menu, while typing a value, or at a "really do it?" question. Nothing is saved when you cancel; a cancelled delete deletes nothing.
+- Claude subscription login: the pasted token is required (an empty or wrong value is refused with a clear message instead of silently creating a broken provider), the wizard confirms how many characters it received, and it offers the current Claude models to choose from.
+- API key, bearer token and OpenAI key for Codex: an empty key is asked for again; you can still create the provider without a key, but only after saying so explicitly.
+- Provider name is checked right away (letters, digits, - and _, not already used); a Base URL must be a real http(s) address; Telegram chat ids must be numbers.
+
+Server
+- Creating a provider with a name that already exists now answers "already exists" instead of a generic server error, and a Base URL that is not an http(s) address is refused.

@@ -431,7 +431,20 @@ async function promptOauthSecret(rl, label) {
     log('  then paste the resulting token below.');
   }
   log('  Note: tokens from `claude setup-token` expire after 1 year — repeat this to rotate one.');
-  return promptSecret(rl, `${label}: `);
+  log(c.gray('  Copy the token it printed (the long line starting with sk-ant-oat…) and paste it below — it stays hidden. Esc cancels.'));
+  for (;;) {
+    const token = (await promptSecret(rl, `${label}: `)).replace(/\s+/g, '');
+    if (!token) {
+      log('  ✗ nothing was entered — paste the token and press Enter (or Esc to cancel).');
+      continue;
+    }
+    if (!/^sk-ant-/.test(token) || token.length < 40) {
+      log(`  ✗ that does not look like a Claude token (${token.length} characters, expected sk-ant-… and about 100). Paste it again.`);
+      continue;
+    }
+    log(`  ✓ token received (${token.length} characters, hidden)`);
+    return token;
+  }
 }
 
 // ---- steps ----
@@ -533,6 +546,15 @@ async function claudeSignIn(rl) {
   return await promptOauthSecret(rl, 'OAuth token (starts with sk-ant-oat…)');
 }
 
+/** Offered when the provider cannot list models itself (e.g. a Claude subscription login) — the current ones, with a hint. */
+const KNOWN_MODELS = {
+  anthropic: [
+    { id: 'claude-sonnet-5-5', hint: '— balanced, the usual choice' },
+    { id: 'claude-opus-5-5', hint: '— strongest, slower and costlier' },
+    { id: 'claude-haiku-4-5-20251001', hint: '— fastest and cheapest' },
+  ],
+};
+
 const AUTH_METHODS = [
   { value: 'api-key', label: 'API key', hint: '— pay per use (Anthropic, OpenAI, DeepSeek, any compatible endpoint)' },
   { value: 'claude-login', label: 'Claude subscription', hint: '— sign in with Claude Pro/Max (claude setup-token)' },
@@ -542,10 +564,49 @@ const AUTH_METHODS = [
   { value: 'none', label: 'No authentication', hint: '— a local server such as Ollama' },
 ];
 
+const isHttpUrl = (v) => {
+  try {
+    const u = new URL(v);
+    return /^https?:$/.test(u.protocol) && !u.username && !u.password;
+  } catch {
+    return false;
+  }
+};
+
+/** Ask for an http(s) address until it is valid; blank = none (returns ''), '-' only when `allowClear`. */
+async function askUrl(rl, question, current, { allowClear = false } = {}) {
+  for (;;) {
+    const v = (await prompt(rl, question, current || undefined)).trim();
+    if (!v) return '';
+    if (allowClear && v === '-') return '-';
+    if (isHttpUrl(v)) return v;
+    log('  ✗ that is not an http(s) address — e.g. https://api.example.com/v1 or http://localhost:11434');
+  }
+}
+
+/** A key / token that must not be silently skipped: re-ask when empty, and only accept "no key" after an explicit yes. */
+async function askKey(rl, question) {
+  for (;;) {
+    const v = (await promptSecret(rl, question)).trim();
+    if (v) {
+      log(`  ✓ received (${v.length} characters, hidden)`);
+      return v;
+    }
+    if (await promptYesNo(rl, 'Nothing was entered. Create it without a key (add it later with Edit)?', false)) return '';
+  }
+}
+
 /** One provider, in the order: name → how it signs in → protocol / address → model → limits → save → test. Returns its name or null. */
 async function addProvider(rl, firstOne) {
-  const name = await prompt(rl, 'Provider name', firstOne ? 'claude-cloud' : undefined);
-  if (!name) return null;
+  const taken = new Set((await apiGet('/providers').catch(() => [])).map((p) => p.name));
+  let name = '';
+  for (;;) {
+    name = (await prompt(rl, 'Provider name (letters, digits, - and _)', firstOne ? 'claude-cloud' : undefined)).trim();
+    if (!name) return null;
+    if (!/^[\w-]{1,60}$/.test(name)) log('  ✗ use only letters, digits, - and _ (no spaces), up to 60 characters');
+    else if (taken.has(name)) log(`  ✗ a provider named "${name}" already exists — pick another name, or go Back and use Edit`);
+    else break;
+  }
   const method = await promptChoice(rl, 'How does it sign in?', AUTH_METHODS, 'api-key');
 
   let kind;
@@ -565,11 +626,10 @@ async function addProvider(rl, firstOne) {
   } else if (method === 'codex-key') {
     kind = 'codex';
     authMode = 'api-key';
-    secret = await promptSecret(rl, 'OpenAI API key (hidden): ');
+    secret = await askKey(rl, 'OpenAI API key (hidden)');
   } else {
     // Base URL first, then suggest the protocol from it (a vendor's URL usually tells which one it speaks).
-    const baseUrlInput = await prompt(rl, 'Base URL (blank = the vendor\'s native Anthropic API)');
-    baseUrl = baseUrlInput || undefined;
+    baseUrl = (await askUrl(rl, 'Base URL (blank = the vendor\'s native Anthropic API)')) || undefined;
     const suggested = method === 'none' && !baseUrl ? 'ollama' : guessKind(baseUrl);
     kind = await promptChoice(
       rl,
@@ -587,10 +647,10 @@ async function addProvider(rl, firstOne) {
       authMode = 'api-key';
     } else if (method === 'auth-token') {
       authMode = 'auth-token';
-      secret = await promptSecret(rl, 'Bearer token (hidden): ');
+      secret = await askKey(rl, 'Bearer token (hidden)');
     } else {
       authMode = 'api-key';
-      secret = await promptSecret(rl, 'API key (hidden): ');
+      secret = await askKey(rl, 'API key (hidden)');
     }
   }
 
@@ -602,6 +662,12 @@ async function addProvider(rl, firstOne) {
         model = await promptChoiceOptional(rl, 'Pick a model', preview.models);
       } else {
         log(`  (could not list models: ${preview.error || 'none returned'})`);
+        const known = KNOWN_MODELS[kind];
+        if (known) {
+          const other = '\u0000other';
+          const pick = await promptChoice(rl, 'Pick a model', [...known.map((m) => ({ value: m.id, label: m.id, hint: m.hint })), { value: other, label: 'Another model…', hint: '— type its name' }], known[0].id);
+          if (pick !== other) model = pick;
+        }
       }
     } catch (e) {
       log(`  (model preview failed: ${e.message})`);
@@ -658,7 +724,7 @@ async function editProvider(rl, p, def) {
   const model = (await prompt(rl, 'Default model', p.model || undefined)).trim();
   if (model && model !== p.model) patch.model = model;
   if (p.kind !== 'codex') {
-    const baseUrl = (await prompt(rl, 'Base URL (- clears)', p.baseUrl || undefined)).trim();
+    const baseUrl = await askUrl(rl, 'Base URL (- clears)', p.baseUrl, { allowClear: true });
     if (baseUrl === '-') patch.baseUrl = '';
     else if (baseUrl && baseUrl !== p.baseUrl) patch.baseUrl = baseUrl;
   }
@@ -786,9 +852,14 @@ async function promptChannelField(rl, field, current) {
   }
   if (field.type === 'list') {
     const cur = Array.isArray(current) ? current.join(', ') : '';
-    const answer = (await prompt(rl, `${field.label}${suffix} (comma-separated${editing ? ', Enter keeps, - clears' : ''})`, cur)).trim();
-    if (answer === '-') return [];
-    return splitCsv(answer);
+    for (;;) {
+      const answer = (await prompt(rl, `${field.label}${suffix} (comma-separated${editing ? ', Enter keeps, - clears' : ''})`, cur)).trim();
+      if (answer === '-') return [];
+      const list = splitCsv(answer);
+      const bad = field.key === 'allowedChatIds' ? list.filter((x) => !/^-?\d+$/.test(x)) : [];
+      if (!bad.length) return list;
+      log(`  ✗ chat ids are numbers (e.g. 477581596, or -1001234567890 for a group) — not: ${bad.join(', ')}`);
+    }
   }
   if (field.type === 'agent') {
     const agents = await apiGet('/agents').catch(() => []);
