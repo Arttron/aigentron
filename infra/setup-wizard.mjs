@@ -741,11 +741,43 @@ async function setDefaultProvider(name) {
   }
 }
 
+/** Edit: keep the current model, pick one from the provider's own list (or the known Claude models), or type a name. */
+async function chooseModel(rl, p) {
+  const how = await promptChoice(
+    rl,
+    `Default model${p.model ? ` (now ${p.model})` : ''}`,
+    [
+      { value: 'keep', label: 'Keep it', hint: p.model ? `— ${p.model}` : '— none set' },
+      { value: 'list', label: 'Choose from the available models' },
+      { value: 'type', label: 'Type a model name' },
+    ],
+    p.model ? 'keep' : 'list',
+  );
+  if (how === 'keep') return p.model || '';
+  if (how === 'type') return (await prompt(rl, 'Model name', p.model || undefined)).trim();
+  let models = [];
+  try {
+    const r = await apiGet(`/providers/${encodeURIComponent(p.name)}/models`);
+    if (r.ok && r.models?.length) models = r.models.map((m) => ({ value: m, label: m }));
+    else log(c.gray(`  (the provider could not list its models: ${r.error || 'none returned'})`));
+  } catch (e) {
+    log(c.gray(`  (could not list models: ${e.message})`));
+  }
+  if (!models.length && KNOWN_MODELS[p.kind]) {
+    log(c.gray('  Showing the current models for this provider type instead:'));
+    models = KNOWN_MODELS[p.kind].map((m) => ({ value: m.id, label: m.id, hint: m.hint }));
+  }
+  if (!models.length) return (await prompt(rl, 'Model name', p.model || undefined)).trim();
+  const other = '\u0000other';
+  const pick = await promptChoice(rl, 'Pick a model', [...models, { value: other, label: 'Another model…', hint: '— type its name' }], models.some((m) => m.value === p.model) ? p.model : models[0].value);
+  return pick === other ? (await prompt(rl, 'Model name', p.model || undefined)).trim() : pick;
+}
+
 /** Change one provider: model, base URL, limits, secret / sign-in, and whether it is the default. */
 async function editProvider(rl, p, def) {
   log(`  Editing "${p.name}" (${p.kind}, ${p.authMode}). Enter keeps the current value.`);
   const patch = {};
-  const model = (await prompt(rl, 'Default model', p.model || undefined)).trim();
+  const model = await chooseModel(rl, p);
   if (model && model !== p.model) patch.model = model;
   if (p.kind !== 'codex') {
     const baseUrl = await askUrl(rl, 'Base URL (- clears)', p.baseUrl, { allowClear: true });
