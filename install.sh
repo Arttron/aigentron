@@ -490,6 +490,18 @@ fi
 cp "$RELEASE_DIR/infra/update-check.sh" "$INSTALL_DIR/update-check.sh"
 chmod +x "$INSTALL_DIR/update-check.sh"
 
+# The `aigentron` command: one entry point for the setup menu, status, logs, restart, update (infra/aigentron-cli.sh, with this
+# install's paths filled in). Goes to /usr/local/bin when we may write there, else next to the install.
+install_cli() {
+  cli_src="$RELEASE_DIR/infra/aigentron-cli.sh"
+  [ -f "$cli_src" ] || return 0
+  if [ -w /usr/local/bin ] || [ "$(id -u)" = 0 ]; then CLI_PATH=/usr/local/bin/aigentron; else mkdir -p "$INSTALL_DIR"; CLI_PATH="$INSTALL_DIR/aigentron"; fi
+  sed -e "s|__MODE__|$1|" -e "s|__CURRENT__|${CURRENT_LINK:-}|" -e "s|__CONTAINER__|${CONTAINER_NAME:-}|" -e "s|__DATA_DIR__|${DATA_DIR:-}|" -e "s|__INSTALL_DIR__|$INSTALL_DIR|" "$cli_src" > "$CLI_PATH"
+  chmod +x "$CLI_PATH"
+  if [ "$CLI_PATH" = /usr/local/bin/aigentron ]; then CLI_HINT="aigentron"; else CLI_HINT="$CLI_PATH   (add it to your PATH, or: sudo ln -sf $CLI_PATH /usr/local/bin/aigentron)"; fi
+}
+CLI_HINT="aigentron"
+
 # ---- build + run (mode-specific) -----------------------------------------
 
 if [ "$INSTALL_MODE" = docker ]; then
@@ -507,12 +519,13 @@ if [ "$INSTALL_MODE" = docker ]; then
     --env-file "$ENV_FILE" \
     "$IMAGE:$VERSION"
 
+  install_cli docker
+
   log "Aigentron $VERSION is running."
   log "Dashboard + API: http://localhost:3001"
   log ""
-  log "Run the setup wizard to configure providers, channels, agents, skills, and a repo:"
-  log "  docker exec -it $CONTAINER_NAME node /app/infra/setup-wizard.mjs"
-  log "  # (or, if this machine also has Node: node \"$RELEASE_DIR/infra/setup-wizard.mjs\")"
+  log "Set up providers, channels, agents and a repo with the guided menu:"
+  log "  $CLI_HINT"
 else
   # Prune superseded release dirs BEFORE building this one: each holds a full
   # monorepo checkout + its own node_modules/dist/.next build output (unlike
@@ -589,6 +602,7 @@ EOF
 
   log "Enabling + (re)starting the aigentron service"
   # Console access to the admin agent from any shell on this server. Points at the `current` symlink, so updates apply.
+  install_cli bare
   cat > /usr/local/bin/aigentron-admin <<SHIM
 #!/bin/sh
 exec node "$CURRENT_LINK/infra/admin-cli.mjs" "\$@"
@@ -606,8 +620,8 @@ SHIM
   log "Dashboard + API: http://localhost:3001"
   log "Logs:             journalctl -u aigentron -f"
   log ""
-  log "Talk to the admin assistant from this terminal (set up providers, agents, … by chatting):"
-  log "  aigentron-admin"
-  log "Or run the guided setup wizard:"
-  log "  node \"$CURRENT_LINK/infra/setup-wizard.mjs\""
+  log "Set up providers, channels, agents and a repo with the guided menu:"
+  log "  aigentron"
+  log "Other commands: aigentron status | logs | restart | update | admin | help"
+  log "Or chat with the admin assistant: aigentron-admin"
 fi

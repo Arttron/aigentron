@@ -25,6 +25,8 @@ make up                # build + start the full stack
 
 Dashboard → http://localhost:3000 · Orchestrator API → http://localhost:3001
 
+**One command on the server:** `aigentron` opens the setup menu (providers, channels, agents, repository); `aigentron status | logs | restart | update | admin | reset-password | help` do the rest. The installer puts it on your PATH.
+
 **First-run setup:** once the stack is up, `pnpm setup` (or `node infra/setup-wizard.mjs`)
 runs a guided CLI wizard for providers, channels, agents, skills, and an optional project
 repo — the same REST API the dashboard uses, just walked step by step from a terminal. The

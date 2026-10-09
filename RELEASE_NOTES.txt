@@ -1,9 +1,12 @@
-Aigentron v0.1.36
+Aigentron v0.1.37
 
-For people who are not programmers: adding a provider in the terminal setup wizard now works the usual way, including subscriptions.
+For people who are not programmers: one command, `aigentron`, to manage the server from the terminal.
 
-Setup wizard (node infra/setup-wizard.mjs)
-- Adding a provider: name → how it signs in → protocol and address → model → limits → a quick test.
-- Ways to sign in: API key, Claude subscription (Pro/Max), ChatGPT subscription via Codex (device-code sign-in), OpenAI key for Codex, bearer token, or no authentication for a local server.
-- Subscriptions are handled in the wizard: it starts the login for you where it can, and tells you exactly what to do (for example, run it inside the container) where it cannot.
-- Editing an existing provider shows how it signs in and its model, and a ChatGPT login can be renewed from there.
+The `aigentron` command (installed with the server)
+- `aigentron` opens the setup menu: providers, channels, agents, repository, advanced. `aigentron providers | channels | agents | repo` jump straight to a section.
+- `aigentron status | start | stop | restart | logs` — run and watch the server.
+- `aigentron doctor` — checks the common problems (service running, port answers, disk, memory, LiteLLM not exposed, a newer release available).
+- `aigentron update` — installs the latest release and keeps your data and settings.
+- `aigentron reset-password` — forgot the dashboard password? Removes all passwords after a confirmation.
+- `aigentron admin` — chat with the admin assistant in the terminal; `-h` on any command shows help; `-v` shows the version.
+- Works for both the Docker and the bare-metal install. Servers installed earlier get the command after one update.

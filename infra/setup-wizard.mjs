@@ -899,6 +899,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--orchestrator-url') args.orchestratorUrl = argv[++i];
     else if (a === '--advanced') args.advanced = true;
+    else if (a === '--section') args.section = argv[++i];
     else if (a === '-h' || a === '--help') args.help = true;
   }
   return args;
@@ -908,6 +909,7 @@ function printHelp() {
   log('Usage: node infra/setup-wizard.mjs [--orchestrator-url <url>] [--advanced]');
   log('  --orchestrator-url  Orchestrator base URL (default http://localhost:3001)');
   log('  --advanced          Skip straight to the password-gated advanced-settings step');
+  log('  --section <name>    Jump straight to one section: providers | channels | agents | repo | advanced');
 }
 
 async function main() {
@@ -936,6 +938,20 @@ async function main() {
   try {
     banner('Aigentron setup wizard', 'guided configuration — re-run any time to change things');
     await stepDeploymentMode(rl, args.orchestratorUrl);
+
+    if (args.section) {
+      const names = async () => (await apiGet('/providers').catch(() => [])).map((p) => p.name);
+      const sections = {
+        providers: () => stepProviders(rl),
+        channels: () => stepChannels(rl),
+        agents: async () => stepAgents(rl, await names()),
+        repo: () => stepRepo(rl),
+        advanced: () => stepAdvanced(rl, { startUnlocked: false }),
+      };
+      if (!sections[args.section]) throw new Error(`unknown section "${args.section}" — use: ${Object.keys(sections).join(', ')}`);
+      await sections[args.section]();
+      return;
+    }
 
     if (args.advanced) {
       await stepAdvanced(rl, { startUnlocked: true });
