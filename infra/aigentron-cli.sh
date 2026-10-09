@@ -30,6 +30,64 @@ version() {
   else cat "$CURRENT/VERSION" 2>/dev/null || echo unknown; fi
 }
 
+# Tab completion: `aigentron completion bash|zsh` prints the script (the installer saves it where the shell looks for it).
+completion() {
+  case "${1:-}" in
+    bash)
+      cat <<'BASH'
+_aigentron() {
+  local cur="${COMP_WORDS[COMP_CWORD]}"
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo admin status start stop restart logs doctor update reset-password version completion help -h --help -v --version" -- "$cur") )
+  elif [ "${COMP_WORDS[1]}" = completion ]; then
+    COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+  fi
+}
+complete -F _aigentron aigentron
+BASH
+      ;;
+    zsh)
+      cat <<'ZSH'
+#compdef aigentron
+_aigentron() {
+  local -a cmds
+  cmds=(
+    'configure:the setup menu'
+    'providers:add or edit model providers'
+    'channels:Telegram etc. — allowed chats, tokens'
+    'agents:agents and their providers'
+    'repo:the project repository'
+    'admin:chat with the admin assistant'
+    'status:is it running? version, health'
+    'start:start the server'
+    'stop:stop the server'
+    'restart:restart the server'
+    'logs:follow the server log'
+    'doctor:check the common problems'
+    'update:install the latest release'
+    'reset-password:remove the dashboard password'
+    'version:the installed version'
+    'completion:print the tab-completion script'
+    'help:show help'
+  )
+  if (( CURRENT == 2 )); then
+    _describe 'command' cmds
+  elif [[ ${words[2]} == completion ]]; then
+    _values 'shell' bash zsh
+  fi
+}
+_aigentron "$@"
+ZSH
+      ;;
+    *) cat >&2 <<'HINT'
+usage: aigentron completion bash|zsh
+  bash:  echo 'eval "$(aigentron completion bash)"' >> ~/.bashrc
+  zsh:   echo 'eval "$(aigentron completion zsh)"' >> ~/.zshrc   (after compinit)
+HINT
+       exit 2 ;;
+  esac
+}
+
 usage() {
   cat <<USAGE
 $(say "${B}aigentron${N} — manage this Aigentron server")
@@ -52,6 +110,7 @@ $(say "${B}Maintain${N}")
   aigentron update            install the latest release (keeps your data and settings)
   aigentron reset-password    forgot the dashboard password? removes all passwords
   aigentron version           (also -v, --version)
+  aigentron completion bash|zsh   tab completion for this command (the installer sets it up)
 
 Any command also accepts -h / --help.
 USAGE
@@ -101,6 +160,7 @@ case "${1:-}" in
   admin|chat) shift; node_script admin-cli.mjs "$@" ;;
   version|-v|--version) version ;;
   doctor|check) doctor ;;
+  completion) shift; completion "$@" ;;
   start|stop|restart) service_cmd "$1" ;;
   status)
     say "${B}Aigentron${N} $(version)"

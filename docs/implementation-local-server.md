@@ -578,6 +578,7 @@ Env is grouped in `.env.example` and allowlisted in `turbo.json` `globalEnv`. No
 | `ORCHESTRATOR_PORT` / `DASHBOARD_PORT` | 3001 / 3000 | host ports (`full` profile only — `minimal`/`bare-metal` are one port, `3001`) |
 | `VITE_ORCHESTRATOR_URL` / `_WS_URL` | http://localhost:3001 | `full` profile's separate dev-server dashboard → API/WS (dev-only; production is same-origin) |
 | `LITELLM_BASE_URL` / `LITELLM_MASTER_KEY` | http://litellm:4000 / — | proxy URL + master key (gates all LiteLLM traffic) |
+| `TRUSTED_PROXY` | — | comma-separated peer IPs whose `cf-connecting-ip` header is believed for the sign-in rate limit (loopback and the compose `cloudflared` container are trusted automatically); any other peer is limited by its own address |
 | `LITELLM_MANAGED_HOST` | 127.0.0.1 | interface of the managed (child-process) litellm; loopback by default so a bare-metal server does not expose the gateway |
 | `OLLAMA_BASE_URL` / `ROUTINE_MODEL` | host.docker.internal:11434 / — | local tier |
 | `ANTHROPIC_API_KEY` / `COMPLEX_MODEL` | — / claude-sonnet-4-6 | cloud tier |

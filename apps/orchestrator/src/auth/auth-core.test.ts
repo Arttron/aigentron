@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   LoginLimiter,
-  SignInGuard,
+  clientAddress,
   canRemovePassword,
   hashPassword,
   isLoopback,
@@ -127,26 +127,21 @@ describe('canRemovePassword', () => {
   });
 });
 
-describe('SignInGuard', () => {
-  it('a forged client header does not give unlimited guesses', () => {
-    const g = new SignInGuard();
-    let t = 0;
-    for (let i = 0; i < 49; i++) g.fail({ client: `fake-${i}`, peer: '10.0.0.5' }, t++);
-    expect(g.wait({ client: 'fake-new', peer: '10.0.0.5' }, t)).toBe(0);
-    g.fail({ client: 'fake-49', peer: '10.0.0.5' }, t++);
-    expect(g.wait({ client: 'fake-brand-new', peer: '10.0.0.5' }, t)).toBeGreaterThan(0);
+describe('clientAddress', () => {
+  it('believes cf-connecting-ip only from a trusted peer', () => {
+    expect(clientAddress('203.0.113.7', '172.18.0.5', ['172.18.0.5'])).toBe('203.0.113.7');
+    expect(clientAddress('203.0.113.7', '127.0.0.1', [])).toBe('203.0.113.7');
+    expect(clientAddress('203.0.113.7', '::ffff:127.0.0.1', [])).toBe('203.0.113.7');
   });
-  it('one client is locked after 5 misses without locking others', () => {
-    const g = new SignInGuard();
-    for (let i = 0; i < 5; i++) g.fail({ client: 'a', peer: 'p' }, i);
-    expect(g.wait({ client: 'a', peer: 'p' }, 10)).toBeGreaterThan(0);
-    expect(g.wait({ client: 'b', peer: 'p' }, 10)).toBe(0);
+  it('a forged header from a direct client is ignored', () => {
+    expect(clientAddress('1.2.3.4', '192.168.1.50', ['172.18.0.5'])).toBe('192.168.1.50');
+    expect(clientAddress('5.6.7.8', '192.168.1.50', ['172.18.0.5'])).toBe('192.168.1.50');
   });
-  it('a success does not reset the peer counter', () => {
-    const g = new SignInGuard();
-    for (let i = 0; i < 49; i++) g.fail({ client: `x${i}`, peer: 'p' }, i);
-    g.ok({ client: 'me', peer: 'p' });
-    g.fail({ client: 'y', peer: 'p' }, 100);
-    expect(g.wait({ client: 'z', peer: 'p' }, 101)).toBeGreaterThan(0);
+  it('without the header the peer is the key; many users behind one tunnel stay separate', () => {
+    expect(clientAddress(undefined, '172.18.0.5', ['172.18.0.5'])).toBe('172.18.0.5');
+    const l = new LoginLimiter(5);
+    for (let i = 0; i < 20; i++) l.fail(clientAddress('198.51.100.9', '172.18.0.5', ['172.18.0.5']), i);
+    expect(l.wait(clientAddress('198.51.100.9', '172.18.0.5', ['172.18.0.5']), 30)).toBeGreaterThan(0);
+    expect(l.wait(clientAddress('203.0.113.1', '172.18.0.5', ['172.18.0.5']), 30)).toBe(0);
   });
 });

@@ -1,12 +1,17 @@
-Aigentron v0.1.37
+Aigentron v0.1.38
 
-For people who are not programmers: one command, `aigentron`, to manage the server from the terminal.
+For people who are not programmers: a round of fixes after a careful code review — sign-in behind a tunnel, voice stability, and the terminal tools.
 
-The `aigentron` command (installed with the server)
-- `aigentron` opens the setup menu: providers, channels, agents, repository, advanced. `aigentron providers | channels | agents | repo` jump straight to a section.
-- `aigentron status | start | stop | restart | logs` — run and watch the server.
-- `aigentron doctor` — checks the common problems (service running, port answers, disk, memory, LiteLLM not exposed, a newer release available).
-- `aigentron update` — installs the latest release and keeps your data and settings.
-- `aigentron reset-password` — forgot the dashboard password? Removes all passwords after a confirmation.
-- `aigentron admin` — chat with the admin assistant in the terminal; `-h` on any command shows help; `-v` shows the version.
-- Works for both the Docker and the bare-metal install. Servers installed earlier get the command after one update.
+Sign-in
+- The limit on wrong passwords is now safe behind a Cloudflare tunnel: one person's mistakes (or an attacker's guesses) can no longer lock everybody out, and faking the client address does not help when connecting directly. Advanced: TRUSTED_PROXY lists extra proxy addresses to trust.
+
+Voice
+- Fixed: in voice mode, tapping while the assistant speaks could open the microphone twice and leave it on.
+- Fixed: pressing a button while an answer plays no longer leaves the read-aloud button stuck; Stop works while the audio is still being prepared, and an answer is not read twice.
+- Voice requests are limited per person (30 a minute) and are not available to the reviewer role, so a low-privilege account cannot run up your provider bill.
+- A local speech server on your home network (192.168.x.x, 10.x.x.x) now works without an API key, as intended; public servers still need one.
+
+Terminal tools
+- The `aigentron` command: tab completion hint no longer runs a command by mistake; the installer handles unusual folder names safely.
+- The setup wizard: no longer drops answers typed or piped quickly, restores the terminal when stopped, and explains what to do (run with sudo) when the ChatGPT sign-in cannot write its folder.
+- Only an operator or admin can read where the Codex sign-in is stored.

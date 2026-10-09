@@ -46,7 +46,7 @@ export function MicButton({
   const toggle = async () => {
     unlockAudio();
     if (phase === 'rec') return void stop();
-    if (phase === 'busy') return;
+    if (phase === 'busy' || rec.current) return; // busy, or the microphone is still starting
     if (!micSupported()) return onError?.('This browser cannot record audio.');
     const r = new Recorder({
       onLevel: (l) => bar.current?.style.setProperty('--lvl', l.toFixed(2)),

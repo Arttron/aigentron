@@ -495,9 +495,22 @@ chmod +x "$INSTALL_DIR/update-check.sh"
 install_cli() {
   cli_src="$RELEASE_DIR/infra/aigentron-cli.sh"
   [ -f "$cli_src" ] || return 0
+  # The values end up inside double quotes in the generated script: a path with " $ ` \ would break it — skip rather than write a broken command.
+  case "${INSTALL_DIR}${DATA_DIR:-}${CONTAINER_NAME:-}" in
+    *'"'*|*'$'*|*'`'*|*'\'*) log "Skipping the 'aigentron' command: the install path contains a character it cannot handle (\" \$ \` \\)."; CLI_HINT="(the 'aigentron' command was not installed)"; return 0 ;;
+  esac
   if [ -w /usr/local/bin ] || [ "$(id -u)" = 0 ]; then CLI_PATH=/usr/local/bin/aigentron; else mkdir -p "$INSTALL_DIR"; CLI_PATH="$INSTALL_DIR/aigentron"; fi
-  sed -e "s|__MODE__|$1|" -e "s|__CURRENT__|${CURRENT_LINK:-}|" -e "s|__CONTAINER__|${CONTAINER_NAME:-}|" -e "s|__DATA_DIR__|${DATA_DIR:-}|" -e "s|__INSTALL_DIR__|$INSTALL_DIR|" "$cli_src" > "$CLI_PATH"
+  # Paths are typed by the user: escape what sed treats specially in a replacement (& | \).
+  esc() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
+  sed -e "s|__MODE__|$(esc "$1")|" -e "s|__CURRENT__|$(esc "${CURRENT_LINK:-}")|" -e "s|__CONTAINER__|$(esc "${CONTAINER_NAME:-}")|" -e "s|__DATA_DIR__|$(esc "${DATA_DIR:-}")|" -e "s|__INSTALL_DIR__|$(esc "$INSTALL_DIR")|" "$cli_src" > "$CLI_PATH"
   chmod +x "$CLI_PATH"
+  # Tab completion (best effort, only where the system-wide directories exist and we may write to them).
+  if [ "$CLI_PATH" = /usr/local/bin/aigentron ]; then
+    [ -d /etc/bash_completion.d ] && "$CLI_PATH" completion bash > /etc/bash_completion.d/aigentron 2>/dev/null || true
+    for zdir in /usr/local/share/zsh/site-functions /usr/share/zsh/vendor-completions; do
+      [ -d "$zdir" ] && [ -w "$zdir" ] && { "$CLI_PATH" completion zsh > "$zdir/_aigentron" 2>/dev/null || true; break; }
+    done
+  fi
   if [ "$CLI_PATH" = /usr/local/bin/aigentron ]; then CLI_HINT="aigentron"; else CLI_HINT="$CLI_PATH   (add it to your PATH, or: sudo ln -sf $CLI_PATH /usr/local/bin/aigentron)"; fi
 }
 CLI_HINT="aigentron"

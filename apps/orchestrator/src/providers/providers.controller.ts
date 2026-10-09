@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { RolesGuard } from '../identity/roles.guard';
+import { Roles } from '../identity/roles.decorator';
 import { ProvidersService, type ProviderPatch } from './providers.service';
 import { CreateProviderDto, ModelsPreviewDto, UpdateProviderDto } from './dto/provider.dto';
 
@@ -66,6 +68,8 @@ export class ProvidersController {
 
   /** Where the Codex (ChatGPT) sign-in lives + whether it is signed in — for the CLI setup wizard. */
   @Get('codex-login')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   codexLogin() {
     return this.providers.codexLoginInfo();
   }

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { LitellmService, defaultKind, stripSelfPrefix } from '../litellm/litellm.service';
 import { CodexService } from '../codex/codex.service';
+import { isKeylessAudioHost } from './audio-endpoint';
 
 type ProviderRow = NonNullable<Awaited<ReturnType<PrismaService['provider']['findUnique']>>>;
 
@@ -157,7 +158,7 @@ export class ProvidersService implements OnModuleInit {
     if (!base) throw new Error(`Provider "${name}" has no Base URL.`);
     const headers: Record<string, string> = {};
     if (p.secret) headers.authorization = `Bearer ${p.secret}`;
-    else if (!/^https?:\/\/(localhost|127\.|host\.docker\.internal|[a-z0-9-]+(:\d+)?\/)/i.test(`${base}/`)) throw new Error(`Provider "${name}" has no API key.`);
+    else if (!isKeylessAudioHost(base)) throw new Error(`Provider "${name}" has no API key.`);
     return { base, headers };
   }
 

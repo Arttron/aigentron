@@ -61,8 +61,8 @@ export const voiceApi = {
     if (!r.ok) throw await failure(r);
     return ((await r.json()) as { text: string }).text;
   },
-  async speak(text: string): Promise<Blob> {
-    const r = await fetch(`${API_BASE}/voice/speak`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+  async speak(text: string, signal?: AbortSignal): Promise<Blob> {
+    const r = await fetch(`${API_BASE}/voice/speak`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }), signal });
     if (!r.ok) throw await failure(r);
     return r.blob();
   },
@@ -84,7 +84,6 @@ export function usePref(key: string): [boolean, (v: boolean) => void] {
     const on = () => setV(read());
     window.addEventListener(PREF_EVENT, on);
     return () => window.removeEventListener(PREF_EVENT, on);
-    // eslint-disable-next-line
   }, [key]);
   const set = useCallback(
     (next: boolean) => {
@@ -223,6 +222,9 @@ let actx: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
 let raf = 0;
 let stopCurrent: (() => void) | null = null;
+/** Bumped by every stop/new request so an answer still being fetched can tell it was superseded. */
+let generation = 0;
+let pendingFetch: AbortController | null = null;
 
 function player(): HTMLAudioElement {
   if (!audio) {
@@ -237,6 +239,7 @@ function player(): HTMLAudioElement {
  * audio element then (a tiny silent clip), and later answers can start by themselves.
  */
 export function unlockAudio(): void {
+  if (stopCurrent) return; // something is playing, so audio is already unlocked — and replacing `src` would cut it off silently
   const a = player();
   a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
   void a.play().catch(() => undefined);
@@ -245,7 +248,19 @@ export function unlockAudio(): void {
 /** Speak `text` (server-side text-to-speech). Resolves when playback ends or is stopped. `onLevel` gets the loudness (0–1). */
 export async function speakText(text: string, onLevel?: (level: number) => void): Promise<void> {
   stopSpeaking();
-  const blob = await voiceApi.speak(text);
+  const mine = ++generation;
+  const ctl = new AbortController();
+  pendingFetch = ctl;
+  let blob: Blob;
+  try {
+    blob = await voiceApi.speak(text, ctl.signal);
+  } catch (e) {
+    if (ctl.signal.aborted) return; // stopped (or replaced by a newer request) while the audio was being made
+    throw e;
+  } finally {
+    if (pendingFetch === ctl) pendingFetch = null;
+  }
+  if (mine !== generation) return;
   const url = URL.createObjectURL(blob);
   const a = player();
   a.src = url;
@@ -302,5 +317,8 @@ export async function speakText(text: string, onLevel?: (level: number) => void)
 }
 
 export function stopSpeaking(): void {
+  generation++;
+  pendingFetch?.abort();
+  pendingFetch = null;
   stopCurrent?.();
 }

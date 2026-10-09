@@ -145,31 +145,22 @@ export class LoginLimiter {
   }
 }
 
-/** Who is signing in: `client` is the address we believe (possibly from a tunnel header), `peer` is the TCP peer we can trust. */
-export interface ClientId {
-  client: string;
-  peer: string;
+/** `::ffff:10.0.0.5` → `10.0.0.5`, so addresses compare the same however the socket reports them. */
+export function normalizeIp(ip: string): string {
+  return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }
 
 /**
- * The client address may come from a header (cf-connecting-ip behind a tunnel) that anyone connecting directly could forge to get a
- * fresh counter on every try. So there is a second, looser counter on the TCP peer itself: forging buys at most a few dozen guesses,
- * and behind a tunnel (where every request shares one peer) it only trips under a real flood.
+ * The address to rate-limit a sign-in by. Behind a Cloudflare tunnel every request arrives from the connector and the real client
+ * is in `cf-connecting-ip` — but anyone connecting DIRECTLY could forge that header to get a fresh counter on every try. So the
+ * header is believed only when the TCP peer is a proxy we trust (loopback, the `cloudflared` container, or TRUSTED_PROXY);
+ * otherwise the peer address itself is the key.
  */
-export class SignInGuard {
-  private readonly perClient = new LoginLimiter(5);
-  private readonly perPeer = new LoginLimiter(50);
-  wait(id: ClientId, now = Date.now()): number {
-    return Math.max(this.perClient.wait(id.client, now), this.perPeer.wait(id.peer, now));
-  }
-  fail(id: ClientId, now = Date.now()): void {
-    this.perClient.fail(id.client, now);
-    this.perPeer.fail(id.peer, now);
-  }
-  /** A success clears the personal counter only — never the peer's, or a known password could be used to reset the guard. */
-  ok(id: ClientId): void {
-    this.perClient.ok(id.client);
-  }
+export function clientAddress(cfConnectingIp: string | undefined, peer: string, trustedPeers: readonly string[]): string {
+  const p = normalizeIp(peer || 'unknown');
+  const trusted = isLoopback(p) || trustedPeers.some((t) => normalizeIp(t) === p);
+  const cf = (cfConnectingIp ?? '').trim();
+  return trusted && cf ? cf : p;
 }
 
 /** Roles that may manage other people's passwords and settings. */

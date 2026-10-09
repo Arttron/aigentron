@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { audioFileName, isOggOpus, parseVoiceConfig, speechText } from './voice-core';
+import { CallGate, audioFileName, isOggOpus, parseVoiceConfig, speechText } from './voice-core';
 
 describe('parseVoiceConfig', () => {
   it('accepts a full config and fills defaults', () => {
@@ -63,5 +63,23 @@ describe('audio naming', () => {
   it('recognises Ogg/Opus', () => {
     expect(isOggOpus('audio/ogg')).toBe(true);
     expect(isOggOpus('audio/mpeg')).toBe(false);
+  });
+});
+
+describe('CallGate', () => {
+  it('limits calls per window and in parallel, per caller', () => {
+    const g = new CallGate(3, 1000, 2);
+    const a = g.enter('u1', 0);
+    const b = g.enter('u1', 1);
+    expect(a && b).toBeTruthy();
+    expect(g.enter('u1', 2)).toBeNull(); // two in flight already
+    a!();
+    const c = g.enter('u1', 3);
+    expect(c).toBeTruthy();
+    c!();
+    b!();
+    expect(g.enter('u1', 4)).toBeNull(); // 3 calls in the window
+    expect(g.enter('u2', 4)).toBeTruthy(); // someone else is unaffected
+    expect(g.enter('u1', 1500)).toBeTruthy(); // the window moved on
   });
 });

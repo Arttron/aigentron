@@ -48,6 +48,9 @@ const stripAnsi = (s) => s.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '');
 const cols = () => process.stdout.columns || 80;
 const fit = (s, max) => (stripAnsi(s).length > max ? `${s.slice(0, Math.max(0, max - 1))}…` : s);
 
+// Restore the terminal when we are killed, not only on a normal exit.
+for (const sig of ['SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(128 + (sig === 'SIGTERM' ? 15 : 1)));
+
 process.on('exit', () => {
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
   if (process.stdout.isTTY) process.stdout.write('\u001b[?25h'); // never leave the cursor hidden
@@ -79,13 +82,19 @@ const KEY_RE = /\u001b\[[0-9;]*[A-Za-z~]|\u001b[A-Za-z]|[\s\S]/gu;
 const ESC_NAMES = { '\u001b[A': 'up', '\u001b[B': 'down', '\u001b[C': 'right', '\u001b[D': 'left', '\u001b[H': 'home', '\u001b[F': 'end', '\u001bOA': 'up', '\u001bOB': 'down' };
 
 /** Feeds `onKey(name, raw)` for every key in every chunk until it returns true (finished). */
+// Keys that arrived in the same chunk as the Enter that finished the previous prompt (piped or pasted input) wait here for the next one.
+let leftover = [];
+
 function readKeys(onKey) {
   return new Promise((resolve) => {
     const stdin = process.stdin;
     if (stdin.isTTY) stdin.setRawMode(true);
     stdin.resume();
     const onData = (chunk) => {
-      for (const raw of chunk.toString('utf8').match(KEY_RE) ?? []) {
+      const keys = [...leftover, ...(chunk.toString('utf8').match(KEY_RE) ?? [])];
+      leftover = [];
+      for (let n = 0; n < keys.length; n++) {
+        const raw = keys[n];
         const name = ESC_NAMES[raw] ?? (raw === '\r' || raw === '\n' ? 'enter' : raw === '\u0003' ? 'ctrl-c' : raw === '\u007f' || raw === '\b' ? 'backspace' : raw === '\t' ? 'tab' : raw === '\u001b' ? 'esc' : raw);
         if (name === 'ctrl-c') {
           stdin.removeListener('data', onData);
@@ -98,12 +107,14 @@ function readKeys(onKey) {
           // Stop reading between prompts, or the open stdin keeps the process alive after the last step ("hangs on Done").
           // Raw mode stays on, so keys typed in the gap are still not echoed.
           stdin.pause();
+          leftover = keys.slice(n + 1);
           resolve();
           return;
         }
       }
     };
     stdin.on('data', onData);
+    if (leftover.length) onData(Buffer.alloc(0)); // answers that were already waiting
   });
 }
 
@@ -479,7 +490,13 @@ async function codexSignIn(rl) {
     log('    Run this wizard where the orchestrator runs (docker exec -it … or on the server itself) to sign in.');
     return false;
   }
-  mkdirSync(info.home, { recursive: true, mode: 0o700 });
+  try {
+    mkdirSync(info.home, { recursive: true, mode: 0o700 });
+  } catch (e) {
+    log(`  ✗ cannot write ${info.home} (${e.code ?? e.message}).`);
+    log('    The sign-in is stored in a protected folder — run the wizard as root: sudo aigentron providers');
+    return false;
+  }
   log(`  Starting the ChatGPT sign-in (device code). Open the link it prints in any browser and enter the code.`);
   log(c.gray(`  The login is stored in ${info.home}.`));
   const res = runInteractive(info.bin, ['login', '--device-auth'], { CODEX_HOME: info.home });

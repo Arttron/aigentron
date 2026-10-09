@@ -6,8 +6,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { publicOrigin } from '../config/cors';
 import { UsersService } from '../users/users.service';
 import {
-  SignInGuard,
-  type ClientId,
+  LoginLimiter,
   canRemovePassword,
   hashPassword,
   signSession,
@@ -50,7 +49,7 @@ type Result<T> = ({ ok: true } & T) | { ok: false; error: string; status?: numbe
 @Injectable()
 export class AuthService implements OnModuleInit {
   private readonly logger = new Logger('Auth');
-  private readonly limiter = new SignInGuard();
+  private readonly limiter = new LoginLimiter();
   private cache: { mtime: number; state: AuthState | null } = { mtime: -1, state: null };
 
   constructor(
@@ -191,7 +190,7 @@ export class AuthService implements OnModuleInit {
   }
 
   /** `user` is an id or (for scripts) a display name; omitted = the only user who has a password. */
-  async login(user: unknown, password: unknown, key: ClientId): Promise<Result<{ token: string; uid: string }>> {
+  async login(user: unknown, password: unknown, key: string): Promise<Result<{ token: string; uid: string }>> {
     const s = this.state();
     if (!s) return { ok: false, error: 'No password is set.' };
     const wait = this.limiter.wait(key);
@@ -216,7 +215,7 @@ export class AuthService implements OnModuleInit {
   }
 
   /** Change your own password (needs the current one). Signs your other browsers out. */
-  async changeOwnPassword(uid: string, current: unknown, next: unknown, key: ClientId): Promise<Result<{ token: string }>> {
+  async changeOwnPassword(uid: string, current: unknown, next: unknown, key: string): Promise<Result<{ token: string }>> {
     const s = this.state();
     const cred = s?.users[uid];
     if (!s || !cred) return { ok: false, error: 'No password is set for you.' };

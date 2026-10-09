@@ -111,3 +111,36 @@ export function audioFileName(mime: string | undefined, fallback = 'voice'): str
 
 /** Whether a mime type is Ogg/Opus — what Telegram shows as a proper voice message. */
 export const isOggOpus = (mime: string | undefined): boolean => /ogg|opus/i.test(mime ?? '');
+
+/**
+ * A small per-caller throttle for the paid voice calls: at most `max` calls per `windowMs`, and at most `parallel` at once. Returns a
+ * release function, or null when the caller must wait. In memory — good enough to stop a runaway client or a low-privilege account
+ * from running up the provider bill.
+ */
+export class CallGate {
+  private readonly hits = new Map<string, number[]>();
+  private readonly active = new Map<string, number>();
+  constructor(
+    private readonly max = 30,
+    private readonly windowMs = 60_000,
+    private readonly parallel = 3,
+  ) {}
+
+  enter(key: string, now = Date.now()): (() => void) | null {
+    const recent = (this.hits.get(key) ?? []).filter((t) => now - t < this.windowMs);
+    if (recent.length >= this.max || (this.active.get(key) ?? 0) >= this.parallel) {
+      this.hits.set(key, recent);
+      return null;
+    }
+    recent.push(now);
+    this.hits.set(key, recent);
+    this.active.set(key, (this.active.get(key) ?? 0) + 1);
+    if (this.hits.size > 500) this.hits.delete(this.hits.keys().next().value as string);
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      this.active.set(key, Math.max(0, (this.active.get(key) ?? 1) - 1));
+    };
+  }
+}

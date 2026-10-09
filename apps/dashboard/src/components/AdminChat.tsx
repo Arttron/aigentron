@@ -326,9 +326,10 @@ export function AdminChat() {
     }
     if (!lastAdmin || lastAdmin.id === spokenRef.current) return;
     spokenRef.current = lastAdmin.id;
-    if (autoSpeak && !voiceOnly && voiceCfg?.ttsReady)
+    // only while the panel is open: closed, the same answer may be on the task page, where the transcript reads it
+    if (open && autoSpeak && !voiceOnly && voiceCfg?.ttsReady)
       void speakText(lastAdmin.text).catch(() => undefined);
-  }, [lastAdmin, autoSpeak, voiceOnly, voiceCfg]);
+  }, [lastAdmin, autoSpeak, voiceOnly, voiceCfg, open]);
 
   // Let the approval dock step aside while the panel occupies the bottom-right corner.
   useEffect(() => {

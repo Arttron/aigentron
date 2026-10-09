@@ -105,6 +105,7 @@ export function VoiceMode({
   }, [go, level, onSend]);
 
   const listen = useCallback(async () => {
+    if (rec.current) return; // a recorder is already starting or running — never open a second microphone
     stopSpeaking();
     setError(null);
     const r = new Recorder({
@@ -136,7 +137,7 @@ export function VoiceMode({
     speakText(reply.text, level)
       .catch((e: Error) => setError(e.message))
       .finally(() => {
-        if (!alive.current) return;
+        if (!alive.current || rec.current) return; // the user already tapped to talk: listen() took over
         if (keep && phaseRef.current === 'speaking') void listen();
         else if (phaseRef.current === 'speaking') go('idle');
       });

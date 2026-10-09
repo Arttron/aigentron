@@ -1,7 +1,8 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { SESSION_COOKIE, type ClientId } from './auth-core';
+import { lookup } from 'node:dns/promises';
+import { SESSION_COOKIE, clientAddress } from './auth-core';
 import { publicOrigin } from '../config/cors';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
@@ -12,12 +13,20 @@ type AuthedRequest = Request & { authUserId?: string };
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  private clientKey(req: Request): ClientId {
-    // Behind a tunnel the peer is always the connector; Cloudflare puts the real client in cf-connecting-ip. That header can be forged
-    // by anyone connecting directly, so the peer address is counted too (see SignInGuard).
+  private trusted: { at: number; ips: string[] } = { at: 0, ips: [] };
+
+  /** Peers whose `cf-connecting-ip` we believe: TRUSTED_PROXY (comma list) plus the `cloudflared` container of the compose stack. */
+  private async trustedPeers(): Promise<string[]> {
+    if (Date.now() - this.trusted.at < 60_000) return this.trusted.ips;
+    const fromEnv = (process.env.TRUSTED_PROXY ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    const resolved = await lookup('cloudflared', { all: true }).then((r) => r.map((x) => x.address)).catch(() => []);
+    this.trusted = { at: Date.now(), ips: [...fromEnv, ...resolved] };
+    return this.trusted.ips;
+  }
+
+  private async clientKey(req: Request): Promise<string> {
     const cf = req.headers['cf-connecting-ip'];
-    const peer = req.socket.remoteAddress || 'unknown';
-    return { client: (Array.isArray(cf) ? cf[0] : cf) || peer, peer };
+    return clientAddress(Array.isArray(cf) ? cf[0] : cf, req.socket.remoteAddress || 'unknown', await this.trustedPeers());
   }
 
   private setCookie(req: Request, res: Response, token: string): void {
@@ -58,7 +67,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   async login(@Body() body: { user?: unknown; password?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const r = await this.auth.login(body?.user, body?.password, this.clientKey(req));
+    const r = await this.auth.login(body?.user, body?.password, await this.clientKey(req));
     if (!r.ok) {
       res.status(r.status ?? 401);
       return { ok: false, error: r.error };
@@ -83,7 +92,7 @@ export class AuthController {
       res.status(400);
       return { ok: false, error: 'Sign in first.' };
     }
-    const r = await this.auth.changeOwnPassword(req.authUserId, body?.current, body?.next, this.clientKey(req));
+    const r = await this.auth.changeOwnPassword(req.authUserId, body?.current, body?.next, await this.clientKey(req));
     if (!r.ok) {
       res.status(r.status ?? 400);
       return { ok: false, error: r.error };
