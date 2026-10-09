@@ -53,7 +53,7 @@ export class EventsGateway
   async handleConnection(client: Socket): Promise<void> {
     // A domain that is not allowed gets no live feed either (the HTTP middleware does not see WebSocket upgrades).
     // Live task output is private: with a password set, only a signed-in browser may listen.
-    if (!this.access.allows(client.handshake.headers.host)) {
+    if (!this.access.allowsRequest(client.handshake.headers.host, client.handshake.address, client.handshake.headers)) {
       client.data.rejected = true;
       client.disconnect(true);
       return;

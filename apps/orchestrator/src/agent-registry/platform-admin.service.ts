@@ -96,6 +96,8 @@ export interface CloudflareProposal {
 export interface ScheduleProposal {
   action: 'create' | 'update' | 'delete';
   name: string;
+  /** task kind: 'same' (default) = every run continues one task, 'new' = every run starts a new task */
+  taskMode?: 'same' | 'new';
   cron?: string;
   timezone?: string;
   kind?: 'message' | 'task';
@@ -760,6 +762,7 @@ export class PlatformAdminService {
       kind: p.kind,
       text: p.text,
       agentName: p.agentName,
+      taskMode: p.taskMode,
       quietStart: p.quietStart,
       quietEnd: p.quietEnd,
       enabled: p.enabled,

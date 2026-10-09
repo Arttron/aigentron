@@ -3,6 +3,8 @@ import type { Request, Response } from 'express';
 import { AccessService } from './access.service';
 import { AppConfigService } from '../config/app-config.service';
 import { publicOrigin } from '../config/cors';
+import { ownAddresses } from './own-addresses';
+import { isThisMachine } from '../auth/auth-core';
 import { normalizeHost } from './access-core';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
@@ -22,6 +24,7 @@ export class AccessController {
       publicHost: this.access.publicHost(),
       yourHost: normalizeHost(req.headers.host),
       enforced: this.access.effective().length > 0,
+      strict: this.access.strict(),
       // read-only facts about how the server is reachable — they are set in the server's .env (see `aigentron access`)
       server: {
         port: this.config.port,
@@ -36,12 +39,13 @@ export class AccessController {
   @HttpCode(200)
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
-  set(@Body() body: { allowedHosts?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const r = this.access.save(body?.allowedHosts, req.headers.host);
+  set(@Body() body: { allowedHosts?: unknown; strict?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const callerLocal = isThisMachine(req.socket.remoteAddress, ownAddresses()) && !req.headers['x-forwarded-for'] && !req.headers['cf-connecting-ip'];
+    const r = this.access.save(body?.allowedHosts, req.headers.host, { strict: typeof body?.strict === 'boolean' ? body.strict : undefined, callerLocal });
     if (!r.ok) {
       res.status(400);
       return { ok: false, error: r.error };
     }
-    return { ok: true, allowedHosts: r.hosts };
+    return { ok: true, allowedHosts: r.hosts, strict: r.strict };
   }
 }

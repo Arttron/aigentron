@@ -134,7 +134,7 @@ export class WebServerService {
         ? (req: IncomingMessage, res: ServerResponse) => {
             // a domain that is not allowed gets the same 421 as everywhere; allowed domains are sent to HTTPS
             const to = redirectTarget(req.headers.host, req.url ?? '/', cfg.httpsPort);
-            if (to && this.access.allows(req.headers.host)) {
+            if (to && this.access.allowsRequest(req.headers.host, req.socket.remoteAddress, req.headers)) {
               res.writeHead(308, { location: to, 'cache-control': 'no-store' }).end();
             } else app(req, res);
           }

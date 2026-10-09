@@ -7,6 +7,7 @@ interface AccessInfo {
   publicHost: string | null;
   yourHost: string;
   enforced: boolean;
+  strict?: boolean;
   server?: { port: number; listenHost: string; bindAddress: string | null; publicUrl: string | null };
 }
 
@@ -14,6 +15,7 @@ interface AccessInfo {
 export function AccessSettings() {
   const [info, setInfo] = useState<AccessInfo | null>(null);
   const [text, setText] = useState('');
+  const [strict, setStrict] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -23,6 +25,7 @@ export function AccessSettings() {
     const j = (await r.json()) as AccessInfo;
     setInfo(j);
     setText(j.allowedHosts.join('\n'));
+    setStrict(Boolean(j.strict));
   }, []);
   useEffect(() => {
     void load();
@@ -34,7 +37,7 @@ export function AccessSettings() {
     const r = await fetch(`${API_BASE}/access`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ allowedHosts: text }),
+      body: JSON.stringify({ allowedHosts: text, strict }),
     }).catch(() => null);
     const j = (await r?.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     setBusy(false);
@@ -61,6 +64,13 @@ export function AccessSettings() {
           spellCheck={false}
         />
       </Field>
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '8px 0' }}>
+        <input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} style={{ width: 'auto', marginTop: 4 }} />
+        <span>
+          <strong>Only these domains</strong> — refuse access by IP address or bare server name (they get an error page, not the dashboard). The server itself (and an SSH tunnel to
+          it) still works. Needs at least one domain above.
+        </span>
+      </label>
       <Muted>
         You are connected via <code>{info.yourHost || 'unknown'}</code>
         {info.publicHost ? (

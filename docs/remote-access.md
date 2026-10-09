@@ -71,6 +71,17 @@ Minimal / bare-metal: install `cloudflared` on the host (`cloudflared service in
 It adds that origin to the allowed origins, **adds its host to the allowed domains** (so only that name — plus local access — is served), and,
 if no dashboard password is set yet, prints a loud warning at startup and shows a red banner in the dashboard. It does not open anything.
 
+## "Only these domains": refuse access by IP address
+
+By default `localhost`, IP addresses and single-word names are **always** accepted (so a port forward, an SSH tunnel or opening the server by IP never locks you out). That also means
+`https://<server-ip>/` shows the dashboard — protected only by the passwords. To make the server answer **only** under your domains, add at least one domain and tick
+**Only these domains** (Settings → General → Access, or `aigentron access` → *Refuse access by IP address*): from outside, a request that comes in under an IP address or a bare server
+name gets an error page instead of the dashboard — and a forged `Host: localhost` does not help. What still works: the server itself (agent hooks, health checks,
+`aigentron`, an SSH tunnel *to* it — they connect from the machine, so they count as local) and requests that come through your tunnel / reverse proxy under an allowed domain.
+Requests relayed by a proxy (with forwarding headers) count as "outside", so a proxy cannot be used to reach the server by IP either. It applies to every port (3001, 80, 443)
+and the live-update socket. The dashboard refuses to switch it on while *you* are connected through an IP address (you would lock yourself out) — do it through your domain or from the server.
+This is not a substitute for passwords (Settings → Security): set both.
+
 ## Let the server serve ports 80 and 443 itself (no proxy needed)
 
 The server can terminate HTTPS on its own — **Settings → General → Web server**, or `aigentron access` → *Ports & HTTPS certificate*:

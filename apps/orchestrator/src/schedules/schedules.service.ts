@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { ChannelsService } from '../channels/channels.service';
@@ -16,6 +16,8 @@ export interface ScheduleInput {
   kind?: string;
   text?: string;
   agentName?: string | null;
+  /** task kind: `same` (default) = each run continues one task; `new` = each run starts a new task */
+  taskMode?: string;
   channelId?: string | null;
   chatId?: string | null;
   quietStart?: string | null;
@@ -23,6 +25,8 @@ export interface ScheduleInput {
 }
 
 const TICK_MS = 30_000;
+/** In "same" mode a schedule's task is replaced by a fresh one after this long (keeps the conversation's context from growing without limit). */
+const ROLLOVER_MS = 30 * 24 * 3600_000;
 /** A run that is overdue by more than this (the server was off) is skipped rather than fired late. */
 const GRACE_MS = 2 * 3600_000;
 
@@ -38,6 +42,8 @@ export function serializeSchedule(r: ScheduleRow) {
     kind: r.kind,
     text: r.text,
     agentName: r.agentName,
+    taskMode: r.taskMode,
+    taskId: r.taskId,
     channelId: r.channelId,
     chatId: r.chatId,
     quietStart: r.quietStart,
@@ -107,6 +113,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       if (!this.channels.allowedChatIds(ch).includes(String(v.chatId))) return `chat ${v.chatId} is not in this channel's allowed chats — add it in Settings → Channels first.`;
     }
     if (v.kind === 'task') {
+      if (v.taskMode !== undefined && v.taskMode !== 'same' && v.taskMode !== 'new') return 'taskMode must be "same" (every run continues one task) or "new" (every run starts a new task).';
       if (!v.agentName) return 'a task needs an agent.';
       if (!(await this.agents.get(v.agentName).catch(() => null))) return `no agent named "${v.agentName}".`;
     }
@@ -129,6 +136,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         kind: input.kind!,
         text: input.text!.trim(),
         agentName: input.kind === 'task' ? input.agentName ?? null : null,
+        taskMode: input.kind === 'task' && input.taskMode === 'new' ? 'new' : 'same',
         channelId: input.channelId ?? null,
         chatId: input.chatId ? String(input.chatId) : null,
         quietStart: input.quietStart ?? null,
@@ -155,6 +163,9 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         kind: next.kind,
         text: next.text.trim(),
         agentName: next.kind === 'task' ? next.agentName : null,
+        taskMode: next.kind === 'task' && next.taskMode === 'new' ? 'new' : 'same',
+        // a different agent (or switching to "new") must not keep feeding the old conversation
+        ...(next.agentName !== cur.agentName || next.kind !== cur.kind || next.taskMode === 'new' ? { taskId: null } : {}),
         channelId: next.channelId,
         chatId: next.chatId ? String(next.chatId) : null,
         quietStart: next.quietStart || null,
@@ -219,7 +230,22 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         const ok = await this.manager.sendText(row.channelId!, row.chatId!, `⏰ ${row.text}`);
         return ok ? record('ok') : record('error', 'could not deliver to the chat (is the channel enabled and the bot able to write there?)');
       }
+      // "same" mode: keep working in ONE task — the run is a follow-up in the conversation the schedule started earlier (the agent
+      // remembers the earlier runs). After ROLLOVER_MS the thread starts fresh so its context does not grow forever.
+      if (row.taskMode !== 'new' && row.taskId) {
+        const existing = await this.tasks.get(row.taskId).catch(() => null);
+        if (existing && Date.now() - new Date(existing.createdAt).getTime() < ROLLOVER_MS) {
+          try {
+            await this.tasks.followUp(existing.id, row.text);
+            return record('ok');
+          } catch (err) {
+            if (err instanceof ConflictException) return record('skipped', 'the previous run is still working and its queue is full');
+            throw err;
+          }
+        }
+      }
       const task = await this.tasks.create({ prompt: row.text, title: `⏰ ${row.name}`, agentName: row.agentName ?? undefined, createdByChannel: `schedule:${row.name}` });
+      if (row.taskMode !== 'new') await this.prisma.schedule.update({ where: { id: row.id }, data: { taskId: task.id } }).catch(() => undefined);
       if (row.channelId && row.chatId) {
         await this.channels.linkThread(row.channelId, task.id, row.chatId);
         await this.channels.setChatState(row.channelId, row.chatId, { activeTaskId: task.id }).catch(() => undefined);

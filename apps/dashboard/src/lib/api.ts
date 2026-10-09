@@ -248,6 +248,9 @@ export interface ScheduleInfo {
   kind: 'message' | 'task';
   text: string;
   agentName: string | null;
+  /** task kind: `same` = every run continues one task, `new` = every run starts a new task */
+  taskMode: 'same' | 'new';
+  taskId: string | null;
   channelId: string | null;
   chatId: string | null;
   quietStart: string | null;
@@ -258,7 +261,7 @@ export interface ScheduleInfo {
   lastError: string | null;
 }
 
-export type ScheduleInput = Partial<Pick<ScheduleInfo, 'name' | 'enabled' | 'cron' | 'timezone' | 'kind' | 'text' | 'agentName' | 'channelId' | 'chatId' | 'quietStart' | 'quietEnd'>>;
+export type ScheduleInput = Partial<Pick<ScheduleInfo, 'name' | 'enabled' | 'cron' | 'timezone' | 'kind' | 'text' | 'agentName' | 'taskMode' | 'channelId' | 'chatId' | 'quietStart' | 'quietEnd'>>;
 
 export interface ChannelInfo {
   id: string;

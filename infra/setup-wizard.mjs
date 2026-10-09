@@ -1356,11 +1356,15 @@ async function stepAccess(rl) {
         : `  Allowed domains: ${c.gray('none — any name is accepted')}`,
     );
     if (acc.publicHost) log(`  Public address (PUBLIC_URL): ${c.cyan(acc.publicHost)} ${c.gray('— always allowed')}`);
+    log(`  Access by IP address / server name: ${acc.strict ? c.green('refused (only the domains above)') : c.gray('allowed')}`);
     log(`  Cloudflare Access: ${cf.enabled ? c.green(`on (${cf.teamDomain})`) : cf.configured ? c.yellow(`saved but off (${cf.teamDomain})`) : c.gray('not set up')}`);
     log(c.gray('  localhost, IP addresses and single-word names are always allowed, so you cannot lock yourself out.'));
     const choices = [
       { value: 'add', label: 'Add domains', hint: '— e.g. dev.example.com, *.team.example.org' },
       ...(acc.allowedHosts.length ? [{ value: 'remove', label: 'Remove a domain' }, { value: 'clear', label: 'Clear the list', hint: '— accept any name again' }] : []),
+      ...(acc.allowedHosts.length || acc.publicHost
+        ? [{ value: 'strict', label: acc.strict ? 'Allow access by IP address again' : 'Refuse access by IP address', hint: acc.strict ? '' : '— only the listed domains (this machine itself still works)' }]
+        : []),
       { value: 'cloudflare', label: 'Cloudflare Access', hint: '— require its sign-in on public addresses' },
       { value: 'web', label: 'Ports & HTTPS certificate', hint: '— listen on 80 / 443, install a certificate' },
       { value: 'server', label: 'Public address & listening', hint: '— PUBLIC_URL, listen on this machine only' },
@@ -1378,6 +1382,13 @@ async function stepAccess(rl) {
         await putAccessDomains(acc.allowedHosts.filter((x) => x !== d));
       } else if (what === 'clear') {
         if (await promptYesNo(rl, 'Clear the whole list?', false)) await putAccessDomains([]);
+      } else if (what === 'strict') {
+        try {
+          const r = await apiPut('/access', { allowedHosts: acc.allowedHosts, strict: !acc.strict });
+          log(r.strict ? '  ✓ IP-address access is refused now — only your domains are served' : '  ✓ IP-address access is allowed again');
+        } catch (e) {
+          log(`  ✗ ${e.message}`);
+        }
       } else if (what === 'cloudflare') {
         await configureCloudflareAccess(rl);
       } else if (what === 'web') {

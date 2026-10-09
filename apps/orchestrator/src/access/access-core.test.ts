@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hostAllowed, isAlwaysAllowed, normalizeHost, parseDomainEntry, parseDomainList } from './access-core';
+import { hostAllowed, requestAllowed, isAlwaysAllowed, normalizeHost, parseDomainEntry, parseDomainList } from './access-core';
 
 describe('normalizeHost', () => {
   it('strips ports, brackets and trailing dots', () => {
@@ -57,5 +57,29 @@ describe('hostAllowed', () => {
   });
   it('local access always works even with a list', () => {
     for (const h of ['localhost:3011', '127.0.0.1:3001', '192.168.0.9:3011', '[::1]:3001', 'myserver:3011']) expect(hostAllowed(h, allowed), h).toBe(true);
+  });
+});
+
+describe('requestAllowed (strict mode)', () => {
+  const allowed = ['dev.example.com'];
+  const req = (over: Partial<Parameters<typeof requestAllowed>[0]>) => requestAllowed({ host: 'dev.example.com', allowed, strict: true, fromThisMachine: false, relayed: false, ...over });
+  it('normal mode keeps the old rule (IPs and local names pass)', () => {
+    expect(req({ strict: false, host: '98.92.70.208' })).toBe(true);
+    expect(req({ strict: false, host: 'evil.example.org' })).toBe(false);
+  });
+  it('strict: only the allowed domains from outside — IP, bare names and a forged localhost are refused', () => {
+    expect(req({})).toBe(true);
+    expect(req({ host: '98.92.70.208' })).toBe(false);
+    expect(req({ host: 'myserver' })).toBe(false);
+    expect(req({ host: 'localhost' })).toBe(false);
+    expect(req({ host: 'other.example.com' })).toBe(false);
+  });
+  it('strict: this machine itself still works, unless the request was relayed by a proxy or tunnel', () => {
+    expect(req({ host: 'localhost', fromThisMachine: true })).toBe(true);
+    expect(req({ host: 'orchestrator', fromThisMachine: true })).toBe(true);
+    expect(req({ host: '98.92.70.208', fromThisMachine: true, relayed: true })).toBe(false);
+  });
+  it('strict without any domain does nothing (it would block everyone)', () => {
+    expect(requestAllowed({ host: '1.2.3.4', allowed: [], strict: true, fromThisMachine: false, relayed: false })).toBe(true);
   });
 });

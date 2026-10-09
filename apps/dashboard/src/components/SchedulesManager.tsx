@@ -19,6 +19,7 @@ interface Draft {
   kind: 'message' | 'task';
   text: string;
   agentName: string;
+  taskMode: 'same' | 'new';
   channelId: string;
   chatId: string;
   timezone: string;
@@ -35,12 +36,13 @@ const localTz = () => {
     return 'UTC';
   }
 };
-const newDraft = (): Draft => ({ name: '', kind: 'message', text: '', agentName: '', channelId: '', chatId: '', timezone: localTz(), quiet: false, quietStart: '22:00', quietEnd: '08:00', when: DEFAULT_FORM });
+const newDraft = (): Draft => ({ name: '', kind: 'message', text: '', agentName: '', taskMode: 'same', channelId: '', chatId: '', timezone: localTz(), quiet: false, quietStart: '22:00', quietEnd: '08:00', when: DEFAULT_FORM });
 const fromSchedule = (s: ScheduleInfo): Draft => ({
   name: s.name,
   kind: s.kind,
   text: s.text,
   agentName: s.agentName ?? '',
+  taskMode: s.taskMode ?? 'same',
   channelId: s.channelId ?? '',
   chatId: s.chatId ?? '',
   timezone: s.timezone,
@@ -110,6 +112,7 @@ export function SchedulesManager() {
         cron: buildCron(d.when),
         timezone: d.timezone.trim() || 'UTC',
         agentName: d.kind === 'task' ? d.agentName || null : null,
+        taskMode: d.taskMode,
         channelId: d.channelId || null,
         chatId: d.channelId ? d.chatId || chatsOf(d.channelId)[0] || null : null,
         quietStart: d.quiet ? d.quietStart : null,
@@ -158,7 +161,7 @@ export function SchedulesManager() {
           <div className={styles.facts}>
             <span>🕒 {s.when}</span>
             {s.quietStart && <span>🌙 quiet {s.quietStart}–{s.quietEnd}</span>}
-            <span>{s.kind === 'task' ? `🤖 task → ${s.agentName}` : '💬 message'}</span>
+            <span>{s.kind === 'task' ? `🤖 task → ${s.agentName} (${s.taskMode === 'new' ? 'new task each time' : 'one ongoing task'})` : '💬 message'}</span>
             {s.channelId && (
               <span>
                 → {channelName(s.channelId)} · chat {s.chatId}
@@ -222,6 +225,14 @@ export function SchedulesManager() {
                     {a.name}
                   </option>
                 ))}
+              </select>
+            </Field>
+          )}
+          {d.kind === 'task' && (
+            <Field label="Each run">
+              <select value={d.taskMode} onChange={(e) => setDraft({ taskMode: e.target.value as 'same' | 'new' })}>
+                <option value="same">Continue ONE ongoing task (the agent remembers earlier runs) — recommended</option>
+                <option value="new">Start a separate new task every time</option>
               </select>
             </Field>
           )}

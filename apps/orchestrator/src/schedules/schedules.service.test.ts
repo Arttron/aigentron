@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { SchedulesService } from './schedules.service';
 
@@ -24,7 +25,11 @@ function fakeEnv(rows: Row[]) {
   };
   const sent: { channelId: string; chatId: string; text: string }[] = [];
   const manager = { sendText: vi.fn(async (channelId: string, chatId: string, text: string) => (sent.push({ channelId, chatId, text }), true)) };
-  const tasks = { create: vi.fn(async () => ({ id: 't1', title: '⏰ x' })) };
+  const tasks = {
+    create: vi.fn(async () => ({ id: 't1', title: '⏰ x' })),
+    get: vi.fn(async (id: string) => ({ id, createdAt: new Date() })),
+    followUp: vi.fn(async () => ({})),
+  };
   const channels = { linkThread: vi.fn(async () => undefined), setChatState: vi.fn(async () => undefined) };
   const svc = new SchedulesService(prisma as never, tasks as never, channels as never, manager as never, {} as never);
   return { svc, prisma, manager, tasks, channels, sent, rows };
@@ -111,5 +116,55 @@ describe('SchedulesService.tick', () => {
     const env = fakeEnv([base({ cron: 'not a cron' })]);
     await env.svc.tick(new Date('2026-10-08T09:30:20Z'));
     expect(env.rows[0]).toMatchObject({ enabled: false, lastStatus: 'error' });
+  });
+});
+
+describe('task schedules — one ongoing task (taskMode "same")', () => {
+  const taskRow = (over: Partial<Row> = {}) => base({ kind: 'task', agentName: 'tutor', channelId: null, chatId: null, taskMode: 'same', taskId: null, ...over });
+  const due = new Date('2026-10-08T09:30:20Z');
+
+  it('the first run creates the task and remembers it; the next run continues it instead of making a new one', async () => {
+    const { svc, rows, tasks } = fakeEnv([taskRow()]);
+    await svc.tick(due);
+    expect(tasks.create).toHaveBeenCalledTimes(1);
+    expect(rows[0]!.taskId).toBe('t1');
+    // next day
+    rows[0]!.nextRunAt = new Date('2026-10-09T09:30:00Z');
+    await svc.tick(new Date('2026-10-09T09:30:20Z'));
+    expect(tasks.create).toHaveBeenCalledTimes(1);
+    expect(tasks.followUp).toHaveBeenCalledWith('t1', 'Practise 10 minutes');
+    expect(rows[0]).toMatchObject({ lastStatus: 'ok' });
+  });
+
+  it('"new" mode starts a separate task every time and keeps no task id', async () => {
+    const { svc, rows, tasks } = fakeEnv([taskRow({ taskMode: 'new' })]);
+    await svc.tick(due);
+    rows[0]!.nextRunAt = new Date('2026-10-09T09:30:00Z');
+    await svc.tick(new Date('2026-10-09T09:30:20Z'));
+    expect(tasks.create).toHaveBeenCalledTimes(2);
+    expect(tasks.followUp).not.toHaveBeenCalled();
+    expect(rows[0]!.taskId ?? null).toBeNull();
+  });
+
+  it('skips (not errors) when the previous run is still going and its queue is full', async () => {
+    const { svc, rows, tasks } = fakeEnv([taskRow({ taskId: 't9' })]);
+    tasks.followUp.mockRejectedValueOnce(new ConflictException('queue full'));
+    await svc.tick(due);
+    expect(rows[0]).toMatchObject({ lastStatus: 'skipped' });
+    expect(tasks.create).not.toHaveBeenCalled();
+  });
+
+  it('starts a fresh task when the old one is gone or a month old', async () => {
+    const gone = fakeEnv([taskRow({ taskId: 'missing' })]);
+    gone.tasks.get.mockRejectedValueOnce(new Error('not found'));
+    await gone.svc.tick(due);
+    expect(gone.tasks.create).toHaveBeenCalledTimes(1);
+    expect(gone.rows[0]!.taskId).toBe('t1');
+
+    const old = fakeEnv([taskRow({ taskId: 't-old' })]);
+    old.tasks.get.mockResolvedValueOnce({ id: 't-old', createdAt: new Date(Date.now() - 31 * 24 * 3600_000) });
+    await old.svc.tick(due);
+    expect(old.tasks.create).toHaveBeenCalledTimes(1);
+    expect(old.tasks.followUp).not.toHaveBeenCalled();
   });
 });

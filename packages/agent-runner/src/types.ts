@@ -169,6 +169,7 @@ export interface AdminToolsWiring {
     kind?: 'message' | 'task';
     text?: string;
     agentName?: string;
+    taskMode?: 'same' | 'new';
     channel?: string;
     chatId?: string;
     quietStart?: string;

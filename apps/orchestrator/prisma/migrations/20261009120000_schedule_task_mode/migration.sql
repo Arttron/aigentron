@@ -1,0 +1,2 @@
+ALTER TABLE "Schedule" ADD COLUMN "taskMode" TEXT NOT NULL DEFAULT 'same';
+ALTER TABLE "Schedule" ADD COLUMN "taskId" TEXT;

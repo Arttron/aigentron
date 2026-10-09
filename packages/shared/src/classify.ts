@@ -484,11 +484,11 @@ export function classifyToolCall(
     const text = s('text').replace(/\s+/g, ' ').slice(0, 140);
     return {
       dangerous: true,
-      summary: `propose_schedule ${action} "${s('name') || '?'}" #${shortHash(JSON.stringify([toolInput.action, toolInput.name, toolInput.cron, toolInput.timezone, toolInput.kind, toolInput.text, toolInput.agentName, toolInput.channel, toolInput.chatId, toolInput.quietStart, toolInput.quietEnd, toolInput.enabled]))}`,
+      summary: `propose_schedule ${action} "${s('name') || '?'}" #${shortHash(JSON.stringify([toolInput.action, toolInput.name, toolInput.cron, toolInput.timezone, toolInput.kind, toolInput.text, toolInput.agentName, toolInput.taskMode, toolInput.channel, toolInput.chatId, toolInput.quietStart, toolInput.quietEnd, toolInput.enabled]))}`,
       reason:
         action === 'delete'
           ? `admin agent proposing to DELETE the schedule "${s('name')}"`
-          : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the schedule "${s('name')}": ${s('cron') || '(same time)'} ${s('timezone')} — ${s('kind') || '(same kind)'}${text ? `: ${text}` : ''}${s('kind') === 'task' ? ` — it runs a task with agent "${s('agentName')}" each time and uses model budget` : ''}`,
+          : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the schedule "${s('name')}": ${s('cron') || '(same time)'} ${s('timezone')} — ${s('kind') || '(same kind)'}${text ? `: ${text}` : ''}${s('kind') === 'task' ? ` — it runs a task with agent "${s('agentName')}" each time (${s('taskMode') === 'new' ? 'a new task per run' : 'the same task, continued'}) and uses model budget` : ''}`,
     };
   }
   if (name === PROPOSE_ALLOWED_DOMAINS_TOOL.toLowerCase()) {

@@ -377,7 +377,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_schedule',
         description:
-          "Create, change or delete a recurring job. `action`: create | update | delete; `name` identifies it. For create/update: `cron` (5 fields: minute hour day-of-month month day-of-week, e.g. \"30 9 * * *\" = every day 09:30, \"0 18 * * 0\" = Sundays 18:00, \"0 8 * * 1-5\" = weekdays 08:00; not more often than every 5 minutes), `timezone` (IANA, e.g. Europe/Kyiv — ask the user, don't guess), `kind`: \"message\" (posts `text` to a chat — no model, free; use it for plain reminders) or \"task\" (starts a task with `text` as the prompt for `agentName` each time — uses model budget; its updates go to the chat), `channel` (channel NAME) + `chatId` (must already be an allowed chat of that channel — see channels_list), optional quiet hours `quietStart`/`quietEnd` (HH:MM, runs inside are skipped), optional `enabled`. `reason` is required. A human reviews and must approve; this call blocks until they decide. Schedules cannot be part of propose_batch — call this once per job.",
+          "Create, change or delete a recurring job. `action`: create | update | delete; `name` identifies it. For create/update: `cron` (5 fields: minute hour day-of-month month day-of-week, e.g. \"30 9 * * *\" = every day 09:30, \"0 18 * * 0\" = Sundays 18:00, \"0 8 * * 1-5\" = weekdays 08:00; not more often than every 5 minutes), `timezone` (IANA, e.g. Europe/Kyiv — ask the user, don't guess), `kind`: \"message\" (posts `text` to a chat — no model, free; use it for plain reminders) or \"task\" (starts a task with `text` as the prompt for `agentName` each time — uses model budget; its updates go to the chat; `taskMode`: \"same\" (default) = every run continues ONE task, so the agent remembers earlier runs, or \"new\" = every run starts a separate task), `channel` (channel NAME) + `chatId` (must already be an allowed chat of that channel — see channels_list), optional quiet hours `quietStart`/`quietEnd` (HH:MM, runs inside are skipped), optional `enabled`. `reason` is required. A human reviews and must approve; this call blocks until they decide. Schedules cannot be part of propose_batch — call this once per job.",
         shape: {
           action: z.enum(['create', 'update', 'delete']),
           name: z.string(),
@@ -386,6 +386,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           kind: z.enum(['message', 'task']).optional(),
           text: z.string().optional(),
           agentName: z.string().optional(),
+          taskMode: z.enum(['same', 'new']).optional(),
           channel: z.string().optional(),
           chatId: z.string().optional(),
           quietStart: z.string().optional(),
@@ -404,6 +405,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
               kind: opt('kind') as 'message' | 'task' | undefined,
               text: typeof args.text === 'string' ? args.text : undefined,
               agentName: opt('agentName'),
+              taskMode: opt('taskMode') as 'same' | 'new' | undefined,
               channel: opt('channel'),
               chatId: opt('chatId'),
               quietStart: opt('quietStart'),

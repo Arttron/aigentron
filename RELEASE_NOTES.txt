@@ -1,18 +1,14 @@
-Aigentron v0.1.46
+Aigentron v0.1.47
 
-For people who are not programmers: the server can now serve your domain over HTTPS by itself, and the terminal menu got friendlier.
+For people who are not programmers: scheduled tasks now stay in one conversation, and you can make the server refuse access by IP address.
 
-Own HTTPS and ports (Settings → General → Web server, or `aigentron access` → Ports & HTTPS certificate)
-- Install a certificate (paste the certificate and its private key) and the server serves HTTPS on port 443. The page checks that the key belongs to the certificate, shows who it is for and when it expires (with a warning when it is close), and warns if it does not cover one of your allowed domains. Replacing or removing it applies instantly, no restart.
-- Port 80 is optional: switch it on when you want it. With a certificate, port 80 sends domain names to HTTPS (IP addresses and local names keep working over plain HTTP). Port 3001 stays as it is.
-- Only the domains you allowed are served, on every port. Under Docker the installer publishes 80 and 443 when the host's ports are free. With "listen on this machine only" the server leaves 80/443 alone for your reverse proxy.
-- No certificate yet? A Cloudflare Origin Certificate or Let's Encrypt both work — docs/remote-access.md explains how.
+Scheduled tasks (Settings → Schedules)
+- A schedule that starts an agent now continues ONE ongoing task by default: every run is a follow-up in the same task, so the agent remembers the earlier runs (for example a daily English lesson that builds on yesterday's). Before, every run created a new task.
+- You can still choose "start a separate new task every time" for a schedule. If the previous run is still working, the next one waits in the task's queue; after 30 days a fresh task starts so the conversation does not grow forever.
+- The admin assistant can set this too.
 
-Terminal menu (`aigentron`)
-- A section opened straight from a command ends with "Exit" instead of "Back"; slow steps (tests, model lists, Cloudflare) show a spinner so the menu never looks frozen.
-- Editing a provider lets you pick the model from a list; the connection details are asked once and remembered.
-- Mistakes are caught early: an empty key, a duplicate or invalid name, a bad address, wrong chat ids.
+Only your domains (Settings → General → Access, or `aigentron access`)
+- New option "Only these domains": from outside, opening the server by its IP address or a bare server name gives an error page instead of the dashboard. The server itself (agent hooks, health checks, SSH tunnel) and your domain keep working. The dashboard will not let you switch it on while you are connected by IP, so you cannot lock yourself out.
+- This does not replace passwords — set them in Settings → Security as well.
 
-Also
-- Newer Claude models work (the built-in Claude Code engine is updated).
-- Cloudflare Access sign-in check, and the admin assistant can manage the allowed domains and that check (with your approval).
+Update note: this release adds two small columns for schedules; they are created automatically when the server starts.

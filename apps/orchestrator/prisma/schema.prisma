@@ -442,6 +442,10 @@ model Schedule {
   agentName  String?
   channelId  String?
   chatId     String?
+  // task kind: `same` = every run continues ONE task (a follow-up in the same conversation), `new` = every run starts a new task
+  taskMode   String    @default("same")
+  // the task that `same` mode keeps continuing (created on the first run)
+  taskId     String?
   // optional quiet hours (HH:MM, in `timezone`): runs that fall inside are skipped
   quietStart String?
   quietEnd   String?

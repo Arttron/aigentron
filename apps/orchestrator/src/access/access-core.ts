@@ -68,3 +68,22 @@ export function hostAllowed(hostHeader: string | undefined, allowed: readonly st
   if (isAlwaysAllowed(host)) return true;
   return allowed.some((a) => (a.startsWith('*.') ? host.endsWith(a.slice(1)) && host.length > a.length - 1 : host === a));
 }
+
+/** Does this Host match one of the allowed DOMAINS (no free pass for IPs / local names)? */
+export function domainAllowed(hostHeader: string | undefined, allowed: readonly string[]): boolean {
+  const host = normalizeHost(hostHeader);
+  if (!host) return false;
+  return allowed.some((a) => (a.startsWith('*.') ? host.endsWith(a.slice(1)) && host.length > a.length - 1 : host === a));
+}
+
+/**
+ * The request-level rule. Normal mode = `hostAllowed` (IPs, localhost and single-word names always pass).
+ * Strict mode (with a non-empty domain list): anyone not on this machine must come in under an allowed DOMAIN — an IP address or a bare
+ * server name gets refused, and a forged `Host: localhost` does not help from outside. A request from this machine itself (agent hooks,
+ * health checks, an SSH tunnel) still passes — unless it was relayed by a proxy/tunnel (forwarding headers), which counts as outside.
+ */
+export function requestAllowed(opts: { host: string | undefined; allowed: readonly string[]; strict: boolean; fromThisMachine: boolean; relayed: boolean }): boolean {
+  if (!opts.strict || opts.allowed.length === 0) return hostAllowed(opts.host, opts.allowed);
+  if (opts.fromThisMachine && !opts.relayed) return true;
+  return domainAllowed(opts.host, opts.allowed);
+}
