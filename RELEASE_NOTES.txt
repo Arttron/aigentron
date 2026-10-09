@@ -1,11 +1,10 @@
-Aigentron v0.1.42
+Aigentron v0.1.43
 
-For people who are not programmers: the terminal setup menu no longer lets mistakes slip through quietly.
+For people who are not programmers: newer Claude models now work, and the terminal menu behaves better in narrow windows.
+
+Claude models
+- The built-in Claude Code engine is updated (2.1.295). Newer models such as claude-opus-5-5 need it; before, a task on such a model failed with "Claude Code 2.1.193 does not support this model; version 2.1.280 or newer is required".
 
 Setup wizard (`aigentron`)
-- Claude subscription login: the pasted token is required (an empty or wrong value is refused with a clear message instead of silently creating a broken provider), the wizard confirms how many characters it received, and it offers the current Claude models to choose from.
-- API key, bearer token and OpenAI key for Codex: an empty key is asked for again; you can still create the provider without a key, but only after saying so explicitly.
-- Provider name is checked right away (letters, digits, - and _, not already used); a Base URL must be a real http(s) address; Telegram chat ids must be numbers.
-
-Server
-- Creating a provider with a name that already exists now answers "already exists" instead of a generic server error, and a Base URL that is not an http(s) address is refused.
+- Yes/No questions and menu headers stay on one line in a narrow terminal (a wrapped line used to be redrawn as a growing pile of copies).
+- A Claude subscription login is no longer reported as "test failed": it cannot be checked with a quick request, so the wizard says so and skips the test — start a small task with that provider to confirm it works.

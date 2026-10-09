@@ -210,7 +210,11 @@ async function select(query, options, def, { back, exit } = {}) {
       process.stdout.write(`\u001b[2K${on ? c.cyan('❯') : ' '} ${num} ${on ? c.cyan(c.bold(label)) : label}${c.gray(hint)}\n`);
     }
   };
-  process.stdout.write(`${qMark()} ${c.bold(query)} ${c.gray(`(↑/↓, Enter · Esc ${back !== undefined ? 'back' : 'cancel'})`)}\n\u001b[?25l`);
+  // header on ONE line (the menu is redrawn by moving the cursor up a fixed number of lines — a wrapped header would break that)
+  const hintFull = `(↑/↓, Enter · Esc ${back !== undefined ? 'back' : 'cancel'})`;
+  const room = Math.max(20, cols() - 3);
+  const hintShown = 2 + query.length + 1 + hintFull.length <= room ? hintFull : '';
+  process.stdout.write(`${qMark()} ${c.bold(fit(query, room - 2))}${hintShown ? ` ${c.gray(hintShown)}` : ''}\n\u001b[?25l`);
   render(true);
   try {
     await readKeys((name) => {
@@ -234,7 +238,7 @@ async function select(query, options, def, { back, exit } = {}) {
     throw new Cancelled();
   }
   // collapse the menu to one line with the answer
-  process.stdout.write(`\u001b[${items.length + 1}A\u001b[J${tick()} ${c.bold(query)} ${c.cyan(items[idx].label)}\n\u001b[?25h`);
+  process.stdout.write(`\u001b[${items.length + 1}A\u001b[J${tick()} ${c.bold(fit(query, Math.max(10, cols() - 8 - items[idx].label.length)))} ${c.cyan(items[idx].label)}\n\u001b[?25h`);
   return items[idx].value;
 }
 
@@ -245,7 +249,18 @@ async function confirm(query, def = false) {
     return a ? /^y(es)?$/.test(a) : def;
   }
   let yes = def;
-  const draw = () => process.stdout.write(`\r\u001b[2K${qMark()} ${c.bold(query)}  ${yes ? c.green(c.bold('● Yes')) : c.gray('○ Yes')}  ${yes ? c.gray('○ No') : c.red(c.bold('● No'))}  ${c.gray('(←/→, y/n, Enter · Esc cancel)')}`);
+  // Everything is kept on ONE terminal line: the line is redrawn in place with \r, which only works if it never wraps (a wrapped
+  // line left a stale copy behind on every key press). Too narrow → drop the key hint first, then shorten the question.
+  const draw = () => {
+    const room = Math.max(20, cols() - 3);
+    const choice = 17; // "● Yes  ○ No" plus spacing
+    let hint = '(←/→, y/n, Enter · Esc cancel)';
+    let q = query;
+    if (2 + q.length + 2 + choice + 2 + hint.length > room) hint = '(Esc cancel)';
+    if (2 + q.length + 2 + choice + 2 + hint.length > room) hint = '';
+    if (2 + q.length + 2 + choice > room) q = `${q.slice(0, Math.max(8, room - 2 - 2 - choice - 1))}…`;
+    process.stdout.write(`\r\u001b[2K${qMark()} ${c.bold(q)}  ${yes ? c.green(c.bold('● Yes')) : c.gray('○ Yes')}  ${yes ? c.gray('○ No') : c.red(c.bold('● No'))}${hint ? `  ${c.gray(hint)}` : ''}`);
+  };
   process.stdout.write('\u001b[?25l');
   draw();
   try {
@@ -258,10 +273,10 @@ async function confirm(query, def = false) {
     return false;
     });
   } catch (e) {
-    process.stdout.write(`\r\u001b[2K${c.gray(`↩ ${query}`)}\n\u001b[?25h`);
+    process.stdout.write(`\r\u001b[2K${c.gray(`↩ ${fit(query, cols() - 4)}`)}\n\u001b[?25h`);
     throw e;
   }
-  process.stdout.write(`\r\u001b[2K${tick()} ${c.bold(query)} ${yes ? c.green('Yes') : c.red('No')}\n\u001b[?25h`);
+  process.stdout.write(`\r\u001b[2K${tick()} ${c.bold(fit(query, Math.max(10, cols() - 8)))} ${yes ? c.green('Yes') : c.red('No')}\n\u001b[?25h`);
   return yes;
 }
 
@@ -564,6 +579,13 @@ const AUTH_METHODS = [
   { value: 'none', label: 'No authentication', hint: '— a local server such as Ollama' },
 ];
 
+/** Print a provider test result. A subscription login (oauth-token) cannot be probed with a quick request — that is a note, not a failure. */
+function reportTest(t, authMode) {
+  if (t.ok) return log(`  ✓ works${t.latencyMs ? ` (${t.latencyMs} ms)` : ''}`);
+  if (authMode === 'oauth-token') return log(c.gray(`  ⓘ ${t.error ?? 'cannot be checked with a quick request'} — the first real task will show it.`));
+  log(`  ✗ test failed: ${t.error ?? 'unknown error'}`);
+}
+
 const isHttpUrl = (v) => {
   try {
     const u = new URL(v);
@@ -692,10 +714,12 @@ async function addProvider(rl, firstOne) {
     log(`  ✗ failed to create provider "${name}": ${e.message}`);
     return null;
   }
-  if (await promptYesNo(rl, 'Test it now (a tiny request)?', true)) {
+  if (authMode === 'oauth-token') {
+    log(c.gray('  ⓘ A Claude subscription login cannot be checked with a quick request — start a small task with this provider to confirm it works.'));
+  } else if (await promptYesNo(rl, 'Test it now (a tiny request)?', true)) {
     try {
       const t = await apiPost(`/providers/${encodeURIComponent(name)}/test`);
-      log(t.ok ? `  ✓ works${t.latencyMs ? ` (${t.latencyMs} ms)` : ''}` : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
+      reportTest(t, authMode);
     } catch (e) {
       log(`  ✗ test failed: ${e.message}`);
     }
@@ -823,7 +847,7 @@ async function stepProviders(rl) {
         const p = await pick('Test which provider?');
         try {
           const t = await apiPost(`/providers/${encodeURIComponent(p.name)}/test`);
-          log(t.ok ? `  ✓ works${t.latencyMs ? ` (${t.latencyMs} ms)` : ''}` : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
+          reportTest(t, p.authMode);
         } catch (e) {
           log(`  ✗ test failed: ${e.message}`);
         }
