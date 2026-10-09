@@ -23,70 +23,81 @@ import { spawnSync, execSync } from 'node:child_process';
 
 let BASE = 'http://localhost:3001';
 
-// readRawLine() below leaves stdin in raw mode once the first prompt runs
-// (never toggled back per-call — see its own comment for why). `exit` is the
-// only event guaranteed to fire even after a direct process.exit() call (the
-// Ctrl+C paths below do exactly that, bypassing any try/finally), so restore
-// cooked mode here or the user's shell is left with echo off after we quit.
+// ---- terminal UI ----
+//
+// Arrow-key menus, y/n toggles and colours — built on one always-raw stdin reader (see readRawLine's history below). Colours follow the
+// usual rules: off when output is not a terminal or NO_COLOR is set, forced on by FORCE_COLOR. When stdin/stdout is not a TTY (piped
+// input, CI) every prompt falls back to a plain typed line, so scripted use keeps working.
+const COLOR = (process.stdout.isTTY && !process.env.NO_COLOR && process.env.TERM !== 'dumb') || Boolean(process.env.FORCE_COLOR);
+const sgr = (open, close = 39) => (s) => (COLOR ? `\u001b[${open}m${s}\u001b[${close}m` : String(s));
+const c = {
+  bold: sgr(1, 22),
+  dim: sgr(2, 22),
+  red: sgr(31),
+  green: sgr(32),
+  yellow: sgr(33),
+  blue: sgr(34),
+  magenta: sgr(35),
+  cyan: sgr(36),
+  gray: sgr(90),
+};
+const INTERACTIVE = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+const stripAnsi = (s) => s.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '');
+const cols = () => process.stdout.columns || 80;
+const fit = (s, max) => (stripAnsi(s).length > max ? `${s.slice(0, Math.max(0, max - 1))}…` : s);
+
 process.on('exit', () => {
   if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  if (process.stdout.isTTY) process.stdout.write('\u001b[?25h'); // never leave the cursor hidden
 });
 
+/** Lines that start like a result get their colour automatically, so steps just `log('  ✓ done')`. */
 function log(msg = '') {
-  console.log(msg);
+  const m = String(msg);
+  if (!COLOR) return console.log(m);
+  if (/^\s*✓/.test(m)) return console.log(c.green(m));
+  if (/^\s*✗/.test(m)) return console.log(c.red(m));
+  if (/^\s*⚠|^\s*warning/i.test(m)) return console.log(c.yellow(m));
+  if (/^\s*\(.*\)\s*$/.test(m)) return console.log(c.gray(m));
+  console.log(m);
 }
 function header(title) {
-  console.log(`\n== ${title} ==`);
+  const line = '━'.repeat(Math.max(4, Math.min(60, cols() - 2) - title.length - 4));
+  console.log(`\n${c.cyan(c.bold(`━━ ${title} `))}${c.cyan(line)}`);
+}
+function banner(title, sub) {
+  console.log(`\n${c.magenta(c.bold(`◆ ${title}`))}${sub ? `  ${c.gray(sub)}` : ''}`);
 }
 
-// ---- prompt helpers ----
-//
-// Every prompt — masked or not — reads stdin itself in raw mode via
-// readRawLine() below; readline's own `.question()` is never used to
-// capture input (rl is paused immediately after creation in main() and
-// kept that way — see the comment there). This used to be split: plain
-// fields went through `rl.question()` (cooked-mode terminal echo) and only
-// secret fields switched to a raw-mode reader for the duration of that one
-// prompt. That split left a real race: readline's own keypress listener
-// stays attached to stdin (echoing in cleartext) until something pauses
-// it, and a paste delivered for a SECRET field can physically arrive on
-// stdin — and get echoed by readline — in the gap between the field
-// BEFORE it resolving and promptSecret's own pause()/raw-mode-switch
-// executing a few microtasks later. Found live: a pasted API key
-// partially printed in cleartext before the masking kicked in, immediately
-// followed by the correctly-masked remainder. Routing every prompt through
-// this one always-raw reader (readline's listener paused from the very
-// start of the wizard) closes that window entirely — there is no longer
-// any mode/listener to race against a fast paste. The trade-off is losing
-// readline's own arrow-key/history line editing for plain fields (masked
-// fields never had it either); Enter/Backspace/Ctrl+C still work.
-function readRawLine(query, { mask = false } = {}) {
+// Every prompt — masked or not — reads stdin itself in raw mode; readline's own `.question()` is never used to capture input
+// (`rl` is paused right after creation in main()). Mixing the two once leaked a pasted API key in cleartext (readline's listener
+// echoed it before the masking reader took over), so there is exactly one reader. The trade-off is no readline history/arrow
+// editing inside a text field; menus below use the arrow keys instead.
+const KEY_RE = /\u001b\[[0-9;]*[A-Za-z~]|\u001b[A-Za-z]|[\s\S]/gu;
+const ESC_NAMES = { '\u001b[A': 'up', '\u001b[B': 'down', '\u001b[C': 'right', '\u001b[D': 'left', '\u001b[H': 'home', '\u001b[F': 'end', '\u001bOA': 'up', '\u001bOB': 'down' };
+
+/** Feeds `onKey(name, raw)` for every key in every chunk until it returns true (finished). */
+function readKeys(onKey) {
   return new Promise((resolve) => {
-    process.stdout.write(query);
     const stdin = process.stdin;
     if (stdin.isTTY) stdin.setRawMode(true);
     stdin.resume();
-    let buf = '';
     const onData = (chunk) => {
-      for (const ch of chunk.toString('utf8')) {
-        if (ch === '\r' || ch === '\n') {
+      for (const raw of chunk.toString('utf8').match(KEY_RE) ?? []) {
+        const name = ESC_NAMES[raw] ?? (raw === '\r' || raw === '\n' ? 'enter' : raw === '\u0003' ? 'ctrl-c' : raw === '\u007f' || raw === '\b' ? 'backspace' : raw === '\t' ? 'tab' : raw === '\u001b' ? 'esc' : raw);
+        if (name === 'ctrl-c') {
           stdin.removeListener('data', onData);
-          process.stdout.write('\n');
-          resolve(buf.trim());
-          return;
-        } else if (ch === '\u0003') {
-          // Ctrl+C — match readline's own SIGINT-on-prompt behavior.
-          stdin.removeListener('data', onData);
-          log('\naborted');
+          process.stdout.write('\u001b[?25h');
+          log(`\n${c.red('aborted')}`);
           process.exit(130);
-        } else if (ch === '\u007f' || ch === '\b') {
-          if (buf.length) {
-            buf = buf.slice(0, -1);
-            process.stdout.write('\b \b');
-          }
-        } else if (ch >= ' ') {
-          buf += ch;
-          process.stdout.write(mask ? '*' : ch);
+        }
+        if (onKey(name, raw)) {
+          stdin.removeListener('data', onData);
+          // Stop reading between prompts, or the open stdin keeps the process alive after the last step ("hangs on Done").
+          // Raw mode stays on, so keys typed in the gap are still not echoed.
+          stdin.pause();
+          resolve();
+          return;
         }
       }
     };
@@ -94,51 +105,125 @@ function readRawLine(query, { mask = false } = {}) {
   });
 }
 
+function readRawLine(query, { mask = false } = {}) {
+  return new Promise((resolve) => {
+    process.stdout.write(query);
+    let buf = '';
+    void readKeys((name, raw) => {
+      if (name === 'enter') {
+        process.stdout.write('\n');
+        resolve(buf.trim());
+        return true;
+      }
+      if (name === 'backspace') {
+        if (buf.length) {
+          buf = buf.slice(0, -1);
+          process.stdout.write('\b \b');
+        }
+      } else if (raw.length >= 1 && raw >= ' ' && !raw.startsWith('\u001b') && !ESC_NAMES[raw]) {
+        buf += raw;
+        process.stdout.write(mask ? '*' : raw);
+      }
+      return false;
+    });
+  });
+}
+
+const qMark = () => c.cyan('?');
+const tick = () => c.green('✔');
+
 function qp(_rl, query) {
   return readRawLine(query);
 }
 
 async function prompt(rl, query, def) {
-  const suffix = def !== undefined && def !== '' ? ` [${def}]` : '';
-  const answer = (await qp(rl, `${query}${suffix}: `)).trim();
+  const suffix = def !== undefined && def !== '' ? ` ${c.gray(`(${def})`)}` : '';
+  const answer = (await qp(rl, `${qMark()} ${c.bold(query)}${suffix} ${c.cyan('›')} `)).trim();
   return answer || def || '';
 }
 
-async function promptYesNo(rl, query, def = false) {
-  const hint = def ? 'Y/n' : 'y/N';
-  const answer = (await qp(rl, `${query} (${hint}): `)).trim().toLowerCase();
-  if (!answer) return def;
-  return /^y(es)?$/.test(answer);
-}
-
-/** Restrict to a fixed set of options; blank falls back to `def`, invalid re-prompts. */
-async function promptChoice(rl, query, options, def) {
-  for (;;) {
-    const answer = (await qp(rl, `${query} [${options.join('/')}]${def ? ` (${def})` : ''}: `)).trim();
-    if (!answer) return def ?? options[0];
-    const match = options.find((o) => o.toLowerCase() === answer.toLowerCase());
-    if (match) return match;
-    log(`  please choose one of: ${options.join(', ')}`);
-  }
-}
-
-/** Same as promptChoice, but blank means "none" instead of a required default. */
-async function promptChoiceOptional(rl, query, options) {
-  if (!options.length) return undefined;
-  for (;;) {
-    const answer = (await qp(rl, `${query} [${options.join('/')}] (blank = none): `)).trim();
-    if (!answer) return undefined;
-    const match = options.find((o) => o.toLowerCase() === answer.toLowerCase());
-    if (match) return match;
-    log(`  please choose one of: ${options.join(', ')}, or leave blank`);
-  }
-}
-
-/** Masked input — same always-raw reader as qp(), echoing '*' per character
- *  instead of the real one. See readRawLine()'s comment for why this no
- *  longer toggles raw mode/pauses `rl` per call. */
+/** Masked input — `*` per character; the real value is never echoed. */
 function promptSecret(_rl, query) {
-  return readRawLine(query, { mask: true });
+  return readRawLine(`${qMark()} ${c.bold(query.replace(/:\s*$/, ''))} ${c.cyan('›')} `, { mask: true });
+}
+
+/**
+ * Menu: ↑/↓ (or j/k, or a number) to move, Enter to choose. `options` are strings or `{ value, label?, hint? }`. Returns the value.
+ * `def` is the value highlighted first.
+ */
+async function select(query, options, def) {
+  const items = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : { label: o.value, ...o }));
+  if (!INTERACTIVE) {
+    for (;;) {
+      const names = items.map((i) => i.value);
+      const a = (await readRawLine(`${query} [${names.join('/')}]${def ? ` (${def})` : ''}: `)).trim();
+      if (!a) return def ?? names[0];
+      const hit = names.find((n) => n.toLowerCase() === a.toLowerCase());
+      if (hit) return hit;
+      log(`  please choose one of: ${names.join(', ')}`);
+    }
+  }
+  let idx = Math.max(0, items.findIndex((i) => i.value === def));
+  const width = cols() - 6;
+  const render = (first) => {
+    if (!first) process.stdout.write(`\u001b[${items.length}A`);
+    for (let n = 0; n < items.length; n++) {
+      const it = items[n];
+      const on = n === idx;
+      const num = n < 9 ? c.gray(`${n + 1}`) : ' ';
+      const text = fit(`${it.label}${it.hint ? `  ${stripAnsi(it.hint)}` : ''}`, width);
+      const [label, hint] = it.hint ? [text.slice(0, it.label.length), text.slice(it.label.length)] : [text, ''];
+      process.stdout.write(`\u001b[2K${on ? c.cyan('❯') : ' '} ${num} ${on ? c.cyan(c.bold(label)) : label}${c.gray(hint)}\n`);
+    }
+  };
+  process.stdout.write(`${qMark()} ${c.bold(query)} ${c.gray('(↑/↓, Enter)')}\n\u001b[?25l`);
+  render(true);
+  await readKeys((name) => {
+    if (name === 'up' || name === 'k') idx = (idx - 1 + items.length) % items.length;
+    else if (name === 'down' || name === 'j' || name === 'tab') idx = (idx + 1) % items.length;
+    else if (name === 'home') idx = 0;
+    else if (name === 'end') idx = items.length - 1;
+    else if (/^[1-9]$/.test(name) && Number(name) <= items.length) idx = Number(name) - 1;
+    else if (name === 'enter') return true;
+    render(false);
+    return false;
+  });
+  // collapse the menu to one line with the answer
+  process.stdout.write(`\u001b[${items.length + 1}A\u001b[J${tick()} ${c.bold(query)} ${c.cyan(items[idx].label)}\n\u001b[?25h`);
+  return items[idx].value;
+}
+
+/** Yes/No: ←/→ or y/n toggles, Enter confirms (the default is preselected). */
+async function confirm(query, def = false) {
+  if (!INTERACTIVE) {
+    const a = (await readRawLine(`${query} (${def ? 'Y/n' : 'y/N'}): `)).trim().toLowerCase();
+    return a ? /^y(es)?$/.test(a) : def;
+  }
+  let yes = def;
+  const draw = () => process.stdout.write(`\r\u001b[2K${qMark()} ${c.bold(query)}  ${yes ? c.green(c.bold('● Yes')) : c.gray('○ Yes')}  ${yes ? c.gray('○ No') : c.red(c.bold('● No'))}  ${c.gray('(←/→, y/n, Enter)')}`);
+  process.stdout.write('\u001b[?25l');
+  draw();
+  await readKeys((name) => {
+    if (name === 'left' || name === 'right' || name === 'tab' || name === 'h' || name === 'l') yes = !yes;
+    else if (name === 'y' || name === 'Y') yes = true;
+    else if (name === 'n' || name === 'N') yes = false;
+    else if (name === 'enter') return true;
+    draw();
+    return false;
+  });
+  process.stdout.write(`\r\u001b[2K${tick()} ${c.bold(query)} ${yes ? c.green('Yes') : c.red('No')}\n\u001b[?25h`);
+  return yes;
+}
+
+const promptYesNo = (_rl, query, def = false) => confirm(query, def);
+const promptChoice = (_rl, query, options, def) => select(query, options, def ?? (typeof options[0] === 'string' ? options[0] : options[0].value));
+
+/** Same as promptChoice, with an extra "none" entry on top. */
+async function promptChoiceOptional(_rl, query, options) {
+  if (!options.length) return undefined;
+  const none = '\u0000none';
+  const v = await select(query, [{ value: none, label: '(none)' }, ...options], none);
+  return v === none ? undefined : v;
 }
 
 function toIntOrUndef(s) {
@@ -270,7 +355,16 @@ async function promptOauthSecret(rl, label) {
 
 async function stepDeploymentMode(rl, cliUrl) {
   header('Step 0 — Deployment');
-  const mode = await promptChoice(rl, 'How is Aigentron installed here?', ['docker', 'bare-metal', 'not-sure'], 'not-sure');
+  const mode = await promptChoice(
+    rl,
+    'How is Aigentron installed here?',
+    [
+      { value: 'docker', label: 'Docker', hint: '— the container install' },
+      { value: 'bare-metal', label: 'Bare-metal', hint: '— a systemd service on this machine' },
+      { value: 'not-sure', label: 'Not sure' },
+    ],
+    'not-sure',
+  );
   const defaultUrl = cliUrl || process.env.ORCHESTRATOR_URL || 'http://localhost:3001';
   BASE = (await prompt(rl, 'Orchestrator URL', defaultUrl)).replace(/\/$/, '');
   try {
@@ -545,19 +639,26 @@ async function stepChannels(rl) {
     const existing = await apiGet('/channels').catch(() => []);
     if (existing.length) {
       log('  Channels now:');
-      for (const c of existing) {
-        const allowed = Array.isArray(c.config?.allowedChatIds) ? c.config.allowedChatIds.length : 0;
-        log(`    - ${c.name} (${c.kind}) ${c.enabled ? 'on' : 'OFF'}${allowed ? `, ${allowed} allowed chat(s)` : ', no allowed chats yet'}`);
+      for (const ch of existing) {
+        const allowed = Array.isArray(ch.config?.allowedChatIds) ? ch.config.allowedChatIds.length : 0;
+        log(`    ${c.cyan('•')} ${c.bold(ch.name)} ${c.gray(`(${ch.kind})`)} ${ch.enabled ? c.green('on') : c.red('OFF')}${allowed ? c.gray(`, ${allowed} allowed chat(s)`) : c.yellow(', no allowed chats yet')}`);
       }
     }
-    const choices = [...(existing.length ? ['edit'] : []), 'add', 'done'];
-    const what = await promptChoice(rl, existing.length ? 'Edit a channel, add a new one, or finish?' : 'Add a channel (e.g. Telegram)?', choices, 'done');
+    const choices = [
+      ...(existing.length ? [{ value: 'edit', label: 'Edit a channel', hint: '— allowed chats, token, on/off' }] : []),
+      { value: 'add', label: 'Add a channel', hint: '— e.g. Telegram' },
+      { value: 'done', label: 'Done with channels' },
+    ];
+    const what = await promptChoice(rl, 'Channels', choices, existing.length ? 'edit' : 'add');
     if (what === 'done') return;
     if (what === 'add') {
       await addChannel(rl, available);
       continue;
     }
-    const name = existing.length === 1 ? existing[0].name : await promptChoice(rl, 'Which channel?', existing.map((c) => c.name), existing[0].name);
+    const name =
+      existing.length === 1
+        ? existing[0].name
+        : await promptChoice(rl, 'Which channel?', existing.map((ch) => ({ value: ch.name, label: ch.name, hint: `(${ch.kind}, ${ch.enabled ? 'on' : 'off'})` })), existing[0].name);
     const row = existing.find((c) => c.name === name);
     const kindDef = available.find((k) => k.kind === row.kind);
     if (!kindDef) log(`  ✗ kind "${row.kind}" is not available`);
@@ -750,7 +851,7 @@ async function main() {
   });
 
   try {
-    log('Aigentron setup wizard — guided first-run configuration.');
+    banner('Aigentron setup wizard', 'guided configuration — re-run any time to change things');
     await stepDeploymentMode(rl, args.orchestratorUrl);
 
     if (args.advanced) {
@@ -758,22 +859,51 @@ async function main() {
       return;
     }
 
-    const providers = await stepProviders(rl);
-    await stepChannels(rl);
-    await stepAgents(rl, providers);
-    await stepRepo(rl);
-    await stepAdvanced(rl);
+    const providerNames = async () => (await apiGet('/providers').catch(() => [])).map((p) => p.name);
+    let first = (await providerNames()).length === 0;
+    for (;;) {
+      const what = await select(
+        'What would you like to do?',
+        [
+          { value: 'all', label: 'Guided setup', hint: '— providers → channels → agents → repo, step by step' },
+          { value: 'providers', label: 'Providers', hint: '— model, base URL, secrets' },
+          { value: 'channels', label: 'Channels', hint: '— Telegram etc., allowed chats' },
+          { value: 'agents', label: 'Agents' },
+          { value: 'repo', label: 'Repository' },
+          { value: 'advanced', label: 'Advanced settings', hint: '— password-gated' },
+          { value: 'quit', label: 'Quit' },
+        ],
+        first ? 'all' : 'channels',
+      );
+      first = false;
+      if (what === 'quit') break;
+      if (what === 'all') {
+        const providers = await stepProviders(rl);
+        await stepChannels(rl);
+        await stepAgents(rl, providers);
+        await stepRepo(rl);
+        await stepAdvanced(rl);
+        break;
+      }
+      if (what === 'providers') await stepProviders(rl);
+      else if (what === 'channels') await stepChannels(rl);
+      else if (what === 'agents') await stepAgents(rl, await providerNames());
+      else if (what === 'repo') await stepRepo(rl);
+      else if (what === 'advanced') await stepAdvanced(rl, { startUnlocked: false });
+    }
 
     header('Done');
     log(`Orchestrator: ${BASE}/api/health`);
     log('Dashboard: check DASHBOARD_BASE_URL in your .env (default http://localhost:3000)');
-    log('Re-run this wizard any time: node infra/setup-wizard.mjs');
+    log(c.gray('Re-run this wizard any time: node infra/setup-wizard.mjs'));
   } finally {
     rl.close();
   }
 }
 
-main().catch((e) => {
+main()
+  .then(() => process.exit(0))
+  .catch((e) => {
   console.error(`\nfatal: ${e.message}`);
   process.exit(1);
 });

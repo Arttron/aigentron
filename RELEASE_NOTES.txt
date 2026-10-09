@@ -1,11 +1,10 @@
-Aigentron v0.1.34
+Aigentron v0.1.35
 
-For people who are not programmers: the setup wizard can now be re-run to change things, and the server install is safer.
+For people who are not programmers: the setup wizard in the terminal is much nicer to use.
 
 Setup wizard (node infra/setup-wizard.mjs)
-- Re-running it now edits what is already set up instead of failing: change a channel's settings (for example add your Telegram chat id), switch a channel on or off, change a provider's model, address or key.
-- Chats that already wrote to the bot are listed, and you can allow them with one answer — no need to know your chat id in advance.
-
-Server install (bare-metal)
-- The built-in LiteLLM gateway now listens on this machine only (127.0.0.1), instead of every network interface. Nothing to change on your side; if you had opened port 4000 in your firewall, you can close it.
-- If it fails to start, the last lines of its output now appear in the service log, and the first start waits up to 2 minutes (a small server can be slow).
+- Menus you move through with the arrow keys (or a number) and Enter; Yes/No switches you toggle with ← → or y / n.
+- A main menu: guided setup, or jump straight to Providers, Channels, Agents, Repository or Advanced settings, and come back to it.
+- Colours: steps, successes, errors and warnings are easy to tell apart. Set NO_COLOR=1 to turn them off.
+- Fixed: the wizard no longer hangs after the last step — it finishes and returns you to the shell.
+- Without a terminal (piped input, scripts) it still works with plain typed answers.
