@@ -21,7 +21,8 @@
 import { createInterface } from 'node:readline';
 import { spawnSync, execSync } from 'node:child_process';
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 let BASE = 'http://localhost:3001';
 
@@ -464,8 +465,26 @@ async function promptOauthSecret(rl, label) {
 
 // ---- steps ----
 
-async function stepDeploymentMode(rl, cliUrl) {
-  header('Step 0 — Deployment');
+// ---- Connection: how this wizard reaches the server (asked once, then remembered) ----
+
+const SAVED_FILE = join(homedir(), '.config', 'aigentron', 'wizard.json');
+function loadSaved() {
+  try {
+    return JSON.parse(readFileSync(SAVED_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+function saveSaved(obj) {
+  try {
+    mkdirSync(dirname(SAVED_FILE), { recursive: true, mode: 0o700 });
+    writeFileSync(SAVED_FILE, JSON.stringify(obj), { mode: 0o600 });
+  } catch {
+    /* remembering is a convenience only */
+  }
+}
+
+async function askConnection(rl, current) {
   const mode = await promptChoice(
     rl,
     'How is Aigentron installed here?',
@@ -474,23 +493,47 @@ async function stepDeploymentMode(rl, cliUrl) {
       { value: 'bare-metal', label: 'Bare-metal', hint: '— a systemd service on this machine' },
       { value: 'not-sure', label: 'Not sure' },
     ],
-    'not-sure',
+    current.mode && ['docker', 'bare-metal', 'not-sure'].includes(current.mode) ? current.mode : 'not-sure',
     { exit: true },
   );
-  const defaultUrl = cliUrl || process.env.ORCHESTRATOR_URL || 'http://localhost:3001';
-  BASE = (await prompt(rl, 'Orchestrator URL', defaultUrl)).replace(/\/$/, '');
-  try {
-    const health = await waitForOrchestrator();
-    log(`  ✓ reachable (version ${health.version ?? 'unknown'})`);
-  } catch {
-    log(`  ✗ could not reach ${BASE}/api/health.`);
-    if (mode === 'docker') {
-      log('  If Node isn\'t installed on this machine, run this wizard via:');
-      log('    docker exec -it <container-name> node /app/infra/setup-wizard.mjs');
-    }
-    throw new Error('orchestrator unreachable — fix the URL/deployment and re-run');
+  const url = (await prompt(rl, 'Orchestrator URL', current.url || 'http://localhost:3001')).replace(/\/$/, '');
+  return { mode, url };
+}
+
+/**
+ * Where the server is. The `aigentron` command already knows (it passes AIGENTRON_MODE and ORCHESTRATOR_URL), so nothing is asked.
+ * Run directly, the first launch asks once and remembers the answer (~/.config/aigentron/wizard.json); it can be changed later in
+ * the "Connection" section. Silent when the server answers; only a failure says anything.
+ */
+async function stepConnection(rl, cliUrl, { force = false } = {}) {
+  const saved = loadSaved();
+  let mode = process.env.AIGENTRON_MODE || saved.mode;
+  let url = cliUrl || process.env.ORCHESTRATOR_URL || saved.url;
+  const known = Boolean(url) || Boolean(mode);
+  if (force || !known) {
+    header(force ? 'Connection' : 'First run — how to reach the server');
+    if (force) log(`  Now: ${BASE}${mode ? ` (${mode})` : ''}`);
+    ({ mode, url } = await askConnection(rl, { mode, url: url || BASE }));
+    saveSaved({ mode, url });
   }
-  return mode;
+  BASE = (url || 'http://localhost:3001').replace(/\/$/, '');
+  for (;;) {
+    try {
+      await waitForOrchestrator(force ? 3 : 4);
+      if (force) log('  ✓ connected');
+      return mode;
+    } catch {
+      log(`  ✗ could not reach ${BASE}/api/health.`);
+      if (mode === 'docker') {
+        log('  If Node isn\'t installed on this machine, run the wizard inside the container:  aigentron  (or docker exec -it <container> node /app/infra/setup-wizard.mjs)');
+      }
+      if (!INTERACTIVE) throw new Error('orchestrator unreachable — fix the URL and re-run');
+      if (!(await promptYesNo(rl, 'Enter a different address?', true))) throw new Error('orchestrator unreachable');
+      ({ mode, url } = await askConnection(rl, { mode, url: BASE }));
+      saveSaved({ mode, url });
+      BASE = url.replace(/\/$/, '');
+    }
+  }
 }
 
 /**
@@ -1367,9 +1410,9 @@ function parseArgs(argv) {
 
 function printHelp() {
   log('Usage: node infra/setup-wizard.mjs [--orchestrator-url <url>] [--advanced]');
-  log('  --orchestrator-url  Orchestrator base URL (default http://localhost:3001)');
+  log('  --orchestrator-url  Orchestrator base URL (default: remembered from the first run, else http://localhost:3001)');
   log('  --advanced          Skip straight to the password-gated advanced-settings step');
-  log('  --section <name>    Jump straight to one section: providers | channels | agents | repo | access | advanced');
+  log('  --section <name>    Jump straight to one section: providers | channels | agents | repo | access | advanced | connection');
 }
 
 async function main() {
@@ -1397,7 +1440,7 @@ async function main() {
 
   try {
     banner('Aigentron setup wizard', 'Esc goes back / cancels · Ctrl+C quits · re-run any time');
-    await stepDeploymentMode(rl, args.orchestratorUrl);
+    await stepConnection(rl, args.orchestratorUrl, { force: args.section === 'connection' });
     await ensureSignedIn(rl);
 
     if (args.section) {
@@ -1408,6 +1451,7 @@ async function main() {
         agents: async () => stepAgents(rl, await names()),
         repo: () => stepRepo(rl),
         access: () => stepAccess(rl),
+        connection: async () => undefined, // already handled above (forced)
         advanced: () => stepAdvanced(rl, { startUnlocked: false }),
       };
       if (!sections[args.section]) throw new Error(`unknown section "${args.section}" — use: ${Object.keys(sections).join(', ')}`);
@@ -1422,6 +1466,7 @@ async function main() {
 
     const providerNames = async () => (await apiGet('/providers').catch(() => [])).map((p) => p.name);
     let first = (await providerNames()).length === 0;
+    let guided = false;
     for (;;) {
       const what = await select(
         'What would you like to do?',
@@ -1433,6 +1478,7 @@ async function main() {
           { value: 'repo', label: 'Repository' },
           { value: 'access', label: 'Access', hint: '— domains, Cloudflare Access, public address' },
           { value: 'advanced', label: 'Advanced settings', hint: '— password-gated' },
+          { value: 'connection', label: 'Connection', hint: '— how this wizard reaches the server' },
           { value: 'quit', label: 'Exit' },
         ],
         first ? 'all' : 'channels',
@@ -1447,6 +1493,7 @@ async function main() {
           await stepAgents(rl, providers);
           await stepRepo(rl);
           await stepAdvanced(rl);
+          guided = true;
           break;
         }
         if (what === 'providers') await stepProviders(rl);
@@ -1455,16 +1502,19 @@ async function main() {
         else if (what === 'repo') await stepRepo(rl);
         else if (what === 'access') await stepAccess(rl);
         else if (what === 'advanced') await stepAdvanced(rl, { startUnlocked: false });
+        else if (what === 'connection') await stepConnection(rl, undefined, { force: true });
       } catch (e) {
         if (!(e instanceof Cancelled)) throw e;
         log(c.gray('  (cancelled — back to the main menu)'));
       }
     }
 
-    header('Done');
-    log(`Orchestrator: ${BASE}/api/health`);
-    log('Dashboard: check DASHBOARD_BASE_URL in your .env (default http://localhost:3000)');
-    log(c.gray('Re-run this wizard any time: node infra/setup-wizard.mjs'));
+    if (guided) {
+      header('Done');
+      log(`Orchestrator: ${BASE}/api/health`);
+      log('Dashboard: check DASHBOARD_BASE_URL in your .env (default http://localhost:3000)');
+      log(c.gray('Re-run this wizard any time: node infra/setup-wizard.mjs'));
+    }
   } finally {
     rl.close();
   }

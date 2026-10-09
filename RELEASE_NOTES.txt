@@ -1,7 +1,8 @@
-Aigentron v0.1.44
+Aigentron v0.1.45
 
-For people who are not programmers: you can now pick a provider's model from a list.
+For people who are not programmers: the terminal menu no longer asks the same technical questions every time.
 
-Setup wizard (`aigentron providers` → Edit a provider)
-- The model question is a menu: keep the current model, choose from the models the provider offers (for example the list from your Ollama or an API-key provider), or type a name.
-- Where a provider cannot list its models (a Claude subscription login), the wizard says so and offers the current Claude models instead.
+The `aigentron` command
+- It no longer asks "How is Aigentron installed here?" and for the server address each time: the command already knows them. Run directly, the menu asks once on the first launch and remembers the answer. A new "Connection" section (`aigentron connection`) changes it when needed.
+- Every command goes straight to its section: `aigentron providers`, `channels`, `agents`, `repo`, `access`, and the new `advanced`.
+- The closing "Done" block appears only after the full guided setup, not on every exit.
