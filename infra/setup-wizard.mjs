@@ -275,6 +275,39 @@ function guessKind(baseUrl) {
 
 // If the dashboard password is already set, pass it as LDS_ADMIN_PASSWORD (it is used once to sign in).
 let sessionToken = '';
+/**
+ * If the server has a sign-in password, sign in before doing anything (otherwise every call is rejected and the lists look empty).
+ * LDS_ADMIN_PASSWORD / LDS_ADMIN_USER work for scripts; interactively we ask: who you are (when several users have a password), then
+ * the password in a hidden prompt.
+ */
+async function ensureSignedIn(rl) {
+  const status = await fetch(`${BASE}/api/auth/status`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+  if (!status?.configured || status.authenticated) return;
+  if (process.env.LDS_ADMIN_PASSWORD) {
+    await signInFromEnv();
+    log('  ✓ signed in');
+    return;
+  }
+  if (!INTERACTIVE) throw new Error('The server has a sign-in password. Set LDS_ADMIN_PASSWORD=<password> (and LDS_ADMIN_USER=<name>) in the environment.');
+  log('  This server asks for a password.');
+  const users = status.users ?? [];
+  const user =
+    users.length > 1 ? await promptChoice(rl, 'Who are you?', users.map((u) => ({ value: u.id, label: u.displayName, hint: `(${u.role})` })), users[0].id) : users[0]?.id;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const password = await promptSecret(rl, 'Password: ');
+    const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user, password }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.token) {
+      sessionToken = j.token;
+      log('  ✓ signed in');
+      return;
+    }
+    log(`  ✗ ${j.error || `sign-in failed (${r.status})`}`);
+    if (r.status === 429) break;
+  }
+  throw new Error('could not sign in — if you forgot the password: aigentron reset-password');
+}
+
 async function signInFromEnv() {
   const password = process.env.LDS_ADMIN_PASSWORD;
   if (!password) throw new Error('The server has a sign-in password. Re-run with LDS_ADMIN_PASSWORD=<password> (and LDS_ADMIN_USER=<name> if several users have one) in the environment.');
@@ -405,58 +438,6 @@ async function stepDeploymentMode(rl, cliUrl) {
  * "set default" / later agent-provider-picker steps see the full set, not
  * just ones created this session.
  */
-async function stepRotateExistingSecret(rl) {
-  let existing;
-  try {
-    existing = await apiGet('/providers');
-  } catch {
-    return [];
-  }
-  if (!existing.length) return [];
-  const names = existing.map((p) => p.name);
-  if (!(await promptYesNo(rl, `Edit an existing provider — model, base URL or secret (found: ${names.join(', ')})?`, false))) {
-    return names;
-  }
-  let more = true;
-  while (more) {
-    const name = await promptChoice(
-      rl,
-      'Which provider?',
-      existing.map((x) => ({ value: x.name, label: x.name, hint: `(${x.kind}, ${x.authMode}${x.model ? `, ${x.model}` : ''})` })),
-      names[0],
-    );
-    const p = existing.find((x) => x.name === name);
-    const patch = {};
-    const model = (await prompt(rl, 'Default model (Enter keeps)', p.model || undefined)).trim();
-    if (model && model !== p.model) patch.model = model;
-    if (p.kind !== 'codex') {
-      const baseUrl = (await prompt(rl, 'Base URL (Enter keeps, - clears)', p.baseUrl || undefined)).trim();
-      if (baseUrl === '-') patch.baseUrl = '';
-      else if (baseUrl && baseUrl !== p.baseUrl) patch.baseUrl = baseUrl;
-    }
-    if (p.authMode === 'codex-login') {
-      if (await promptYesNo(rl, 'Sign in to ChatGPT again (renew or switch the account)?', false)) await codexSignIn(rl);
-    } else {
-      const secret =
-        p.authMode === 'oauth-token'
-          ? await promptOauthSecret(rl, 'New OAuth token')
-          : await promptSecret(rl, `New secret (blank = keep current${p.secretSet ? ` ${p.secretHint ?? ''}` : ', none set yet'}): `);
-      if (secret) patch.secret = secret;
-    }
-    if (Object.keys(patch).length) {
-      try {
-        await apiPut(`/providers/${encodeURIComponent(name)}`, patch);
-        log(`  ✓ "${name}" updated (${Object.keys(patch).join(', ')})`);
-      } catch (e) {
-        log(`  ✗ failed to update "${name}": ${e.message}`);
-      }
-    } else {
-      log('  (no change)');
-    }
-    more = await promptYesNo(rl, 'Edit another provider?', false);
-  }
-  return names;
-}
 
 /** Runs an interactive child (a login CLI) with the real terminal: cooked mode while it runs, raw mode back afterwards. */
 function runInteractive(cmd, args, env = {}) {
@@ -618,28 +599,134 @@ async function addProvider(rl, firstOne) {
   return name;
 }
 
+const providerLine = (p, def) =>
+  `    ${c.cyan('•')} ${c.bold(p.name)} ${c.gray(`(${p.kind}, ${p.authMode}${p.model ? `, ${p.model}` : ''})`)}${p.name === def ? ` ${c.green('★ default')}` : ''}${!p.model ? c.yellow('  no model') : ''}`;
+
+async function setDefaultProvider(name) {
+  try {
+    await apiPut('/settings', { defaultProvider: name });
+    log(`  ✓ "${name}" is now the default provider`);
+    return true;
+  } catch (e) {
+    log(`  ✗ ${e.message}`);
+    return false;
+  }
+}
+
+/** Change one provider: model, base URL, limits, secret / sign-in, and whether it is the default. */
+async function editProvider(rl, p, def) {
+  log(`  Editing "${p.name}" (${p.kind}, ${p.authMode}). Enter keeps the current value.`);
+  const patch = {};
+  const model = (await prompt(rl, 'Default model', p.model || undefined)).trim();
+  if (model && model !== p.model) patch.model = model;
+  if (p.kind !== 'codex') {
+    const baseUrl = (await prompt(rl, 'Base URL (- clears)', p.baseUrl || undefined)).trim();
+    if (baseUrl === '-') patch.baseUrl = '';
+    else if (baseUrl && baseUrl !== p.baseUrl) patch.baseUrl = baseUrl;
+  }
+  if (p.authMode === 'codex-login') {
+    if (await promptYesNo(rl, 'Sign in to ChatGPT again (renew or switch the account)?', false)) await codexSignIn(rl);
+  } else {
+    const secret =
+      p.authMode === 'oauth-token'
+        ? (await promptYesNo(rl, 'Replace the Claude login token?', false))
+          ? await claudeSignIn(rl)
+          : ''
+        : await promptSecret(rl, `New secret (blank = keep current${p.secretSet ? ` ${p.secretHint ?? ''}` : ', none set yet'}): `);
+    if (secret) patch.secret = secret;
+  }
+  if (await promptYesNo(rl, 'Change the rate limits (rpm/tpm)?', false)) {
+    const rpm = (await prompt(rl, 'Requests/min (0 = none)', p.rpm ? String(p.rpm) : undefined)).trim();
+    const tpm = (await prompt(rl, 'Tokens/min (0 = none)', p.tpm ? String(p.tpm) : undefined)).trim();
+    if (rpm !== '' && Number(rpm) !== (p.rpm ?? 0)) patch.rpm = Number(rpm) || 0;
+    if (tpm !== '' && Number(tpm) !== (p.tpm ?? 0)) patch.tpm = Number(tpm) || 0;
+  }
+  if (Object.keys(patch).length) {
+    try {
+      await apiPut(`/providers/${encodeURIComponent(p.name)}`, patch);
+      log(`  ✓ "${p.name}" updated (${Object.keys(patch).join(', ')})`);
+    } catch (e) {
+      log(`  ✗ failed to update "${p.name}": ${e.message}`);
+    }
+  } else {
+    log('  (no change)');
+  }
+  if (p.name !== def && (await promptYesNo(rl, `Make "${p.name}" the default provider?`, false))) await setDefaultProvider(p.name);
+}
+
+async function deleteProvider(rl, p, def, others) {
+  const isDefault = p.name === def;
+  if (!(await promptYesNo(rl, `Delete "${p.name}"${isDefault ? ' — it is the DEFAULT provider' : ''}? Agents that use it will stop working until you pick another.`, false))) return;
+  try {
+    await api('DELETE', `/providers/${encodeURIComponent(p.name)}`);
+    log(`  ✓ "${p.name}" deleted`);
+  } catch (e) {
+    log(`  ✗ failed to delete "${p.name}": ${e.message}`);
+    return;
+  }
+  if (isDefault && others.length) {
+    const next = await promptChoiceOptional(rl, 'Choose the new default provider', others.map((o) => o.name));
+    if (next) await setDefaultProvider(next);
+    else log('  ⚠ no default provider is set now — tasks without an agent will fail until you choose one.');
+  }
+}
+
+/** Providers: list them (with the default marked), and add / edit / set default / test / delete in a loop. Returns the names. */
 async function stepProviders(rl) {
   header('Step 1 — Providers (network, model, auth)');
-  const providers = await stepRotateExistingSecret(rl);
-  let first = providers.length === 0;
-  while (await promptYesNo(rl, first ? 'Add a provider now?' : 'Add another provider?', first)) {
-    first = false;
-    const created = await addProvider(rl, providers.length === 0);
-    if (created) providers.push(created);
-  }
-
-  if (providers.length) {
-    const def = await promptChoiceOptional(rl, 'Set the default provider', providers);
-    if (def) {
+  for (;;) {
+    const list = await apiGet('/providers').catch(() => []);
+    const settings = await apiGet('/settings').catch(() => ({}));
+    const def = settings.defaultProvider;
+    if (list.length) {
+      log('  Providers now:');
+      for (const p of list) log(providerLine(p, def));
+      if (!list.some((p) => p.name === def)) log(c.yellow(`  ⚠ the default provider "${def ?? '(none)'}" does not exist — choose a default below.`));
+    } else {
+      log('  No providers yet.');
+    }
+    const choices = [
+      { value: 'add', label: 'Add a provider' },
+      ...(list.length
+        ? [
+            { value: 'edit', label: 'Edit a provider', hint: '— model, address, key / sign-in, limits' },
+            { value: 'default', label: 'Set the default provider' },
+            { value: 'test', label: 'Test a provider' },
+            { value: 'delete', label: 'Delete a provider' },
+          ]
+        : []),
+      { value: 'done', label: 'Done with providers' },
+    ];
+    const what = await promptChoice(rl, 'Providers', choices, list.length ? 'edit' : 'add');
+    if (what === 'done') return list.map((p) => p.name);
+    if (what === 'add') {
+      const created = await addProvider(rl, list.length === 0);
+      if (created && (list.length === 0 || (await promptYesNo(rl, `Make "${created}" the default provider?`, false)))) await setDefaultProvider(created);
+      continue;
+    }
+    const pick = async (q) => {
+      if (list.length === 1) return list[0];
+      const options = list.map((x) => ({ value: x.name, label: x.name, hint: `(${x.kind}, ${x.authMode}${x.model ? `, ${x.model}` : ''})${x.name === def ? ' ★ default' : ''}` }));
+      const name = await promptChoice(rl, q, options, list.some((x) => x.name === def) ? def : list[0].name);
+      return list.find((x) => x.name === name);
+    };
+    if (what === 'edit') await editProvider(rl, await pick('Which provider?'), def);
+    else if (what === 'default') {
+      const p = await pick('Which provider should be the default?');
+      await setDefaultProvider(p.name);
+    } else if (what === 'test') {
+      const p = await pick('Test which provider?');
       try {
-        await apiPut('/settings', { defaultProvider: def });
-        log(`  ✓ default provider set to "${def}"`);
+        const t = await apiPost(`/providers/${encodeURIComponent(p.name)}/test`);
+        log(t.ok ? `  ✓ works${t.latencyMs ? ` (${t.latencyMs} ms)` : ''}` : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
       } catch (e) {
-        log(`  ✗ ${e.message}`);
+        log(`  ✗ test failed: ${e.message}`);
       }
+    } else if (what === 'delete') {
+      const p = await pick('Delete which provider?');
+      await deleteProvider(rl, p, def, list.filter((x) => x.name !== p.name));
     }
   }
-  return providers;
 }
 
 /**
@@ -663,8 +750,20 @@ async function promptChannelField(rl, field, current) {
   if (field.type === 'agent') {
     const agents = await apiGet('/agents').catch(() => []);
     if (!agents.length) return current || undefined;
-    const answer = await promptChoiceOptional(rl, `${field.label}${suffix}${current ? ` [now: ${current}]` : ''}`, agents.map((a) => a.name));
-    return answer ?? (current || undefined);
+    if (!editing) return await promptChoiceOptional(rl, `${field.label}${suffix}`, agents.map((a) => a.name));
+    // editing: the current agent is preselected, so Enter keeps it; the first entry clears it
+    const none = '\u0000none';
+    const pick = await promptChoice(
+      rl,
+      `${field.label}${suffix}`,
+      [
+        { value: none, label: '(none — use the default lead)' },
+        ...(current && !agents.some((a) => a.name === current) ? [{ value: current, label: current, hint: '(no such agent any more)' }] : []),
+        ...agents.map((a) => a.name),
+      ],
+      current || none,
+    );
+    return pick === none ? '' : pick;
   }
   const value = await prompt(rl, `${field.label}${suffix}`, typeof current === 'string' ? current : undefined);
   return value || undefined;
@@ -955,6 +1054,7 @@ async function main() {
   try {
     banner('Aigentron setup wizard', 'guided configuration — re-run any time to change things');
     await stepDeploymentMode(rl, args.orchestratorUrl);
+    await ensureSignedIn(rl);
 
     if (args.section) {
       const names = async () => (await apiGet('/providers').catch(() => [])).map((p) => p.name);

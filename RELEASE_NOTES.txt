@@ -1,17 +1,13 @@
-Aigentron v0.1.38
+Aigentron v0.1.39
 
-For people who are not programmers: a round of fixes after a careful code review — sign-in behind a tunnel, voice stability, and the terminal tools.
+For people who are not programmers: managing providers from the terminal is now complete, and the setup wizard asks for your password when the server has one.
 
-Sign-in
-- The limit on wrong passwords is now safe behind a Cloudflare tunnel: one person's mistakes (or an attacker's guesses) can no longer lock everybody out, and faking the client address does not help when connecting directly. Advanced: TRUSTED_PROXY lists extra proxy addresses to trust.
+Providers in the terminal (`aigentron providers`)
+- One menu: add, edit, set the default, test and delete providers. The list shows each provider's type, how it signs in and its model, and marks the default with a star.
+- Editing a provider (model, address, key or sign-in, rate limits) ends with "Make it the default provider?" — no more hunting for where to set the default.
+- Deleting the default provider asks which one should take over.
 
-Voice
-- Fixed: in voice mode, tapping while the assistant speaks could open the microphone twice and leave it on.
-- Fixed: pressing a button while an answer plays no longer leaves the read-aloud button stuck; Stop works while the audio is still being prepared, and an answer is not read twice.
-- Voice requests are limited per person (30 a minute) and are not available to the reviewer role, so a low-privilege account cannot run up your provider bill.
-- A local speech server on your home network (192.168.x.x, 10.x.x.x) now works without an API key, as intended; public servers still need one.
-
-Terminal tools
-- The `aigentron` command: tab completion hint no longer runs a command by mistake; the installer handles unusual folder names safely.
-- The setup wizard: no longer drops answers typed or piped quickly, restores the terminal when stopped, and explains what to do (run with sudo) when the ChatGPT sign-in cannot write its folder.
-- Only an operator or admin can read where the Codex sign-in is stored.
+Setup wizard
+- When the server has a sign-in password, the wizard now asks for it first (a hidden field; with several users it asks who you are). Before, every list looked empty.
+- Editing a channel no longer clears its default agent by accident, even if that agent no longer exists.
+- `aigentron version` always prints something sensible, also for a Docker install without a version label.

@@ -26,7 +26,9 @@ node_script() {
 }
 
 version() {
-  if [ "$MODE" = docker ]; then docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$CONTAINER" 2>/dev/null || echo unknown
+  if [ "$MODE" = docker ]; then
+    v=$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$CONTAINER" 2>/dev/null || true)
+    echo "${v:-unknown}"
   else cat "$CURRENT/VERSION" 2>/dev/null || echo unknown; fi
 }
 
