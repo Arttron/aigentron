@@ -1,18 +1,7 @@
-Aigentron v0.1.40
+Aigentron v0.1.41
 
-For people who are not programmers: control who can reach your server from the internet — in the dashboard, in the terminal, or by asking the admin assistant.
+For people who are not programmers: the terminal setup menu is easier to get out of.
 
-Cloudflare Access check (Settings → General → Cloudflare Access)
-- A second, independent layer: when on, a request that comes in under a real domain name must carry the signed sign-in token that Cloudflare Access adds. Going around Cloudflare (a tunnel address without an Access policy) gets an error instead of your dashboard.
-- You give it two values — your team domain and the application's AUD tag — and press Test to see that it can reach Cloudflare (and, on your public address, who Cloudflare says you are).
-- localhost, IP addresses and your local network are never affected, so you cannot lock yourself out; the dashboard also refuses to switch it on if that would lock you out. Passwords still apply on top.
-
-Domains and address, from the terminal (`aigentron access`)
-- Add, remove or clear the allowed domains; set up Cloudflare Access; change the public address (PUBLIC_URL) and make the server listen on this machine only (new setting ORCHESTRATOR_HOST, handy behind a tunnel). On a bare-metal install the terminal edits the .env for you; on Docker it shows the lines to add.
-- The Access card in the dashboard now also shows how the server is reachable (port, listening address, public address).
-
-The admin assistant can help
-- It can read the current state and, with your approval on a card, change the allowed domains and the Cloudflare Access check. It does not touch server-level settings (.env) — it points you to `aigentron access`.
-
-Also
-- The startup warning for a public address now says what to do (set passwords, use Cloudflare Access) instead of claiming there is no login.
+Setup wizard (`aigentron`)
+- Every menu now ends with "← Back" (one level up) or "Exit" (where there is nothing above), so you are never stuck after choosing something like "Delete a provider".
+- Esc does the same from anywhere: in a menu, while typing a value, or at a "really do it?" question. Nothing is saved when you cancel; a cancelled delete deletes nothing.

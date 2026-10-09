@@ -82,11 +82,18 @@ const KEY_RE = /\u001b\[[0-9;]*[A-Za-z~]|\u001b[A-Za-z]|[\s\S]/gu;
 const ESC_NAMES = { '\u001b[A': 'up', '\u001b[B': 'down', '\u001b[C': 'right', '\u001b[D': 'left', '\u001b[H': 'home', '\u001b[F': 'end', '\u001bOA': 'up', '\u001bOB': 'down' };
 
 /** Feeds `onKey(name, raw)` for every key in every chunk until it returns true (finished). */
+/** Thrown when the user presses Esc: "cancel what I am doing" — the menu loops catch it and go one level back. */
+class Cancelled extends Error {
+  constructor() {
+    super('cancelled');
+  }
+}
+
 // Keys that arrived in the same chunk as the Enter that finished the previous prompt (piped or pasted input) wait here for the next one.
 let leftover = [];
 
 function readKeys(onKey) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const stdin = process.stdin;
     if (stdin.isTTY) stdin.setRawMode(true);
     stdin.resume();
@@ -101,6 +108,13 @@ function readKeys(onKey) {
           process.stdout.write('\u001b[?25h');
           log(`\n${c.red('aborted')}`);
           process.exit(130);
+        }
+        if (name === 'esc' && !String(raw).startsWith('\u001b[') && keys.length === 1) {
+          stdin.removeListener('data', onData);
+          stdin.pause();
+          leftover = [];
+          reject(new Cancelled());
+          return;
         }
         if (onKey(name, raw)) {
           stdin.removeListener('data', onData);
@@ -119,10 +133,10 @@ function readKeys(onKey) {
 }
 
 function readRawLine(query, { mask = false } = {}) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     process.stdout.write(query);
     let buf = '';
-    void readKeys((name, raw) => {
+    readKeys((name, raw) => {
       if (name === 'enter') {
         process.stdout.write('\n');
         resolve(buf.trim());
@@ -138,6 +152,9 @@ function readRawLine(query, { mask = false } = {}) {
         process.stdout.write(mask ? '*' : raw);
       }
       return false;
+    }).catch((e) => {
+      process.stdout.write('\n');
+      reject(e);
     });
   });
 }
@@ -164,7 +181,7 @@ function promptSecret(_rl, query) {
  * Menu: ↑/↓ (or j/k, or a number) to move, Enter to choose. `options` are strings or `{ value, label?, hint? }`. Returns the value.
  * `def` is the value highlighted first.
  */
-async function select(query, options, def) {
+async function select(query, options, def, { back, exit } = {}) {
   const items = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : { label: o.value, ...o }));
   if (!INTERACTIVE) {
     for (;;) {
@@ -176,6 +193,10 @@ async function select(query, options, def) {
       log(`  please choose one of: ${names.join(', ')}`);
     }
   }
+  // The last entry always leads out: "← Back" one level up, or "Exit" when there is no level above (`exit`). Menus that already
+  // end with their own "done / back" entry pass `back` and are left as they are.
+  const BACK = '\u0000back';
+  if (back === undefined) items.push({ value: BACK, label: exit ? 'Exit' : '← Back' });
   let idx = Math.max(0, items.findIndex((i) => i.value === def));
   const width = cols() - 6;
   const render = (first) => {
@@ -189,9 +210,10 @@ async function select(query, options, def) {
       process.stdout.write(`\u001b[2K${on ? c.cyan('❯') : ' '} ${num} ${on ? c.cyan(c.bold(label)) : label}${c.gray(hint)}\n`);
     }
   };
-  process.stdout.write(`${qMark()} ${c.bold(query)} ${c.gray('(↑/↓, Enter)')}\n\u001b[?25l`);
+  process.stdout.write(`${qMark()} ${c.bold(query)} ${c.gray(`(↑/↓, Enter · Esc ${back !== undefined ? 'back' : 'cancel'})`)}\n\u001b[?25l`);
   render(true);
-  await readKeys((name) => {
+  try {
+    await readKeys((name) => {
     if (name === 'up' || name === 'k') idx = (idx - 1 + items.length) % items.length;
     else if (name === 'down' || name === 'j' || name === 'tab') idx = (idx + 1) % items.length;
     else if (name === 'home') idx = 0;
@@ -200,7 +222,17 @@ async function select(query, options, def) {
     else if (name === 'enter') return true;
     render(false);
     return false;
-  });
+    });
+  } catch (e) {
+    if (!(e instanceof Cancelled)) throw e;
+    process.stdout.write(`\u001b[${items.length + 1}A\u001b[J${c.gray(`↩ ${query}`)}\n\u001b[?25h`);
+    if (back !== undefined) return back;
+    throw e;
+  }
+  if (items[idx].value === BACK) {
+    process.stdout.write(`\u001b[${items.length + 1}A\u001b[J${c.gray(`↩ ${query}`)}\n\u001b[?25h`);
+    throw new Cancelled();
+  }
   // collapse the menu to one line with the answer
   process.stdout.write(`\u001b[${items.length + 1}A\u001b[J${tick()} ${c.bold(query)} ${c.cyan(items[idx].label)}\n\u001b[?25h`);
   return items[idx].value;
@@ -213,23 +245,28 @@ async function confirm(query, def = false) {
     return a ? /^y(es)?$/.test(a) : def;
   }
   let yes = def;
-  const draw = () => process.stdout.write(`\r\u001b[2K${qMark()} ${c.bold(query)}  ${yes ? c.green(c.bold('● Yes')) : c.gray('○ Yes')}  ${yes ? c.gray('○ No') : c.red(c.bold('● No'))}  ${c.gray('(←/→, y/n, Enter)')}`);
+  const draw = () => process.stdout.write(`\r\u001b[2K${qMark()} ${c.bold(query)}  ${yes ? c.green(c.bold('● Yes')) : c.gray('○ Yes')}  ${yes ? c.gray('○ No') : c.red(c.bold('● No'))}  ${c.gray('(←/→, y/n, Enter · Esc cancel)')}`);
   process.stdout.write('\u001b[?25l');
   draw();
-  await readKeys((name) => {
+  try {
+    await readKeys((name) => {
     if (name === 'left' || name === 'right' || name === 'tab' || name === 'h' || name === 'l') yes = !yes;
     else if (name === 'y' || name === 'Y') yes = true;
     else if (name === 'n' || name === 'N') yes = false;
     else if (name === 'enter') return true;
     draw();
     return false;
-  });
+    });
+  } catch (e) {
+    process.stdout.write(`\r\u001b[2K${c.gray(`↩ ${query}`)}\n\u001b[?25h`);
+    throw e;
+  }
   process.stdout.write(`\r\u001b[2K${tick()} ${c.bold(query)} ${yes ? c.green('Yes') : c.red('No')}\n\u001b[?25h`);
   return yes;
 }
 
 const promptYesNo = (_rl, query, def = false) => confirm(query, def);
-const promptChoice = (_rl, query, options, def) => select(query, options, def ?? (typeof options[0] === 'string' ? options[0] : options[0].value));
+const promptChoice = (_rl, query, options, def, opts) => select(query, options, def ?? (typeof options[0] === 'string' ? options[0] : options[0].value), opts);
 
 /** Same as promptChoice, with an extra "none" entry on top. */
 async function promptChoiceOptional(_rl, query, options) {
@@ -410,6 +447,7 @@ async function stepDeploymentMode(rl, cliUrl) {
       { value: 'not-sure', label: 'Not sure' },
     ],
     'not-sure',
+    { exit: true },
   );
   const defaultUrl = cliUrl || process.env.ORCHESTRATOR_URL || 'http://localhost:3001';
   BASE = (await prompt(rl, 'Orchestrator URL', defaultUrl)).replace(/\/$/, '');
@@ -695,36 +733,41 @@ async function stepProviders(rl) {
             { value: 'delete', label: 'Delete a provider' },
           ]
         : []),
-      { value: 'done', label: 'Done with providers' },
+      { value: 'done', label: '← Back' },
     ];
-    const what = await promptChoice(rl, 'Providers', choices, list.length ? 'edit' : 'add');
+    const what = await promptChoice(rl, 'Providers', choices, list.length ? 'edit' : 'add', { back: 'done' });
     if (what === 'done') return list.map((p) => p.name);
-    if (what === 'add') {
-      const created = await addProvider(rl, list.length === 0);
-      if (created && (list.length === 0 || (await promptYesNo(rl, `Make "${created}" the default provider?`, false)))) await setDefaultProvider(created);
-      continue;
-    }
-    const pick = async (q) => {
-      if (list.length === 1) return list[0];
-      const options = list.map((x) => ({ value: x.name, label: x.name, hint: `(${x.kind}, ${x.authMode}${x.model ? `, ${x.model}` : ''})${x.name === def ? ' ★ default' : ''}` }));
-      const name = await promptChoice(rl, q, options, list.some((x) => x.name === def) ? def : list[0].name);
-      return list.find((x) => x.name === name);
-    };
-    if (what === 'edit') await editProvider(rl, await pick('Which provider?'), def);
-    else if (what === 'default') {
-      const p = await pick('Which provider should be the default?');
-      await setDefaultProvider(p.name);
-    } else if (what === 'test') {
-      const p = await pick('Test which provider?');
-      try {
-        const t = await apiPost(`/providers/${encodeURIComponent(p.name)}/test`);
-        log(t.ok ? `  ✓ works${t.latencyMs ? ` (${t.latencyMs} ms)` : ''}` : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
-      } catch (e) {
-        log(`  ✗ test failed: ${e.message}`);
+    try {
+      if (what === 'add') {
+        const created = await addProvider(rl, list.length === 0);
+        if (created && (list.length === 0 || (await promptYesNo(rl, `Make "${created}" the default provider?`, false)))) await setDefaultProvider(created);
+        continue;
       }
-    } else if (what === 'delete') {
-      const p = await pick('Delete which provider?');
-      await deleteProvider(rl, p, def, list.filter((x) => x.name !== p.name));
+      const pick = async (q) => {
+        if (list.length === 1) return list[0];
+        const options = list.map((x) => ({ value: x.name, label: x.name, hint: `(${x.kind}, ${x.authMode}${x.model ? `, ${x.model}` : ''})${x.name === def ? ' ★ default' : ''}` }));
+        const name = await promptChoice(rl, q, options, list.some((x) => x.name === def) ? def : list[0].name);
+        return list.find((x) => x.name === name);
+      };
+      if (what === 'edit') await editProvider(rl, await pick('Which provider?'), def);
+      else if (what === 'default') {
+        const p = await pick('Which provider should be the default?');
+        await setDefaultProvider(p.name);
+      } else if (what === 'test') {
+        const p = await pick('Test which provider?');
+        try {
+          const t = await apiPost(`/providers/${encodeURIComponent(p.name)}/test`);
+          log(t.ok ? `  ✓ works${t.latencyMs ? ` (${t.latencyMs} ms)` : ''}` : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
+        } catch (e) {
+          log(`  ✗ test failed: ${e.message}`);
+        }
+      } else if (what === 'delete') {
+        const p = await pick('Delete which provider?');
+        await deleteProvider(rl, p, def, list.filter((x) => x.name !== p.name));
+      }
+    } catch (e) {
+      if (!(e instanceof Cancelled)) throw e;
+      log(c.gray('  (cancelled — back to the menu)'));
     }
   }
 }
@@ -846,22 +889,27 @@ async function stepChannels(rl) {
     const choices = [
       ...(existing.length ? [{ value: 'edit', label: 'Edit a channel', hint: '— allowed chats, token, on/off' }] : []),
       { value: 'add', label: 'Add a channel', hint: '— e.g. Telegram' },
-      { value: 'done', label: 'Done with channels' },
+      { value: 'done', label: '← Back' },
     ];
-    const what = await promptChoice(rl, 'Channels', choices, existing.length ? 'edit' : 'add');
+    const what = await promptChoice(rl, 'Channels', choices, existing.length ? 'edit' : 'add', { back: 'done' });
     if (what === 'done') return;
-    if (what === 'add') {
-      await addChannel(rl, available);
-      continue;
+    try {
+      if (what === 'add') {
+        await addChannel(rl, available);
+        continue;
+      }
+      const name =
+        existing.length === 1
+          ? existing[0].name
+          : await promptChoice(rl, 'Which channel?', existing.map((ch) => ({ value: ch.name, label: ch.name, hint: `(${ch.kind}, ${ch.enabled ? 'on' : 'off'})` })), existing[0].name);
+      const row = existing.find((c) => c.name === name);
+      const kindDef = available.find((k) => k.kind === row.kind);
+      if (!kindDef) log(`  ✗ kind "${row.kind}" is not available`);
+      else await editChannel(rl, row, kindDef);
+    } catch (e) {
+      if (!(e instanceof Cancelled)) throw e;
+      log(c.gray('  (cancelled — back to the menu)'));
     }
-    const name =
-      existing.length === 1
-        ? existing[0].name
-        : await promptChoice(rl, 'Which channel?', existing.map((ch) => ({ value: ch.name, label: ch.name, hint: `(${ch.kind}, ${ch.enabled ? 'on' : 'off'})` })), existing[0].name);
-    const row = existing.find((c) => c.name === name);
-    const kindDef = available.find((k) => k.kind === row.kind);
-    if (!kindDef) log(`  ✗ kind "${row.kind}" is not available`);
-    else await editChannel(rl, row, kindDef);
   }
 }
 
@@ -1008,23 +1056,28 @@ async function stepAccess(rl) {
       ...(acc.allowedHosts.length ? [{ value: 'remove', label: 'Remove a domain' }, { value: 'clear', label: 'Clear the list', hint: '— accept any name again' }] : []),
       { value: 'cloudflare', label: 'Cloudflare Access', hint: '— require its sign-in on public addresses' },
       { value: 'server', label: 'Public address & listening', hint: '— PUBLIC_URL, listen on this machine only' },
-      { value: 'done', label: 'Done' },
+      { value: 'done', label: '← Back' },
     ];
-    const what = await promptChoice(rl, 'Access', choices, 'add');
+    const what = await promptChoice(rl, 'Access', choices, 'add', { back: 'done' });
     if (what === 'done') return;
-    if (what === 'add') {
-      const input = await prompt(rl, 'Domains to add (comma-separated)');
-      const add = splitCsv(input);
-      if (add.length) await putAccessDomains([...new Set([...acc.allowedHosts, ...add])]);
-    } else if (what === 'remove') {
-      const d = await promptChoice(rl, 'Remove which domain?', acc.allowedHosts, acc.allowedHosts[0]);
-      await putAccessDomains(acc.allowedHosts.filter((x) => x !== d));
-    } else if (what === 'clear') {
-      if (await promptYesNo(rl, 'Clear the whole list?', false)) await putAccessDomains([]);
-    } else if (what === 'cloudflare') {
-      await configureCloudflareAccess(rl);
-    } else if (what === 'server') {
-      await configureServerAddress(rl, acc.server ?? { port: 3001, listenHost: '0.0.0.0', bindAddress: null, publicUrl: null });
+    try {
+      if (what === 'add') {
+        const input = await prompt(rl, 'Domains to add (comma-separated)');
+        const add = splitCsv(input);
+        if (add.length) await putAccessDomains([...new Set([...acc.allowedHosts, ...add])]);
+      } else if (what === 'remove') {
+        const d = await promptChoice(rl, 'Remove which domain?', acc.allowedHosts, acc.allowedHosts[0]);
+        await putAccessDomains(acc.allowedHosts.filter((x) => x !== d));
+      } else if (what === 'clear') {
+        if (await promptYesNo(rl, 'Clear the whole list?', false)) await putAccessDomains([]);
+      } else if (what === 'cloudflare') {
+        await configureCloudflareAccess(rl);
+      } else if (what === 'server') {
+        await configureServerAddress(rl, acc.server ?? { port: 3001, listenHost: '0.0.0.0', bindAddress: null, publicUrl: null });
+      }
+    } catch (e) {
+      if (!(e instanceof Cancelled)) throw e;
+      log(c.gray('  (cancelled — back to the menu)'));
     }
   }
 }
@@ -1216,7 +1269,7 @@ async function main() {
   });
 
   try {
-    banner('Aigentron setup wizard', 'guided configuration — re-run any time to change things');
+    banner('Aigentron setup wizard', 'Esc goes back / cancels · Ctrl+C quits · re-run any time');
     await stepDeploymentMode(rl, args.orchestratorUrl);
     await ensureSignedIn(rl);
 
@@ -1253,26 +1306,32 @@ async function main() {
           { value: 'repo', label: 'Repository' },
           { value: 'access', label: 'Access', hint: '— domains, Cloudflare Access, public address' },
           { value: 'advanced', label: 'Advanced settings', hint: '— password-gated' },
-          { value: 'quit', label: 'Quit' },
+          { value: 'quit', label: 'Exit' },
         ],
         first ? 'all' : 'channels',
+        { back: 'quit' },
       );
       first = false;
       if (what === 'quit') break;
-      if (what === 'all') {
-        const providers = await stepProviders(rl);
-        await stepChannels(rl);
-        await stepAgents(rl, providers);
-        await stepRepo(rl);
-        await stepAdvanced(rl);
-        break;
+      try {
+        if (what === 'all') {
+          const providers = await stepProviders(rl);
+          await stepChannels(rl);
+          await stepAgents(rl, providers);
+          await stepRepo(rl);
+          await stepAdvanced(rl);
+          break;
+        }
+        if (what === 'providers') await stepProviders(rl);
+        else if (what === 'channels') await stepChannels(rl);
+        else if (what === 'agents') await stepAgents(rl, await providerNames());
+        else if (what === 'repo') await stepRepo(rl);
+        else if (what === 'access') await stepAccess(rl);
+        else if (what === 'advanced') await stepAdvanced(rl, { startUnlocked: false });
+      } catch (e) {
+        if (!(e instanceof Cancelled)) throw e;
+        log(c.gray('  (cancelled — back to the main menu)'));
       }
-      if (what === 'providers') await stepProviders(rl);
-      else if (what === 'channels') await stepChannels(rl);
-      else if (what === 'agents') await stepAgents(rl, await providerNames());
-      else if (what === 'repo') await stepRepo(rl);
-      else if (what === 'access') await stepAccess(rl);
-      else if (what === 'advanced') await stepAdvanced(rl, { startUnlocked: false });
     }
 
     header('Done');
@@ -1287,6 +1346,10 @@ async function main() {
 main()
   .then(() => process.exit(0))
   .catch((e) => {
+  if (e instanceof Cancelled) {
+    console.log(c.gray('\ncancelled'));
+    process.exit(0);
+  }
   console.error(`\nfatal: ${e.message}`);
   process.exit(1);
 });
