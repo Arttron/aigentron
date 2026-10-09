@@ -350,6 +350,11 @@ export class ProvidersService implements OnModuleInit {
     }
   }
 
+  /** For the CLI wizard: where to sign in to Codex (`CODEX_HOME`), and whether someone already has. */
+  async codexLoginInfo() {
+    return { home: this.codex.loginHome, bin: this.codex.bin, ...(await this.codex.status()) };
+  }
+
   /** Models the provider's endpoint advertises (for the agent's model picker). */
   async listModels(name: string): Promise<ProviderModelsResult> {
     const p = toProvider(await this.getRow(name));

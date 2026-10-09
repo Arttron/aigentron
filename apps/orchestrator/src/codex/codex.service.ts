@@ -35,6 +35,11 @@ export class CodexService implements OnModuleInit {
     return process.env.CODEX_AUTH_HOME?.trim() || join(this.config.secretsDir, 'codex');
   }
 
+  /** Where a NEW sign-in should be written (`codex login` with CODEX_HOME set to this). */
+  get loginHome(): string {
+    return this.preferredHome;
+  }
+
   /** Older locations a sign-in may still sit in: inside the agent tree (pre-0.1.27) or a plain `codex login`'s ~/.codex. */
   private get legacyHomes(): string[] {
     return [join(this.config.agentDir, '.codex-home'), join(homedir(), '.codex')];

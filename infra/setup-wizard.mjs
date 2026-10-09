@@ -20,6 +20,8 @@
 // ----------------------------------------------------------------------
 import { createInterface } from 'node:readline';
 import { spawnSync, execSync } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 let BASE = 'http://localhost:3001';
 
@@ -330,7 +332,7 @@ function commandExists(cmd) {
  */
 function runClaudeSetupTokenInteractive() {
   log('  Launching `claude setup-token` — complete the login it opens, then come back here.');
-  const res = spawnSync('claude', ['setup-token'], { stdio: 'inherit' });
+  const res = runInteractive('claude', ['setup-token']);
   if (res.status !== 0) {
     log('  (`claude setup-token` did not exit successfully — you can still paste a token manually below)');
   }
@@ -406,7 +408,12 @@ async function stepRotateExistingSecret(rl) {
   }
   let more = true;
   while (more) {
-    const name = await promptChoice(rl, 'Which provider?', names, names[0]);
+    const name = await promptChoice(
+      rl,
+      'Which provider?',
+      existing.map((x) => ({ value: x.name, label: x.name, hint: `(${x.kind}, ${x.authMode}${x.model ? `, ${x.model}` : ''})` })),
+      names[0],
+    );
     const p = existing.find((x) => x.name === name);
     const patch = {};
     const model = (await prompt(rl, 'Default model (Enter keeps)', p.model || undefined)).trim();
@@ -416,7 +423,9 @@ async function stepRotateExistingSecret(rl) {
       if (baseUrl === '-') patch.baseUrl = '';
       else if (baseUrl && baseUrl !== p.baseUrl) patch.baseUrl = baseUrl;
     }
-    if (p.authMode !== 'codex-login') {
+    if (p.authMode === 'codex-login') {
+      if (await promptYesNo(rl, 'Sign in to ChatGPT again (renew or switch the account)?', false)) await codexSignIn(rl);
+    } else {
       const secret =
         p.authMode === 'oauth-token'
           ? await promptOauthSecret(rl, 'New OAuth token')
@@ -438,94 +447,168 @@ async function stepRotateExistingSecret(rl) {
   return names;
 }
 
+/** Runs an interactive child (a login CLI) with the real terminal: cooked mode while it runs, raw mode back afterwards. */
+function runInteractive(cmd, args, env = {}) {
+  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  process.stdin.resume();
+  const res = spawnSync(cmd, args, { stdio: 'inherit', env: { ...process.env, ...env } });
+  process.stdin.pause();
+  if (process.stdin.isTTY) process.stdin.setRawMode(true);
+  return res;
+}
+
+/** ChatGPT-subscription sign-in for the Codex runtime: `codex login --device-auth` into the orchestrator's CODEX_HOME. */
+async function codexSignIn(rl) {
+  const info = await apiGet('/providers/codex-login').catch(() => null);
+  if (!info) {
+    log('  ✗ could not ask the orchestrator where the Codex sign-in lives.');
+    return false;
+  }
+  if (info.loggedIn) {
+    log(`  ✓ Codex is already signed in (${info.message}).`);
+    if (!(await promptYesNo(rl, 'Sign in again (another account)?', false))) return true;
+  }
+  if (!commandExists(info.bin)) {
+    log(`  ⚠ The Codex CLI ("${info.bin}") is not installed on this machine.`);
+    log('    Run this wizard inside the container (docker exec -it <container> node /app/infra/setup-wizard.mjs),');
+    log('    or install it here: npm i -g @openai/codex — then choose this again.');
+    return false;
+  }
+  if (!existsSync(dirname(info.home))) {
+    log(`  ⚠ The orchestrator keeps the Codex sign-in in ${info.home}, which is not on this machine.`);
+    log('    Run this wizard where the orchestrator runs (docker exec -it … or on the server itself) to sign in.');
+    return false;
+  }
+  mkdirSync(info.home, { recursive: true, mode: 0o700 });
+  log(`  Starting the ChatGPT sign-in (device code). Open the link it prints in any browser and enter the code.`);
+  log(c.gray(`  The login is stored in ${info.home}.`));
+  const res = runInteractive(info.bin, ['login', '--device-auth'], { CODEX_HOME: info.home });
+  const after = await apiGet('/providers/codex-login').catch(() => null);
+  if (res.status === 0 && after?.loggedIn) {
+    log('  ✓ signed in to ChatGPT');
+    return true;
+  }
+  log(`  ✗ sign-in did not complete${after ? ` (${after.message})` : ''}. You can repeat it: choose Providers → edit → this provider.`);
+  return false;
+}
+
+/** Claude subscription sign-in: `claude setup-token` mints a long-lived OAuth token that the user pastes back. */
+async function claudeSignIn(rl) {
+  return await promptOauthSecret(rl, 'OAuth token (starts with sk-ant-oat…)');
+}
+
+const AUTH_METHODS = [
+  { value: 'api-key', label: 'API key', hint: '— pay per use (Anthropic, OpenAI, DeepSeek, any compatible endpoint)' },
+  { value: 'claude-login', label: 'Claude subscription', hint: '— sign in with Claude Pro/Max (claude setup-token)' },
+  { value: 'codex-login', label: 'ChatGPT subscription (Codex)', hint: '— sign in with your ChatGPT plan (device code)' },
+  { value: 'codex-key', label: 'OpenAI API key for Codex', hint: '— the Codex runtime, billed per use' },
+  { value: 'auth-token', label: 'Bearer token', hint: '— for gateways that want Authorization: Bearer …' },
+  { value: 'none', label: 'No authentication', hint: '— a local server such as Ollama' },
+];
+
+/** One provider, in the order: name → how it signs in → protocol / address → model → limits → save → test. Returns its name or null. */
+async function addProvider(rl, firstOne) {
+  const name = await prompt(rl, 'Provider name', firstOne ? 'claude-cloud' : undefined);
+  if (!name) return null;
+  const method = await promptChoice(rl, 'How does it sign in?', AUTH_METHODS, 'api-key');
+
+  let kind;
+  let authMode;
+  let baseUrl;
+  let secret;
+  if (method === 'claude-login') {
+    kind = 'anthropic';
+    authMode = 'oauth-token';
+    secret = await claudeSignIn(rl);
+  } else if (method === 'codex-login') {
+    kind = 'codex';
+    authMode = 'codex-login';
+    if (!(await codexSignIn(rl))) {
+      if (!(await promptYesNo(rl, 'Create the provider anyway (sign in later)?', true))) return null;
+    }
+  } else if (method === 'codex-key') {
+    kind = 'codex';
+    authMode = 'api-key';
+    secret = await promptSecret(rl, 'OpenAI API key (hidden): ');
+  } else {
+    // Base URL first, then suggest the protocol from it (a vendor's URL usually tells which one it speaks).
+    const baseUrlInput = await prompt(rl, 'Base URL (blank = the vendor\'s native Anthropic API)');
+    baseUrl = baseUrlInput || undefined;
+    const suggested = method === 'none' && !baseUrl ? 'ollama' : guessKind(baseUrl);
+    kind = await promptChoice(
+      rl,
+      'Protocol (what the endpoint speaks — LiteLLM uses it)',
+      [
+        { value: 'anthropic', label: 'Anthropic', hint: '— Claude API and Anthropic-compatible endpoints' },
+        { value: 'openai', label: 'OpenAI', hint: '— OpenAI and OpenAI-compatible (Groq, vLLM, LM Studio…)' },
+        { value: 'deepseek', label: 'DeepSeek' },
+        { value: 'ollama', label: 'Ollama', hint: '— a local Ollama server' },
+      ],
+      suggested,
+    );
+    if (baseUrl && kind !== suggested) log(`  ⚠ "${baseUrl}" looked like a ${suggested} endpoint — make sure ${kind} is really what it speaks.`);
+    if (method === 'none') {
+      authMode = 'api-key';
+    } else if (method === 'auth-token') {
+      authMode = 'auth-token';
+      secret = await promptSecret(rl, 'Bearer token (hidden): ');
+    } else {
+      authMode = 'api-key';
+      secret = await promptSecret(rl, 'API key (hidden): ');
+    }
+  }
+
+  let model;
+  if (await promptYesNo(rl, 'List the available models from this provider?', true)) {
+    try {
+      const preview = await apiPost('/providers/models-preview', { kind, baseUrl: baseUrl || undefined, authMode, secret: secret || undefined });
+      if (preview.ok && preview.models?.length) {
+        model = await promptChoiceOptional(rl, 'Pick a model', preview.models);
+      } else {
+        log(`  (could not list models: ${preview.error || 'none returned'})`);
+      }
+    } catch (e) {
+      log(`  (model preview failed: ${e.message})`);
+    }
+  }
+  if (!model) model = await prompt(rl, 'Model name (blank only if every agent using this provider sets its own)');
+  if (!model) {
+    log('  ⚠ No model set — a task reaching this provider needs a model on the agent, or it fails with "No runnable provider".');
+  }
+
+  let rpm;
+  let tpm;
+  if (await promptYesNo(rl, 'Set rate limits (rpm/tpm)?', false)) {
+    rpm = toIntOrUndef(await prompt(rl, 'Requests/min (blank = none)'));
+    tpm = toIntOrUndef(await prompt(rl, 'Tokens/min (blank = none)'));
+  }
+
+  try {
+    await apiPost('/providers', { name, kind, baseUrl: baseUrl || undefined, model, authMode, secret: secret || undefined, rpm, tpm });
+    log(`  ✓ provider "${name}" created`);
+  } catch (e) {
+    log(`  ✗ failed to create provider "${name}": ${e.message}`);
+    return null;
+  }
+  if (await promptYesNo(rl, 'Test it now (a tiny request)?', true)) {
+    try {
+      const t = await apiPost(`/providers/${encodeURIComponent(name)}/test`);
+      log(t.ok ? `  ✓ works${t.latencyMs ? ` (${t.latencyMs} ms)` : ''}` : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
+    } catch (e) {
+      log(`  ✗ test failed: ${e.message}`);
+    }
+  }
+  return name;
+}
+
 async function stepProviders(rl) {
   header('Step 1 — Providers (network, model, auth)');
   const providers = await stepRotateExistingSecret(rl);
   let first = providers.length === 0;
   while (await promptYesNo(rl, first ? 'Add a provider now?' : 'Add another provider?', first)) {
     first = false;
-    const name = await prompt(rl, 'Provider name (id)', providers.length ? undefined : 'claude-cloud');
-    // Base URL BEFORE kind, then suggest kind from it (mirrors the
-    // dashboard's ProviderForm.tsx) — asking kind first (with 'anthropic'
-    // always the default) let an operator pair a non-native base URL with
-    // the wrong kind (e.g. leaving kind=anthropic against a vendor whose
-    // native endpoint doesn't speak Anthropic protocol) without any signal
-    // something might be off. `kind` isn't just a label: it's what tells
-    // LiteLLM which protocol to speak upstream (or, for kind=anthropic, that
-    // no translation is needed at all — some vendors, e.g. DeepSeek, expose
-    // a genuine Anthropic-compatible path of their own, not just an OpenAI
-    // one; guessKind() below recognizes a `.../anthropic` URL for exactly
-    // that case).
-    const baseUrlInput = await prompt(rl, 'Base URL (blank = native Anthropic API)');
-    const baseUrl = baseUrlInput || undefined;
-    const suggestedKind = guessKind(baseUrl);
-    const kind = await promptChoice(rl, 'Kind (upstream family — LiteLLM uses this to know the protocol to speak)', ['anthropic', 'openai', 'deepseek', 'ollama'], suggestedKind);
-    if (baseUrl && kind !== suggestedKind) {
-      log(`  Note: "${baseUrl}" looked like a ${suggestedKind} endpoint to us — make sure ${kind} is really what it speaks.`);
-    }
-
-    const authOptions = kind === 'anthropic' ? ['api-key', 'auth-token', 'oauth-token'] : ['api-key', 'auth-token'];
-    const authMode = await promptChoice(rl, 'Auth mode', authOptions, 'api-key');
-
-    let secret;
-    if (authMode === 'oauth-token') {
-      secret = await promptOauthSecret(rl, 'OAuth token');
-    } else {
-      secret = await promptSecret(rl, 'Secret (API key/token, hidden): ');
-    }
-
-    let model;
-    if (await promptYesNo(rl, 'Try to list available models from this endpoint?', false)) {
-      try {
-        const preview = await apiPost('/providers/models-preview', {
-          kind,
-          baseUrl: baseUrl || undefined,
-          authMode,
-          secret: secret || undefined,
-        });
-        if (preview.ok && preview.models?.length) {
-          model = await promptChoiceOptional(rl, 'Pick a model', preview.models);
-        } else {
-          log(`  (could not list models: ${preview.error || 'none returned'})`);
-          if (kind === 'anthropic' && baseUrl) {
-            log('  (a third-party Anthropic-compatible endpoint may just not implement model listing —');
-            log('  that alone doesn\'t mean the real completion endpoint is broken; type the model name below)');
-          }
-        }
-      } catch (e) {
-        log(`  (model preview failed: ${e.message})`);
-      }
-    }
-    if (!model) model = await prompt(rl, 'Model name (leave blank ONLY if every agent using this provider sets its own model)');
-    if (!model) {
-      log('  ⚠ No model set — this provider is skipped when resolving which model to run unless');
-      log('  an agent using it has its own model override. A task that reaches it with neither set');
-      log('  fails with "No runnable provider: set a default model on the provider or pick one on the agent."');
-    }
-
-    let rpm;
-    let tpm;
-    if (await promptYesNo(rl, 'Set rate limits (rpm/tpm)?', false)) {
-      rpm = toIntOrUndef(await prompt(rl, 'Requests/min (blank = none)'));
-      tpm = toIntOrUndef(await prompt(rl, 'Tokens/min (blank = none)'));
-    }
-
-    try {
-      await apiPost('/providers', {
-        name,
-        kind,
-        baseUrl: baseUrl || undefined,
-        model,
-        authMode,
-        secret: secret || undefined,
-        rpm,
-        tpm,
-      });
-      log(`  ✓ provider "${name}" created`);
-      providers.push(name);
-    } catch (e) {
-      log(`  ✗ failed to create provider "${name}": ${e.message}`);
-    }
+    const created = await addProvider(rl, providers.length === 0);
+    if (created) providers.push(created);
   }
 
   if (providers.length) {

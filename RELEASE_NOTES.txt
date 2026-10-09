@@ -1,10 +1,9 @@
-Aigentron v0.1.35
+Aigentron v0.1.36
 
-For people who are not programmers: the setup wizard in the terminal is much nicer to use.
+For people who are not programmers: adding a provider in the terminal setup wizard now works the usual way, including subscriptions.
 
 Setup wizard (node infra/setup-wizard.mjs)
-- Menus you move through with the arrow keys (or a number) and Enter; Yes/No switches you toggle with ← → or y / n.
-- A main menu: guided setup, or jump straight to Providers, Channels, Agents, Repository or Advanced settings, and come back to it.
-- Colours: steps, successes, errors and warnings are easy to tell apart. Set NO_COLOR=1 to turn them off.
-- Fixed: the wizard no longer hangs after the last step — it finishes and returns you to the shell.
-- Without a terminal (piped input, scripts) it still works with plain typed answers.
+- Adding a provider: name → how it signs in → protocol and address → model → limits → a quick test.
+- Ways to sign in: API key, Claude subscription (Pro/Max), ChatGPT subscription via Codex (device-code sign-in), OpenAI key for Codex, bearer token, or no authentication for a local server.
+- Subscriptions are handled in the wizard: it starts the login for you where it can, and tells you exactly what to do (for example, run it inside the container) where it cannot.
+- Editing an existing provider shows how it signs in and its model, and a ChatGPT login can be renewed from there.

@@ -64,6 +64,12 @@ export class ProvidersController {
     return serialize(await this.providers.update(name, toPatch(dto)));
   }
 
+  /** Where the Codex (ChatGPT) sign-in lives + whether it is signed in — for the CLI setup wizard. */
+  @Get('codex-login')
+  codexLogin() {
+    return this.providers.codexLoginInfo();
+  }
+
   /** Preview a provider's model list from ad-hoc params (create/edit form). */
   @Post('models-preview')
   modelsPreview(@Body() dto: ModelsPreviewDto) {
