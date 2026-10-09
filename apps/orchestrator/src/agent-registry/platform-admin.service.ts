@@ -9,6 +9,8 @@ import {
   PROPOSE_CLEANUP_TOOL,
   PROPOSE_PROVIDER_TOOL,
   PROPOSE_SCHEDULE_TOOL,
+  PROPOSE_ALLOWED_DOMAINS_TOOL,
+  PROPOSE_CLOUDFLARE_ACCESS_TOOL,
   PROPOSE_CHANNEL_TOOL,
   PROPOSE_RESOURCE_TOOL,
   PROPOSE_PACK_INSTALL_TOOL,
@@ -34,6 +36,10 @@ import { ResourcesService } from '../resources/resources.service';
 import { cleanTags, validateMeta } from '../resources/resources-core';
 import type { PacksService } from '../packs/packs.service';
 import { describeSchedule } from '../schedules/schedule-core';
+import { AccessService } from '../access/access.service';
+import { parseDomainList } from '../access/access-core';
+import { CloudflareAccessService } from '../access/cloudflare-access.service';
+import { parseAud, parseTeamDomain } from '../access/cloudflare-access-core';
 import { validateProviderProposal, validateSettingsChanges, type ProviderProposal } from './admin-validation';
 
 export { validateProviderProposal, validateSettingsChanges };
@@ -71,6 +77,19 @@ export interface ChannelProposal {
   defaultAgent?: string;
   allowChatId?: string;
   removeChatId?: string;
+  reason: string;
+}
+
+export interface DomainsProposal {
+  action: 'add' | 'remove' | 'set' | 'clear';
+  domains?: string[];
+  reason: string;
+}
+
+export interface CloudflareProposal {
+  enabled: boolean;
+  teamDomain: string;
+  aud?: string;
   reason: string;
 }
 
@@ -135,6 +154,12 @@ export class PlatformAdminService {
       this.schedulesCache = this.moduleRef.get(Cls, { strict: false });
     }
     return this.schedulesCache;
+  }
+  private get accessSvc(): AccessService {
+    return this.moduleRef.get(AccessService, { strict: false });
+  }
+  private get cloudflareSvc(): CloudflareAccessService {
+    return this.moduleRef.get(CloudflareAccessService, { strict: false });
   }
   private get channelsSvc(): ChannelsService {
     if (!this.channelsCache) this.channelsCache = this.moduleRef.get(ChannelsService, { strict: false });
@@ -237,6 +262,14 @@ export class PlatformAdminService {
     }
     if (toolName === PROPOSE_SCHEDULE_TOOL) {
       const why = await this.checkSchedule(toolInput as unknown as ScheduleProposal);
+      return why ? `Refused: ${why}` : null;
+    }
+    if (toolName === PROPOSE_ALLOWED_DOMAINS_TOOL) {
+      const why = this.checkDomains(toolInput as unknown as DomainsProposal);
+      return why ? `Refused: ${why}` : null;
+    }
+    if (toolName === PROPOSE_CLOUDFLARE_ACCESS_TOOL) {
+      const why = await this.checkCloudflare(toolInput as unknown as CloudflareProposal);
       return why ? `Refused: ${why}` : null;
     }
     if (toolName === PROPOSE_PROVIDER_TOOL) {
@@ -616,6 +649,94 @@ export class PlatformAdminService {
   }
 
   // ---- schedules -------------------------------------------------------------
+
+  // ---- where the server answers: allowed domains + Cloudflare Access ----
+
+  async accessStatus(): Promise<string> {
+    const access = this.accessSvc;
+    const cf = this.cloudflareSvc.get();
+    const list = access.configured();
+    return [
+      list.length ? `Allowed domains (enforced): ${list.join(', ')}` : 'Allowed domains: none — any name is accepted.',
+      access.publicHost() ? `Public address (PUBLIC_URL): ${access.publicHost()} — always allowed (set in the server's .env).` : 'Public address (PUBLIC_URL): not set.',
+      'localhost, IP addresses and single-word names always work, whatever the list.',
+      cf ? `Cloudflare Access: ${cf.enabled ? 'ON' : 'saved but OFF'} (team ${cf.teamDomain}, AUD saved).` : 'Cloudflare Access: not set up.',
+      `The listen address and PUBLIC_URL are server-level (.env) settings — the user changes them with \`aigentron access\` on the server.`,
+    ].join('\n');
+  }
+
+  private nextDomains(p: DomainsProposal): { next: string[]; error?: string } {
+    const cur = this.accessSvc.configured();
+    const { list, bad } = parseDomainList(p.domains ?? []);
+    if (bad.length) return { next: cur, error: `not a domain name: ${bad.join(', ')} (use dev.example.com or *.example.com).` };
+    if (p.action === 'clear') return { next: [] };
+    if (!list.length) return { next: cur, error: 'give at least one domain.' };
+    if (p.action === 'set') return { next: list };
+    if (p.action === 'add') return { next: [...new Set([...cur, ...list])] };
+    return { next: cur.filter((d) => !list.includes(d)) };
+  }
+
+  private checkDomains(p: DomainsProposal): string | null {
+    if (!['add', 'remove', 'set', 'clear'].includes(p.action)) return 'action must be add, remove, set or clear.';
+    if (!p.reason?.trim()) return 'give a reason.';
+    const { next, error } = this.nextDomains(p);
+    if (error) return error;
+    const cur = this.accessSvc.configured();
+    if (next.length === cur.length && next.every((d) => cur.includes(d))) return 'that would not change the list.';
+    return null;
+  }
+
+  async proposeAllowedDomains(currentTaskId: string, sessionId: string, input: DomainsProposal): Promise<ProposalResult> {
+    const why = this.checkDomains(input);
+    if (why) return { ok: false, message: `Rejected: ${why}` };
+    const denied = await this.proposals.requireApproval(
+      currentTaskId,
+      sessionId,
+      PROPOSE_ALLOWED_DOMAINS_TOOL,
+      { ...input },
+      (i) => i.action === input.action && JSON.stringify(i.domains ?? []) === JSON.stringify(input.domains ?? []),
+    );
+    if (denied) return denied;
+    const before = this.accessSvc.configured();
+    const { next } = this.nextDomains(input);
+    const r = this.accessSvc.save(next, undefined);
+    if (!r.ok) return { ok: false, message: `Rejected: ${r.error}` };
+    await this.audit.record({ taskId: currentTaskId, tool: 'propose_allowed_domains', summary: `Allowed domains: [${before.join(', ')}] → [${r.hosts.join(', ')}] — ${input.reason.slice(0, 80)}` });
+    this.logger.log(`Admin changed allowed domains: ${r.hosts.join(', ') || '(none)'}`);
+    return { ok: true, message: r.hosts.length ? `Allowed domains are now: ${r.hosts.join(', ')}. Takes effect immediately.` : 'The list is cleared — any domain name is accepted again.' };
+  }
+
+  private async checkCloudflare(p: CloudflareProposal): Promise<string | null> {
+    if (!p.reason?.trim()) return 'give a reason.';
+    const team = parseTeamDomain(p.teamDomain);
+    if (!team) return 'teamDomain looks like yourteam.cloudflareaccess.com (Zero Trust → Settings → Team domain).';
+    const saved = this.cloudflareSvc.get();
+    if (!parseAud(p.aud ?? saved?.aud)) return 'give the Application Audience (AUD) tag — the long code on the Access application\'s Overview page.';
+    if (p.enabled) {
+      const r = await this.cloudflareSvc.reachable(team);
+      if (!r.ok) return `could not get Cloudflare's signing keys for ${team} (${r.error}) — check the team domain.`;
+    }
+    if (saved && saved.enabled === p.enabled && saved.teamDomain === team && (!p.aud || p.aud === saved.aud)) return 'that is already the current setting.';
+    return null;
+  }
+
+  async proposeCloudflareAccess(currentTaskId: string, sessionId: string, input: CloudflareProposal): Promise<ProposalResult> {
+    const why = await this.checkCloudflare(input);
+    if (why) return { ok: false, message: `Rejected: ${why}` };
+    const denied = await this.proposals.requireApproval(
+      currentTaskId,
+      sessionId,
+      PROPOSE_CLOUDFLARE_ACCESS_TOOL,
+      { enabled: input.enabled, teamDomain: input.teamDomain, aud: input.aud ? '(set)' : undefined, reason: input.reason },
+      (i) => i.enabled === input.enabled && String(i.teamDomain ?? '') === input.teamDomain,
+    );
+    if (denied) return denied;
+    const r = await this.cloudflareSvc.save({ enabled: input.enabled, teamDomain: input.teamDomain, aud: input.aud }, undefined, {});
+    if (!r.ok) return { ok: false, message: `Rejected: ${r.error}` };
+    await this.audit.record({ taskId: currentTaskId, tool: 'propose_cloudflare_access', summary: `Cloudflare Access ${r.config.enabled ? 'ON' : 'off'} (team ${r.config.teamDomain}) — ${input.reason.slice(0, 80)}` });
+    this.logger.log(`Admin set Cloudflare Access ${r.config.enabled ? 'on' : 'off'} (${r.config.teamDomain})`);
+    return { ok: true, message: r.config.enabled ? `Cloudflare Access is now required on public domain names (team ${r.config.teamDomain}). localhost / IPs / the local network are unaffected.` : 'Cloudflare Access is switched off.' };
+  }
 
   async schedulesList(): Promise<string> {
     const rows = await (await this.schedulesSvc()).list();

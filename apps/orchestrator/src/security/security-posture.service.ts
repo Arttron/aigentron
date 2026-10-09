@@ -32,8 +32,8 @@ export class SecurityPostureService implements OnApplicationBootstrap {
     const publicUrl = publicOrigin(process.env.PUBLIC_URL);
     if (publicUrl) {
       this.logger.warn(
-        `PUBLIC_URL=${publicUrl}: the dashboard is meant to be reachable from the internet. The API has NO built-in login yet — ` +
-          'it must sit behind an authenticating layer (e.g. Cloudflare Access). See docs/remote-access.md.',
+        `PUBLIC_URL=${publicUrl}: the dashboard is meant to be reachable from the internet. Make sure sign-in passwords are set ` +
+          '(Settings → Security) — without one, anyone who finds the address controls the platform — and/or put it behind Cloudflare Access. See docs/remote-access.md.',
       );
     }
     const bind = this.bindAddress();

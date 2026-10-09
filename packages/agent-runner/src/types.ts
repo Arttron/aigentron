@@ -176,6 +176,10 @@ export interface AdminToolsWiring {
     enabled?: boolean;
     reason: string;
   }) => Promise<{ ok: boolean; message: string }>;
+  /** Where the server answers: status is read-only; domains / Cloudflare Access changes are human-approved. */
+  accessStatus: () => Promise<string>;
+  proposeAllowedDomains: (input: { action: 'add' | 'remove' | 'set' | 'clear'; domains?: string[]; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  proposeCloudflareAccess: (input: { enabled: boolean; teamDomain: string; aud?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Content packs: read-only overview, and install one — human-approved (never overwrites; schedules arrive switched off). */
   packsList: () => Promise<string>;
   proposePackInstall: (input: { name: string; timezone?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;

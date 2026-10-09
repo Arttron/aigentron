@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyToolCall, PROPOSE_BATCH_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
+import { ACCESS_STATUS_TOOL, classifyToolCall, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
 
 const bash = (command: string) => classifyToolCall('Bash', { command });
 
@@ -102,8 +102,19 @@ describe('classifyToolCall — internal tools', () => {
     [PROPOSE_SETTINGS_TOOL, { changes: { concurrency: 2 } }],
     [PROPOSE_TASK_TOOL, { agentName: 'dev', prompt: 'do it' }],
     [PROPOSE_BATCH_TOOL, { items: [{ kind: 'task_action' }] }],
+    [PROPOSE_ALLOWED_DOMAINS_TOOL, { action: 'add', domains: ['dev.example.com'] }],
+    [PROPOSE_CLOUDFLARE_ACCESS_TOOL, { enabled: true, teamDomain: 'acme.cloudflareaccess.com' }],
   ])('gates %s', (tool, input) => {
     expect(classifyToolCall(tool, input).dangerous).toBe(true);
+  });
+  it('access proposals: reading is free, and different changes never share a summary', () => {
+    expect(classifyToolCall(ACCESS_STATUS_TOOL, {}).dangerous).toBe(false);
+    const a = classifyToolCall(PROPOSE_ALLOWED_DOMAINS_TOOL, { action: 'add', domains: ['a.example.com'] }).summary;
+    const b = classifyToolCall(PROPOSE_ALLOWED_DOMAINS_TOOL, { action: 'add', domains: ['b.example.com'] }).summary;
+    expect(a).not.toBe(b);
+    const on = classifyToolCall(PROPOSE_CLOUDFLARE_ACCESS_TOOL, { enabled: true, teamDomain: 'acme.cloudflareaccess.com', aud: 'x' }).summary;
+    const off = classifyToolCall(PROPOSE_CLOUDFLARE_ACCESS_TOOL, { enabled: false, teamDomain: 'acme.cloudflareaccess.com', aud: 'x' }).summary;
+    expect(on).not.toBe(off);
   });
   it('different proposals produce different summaries (exception signatures must not collide)', () => {
     const a = classifyToolCall(PROPOSE_SETTINGS_TOOL, { changes: { concurrency: 2 } }).summary;

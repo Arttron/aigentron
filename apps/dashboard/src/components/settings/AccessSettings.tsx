@@ -7,6 +7,7 @@ interface AccessInfo {
   publicHost: string | null;
   yourHost: string;
   enforced: boolean;
+  server?: { port: number; listenHost: string; bindAddress: string | null; publicUrl: string | null };
 }
 
 /** Settings → General → Access: which domain names this server answers to. */
@@ -77,6 +78,18 @@ export function AccessSettings() {
         </Button>
         {msg && (msg.ok ? <Muted>{msg.text}</Muted> : <ErrorText>{msg.text}</ErrorText>)}
       </Row>
+      {info.server && (
+        <Muted>
+          <strong>How the server is reachable</strong> (set in the server&rsquo;s <code>.env</code> — change with <code>aigentron access</code> on the server, then restart):{' '}
+          port <code>{info.server.port}</code>, listens on <code>{info.server.listenHost}</code>
+          {info.server.bindAddress ? (
+            <>
+              , published on <code>{info.server.bindAddress}</code>
+            </>
+          ) : null}
+          , public address {info.server.publicUrl ? <code>{info.server.publicUrl}</code> : <em>not set</em>}.
+        </Muted>
+      )}
       <Muted>
         This limits <em>where</em> the page can be opened; <em>who</em> may use it is decided by the passwords (Security). For a
         second, independent layer see Cloudflare Access in <code>docs/remote-access.md</code>.

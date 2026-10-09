@@ -20,7 +20,7 @@
 // ----------------------------------------------------------------------
 import { createInterface } from 'node:readline';
 import { spawnSync, execSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 let BASE = 'http://localhost:3001';
@@ -865,6 +865,170 @@ async function stepChannels(rl) {
   }
 }
 
+// ---- Access: where the server answers (domains, Cloudflare Access, address settings) ----
+
+/** Set (or, with null, remove) KEY=value in an env file, replacing a commented-out example line if there is one. */
+function setEnvVar(file, key, value) {
+  const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : [];
+  const live = new RegExp(`^\\s*${key}=`);
+  const example = new RegExp(`^\\s*#\\s*${key}=`);
+  let at = lines.findIndex((l) => live.test(l));
+  if (at < 0) at = lines.findIndex((l) => example.test(l));
+  if (value === null) {
+    if (at >= 0 && live.test(lines[at])) lines.splice(at, 1);
+  } else if (at >= 0) {
+    lines[at] = `${key}=${value}`;
+  } else {
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    lines.push(`${key}=${value}`, '');
+  }
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, lines.join('\n'), { mode: 0o600 });
+  renameSync(tmp, file);
+}
+
+async function putAccessDomains(list) {
+  try {
+    await apiPut('/access', { allowedHosts: list });
+    log('  ✓ saved — takes effect immediately');
+    return true;
+  } catch (e) {
+    log(`  ✗ ${e.message}`);
+    return false;
+  }
+}
+
+async function configureCloudflareAccess(rl) {
+  const cf = await apiGet('/cloudflare-access').catch(() => null);
+  if (!cf) {
+    log('  ✗ could not read the Cloudflare Access settings from the server.');
+    return;
+  }
+  log(c.gray('  Zero Trust → Settings → Team domain; Access → Applications → your app → Overview → Application Audience (AUD) Tag.'));
+  const teamDomain = await prompt(rl, 'Team domain (yourteam.cloudflareaccess.com)', cf.teamDomain || undefined);
+  const aud = await prompt(rl, `Application Audience (AUD) tag${cf.audSet ? ` — saved (${cf.audHint}), Enter keeps it` : ''}`);
+  const enabled = await promptYesNo(rl, 'Require Cloudflare Access on public (domain-name) addresses?', cf.enabled || !cf.configured);
+  try {
+    await apiPut('/cloudflare-access', { enabled, teamDomain, aud: aud || undefined });
+    log(`  ✓ saved${enabled ? ' — public addresses now need a Cloudflare Access sign-in' : ' (switched off)'}`);
+  } catch (e) {
+    log(`  ✗ ${e.message}`);
+    return;
+  }
+  if (await promptYesNo(rl, 'Check the connection to Cloudflare now?', true)) {
+    try {
+      const t = await apiPost('/cloudflare-access/test');
+      log(t.keys.ok ? `  ✓ Cloudflare's signing keys fetched (${t.keys.count})` : `  ✗ could not fetch Cloudflare's keys: ${t.keys.error}`);
+      log(c.gray('  (This terminal request does not go through Cloudflare, so it carries no Access sign-in — that is expected.)'));
+    } catch (e) {
+      log(`  ✗ ${e.message}`);
+    }
+  }
+}
+
+/** PUBLIC_URL / ORCHESTRATOR_HOST live in the server's .env: editable here only when the wizard can reach that file. */
+async function configureServerAddress(rl, server) {
+  const envFile = process.env.AIGENTRON_ENV_FILE;
+  const writable = (() => {
+    try {
+      if (!envFile) return false;
+      accessSync(envFile, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  log(`  Now: public address ${server.publicUrl ?? '(not set)'}, listens on ${server.listenHost}:${server.port}${server.bindAddress ? `, published on ${server.bindAddress}` : ''}.`);
+  if (!writable) {
+    log('  These two settings live in the server\'s .env file, which this terminal cannot edit (e.g. a Docker install: the file is on the host).');
+    log('  Add the lines to .env and restart:');
+    log('    PUBLIC_URL=https://dev.example.com        # your public address (added to the allowed domains automatically)');
+    log('    ORCHESTRATOR_HOST=127.0.0.1               # listen on this machine only (e.g. behind a tunnel); default 0.0.0.0');
+    log(c.gray('  Docker install: re-run the installer (aigentron update) so the container picks the new .env up.'));
+    return;
+  }
+  const urlIn = (await prompt(rl, 'Public address (https://…, - removes it, Enter keeps)', server.publicUrl || undefined)).trim();
+  let changed = false;
+  if (urlIn === '-') {
+    setEnvVar(envFile, 'PUBLIC_URL', null);
+    changed = true;
+  } else if (urlIn && urlIn !== server.publicUrl) {
+    try {
+      const u = new URL(urlIn);
+      if (!/^https?:$/.test(u.protocol) || u.username || u.password) throw new Error('bad');
+      setEnvVar(envFile, 'PUBLIC_URL', u.origin);
+      changed = true;
+    } catch {
+      log('  ✗ that is not a valid http(s) address');
+    }
+  }
+  const host = await promptChoice(
+    rl,
+    'Listen on',
+    [
+      { value: '0.0.0.0', label: 'All interfaces', hint: '— reachable from the network (default)' },
+      { value: '127.0.0.1', label: 'This machine only', hint: '— e.g. behind a Cloudflare tunnel or reverse proxy' },
+    ],
+    server.listenHost === '127.0.0.1' ? '127.0.0.1' : '0.0.0.0',
+  );
+  if (host !== server.listenHost) {
+    if (host === '127.0.0.1') setEnvVar(envFile, 'ORCHESTRATOR_HOST', host);
+    else setEnvVar(envFile, 'ORCHESTRATOR_HOST', null);
+    changed = true;
+  }
+  if (changed) {
+    log(`  ✓ ${envFile} updated`);
+    log('  ⚠ These take effect after a restart:  sudo aigentron restart');
+    if (host === '127.0.0.1') log(c.yellow('  ⚠ Listening on this machine only: open the dashboard through the tunnel / proxy or an SSH forward, not by the server\'s IP.'));
+  } else {
+    log('  (no change)');
+  }
+}
+
+async function stepAccess(rl) {
+  header('Access — where the server answers');
+  for (;;) {
+    const acc = await apiGet('/access').catch(() => null);
+    if (!acc) {
+      log('  ✗ could not read the access settings from the server.');
+      return;
+    }
+    const cf = await apiGet('/cloudflare-access').catch(() => ({}));
+    log(`  You are connected via ${c.bold(acc.yourHost || 'unknown')}.`);
+    log(
+      acc.allowedHosts.length
+        ? `  Allowed domains (${acc.enforced ? 'enforced' : 'not enforced'}): ${acc.allowedHosts.map((d) => c.cyan(d)).join(', ')}`
+        : `  Allowed domains: ${c.gray('none — any name is accepted')}`,
+    );
+    if (acc.publicHost) log(`  Public address (PUBLIC_URL): ${c.cyan(acc.publicHost)} ${c.gray('— always allowed')}`);
+    log(`  Cloudflare Access: ${cf.enabled ? c.green(`on (${cf.teamDomain})`) : cf.configured ? c.yellow(`saved but off (${cf.teamDomain})`) : c.gray('not set up')}`);
+    log(c.gray('  localhost, IP addresses and single-word names are always allowed, so you cannot lock yourself out.'));
+    const choices = [
+      { value: 'add', label: 'Add domains', hint: '— e.g. dev.example.com, *.team.example.org' },
+      ...(acc.allowedHosts.length ? [{ value: 'remove', label: 'Remove a domain' }, { value: 'clear', label: 'Clear the list', hint: '— accept any name again' }] : []),
+      { value: 'cloudflare', label: 'Cloudflare Access', hint: '— require its sign-in on public addresses' },
+      { value: 'server', label: 'Public address & listening', hint: '— PUBLIC_URL, listen on this machine only' },
+      { value: 'done', label: 'Done' },
+    ];
+    const what = await promptChoice(rl, 'Access', choices, 'add');
+    if (what === 'done') return;
+    if (what === 'add') {
+      const input = await prompt(rl, 'Domains to add (comma-separated)');
+      const add = splitCsv(input);
+      if (add.length) await putAccessDomains([...new Set([...acc.allowedHosts, ...add])]);
+    } else if (what === 'remove') {
+      const d = await promptChoice(rl, 'Remove which domain?', acc.allowedHosts, acc.allowedHosts[0]);
+      await putAccessDomains(acc.allowedHosts.filter((x) => x !== d));
+    } else if (what === 'clear') {
+      if (await promptYesNo(rl, 'Clear the whole list?', false)) await putAccessDomains([]);
+    } else if (what === 'cloudflare') {
+      await configureCloudflareAccess(rl);
+    } else if (what === 'server') {
+      await configureServerAddress(rl, acc.server ?? { port: 3001, listenHost: '0.0.0.0', bindAddress: null, publicUrl: null });
+    }
+  }
+}
+
 async function stepAgents(rl, providerNames) {
   header('Step 3 — Agents (+ skills)');
   const agents = await apiGet('/agents').catch(() => []);
@@ -1025,7 +1189,7 @@ function printHelp() {
   log('Usage: node infra/setup-wizard.mjs [--orchestrator-url <url>] [--advanced]');
   log('  --orchestrator-url  Orchestrator base URL (default http://localhost:3001)');
   log('  --advanced          Skip straight to the password-gated advanced-settings step');
-  log('  --section <name>    Jump straight to one section: providers | channels | agents | repo | advanced');
+  log('  --section <name>    Jump straight to one section: providers | channels | agents | repo | access | advanced');
 }
 
 async function main() {
@@ -1063,6 +1227,7 @@ async function main() {
         channels: () => stepChannels(rl),
         agents: async () => stepAgents(rl, await names()),
         repo: () => stepRepo(rl),
+        access: () => stepAccess(rl),
         advanced: () => stepAdvanced(rl, { startUnlocked: false }),
       };
       if (!sections[args.section]) throw new Error(`unknown section "${args.section}" — use: ${Object.keys(sections).join(', ')}`);
@@ -1086,6 +1251,7 @@ async function main() {
           { value: 'channels', label: 'Channels', hint: '— Telegram etc., allowed chats' },
           { value: 'agents', label: 'Agents' },
           { value: 'repo', label: 'Repository' },
+          { value: 'access', label: 'Access', hint: '— domains, Cloudflare Access, public address' },
           { value: 'advanced', label: 'Advanced settings', hint: '— password-gated' },
           { value: 'quit', label: 'Quit' },
         ],
@@ -1105,6 +1271,7 @@ async function main() {
       else if (what === 'channels') await stepChannels(rl);
       else if (what === 'agents') await stepAgents(rl, await providerNames());
       else if (what === 'repo') await stepRepo(rl);
+      else if (what === 'access') await stepAccess(rl);
       else if (what === 'advanced') await stepAdvanced(rl, { startUnlocked: false });
     }
 

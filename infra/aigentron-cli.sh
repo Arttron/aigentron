@@ -22,7 +22,7 @@ node_script() {
   if [ "$MODE" = docker ]; then
     exec docker exec -it "$CONTAINER" node "/app/infra/$script" "$@"
   fi
-  ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://127.0.0.1:$PORT}" LDS_URL="${LDS_URL:-http://127.0.0.1:$PORT}" exec node "$CURRENT/infra/$script" "$@"
+  AIGENTRON_ENV_FILE="$INSTALL_DIR/.env" ORCHESTRATOR_URL="${ORCHESTRATOR_URL:-http://127.0.0.1:$PORT}" LDS_URL="${LDS_URL:-http://127.0.0.1:$PORT}" exec node "$CURRENT/infra/$script" "$@"
 }
 
 version() {
@@ -40,7 +40,7 @@ completion() {
 _aigentron() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "configure providers channels agents repo admin status start stop restart logs doctor update reset-password version completion help -h --help -v --version" -- "$cur") )
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo access admin status start stop restart logs doctor update reset-password version completion help -h --help -v --version" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   fi
@@ -59,6 +59,7 @@ _aigentron() {
     'channels:Telegram etc. — allowed chats, tokens'
     'agents:agents and their providers'
     'repo:the project repository'
+    'access:allowed domains, Cloudflare Access, address'
     'admin:chat with the admin assistant'
     'status:is it running? version, health'
     'start:start the server'
@@ -100,6 +101,7 @@ $(say "${B}Set up${N}")
   aigentron channels          Telegram etc. — allowed chats, tokens, on/off
   aigentron agents            agents and their providers
   aigentron repo              the project repository
+  aigentron access            allowed domains, Cloudflare Access, public address / listening
   aigentron admin [text]      chat with the admin assistant in the terminal
 
 $(say "${B}Run${N}")
@@ -157,6 +159,7 @@ for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
 
 case "${1:-}" in
   ""|configure|config|setup|wizard) [ $# -gt 0 ] && shift; node_script setup-wizard.mjs "$@" ;;
+  access|domains|host) shift; node_script setup-wizard.mjs --section access "$@" ;;
   providers|channels|agents) sec="$1"; shift; node_script setup-wizard.mjs --section "$sec" "$@" ;;
   repo|repository) shift; node_script setup-wizard.mjs --section repo "$@" ;;
   admin|chat) shift; node_script admin-cli.mjs "$@" ;;

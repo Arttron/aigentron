@@ -13,6 +13,7 @@ import { AgentEventBus, type BusEvent } from '../bus/agent-event-bus';
 import { PresenceService } from '../presence/presence.service';
 import { resolveCorsOrigin } from '../config/cors';
 import { AuthService } from '../auth/auth.service';
+import { CloudflareAccessService } from '../access/cloudflare-access.service';
 import { AccessService } from '../access/access.service';
 
 /**
@@ -35,6 +36,7 @@ export class EventsGateway
     private readonly presence: PresenceService,
     private readonly auth: AuthService,
     private readonly access: AccessService,
+    private readonly cloudflare: CloudflareAccessService,
   ) {}
 
   onModuleInit(): void {
@@ -48,10 +50,16 @@ export class EventsGateway
   /** Sockets whose window is currently focused (to decrement on disconnect). */
   private readonly focused = new Set<string>();
 
-  handleConnection(client: Socket): void {
+  async handleConnection(client: Socket): Promise<void> {
     // A domain that is not allowed gets no live feed either (the HTTP middleware does not see WebSocket upgrades).
     // Live task output is private: with a password set, only a signed-in browser may listen.
     if (!this.access.allows(client.handshake.headers.host)) {
+      client.data.rejected = true;
+      client.disconnect(true);
+      return;
+    }
+    // Cloudflare Access (if on): a socket opened under a real domain needs Access's token too.
+    if (this.cloudflare.required(client.handshake.headers.host) && !(await this.cloudflare.check(client.handshake.headers)).ok) {
       client.data.rejected = true;
       client.disconnect(true);
       return;

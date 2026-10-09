@@ -71,6 +71,26 @@ Minimal / bare-metal: install `cloudflared` on the host (`cloudflared service in
 It adds that origin to the allowed origins, **adds its host to the allowed domains** (so only that name — plus local access — is served), and,
 if no dashboard password is set yet, prints a loud warning at startup and shows a red banner in the dashboard. It does not open anything.
 
+## Make the server check Cloudflare Access itself (optional)
+
+Cloudflare Access alone protects the hostname *if* every request really goes through it. To make the server enforce that, give it the two values of your Access
+application — **Settings → General → Cloudflare Access** in the dashboard, or `aigentron access` → *Cloudflare Access* in a terminal on the server:
+
+- **Team domain** — Zero Trust → Settings → *Team domain* (`yourteam.cloudflareaccess.com`);
+- **Application Audience (AUD) tag** — Access → Applications → your application → *Overview*.
+
+With it on, a request that arrives under a real domain name must carry Cloudflare's signed `Cf-Access-Jwt-Assertion` token (checked against Cloudflare's published keys:
+signature, issuer, audience, expiry). A tunnel hostname that has no Access policy, or a direct hit on the origin with the public `Host`, is answered `403`. The same check
+guards the live-update WebSocket. `localhost`, IP addresses and single-word LAN names are never affected, so you cannot lock yourself out; the dashboard also refuses to switch
+this on while *you* are connected through a public name without a valid token. If Cloudflare's keys cannot be fetched the request is refused (fail closed). The password
+sign-in still applies on top. The **Test** button (and the terminal) show whether the keys can be fetched and — when opened on your public address — who Access says you are.
+The setting is stored in `secrets/cloudflare-access.json`.
+
+## Address settings in `.env`
+
+`aigentron access` also shows the two address settings that live in the server's `.env` and need a restart: `PUBLIC_URL` (your public address) and
+`ORCHESTRATOR_HOST` (`127.0.0.1` = listen on this machine only, e.g. behind a tunnel; default `0.0.0.0`). On a bare-metal install the terminal edits `.env` for you; on Docker it prints the lines to add.
+
 ## Things to know
 
 - **Everything under the hostname is behind Access** — including `/api/mcp` (the MCP entry point for outside clients),

@@ -62,7 +62,10 @@ in that chat). Buttons: Run now (try it), Turn on/off, Edit, Delete. A run misse
 To open the dashboard from outside, the user has two ways (or both): **A. built-in** — passwords (above) plus Settings → General → **Access**, a list of
 allowed domain names (empty = any; `localhost`, IP addresses and single-word names always work, so a port forward / `ssh -L` is never affected); and
 **B. Cloudflare Access** — an alternative or extra layer: Cloudflare asks the visitor to sign in (e-mail code / Google / GitHub) before the server is reached; set up
-in the Cloudflare dashboard, steps in `docs/remote-access.md`. A random sub-domain alone is not protection. I can't change these settings — point the user to those screens or that doc.
+in the Cloudflare dashboard, steps in `docs/remote-access.md`. A random sub-domain alone is not protection. To make the server itself insist on Cloudflare's sign-in, Settings → General → **Cloudflare Access** takes the team domain
+(`yourteam.cloudflareaccess.com`) and the application's AUD tag, with Save and **Test**; when on, a request under a real domain name without Cloudflare's signed token is refused
+(`localhost`, IPs and the local network are never affected). On the server the same is `aigentron access` (domains, Cloudflare Access, `PUBLIC_URL`, listening on this machine only).
+I can read it (`access_status`) and change the allowed domains and the Cloudflare Access check (`propose_allowed_domains`, `propose_cloudflare_access`, with approval); `PUBLIC_URL` and the listen address are in the server's `.env` (the user runs `aigentron access`) — I can't change those.
 
 ## Approvals
 

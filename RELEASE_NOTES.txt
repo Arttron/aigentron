@@ -1,13 +1,18 @@
-Aigentron v0.1.39
+Aigentron v0.1.40
 
-For people who are not programmers: managing providers from the terminal is now complete, and the setup wizard asks for your password when the server has one.
+For people who are not programmers: control who can reach your server from the internet — in the dashboard, in the terminal, or by asking the admin assistant.
 
-Providers in the terminal (`aigentron providers`)
-- One menu: add, edit, set the default, test and delete providers. The list shows each provider's type, how it signs in and its model, and marks the default with a star.
-- Editing a provider (model, address, key or sign-in, rate limits) ends with "Make it the default provider?" — no more hunting for where to set the default.
-- Deleting the default provider asks which one should take over.
+Cloudflare Access check (Settings → General → Cloudflare Access)
+- A second, independent layer: when on, a request that comes in under a real domain name must carry the signed sign-in token that Cloudflare Access adds. Going around Cloudflare (a tunnel address without an Access policy) gets an error instead of your dashboard.
+- You give it two values — your team domain and the application's AUD tag — and press Test to see that it can reach Cloudflare (and, on your public address, who Cloudflare says you are).
+- localhost, IP addresses and your local network are never affected, so you cannot lock yourself out; the dashboard also refuses to switch it on if that would lock you out. Passwords still apply on top.
 
-Setup wizard
-- When the server has a sign-in password, the wizard now asks for it first (a hidden field; with several users it asks who you are). Before, every list looked empty.
-- Editing a channel no longer clears its default agent by accident, even if that agent no longer exists.
-- `aigentron version` always prints something sensible, also for a Docker install without a version label.
+Domains and address, from the terminal (`aigentron access`)
+- Add, remove or clear the allowed domains; set up Cloudflare Access; change the public address (PUBLIC_URL) and make the server listen on this machine only (new setting ORCHESTRATOR_HOST, handy behind a tunnel). On a bare-metal install the terminal edits the .env for you; on Docker it shows the lines to add.
+- The Access card in the dashboard now also shows how the server is reachable (port, listening address, public address).
+
+The admin assistant can help
+- It can read the current state and, with your approval on a card, change the allowed domains and the Cloudflare Access check. It does not touch server-level settings (.env) — it points you to `aigentron access`.
+
+Also
+- The startup warning for a public address now says what to do (set passwords, use Cloudflare Access) instead of claiming there is no login.

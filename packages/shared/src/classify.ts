@@ -90,6 +90,10 @@ export const PROPOSE_CLEANUP_TOOL = `${INTERNAL_TOOL_PREFIX}propose_cleanup`;
 /** Recurring jobs (reminders / periodic tasks): listing is free; create/change/delete is a gated proposal. */
 export const SCHEDULES_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}schedules_list`;
 export const PROPOSE_SCHEDULE_TOOL = `${INTERNAL_TOOL_PREFIX}propose_schedule`;
+/** Where the server answers: reading the status is free; changing the allowed domains / Cloudflare Access is a gated proposal. */
+export const ACCESS_STATUS_TOOL = `${INTERNAL_TOOL_PREFIX}access_status`;
+export const PROPOSE_ALLOWED_DOMAINS_TOOL = `${INTERNAL_TOOL_PREFIX}propose_allowed_domains`;
+export const PROPOSE_CLOUDFLARE_ACCESS_TOOL = `${INTERNAL_TOOL_PREFIX}propose_cloudflare_access`;
 /** Chat channels (Telegram): listing (with connectivity + chats waiting to be allowed) is free; create/change/delete is gated. The bot token is entered through request_secret, never here. */
 /** The admin writes/changes/deletes a text note in the project's resource library (approval). */
 export const PROPOSE_RESOURCE_TOOL = `${INTERNAL_TOOL_PREFIX}propose_resource`;
@@ -485,6 +489,23 @@ export function classifyToolCall(
         action === 'delete'
           ? `admin agent proposing to DELETE the schedule "${s('name')}"`
           : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the schedule "${s('name')}": ${s('cron') || '(same time)'} ${s('timezone')} — ${s('kind') || '(same kind)'}${text ? `: ${text}` : ''}${s('kind') === 'task' ? ` — it runs a task with agent "${s('agentName')}" each time and uses model budget` : ''}`,
+    };
+  }
+  if (name === PROPOSE_ALLOWED_DOMAINS_TOOL.toLowerCase()) {
+    const action = typeof toolInput.action === 'string' ? toolInput.action : '?';
+    const domains = Array.isArray(toolInput.domains) ? toolInput.domains.map(String).join(', ') : '';
+    return {
+      dangerous: true,
+      summary: `propose_allowed_domains ${action} #${shortHash(JSON.stringify([toolInput.action, toolInput.domains]))}`,
+      reason: `admin agent proposing to ${action === 'clear' ? 'CLEAR the list of allowed domains (any name is accepted again)' : `${action} allowed domains: ${domains || '(none)'}`}. Once a list exists, other public domain names stop working (localhost, IP addresses and the local network always work)`,
+    };
+  }
+  if (name === PROPOSE_CLOUDFLARE_ACCESS_TOOL.toLowerCase()) {
+    const t = (k: string) => (typeof toolInput[k] === 'string' ? (toolInput[k] as string) : '?');
+    return {
+      dangerous: true,
+      summary: `propose_cloudflare_access ${toolInput.enabled ? 'on' : 'off'} ${t('teamDomain')} #${shortHash(JSON.stringify([toolInput.enabled, toolInput.teamDomain, toolInput.aud]))}`,
+      reason: `admin agent proposing to ${toolInput.enabled ? 'REQUIRE' : 'stop requiring'} the Cloudflare Access sign-in (team ${t('teamDomain')}) on public domain names${toolInput.enabled ? ' — a request without Cloudflare\'s signed token gets 403; localhost, IPs and the local network are unaffected' : ''}`,
     };
   }
   if (name === PROPOSE_PROVIDER_TOOL.toLowerCase()) {

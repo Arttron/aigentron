@@ -3,6 +3,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { AppConfigService } from './config/app-config.service';
+import { CloudflareAccessService } from './access/cloudflare-access.service';
 import { AccessService } from './access/access.service';
 
 /**
@@ -48,6 +49,13 @@ async function bootstrap(): Promise<void> {
     if (access.allows(req.headers.host)) return next();
     res.status(421).type('text/plain').send('This address is not served here. If you own this server, allow the domain in Settings → General → Access, or open it by IP / localhost.');
   });
+  // Cloudflare Access (Settings → General): under a real domain name every request must carry Access's signed token.
+  const cfAccess = app.get(CloudflareAccessService);
+  app.use(async (req: { headers: Record<string, string | string[] | undefined> }, res: { status: (n: number) => { type: (t: string) => { send: (b: string) => void } } }, next: () => void) => {
+    const host = req.headers.host as string | undefined;
+    if (!cfAccess.required(host) || (await cfAccess.check(req.headers)).ok) return next();
+    res.status(403).type('text/plain').send('Cloudflare Access sign-in is required for this address.');
+  });
   app.setGlobalPrefix('api');
   app.enableCors({
     origin: config.corsOrigin,
@@ -79,7 +87,7 @@ async function listenWithRetry(
 ): Promise<void> {
   for (let i = 1; ; i++) {
     try {
-      await app.listen(port, '0.0.0.0');
+      await app.listen(port, process.env.ORCHESTRATOR_HOST?.trim() || '0.0.0.0'); // ORCHESTRATOR_HOST=127.0.0.1: this machine only (e.g. behind a tunnel)
       return;
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;

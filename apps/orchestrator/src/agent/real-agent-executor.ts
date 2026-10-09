@@ -276,6 +276,9 @@ export class RealAgentExecutor extends AgentExecutor {
       proposeChannel: (input) => this.platformAdmin.proposeChannel(taskId, sessionId, input),
       schedulesList: () => this.platformAdmin.schedulesList(),
       proposeSchedule: (input) => this.platformAdmin.proposeSchedule(taskId, sessionId, input),
+      accessStatus: () => this.platformAdmin.accessStatus(),
+      proposeAllowedDomains: (input) => this.platformAdmin.proposeAllowedDomains(taskId, sessionId, input),
+      proposeCloudflareAccess: (input) => this.platformAdmin.proposeCloudflareAccess(taskId, sessionId, input),
       proposeTaskAction: (input) => this.platformAdmin.proposeTaskAction(taskId, sessionId, input),
       proposeAgentDelete: (input) => this.platformAdmin.proposeAgentDelete(taskId, sessionId, input),
     };

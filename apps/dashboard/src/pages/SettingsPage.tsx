@@ -3,6 +3,7 @@ import { AppHeader, BackLink, Tabs, type TabDef } from '@/components/ui';
 import { GeneralSettingsForm } from '@/components/settings/GeneralSettingsForm';
 import { SecuritySettings } from '@/components/settings/SecuritySettings';
 import { AccessSettings } from '@/components/settings/AccessSettings';
+import { CloudflareAccessSettings } from '@/components/settings/CloudflareAccessSettings';
 import { LiteLlmRoutes } from '@/components/settings/LiteLlmRoutes';
 import { ProvidersManager } from '@/components/ProvidersManager';
 import { McpManager } from '@/components/McpManager';
@@ -39,6 +40,7 @@ export function SettingsPage() {
         <>
           <SecuritySettings />
           <AccessSettings />
+          <CloudflareAccessSettings />
           <GeneralSettingsForm />
         </>
       )}

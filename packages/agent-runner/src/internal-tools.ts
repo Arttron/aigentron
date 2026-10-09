@@ -415,6 +415,51 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         },
       },
       {
+        name: 'access_status',
+        description:
+          "Where the server answers: the allowed domain names (and whether they are enforced), the public address from PUBLIC_URL, and whether Cloudflare Access is set up / on. Read-only. Use it before proposing changes.",
+        shape: {},
+        handler: () => admin.accessStatus(),
+      },
+      {
+        name: 'propose_allowed_domains',
+        description:
+          "Change the list of domain names this server answers to. `action`: add | remove | set (replace the whole list) | clear (accept any name again); `domains` (for add/remove/set): names like dev.example.com or *.example.com. localhost, IP addresses and single-word LAN names always work, whatever the list. Once the list is non-empty, OTHER public domain names stop working — make sure the user's own address stays on it. `reason` is required. A human reviews and must approve; this call blocks until they decide. PUBLIC_URL / listen address live in the server's .env — you cannot change them; point the user to `aigentron access`.",
+        shape: {
+          action: z.enum(['add', 'remove', 'set', 'clear']),
+          domains: z.array(z.string()).optional(),
+          reason: z.string(),
+        },
+        handler: async (args) =>
+          (
+            await admin.proposeAllowedDomains({
+              action: args.action as 'add' | 'remove' | 'set' | 'clear',
+              domains: Array.isArray(args.domains) ? args.domains.map(String) : undefined,
+              reason: String(args.reason ?? ''),
+            })
+          ).message,
+      },
+      {
+        name: 'propose_cloudflare_access',
+        description:
+          "Turn the server's own Cloudflare Access check on or off. `enabled`; `teamDomain` (yourteam.cloudflareaccess.com — Zero Trust → Settings → Team domain); `aud` (the Application Audience tag from the Access application's Overview page; optional if one is already saved — it is an identifier, not a secret, so it may be typed in chat). When on, a request under a real domain name must carry Cloudflare's signed token or it gets 403 (localhost, IPs and the local network are unaffected). The call first checks that Cloudflare answers for that team. `reason` is required. A human reviews and must approve; this call blocks until they decide.",
+        shape: {
+          enabled: z.boolean(),
+          teamDomain: z.string(),
+          aud: z.string().optional(),
+          reason: z.string(),
+        },
+        handler: async (args) =>
+          (
+            await admin.proposeCloudflareAccess({
+              enabled: args.enabled === true,
+              teamDomain: String(args.teamDomain ?? ''),
+              aud: typeof args.aud === 'string' && args.aud.trim() ? args.aud.trim() : undefined,
+              reason: String(args.reason ?? ''),
+            })
+          ).message,
+      },
+      {
         name: 'propose_batch',
         description:
           "Propose SEVERAL related changes behind ONE approval (the user approves once instead of N times). Use it whenever a request needs 2+ changes (e.g. create three agents + a provider, set up an agent and start its first task). `items` (1–12, applied IN ORDER; later items may refer to agents created by earlier ones): each is {kind, args} where kind/args are: agent {name, content}; skill {name, content}; agent_delete {name, reason}; provider {name, kind, model, authMode, baseUrl?, makeDefault?, reason}; settings {changes, reason}; task {agentName, prompt, title?, reason}; task_action {action, taskIds, reason}. Not allowed in a batch: secrets (use request_secret), cleanup, undo. The whole batch is validated first — if any item is invalid nothing is shown and you get the reasons; otherwise the user sees every item on one card. Items are journaled one by one (each can be reverted). If an item fails while applying, the batch stops there and the result says which items were applied.",
