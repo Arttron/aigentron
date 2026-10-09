@@ -307,28 +307,39 @@ async function stepRotateExistingSecret(rl) {
   }
   if (!existing.length) return [];
   const names = existing.map((p) => p.name);
-  if (!(await promptYesNo(rl, `Rotate/update an existing provider's secret (found: ${names.join(', ')})?`, false))) {
+  if (!(await promptYesNo(rl, `Edit an existing provider — model, base URL or secret (found: ${names.join(', ')})?`, false))) {
     return names;
   }
   let more = true;
   while (more) {
     const name = await promptChoice(rl, 'Which provider?', names, names[0]);
     const p = existing.find((x) => x.name === name);
-    const secret =
-      p.authMode === 'oauth-token'
-        ? await promptOauthSecret(rl, 'New OAuth token')
-        : await promptSecret(rl, 'New secret (blank = keep current): ');
-    if (secret) {
+    const patch = {};
+    const model = (await prompt(rl, 'Default model (Enter keeps)', p.model || undefined)).trim();
+    if (model && model !== p.model) patch.model = model;
+    if (p.kind !== 'codex') {
+      const baseUrl = (await prompt(rl, 'Base URL (Enter keeps, - clears)', p.baseUrl || undefined)).trim();
+      if (baseUrl === '-') patch.baseUrl = '';
+      else if (baseUrl && baseUrl !== p.baseUrl) patch.baseUrl = baseUrl;
+    }
+    if (p.authMode !== 'codex-login') {
+      const secret =
+        p.authMode === 'oauth-token'
+          ? await promptOauthSecret(rl, 'New OAuth token')
+          : await promptSecret(rl, `New secret (blank = keep current${p.secretSet ? ` ${p.secretHint ?? ''}` : ', none set yet'}): `);
+      if (secret) patch.secret = secret;
+    }
+    if (Object.keys(patch).length) {
       try {
-        await apiPut(`/providers/${encodeURIComponent(name)}`, { secret });
-        log(`  ✓ "${name}" secret updated`);
+        await apiPut(`/providers/${encodeURIComponent(name)}`, patch);
+        log(`  ✓ "${name}" updated (${Object.keys(patch).join(', ')})`);
       } catch (e) {
         log(`  ✗ failed to update "${name}": ${e.message}`);
       }
     } else {
       log('  (no change)');
     }
-    more = await promptYesNo(rl, 'Rotate another provider\'s secret?', false);
+    more = await promptYesNo(rl, 'Edit another provider?', false);
   }
   return names;
 }
@@ -437,58 +448,120 @@ async function stepProviders(rl) {
   return providers;
 }
 
-async function promptChannelField(rl, field) {
+/**
+ * One channel field. `current` (when editing) is shown as the default: Enter keeps it. Secrets never show their value — blank keeps
+ * the stored one. A list is typed comma-separated; `-` clears it.
+ */
+async function promptChannelField(rl, field, current) {
+  const editing = current !== undefined;
   const note = [field.required ? 'required' : null, field.help].filter(Boolean).join(' — ');
   const suffix = note ? ` (${note})` : '';
   if (field.type === 'password') {
-    return await promptSecret(rl, `${field.label}${suffix}: `);
+    const hint = editing && current?.set ? ` [set ${current.hint ?? ''} — blank keeps]` : '';
+    return await promptSecret(rl, `${field.label}${suffix}${hint}: `);
   }
   if (field.type === 'list') {
-    return splitCsv(await prompt(rl, `${field.label}${suffix} (comma-separated)`));
+    const cur = Array.isArray(current) ? current.join(', ') : '';
+    const answer = (await prompt(rl, `${field.label}${suffix} (comma-separated${editing ? ', Enter keeps, - clears' : ''})`, cur)).trim();
+    if (answer === '-') return [];
+    return splitCsv(answer);
   }
   if (field.type === 'agent') {
     const agents = await apiGet('/agents').catch(() => []);
-    if (!agents.length) return undefined;
-    return await promptChoiceOptional(rl, `${field.label}${suffix}`, agents.map((a) => a.name));
+    if (!agents.length) return current || undefined;
+    const answer = await promptChoiceOptional(rl, `${field.label}${suffix}${current ? ` [now: ${current}]` : ''}`, agents.map((a) => a.name));
+    return answer ?? (current || undefined);
   }
-  const value = await prompt(rl, `${field.label}${suffix}`, field.placeholder ? undefined : '');
+  const value = await prompt(rl, `${field.label}${suffix}`, typeof current === 'string' ? current : undefined);
   return value || undefined;
+}
+
+/** Chats that wrote to the bot but are not allowed yet: offer to let each one in (this is how you add yourself without knowing your id). */
+async function offerPendingChats(rl, row) {
+  const pairings = await apiGet(`/channels/${row.id}/pairings`).catch(() => []);
+  for (const p of pairings) {
+    const who = [p.userName, p.firstText ? `"${p.firstText.slice(0, 40)}"` : null].filter(Boolean).join(' ');
+    if (await promptYesNo(rl, `  Chat ${p.chatId}${who ? ` (${who})` : ''} wrote to the bot. Allow it?`, false)) {
+      await apiPost(`/channels/${row.id}/pairings/${encodeURIComponent(p.chatId)}/allow`);
+      log(`  ✓ chat ${p.chatId} allowed`);
+    }
+  }
+  if (!pairings.length) log('  (no waiting chats — write anything to the bot from Telegram, then choose this again, or type your chat id)');
+}
+
+async function testChannel(rl, row) {
+  if (!(await promptYesNo(rl, 'Test this channel now?', true))) return;
+  const t = await apiPost(`/channels/${row.id}/test`);
+  log(t.ok ? '  ✓ test ok' : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
+}
+
+async function editChannel(rl, row, kindDef) {
+  log(`  Editing "${row.name}" (${row.kind}). Enter keeps the current value.`);
+  const config = {};
+  for (const field of kindDef.fields) {
+    const cur = field.type === 'password' ? row.secrets?.[field.key] : row.config?.[field.key];
+    config[field.key] = await promptChannelField(rl, field, cur ?? (field.type === 'list' ? [] : ''));
+  }
+  const enabled = await promptYesNo(rl, 'Enabled?', row.enabled);
+  try {
+    const saved = await apiPut(`/channels/${row.id}`, { enabled, config });
+    log(`  ✓ channel "${row.name}" updated`);
+    await offerPendingChats(rl, saved);
+    await testChannel(rl, saved);
+  } catch (e) {
+    log(`  ✗ failed to update "${row.name}": ${e.message}`);
+  }
+}
+
+async function addChannel(rl, available) {
+  const kindNames = available.map((k) => k.kind);
+  const kind = await promptChoice(rl, 'Channel kind', kindNames, kindNames[0]);
+  const kindDef = available.find((k) => k.kind === kind);
+  if (kindDef.hint) log(`  ${kindDef.hint}`);
+  const name = await prompt(rl, 'Channel name (id)', kind);
+  const config = {};
+  for (const field of kindDef.fields) {
+    config[field.key] = await promptChannelField(rl, field);
+  }
+  try {
+    const row = await apiPost('/channels', { name, kind, enabled: true, config });
+    log(`  ✓ channel "${name}" created`);
+    await offerPendingChats(rl, row);
+    await testChannel(rl, row);
+  } catch (e) {
+    log(`  ✗ failed to create channel "${name}": ${e.message}`);
+  }
 }
 
 async function stepChannels(rl) {
   header('Step 2 — Channels');
-  if (!(await promptYesNo(rl, 'Configure a channel now (e.g. Telegram)?', false))) {
-    log('  Skipped — configurable later via the dashboard or this wizard.');
-    return;
-  }
   const kinds = await apiGet('/channels/kinds').catch(() => []);
   const available = kinds.filter((k) => k.available);
   if (!available.length) {
     log('  No channel kind is implemented yet.');
     return;
   }
-  let more = true;
-  while (more) {
-    const kindNames = available.map((k) => k.kind);
-    const kind = await promptChoice(rl, 'Channel kind', kindNames, kindNames[0]);
-    const kindDef = available.find((k) => k.kind === kind);
-    if (kindDef.hint) log(`  ${kindDef.hint}`);
-    const name = await prompt(rl, 'Channel name (id)', kind);
-    const config = {};
-    for (const field of kindDef.fields) {
-      config[field.key] = await promptChannelField(rl, field);
-    }
-    try {
-      const row = await apiPost('/channels', { name, kind, enabled: true, config });
-      log(`  ✓ channel "${name}" created`);
-      if (await promptYesNo(rl, 'Test this channel now?', true)) {
-        const t = await apiPost(`/channels/${row.id}/test`);
-        log(t.ok ? '  ✓ test ok' : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
+  for (;;) {
+    const existing = await apiGet('/channels').catch(() => []);
+    if (existing.length) {
+      log('  Channels now:');
+      for (const c of existing) {
+        const allowed = Array.isArray(c.config?.allowedChatIds) ? c.config.allowedChatIds.length : 0;
+        log(`    - ${c.name} (${c.kind}) ${c.enabled ? 'on' : 'OFF'}${allowed ? `, ${allowed} allowed chat(s)` : ', no allowed chats yet'}`);
       }
-    } catch (e) {
-      log(`  ✗ failed to create channel "${name}": ${e.message}`);
     }
-    more = await promptYesNo(rl, 'Add another channel?', false);
+    const choices = [...(existing.length ? ['edit'] : []), 'add', 'done'];
+    const what = await promptChoice(rl, existing.length ? 'Edit a channel, add a new one, or finish?' : 'Add a channel (e.g. Telegram)?', choices, 'done');
+    if (what === 'done') return;
+    if (what === 'add') {
+      await addChannel(rl, available);
+      continue;
+    }
+    const name = existing.length === 1 ? existing[0].name : await promptChoice(rl, 'Which channel?', existing.map((c) => c.name), existing[0].name);
+    const row = existing.find((c) => c.name === name);
+    const kindDef = available.find((k) => k.kind === row.kind);
+    if (!kindDef) log(`  ✗ kind "${row.kind}" is not available`);
+    else await editChannel(rl, row, kindDef);
   }
 }
 

@@ -99,6 +99,8 @@ export class AppConfigService {
   /** Command + args used to spawn the litellm child process (binary on PATH in the single image). */
   readonly litellmManagedCommand: string;
   readonly litellmManagedArgs: string[];
+  /** Interface the managed litellm listens on (loopback: only this machine talks to it). */
+  readonly litellmManagedHost: string;
 
   /**
    * Where the real Ollama actually lives — used for the model picker (its
@@ -183,6 +185,7 @@ export class AppConfigService {
     this.litellmManaged = /^(1|true|yes)$/i.test(process.env.LITELLM_MANAGED ?? '');
     this.litellmManagedConfigPath = process.env.LITELLM_MANAGED_CONFIG_PATH ?? '/data/litellm-config.generated.yaml';
     this.litellmManagedCommand = process.env.LITELLM_MANAGED_COMMAND ?? 'litellm';
+    this.litellmManagedHost = process.env.LITELLM_MANAGED_HOST?.trim() || '127.0.0.1';
     this.litellmManagedArgs = (process.env.LITELLM_MANAGED_ARGS ?? '').split(' ').filter(Boolean);
     this.dashboardBaseUrl = (process.env.DASHBOARD_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
     this.attachmentsDir = process.env.ATTACHMENTS_DIR ?? join(this.agentDir, 'attachments');

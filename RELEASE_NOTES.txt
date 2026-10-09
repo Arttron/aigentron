@@ -1,14 +1,11 @@
-Aigentron v0.1.33
+Aigentron v0.1.34
 
-For people who are not programmers: a small security fix and a tidier voice experience.
+For people who are not programmers: the setup wizard can now be re-run to change things, and the server install is safer.
 
-Security
-- Sign-in attempts are now limited more reliably: guessing a password could no longer be sped up by faking the "client address" header when connecting directly (home network, IP address, port forwarding). Behind a Cloudflare tunnel nothing changes for normal use.
+Setup wizard (node infra/setup-wizard.mjs)
+- Re-running it now edits what is already set up instead of failing: change a channel's settings (for example add your Telegram chat id), switch a channel on or off, change a provider's model, address or key.
+- Chats that already wrote to the bot are listed, and you can allow them with one answer — no need to know your chat id in advance.
 
-Voice
-- Voice mode and the "Speak" switch sit in the same strip in both modes, with clearer icons, and nothing jumps when switching.
-- One read-aloud button on the latest answer only; it no longer moves the text.
-- Settings → Voice has a hands-on "Try it": hear the voice and record yourself to see what is recognised.
-
-Notes
-- Agents with a shell can still reach the server's sign-in key file; separating agents from it is the next planned security step (see docs/BACKLOG.md).
+Server install (bare-metal)
+- The built-in LiteLLM gateway now listens on this machine only (127.0.0.1), instead of every network interface. Nothing to change on your side; if you had opened port 4000 in your firewall, you can close it.
+- If it fails to start, the last lines of its output now appear in the service log, and the first start waits up to 2 minutes (a small server can be slow).

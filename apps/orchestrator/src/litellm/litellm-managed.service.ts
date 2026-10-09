@@ -6,7 +6,10 @@ import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** How long to wait for the freshly-spawned litellm to answer before giving up. */
-const READY_TIMEOUT_MS = 30_000;
+// Generous: the first start of `litellm[proxy]` on a small VM can take over a minute (heavy imports).
+const READY_TIMEOUT_MS = 120_000;
+/** How many recent output lines of the child to keep for the failure message. */
+const TAIL_LINES = 30;
 const READY_POLL_MS = 500;
 
 /**
@@ -27,6 +30,7 @@ const READY_POLL_MS = 500;
 export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(LitellmManagedService.name);
   private child?: ChildProcess;
+  private tail: string[] = [];
   /** Serializes regenerate+restart calls so concurrent route CRUD can't race two restarts. */
   private queue: Promise<void> = Promise.resolve();
 
@@ -91,7 +95,9 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
   private async restartChild(): Promise<void> {
     await this.stopChild();
     const port = portOf(this.config.litellmBaseUrl);
-    const args = [...this.config.litellmManagedArgs, '--config', this.config.litellmManagedConfigPath, '--port', String(port)];
+    // Bind to loopback by default: only the orchestrator and the agents on this machine talk to it, and litellm's own default
+    // (0.0.0.0) would expose the gateway on every network interface of a bare-metal server.
+    const args = [...this.config.litellmManagedArgs, '--config', this.config.litellmManagedConfigPath, '--host', this.config.litellmManagedHost, '--port', String(port)];
     this.logger.log(`Starting litellm: ${this.config.litellmManagedCommand} ${args.join(' ')}`);
     // NOT a blanket ...process.env spread: litellm auto-detects ANY DATABASE_URL
     // in its environment for its own (optional, unwanted here) Postgres-backed
@@ -103,14 +109,22 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
       env: { ...inheritedEnv, LITELLM_MASTER_KEY: this.config.litellmMasterKey },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    child.stdout?.on('data', (d: Buffer) => this.logger.debug(`[litellm] ${d.toString().trimEnd()}`));
-    child.stderr?.on('data', (d: Buffer) => this.logger.debug(`[litellm] ${d.toString().trimEnd()}`));
+    this.tail = [];
+    const onOutput = (d: Buffer) => {
+      const text = d.toString().trimEnd();
+      this.logger.debug(`[litellm] ${text}`);
+      this.tail.push(...text.split('\n').filter((l) => l.trim()));
+      if (this.tail.length > TAIL_LINES) this.tail.splice(0, this.tail.length - TAIL_LINES);
+    };
+    child.stdout?.on('data', onOutput);
+    child.stderr?.on('data', onOutput);
+    child.on('error', (e) => this.logger.warn(`could not start litellm (${this.config.litellmManagedCommand}): ${e.message}`));
     child.on('exit', (code, signal) => {
       if (this.child === child) this.child = undefined;
-      if (code !== null && code !== 0) this.logger.warn(`litellm exited with code ${code} (signal ${signal ?? 'none'})`);
+      if (code !== null && code !== 0) this.logger.warn(`litellm exited with code ${code} (signal ${signal ?? 'none'}). Last output:\n${this.tail.join('\n')}`);
     });
     this.child = child;
-    await this.waitUntilReady(port);
+    await this.waitUntilReady(port, child);
   }
 
   private async stopChild(): Promise<void> {
@@ -124,9 +138,10 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async waitUntilReady(port: number): Promise<void> {
+  private async waitUntilReady(port: number, child: ChildProcess): Promise<void> {
     const deadline = Date.now() + READY_TIMEOUT_MS;
     while (Date.now() < deadline) {
+      if (child.exitCode !== null || child.signalCode !== null) return; // it died — already reported with its last output
       try {
         const res = await fetch(`http://127.0.0.1:${port}/v1/models`, {
           headers: { authorization: `Bearer ${this.config.litellmMasterKey}` },
@@ -140,7 +155,7 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
       }
       await new Promise((r) => setTimeout(r, READY_POLL_MS));
     }
-    this.logger.warn(`litellm did not become ready within ${READY_TIMEOUT_MS}ms`);
+    this.logger.warn(`litellm did not become ready within ${READY_TIMEOUT_MS / 1000}s. Last output:\n${this.tail.join('\n')}`);
   }
 }
 

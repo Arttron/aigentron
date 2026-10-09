@@ -29,6 +29,7 @@ Dashboard → http://localhost:3000 · Orchestrator API → http://localhost:300
 runs a guided CLI wizard for providers, channels, agents, skills, and an optional project
 repo — the same REST API the dashboard uses, just walked step by step from a terminal. The
 dashboard keeps working standalone; the wizard is a guided alternative, not a replacement.
+It can be re-run any time to **edit** what is already set up: provider model / base URL / secret, and channel settings (e.g. add your Telegram chat id, or allow a chat that has already written to the bot).
 
 ## Running locally with Docker Compose
 
