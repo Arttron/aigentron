@@ -1,8 +1,18 @@
-Aigentron v0.1.45
+Aigentron v0.1.46
 
-For people who are not programmers: the terminal menu no longer asks the same technical questions every time.
+For people who are not programmers: the server can now serve your domain over HTTPS by itself, and the terminal menu got friendlier.
 
-The `aigentron` command
-- It no longer asks "How is Aigentron installed here?" and for the server address each time: the command already knows them. Run directly, the menu asks once on the first launch and remembers the answer. A new "Connection" section (`aigentron connection`) changes it when needed.
-- Every command goes straight to its section: `aigentron providers`, `channels`, `agents`, `repo`, `access`, and the new `advanced`.
-- The closing "Done" block appears only after the full guided setup, not on every exit.
+Own HTTPS and ports (Settings → General → Web server, or `aigentron access` → Ports & HTTPS certificate)
+- Install a certificate (paste the certificate and its private key) and the server serves HTTPS on port 443. The page checks that the key belongs to the certificate, shows who it is for and when it expires (with a warning when it is close), and warns if it does not cover one of your allowed domains. Replacing or removing it applies instantly, no restart.
+- Port 80 is optional: switch it on when you want it. With a certificate, port 80 sends domain names to HTTPS (IP addresses and local names keep working over plain HTTP). Port 3001 stays as it is.
+- Only the domains you allowed are served, on every port. Under Docker the installer publishes 80 and 443 when the host's ports are free. With "listen on this machine only" the server leaves 80/443 alone for your reverse proxy.
+- No certificate yet? A Cloudflare Origin Certificate or Let's Encrypt both work — docs/remote-access.md explains how.
+
+Terminal menu (`aigentron`)
+- A section opened straight from a command ends with "Exit" instead of "Back"; slow steps (tests, model lists, Cloudflare) show a spinner so the menu never looks frozen.
+- Editing a provider lets you pick the model from a list; the connection details are asked once and remembered.
+- Mistakes are caught early: an empty key, a duplicate or invalid name, a bad address, wrong chat ids.
+
+Also
+- Newer Claude models work (the built-in Claude Code engine is updated).
+- Cloudflare Access sign-in check, and the admin assistant can manage the allowed domains and that check (with your approval).

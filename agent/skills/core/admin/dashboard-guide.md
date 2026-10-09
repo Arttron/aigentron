@@ -61,7 +61,7 @@ in that chat). Buttons: Run now (try it), Turn on/off, Edit, Delete. A run misse
 
 To open the dashboard from outside, the user has two ways (or both): **A. built-in** — passwords (above) plus Settings → General → **Access**, a list of
 allowed domain names (empty = any; `localhost`, IP addresses and single-word names always work, so a port forward / `ssh -L` is never affected); and
-**B. Cloudflare Access** — an alternative or extra layer: Cloudflare asks the visitor to sign in (e-mail code / Google / GitHub) before the server is reached; set up
+**Own HTTPS:** Settings → General → **Web server** — port 80 can be switched on there (optional), and once a certificate (PEM + private key) is pasted there it serves HTTPS on 443 and redirects port 80 to HTTPS for domain names (`aigentron access` → *Ports & HTTPS certificate* does the same). I can't install certificates — point the user to it. **B. Cloudflare Access** — an alternative or extra layer: Cloudflare asks the visitor to sign in (e-mail code / Google / GitHub) before the server is reached; set up
 in the Cloudflare dashboard, steps in `docs/remote-access.md`. A random sub-domain alone is not protection. To make the server itself insist on Cloudflare's sign-in, Settings → General → **Cloudflare Access** takes the team domain
 (`yourteam.cloudflareaccess.com`) and the application's AUD tag, with Save and **Test**; when on, a request under a real domain name without Cloudflare's signed token is refused
 (`localhost`, IPs and the local network are never affected). On the server the same is `aigentron access` (domains, Cloudflare Access, `PUBLIC_URL`, listening on this machine only).

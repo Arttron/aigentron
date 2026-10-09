@@ -30,6 +30,7 @@ import { ChannelsModule } from './channels/channels.module';
 import { EventsModule } from './events/events.module';
 import { AuthModule } from './auth/auth.module';
 import { AccessModule } from './access/access.module';
+import { WebServerModule } from './web/web-server.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { ResourcesModule } from './resources/resources.module';
 import { PacksModule } from './packs/packs.module';
@@ -51,6 +52,7 @@ import { HealthController } from './health/health.controller';
     AppConfigModule,
     AuthModule,
     AccessModule,
+    WebServerModule,
     SchedulesModule,
     ResourcesModule,
     PacksModule,

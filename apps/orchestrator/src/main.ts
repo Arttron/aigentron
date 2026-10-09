@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { AppConfigService } from './config/app-config.service';
 import { CloudflareAccessService } from './access/cloudflare-access.service';
 import { AccessService } from './access/access.service';
+import { WebServerService } from './web/web-server.service';
 
 /**
  * Keep the orchestrator alive on benign socket write failures. A broken pipe
@@ -71,6 +72,8 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   await listenWithRetry(app, config.port);
+  // port 80 / 443 (HTTPS once a certificate is installed) — see web/web-server.service.ts; never fatal
+  void app.get(WebServerService).start();
   Logger.log(`Orchestrator listening on http://0.0.0.0:${config.port}/api`, 'Bootstrap');
 }
 

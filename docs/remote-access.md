@@ -71,6 +71,23 @@ Minimal / bare-metal: install `cloudflared` on the host (`cloudflared service in
 It adds that origin to the allowed origins, **adds its host to the allowed domains** (so only that name — plus local access — is served), and,
 if no dashboard password is set yet, prints a loud warning at startup and shows a red banner in the dashboard. It does not open anything.
 
+## Let the server serve ports 80 and 443 itself (no proxy needed)
+
+The server can terminate HTTPS on its own — **Settings → General → Web server**, or `aigentron access` → *Ports & HTTPS certificate*:
+
+- Port **3001** (HTTP) is always there. Port **80** (plain HTTP) is **optional** — switch it on in the same place when you want it.
+- Install a **certificate** (full chain + private key, PEM, key not password-protected) and the server serves **HTTPS on 443**; port 80 (when on) **redirects domain names to HTTPS**
+  (IP addresses and local names keep working over plain HTTP, like the domain list). The certificate is checked against its key and expiry before it is accepted, and the page
+  warns when it expires soon or does not cover one of your allowed domains. Remove it and the server goes back to HTTP (3001, and 80 if you switched it on). Changes apply immediately, no restart.
+- Only the domains in **Access** are served (others get `421`), on every port. Set that first, and set passwords.
+- Where to get a certificate: a **Cloudflare Origin Certificate** (SSL/TLS → Origin Server → Create Certificate; set the zone to *Full (strict)*), or Let's Encrypt
+  (`certbot certonly --standalone -d dev.example.com`, then use `fullchain.pem` + `privkey.pem`; renew before it expires and install the new pair).
+- Ports below 1024 need root — the bare-metal service runs as root, so it works out of the box. Under Docker the installer publishes `-p 80:80 -p 443:443` when the host ports are free.
+  A port that cannot be bound (taken by another program) is reported in the page and never stops the server. Ports and the redirect can be changed (`secrets/web-server.json`); `WEB_HOST` limits the interface.
+- Certificate files live in the protected `secrets/tls/` folder.
+
+Use a reverse proxy (Caddy / nginx) instead if you already run one on 80/443 — point it at `127.0.0.1:3001` and forward WebSocket upgrades for `/socket.io`.
+
 ## Make the server check Cloudflare Access itself (optional)
 
 Cloudflare Access alone protects the hostname *if* every request really goes through it. To make the server enforce that, give it the two values of your Access

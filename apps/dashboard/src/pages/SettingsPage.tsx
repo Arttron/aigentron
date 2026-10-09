@@ -4,6 +4,7 @@ import { GeneralSettingsForm } from '@/components/settings/GeneralSettingsForm';
 import { SecuritySettings } from '@/components/settings/SecuritySettings';
 import { AccessSettings } from '@/components/settings/AccessSettings';
 import { CloudflareAccessSettings } from '@/components/settings/CloudflareAccessSettings';
+import { WebServerSettings } from '@/components/settings/WebServerSettings';
 import { LiteLlmRoutes } from '@/components/settings/LiteLlmRoutes';
 import { ProvidersManager } from '@/components/ProvidersManager';
 import { McpManager } from '@/components/McpManager';
@@ -40,6 +41,7 @@ export function SettingsPage() {
         <>
           <SecuritySettings />
           <AccessSettings />
+          <WebServerSettings />
           <CloudflareAccessSettings />
           <GeneralSettingsForm />
         </>

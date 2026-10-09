@@ -524,13 +524,22 @@ if [ "$INSTALL_MODE" = docker ]; then
 
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   log "Starting $CONTAINER_NAME"
-  docker run -d --name "$CONTAINER_NAME" \
-    --restart unless-stopped \
-    -p 3001:3001 \
-    --add-host host.docker.internal:host-gateway \
-    -v "$DATA_VOLUME:/data" \
-    --env-file "$ENV_FILE" \
-    "$IMAGE:$VERSION"
+  # Ports 80 / 443 too (the app serves HTTP on 80 and HTTPS on 443 once a certificate is installed — Settings → Web server /
+  # `aigentron access`). If the host already uses them, fall back to 3001 only.
+  run_container() {
+    docker run -d --name "$CONTAINER_NAME" \
+      --restart unless-stopped \
+      -p 3001:3001 $1 \
+      --add-host host.docker.internal:host-gateway \
+      -v "$DATA_VOLUME:/data" \
+      --env-file "$ENV_FILE" \
+      "$IMAGE:$VERSION"
+  }
+  if ! run_container "-p 80:80 -p 443:443" >/dev/null 2>&1; then
+    docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    log "Ports 80/443 are busy on this host — publishing only 3001 (put a reverse proxy in front, or free them and re-run)"
+    run_container ""
+  fi
 
   install_cli docker
 

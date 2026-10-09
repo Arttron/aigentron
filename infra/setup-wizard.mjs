@@ -25,6 +25,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 let BASE = 'http://localhost:3001';
+/** Entered a section straight from the command line (`aigentron providers`): there is no menu above it, so the way out is "Exit". */
+let DIRECT = false;
+const OUT_LABEL = () => (DIRECT ? 'Exit' : '← Back');
 
 // ---- terminal UI ----
 //
@@ -212,7 +215,7 @@ async function select(query, options, def, { back, exit } = {}) {
     }
   };
   // header on ONE line (the menu is redrawn by moving the cursor up a fixed number of lines — a wrapped header would break that)
-  const hintFull = `(↑/↓, Enter · Esc ${back !== undefined ? 'back' : 'cancel'})`;
+  const hintFull = `(↑/↓, Enter · Esc ${back === undefined ? 'cancel' : DIRECT || back === 'quit' ? 'exit' : 'back'})`;
   const room = Math.max(20, cols() - 3);
   const hintShown = 2 + query.length + 1 + hintFull.length <= room ? hintFull : '';
   process.stdout.write(`${qMark()} ${c.bold(fit(query, room - 2))}${hintShown ? ` ${c.gray(hintShown)}` : ''}\n\u001b[?25l`);
@@ -369,13 +372,59 @@ async function signInFromEnv() {
   if (!r.ok || !j.token) throw new Error(`sign-in failed: ${j.error || r.status}`);
   sessionToken = j.token;
 }
+// ---- activity indicator: anything that takes longer than a moment shows a spinner, so the menu never looks frozen ----
+const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+let spinnerOn = false;
+let busyLabel = null;
+
+/** Start a spinner after `delay` ms (so quick calls never flicker). Returns a function that stops it and clears its line. */
+function startSpinner(label, delay = 300) {
+  if (!INTERACTIVE) return () => {};
+  let timer = null;
+  let shown = false;
+  const begin = setTimeout(() => {
+    if (spinnerOn) return; // another one is already showing
+    spinnerOn = shown = true;
+    let i = 0;
+    process.stdout.write('\u001b[?25l');
+    const draw = () => process.stdout.write(`\r\u001b[2K${c.cyan(FRAMES[i++ % FRAMES.length])} ${c.gray(fit(label, Math.max(10, cols() - 4)))}`);
+    draw();
+    timer = setInterval(draw, 80);
+  }, delay);
+  return () => {
+    clearTimeout(begin);
+    if (timer) clearInterval(timer);
+    if (shown) {
+      spinnerOn = false;
+      process.stdout.write('\r\u001b[2K\u001b[?25h');
+    }
+  };
+}
+
+/** Run `fn` with a named spinner ("Testing the provider…") for as long as it takes. */
+async function busy(label, fn) {
+  const prev = busyLabel;
+  busyLabel = label;
+  try {
+    return await fn();
+  } finally {
+    busyLabel = prev;
+  }
+}
+
 async function api(method, path, body, retried = false) {
   const headers = { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}) };
-  const res = await fetch(`${BASE}/api${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const stop = startSpinner(busyLabel ?? 'Waiting for the server…');
+  let res;
+  try {
+    res = await fetch(`${BASE}/api${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } finally {
+    stop();
+  }
   if (res.status === 401 && !retried) {
     await signInFromEnv();
     return api(method, path, body, true);
@@ -396,6 +445,7 @@ async function api(method, path, body, retried = false) {
 const apiGet = (path) => api('GET', path);
 const apiPost = (path, body) => api('POST', path, body ?? {});
 const apiPut = (path, body) => api('PUT', path, body ?? {});
+const apiDelete = (path) => api('DELETE', path);
 
 async function waitForOrchestrator(maxTries = 10) {
   for (let i = 0; i < maxTries; i++) {
@@ -519,7 +569,7 @@ async function stepConnection(rl, cliUrl, { force = false } = {}) {
   BASE = (url || 'http://localhost:3001').replace(/\/$/, '');
   for (;;) {
     try {
-      await waitForOrchestrator(force ? 3 : 4);
+      await busy('Connecting to the server…', () => waitForOrchestrator(force ? 3 : 4));
       if (force) log('  ✓ connected');
       return mode;
     } catch {
@@ -722,7 +772,7 @@ async function addProvider(rl, firstOne) {
   let model;
   if (await promptYesNo(rl, 'List the available models from this provider?', true)) {
     try {
-      const preview = await apiPost('/providers/models-preview', { kind, baseUrl: baseUrl || undefined, authMode, secret: secret || undefined });
+      const preview = await busy('Fetching the model list…', () => apiPost('/providers/models-preview', { kind, baseUrl: baseUrl || undefined, authMode, secret: secret || undefined }));
       if (preview.ok && preview.models?.length) {
         model = await promptChoiceOptional(rl, 'Pick a model', preview.models);
       } else {
@@ -761,7 +811,7 @@ async function addProvider(rl, firstOne) {
     log(c.gray('  ⓘ A Claude subscription login cannot be checked with a quick request — start a small task with this provider to confirm it works.'));
   } else if (await promptYesNo(rl, 'Test it now (a tiny request)?', true)) {
     try {
-      const t = await apiPost(`/providers/${encodeURIComponent(name)}/test`);
+      const t = await busy('Testing the provider…', () => apiPost(`/providers/${encodeURIComponent(name)}/test`));
       reportTest(t, authMode);
     } catch (e) {
       log(`  ✗ test failed: ${e.message}`);
@@ -800,7 +850,7 @@ async function chooseModel(rl, p) {
   if (how === 'type') return (await prompt(rl, 'Model name', p.model || undefined)).trim();
   let models = [];
   try {
-    const r = await apiGet(`/providers/${encodeURIComponent(p.name)}/models`);
+    const r = await busy('Fetching the model list…', () => apiGet(`/providers/${encodeURIComponent(p.name)}/models`));
     if (r.ok && r.models?.length) models = r.models.map((m) => ({ value: m, label: m }));
     else log(c.gray(`  (the provider could not list its models: ${r.error || 'none returned'})`));
   } catch (e) {
@@ -898,7 +948,7 @@ async function stepProviders(rl) {
             { value: 'delete', label: 'Delete a provider' },
           ]
         : []),
-      { value: 'done', label: '← Back' },
+      { value: 'done', label: OUT_LABEL() },
     ];
     const what = await promptChoice(rl, 'Providers', choices, list.length ? 'edit' : 'add', { back: 'done' });
     if (what === 'done') return list.map((p) => p.name);
@@ -921,7 +971,7 @@ async function stepProviders(rl) {
       } else if (what === 'test') {
         const p = await pick('Test which provider?');
         try {
-          const t = await apiPost(`/providers/${encodeURIComponent(p.name)}/test`);
+          const t = await busy('Testing the provider…', () => apiPost(`/providers/${encodeURIComponent(p.name)}/test`));
           reportTest(t, p.authMode);
         } catch (e) {
           log(`  ✗ test failed: ${e.message}`);
@@ -997,7 +1047,7 @@ async function offerPendingChats(rl, row) {
 
 async function testChannel(rl, row) {
   if (!(await promptYesNo(rl, 'Test this channel now?', true))) return;
-  const t = await apiPost(`/channels/${row.id}/test`);
+  const t = await busy('Testing the channel…', () => apiPost(`/channels/${row.id}/test`));
   log(t.ok ? '  ✓ test ok' : `  ✗ test failed: ${t.error ?? 'unknown error'}`);
 }
 
@@ -1059,7 +1109,7 @@ async function stepChannels(rl) {
     const choices = [
       ...(existing.length ? [{ value: 'edit', label: 'Edit a channel', hint: '— allowed chats, token, on/off' }] : []),
       { value: 'add', label: 'Add a channel', hint: '— e.g. Telegram' },
-      { value: 'done', label: '← Back' },
+      { value: 'done', label: OUT_LABEL() },
     ];
     const what = await promptChoice(rl, 'Channels', choices, existing.length ? 'edit' : 'add', { back: 'done' });
     if (what === 'done') return;
@@ -1127,7 +1177,7 @@ async function configureCloudflareAccess(rl) {
   const aud = await prompt(rl, `Application Audience (AUD) tag${cf.audSet ? ` — saved (${cf.audHint}), Enter keeps it` : ''}`);
   const enabled = await promptYesNo(rl, 'Require Cloudflare Access on public (domain-name) addresses?', cf.enabled || !cf.configured);
   try {
-    await apiPut('/cloudflare-access', { enabled, teamDomain, aud: aud || undefined });
+    await busy('Saving (checking with Cloudflare)…', () => apiPut('/cloudflare-access', { enabled, teamDomain, aud: aud || undefined }));
     log(`  ✓ saved${enabled ? ' — public addresses now need a Cloudflare Access sign-in' : ' (switched off)'}`);
   } catch (e) {
     log(`  ✗ ${e.message}`);
@@ -1135,7 +1185,7 @@ async function configureCloudflareAccess(rl) {
   }
   if (await promptYesNo(rl, 'Check the connection to Cloudflare now?', true)) {
     try {
-      const t = await apiPost('/cloudflare-access/test');
+      const t = await busy('Contacting Cloudflare…', () => apiPost('/cloudflare-access/test'));
       log(t.keys.ok ? `  ✓ Cloudflare's signing keys fetched (${t.keys.count})` : `  ✗ could not fetch Cloudflare's keys: ${t.keys.error}`);
       log(c.gray('  (This terminal request does not go through Cloudflare, so it carries no Access sign-in — that is expected.)'));
     } catch (e) {
@@ -1203,6 +1253,93 @@ async function configureServerAddress(rl, server) {
   }
 }
 
+/** Ports the server listens on and its HTTPS certificate (API: /web-server). */
+async function stepWebServer(rl) {
+  for (;;) {
+    const st = await apiGet('/web-server').catch(() => null);
+    if (!st) {
+      log('  ✗ could not read the web server settings (is the server up to date?).');
+      return;
+    }
+    log(`  Always on: port ${st.apiPort} (HTTP).`);
+    for (const l of st.listeners) {
+      if (l.state === 'off') log(c.gray(`  ${l.kind === 'https' ? 'HTTPS — off (no certificate)' : 'HTTP — off'}`));
+      else if (l.state === 'listening') log(`  ${c.green('●')} ${l.kind.toUpperCase()} :${l.port} — ${l.role === 'redirect' ? 'redirects domain names to HTTPS' : 'serves the dashboard'}`);
+      else log(c.red(`  ● ${l.kind.toUpperCase()} :${l.port} — could not start: ${l.error}`));
+    }
+    if (st.certificate) {
+      const ct = st.certificate;
+      log(`  Certificate: ${c.bold(ct.subject)} for ${ct.names.join(', ') || '—'}, expires ${ct.validTo.slice(0, 10)} (${ct.daysLeft} days)${ct.selfSigned ? c.yellow(' — self-signed') : ''}`);
+      if (ct.daysLeft < 14) log(c.yellow('  ⚠ the certificate expires soon — install a new one'));
+      if (st.uncoveredDomains.length) log(c.yellow(`  ⚠ allowed domains the certificate does not cover: ${st.uncoveredDomains.join(', ')}`));
+    } else {
+      log(c.gray('  Certificate: none — the server speaks plain HTTP (install one to switch on HTTPS on 443).'));
+    }
+    const what = await promptChoice(
+      rl,
+      'Ports & certificate',
+      [
+        { value: 'install', label: st.certificate ? 'Replace the certificate' : 'Install a certificate', hint: '— PEM files on this machine' },
+        ...(st.certificate ? [{ value: 'remove', label: 'Remove the certificate' }] : []),
+        { value: 'port80', label: st.config.httpPort ? `Turn off HTTP port ${st.config.httpPort}` : 'Turn on HTTP port 80', hint: st.config.httpPort ? '— the server stops answering there' : '— optional; with a certificate it redirects to HTTPS' },
+        { value: 'ports', label: 'Change ports', hint: `— HTTP ${st.config.httpPort || 'off'}, HTTPS ${st.config.httpsPort || 'off'}, redirect ${st.config.redirect ? 'on' : 'off'}` },
+        { value: 'done', label: OUT_LABEL() },
+      ],
+      st.certificate ? 'port80' : 'install',
+      { back: 'done' },
+    );
+    if (what === 'done') return;
+    try {
+      if (what === 'install') {
+        log(c.gray('  Give the paths of the certificate (full chain) and its private key. Under Docker the files must be inside the container (docker cp), or paste them in the dashboard instead.'));
+        const read = async (q) => {
+          for (;;) {
+            const path = (await prompt(rl, q)).replace(/^~(?=\/)/, homedir());
+            if (!path) throw new Cancelled();
+            try {
+              return readFileSync(path, 'utf8');
+            } catch (e) {
+              log(`  ✗ cannot read ${path}: ${e.code ?? e.message}`);
+            }
+          }
+        };
+        const cert = await read('Certificate file (PEM, full chain)');
+        const key = await read('Private key file (PEM)');
+        try {
+          const r = await busy('Installing…', () => apiPut('/web-server/certificate', { cert, key }));
+          log(`  ✓ certificate installed${r.certificate ? ` for ${r.certificate.names.join(', ')}` : ''} — HTTPS is on`);
+          for (const l of r.listeners ?? []) if (l.state === 'error') log(c.red(`  ✗ ${l.kind.toUpperCase()} :${l.port}: ${l.error}`));
+        } catch (e) {
+          log(`  ✗ ${e.message}`);
+        }
+      } else if (what === 'remove') {
+        if (await promptYesNo(rl, 'Remove the certificate? HTTPS stops.', false)) {
+          await apiDelete('/web-server/certificate');
+          log('  ✓ certificate removed');
+        }
+      } else if (what === 'port80') {
+        const r = await apiPut('/web-server/config', { httpPort: st.config.httpPort ? 0 : 80 });
+        log(st.config.httpPort ? '  ✓ HTTP port switched off' : '  ✓ HTTP port 80 switched on');
+        for (const l of r.listeners ?? []) if (l.state === 'error') log(c.red(`  ✗ ${l.kind.toUpperCase()} :${l.port}: ${l.error}`));
+      } else if (what === 'ports') {
+        const http = (await prompt(rl, 'HTTP port (0 = off)', String(st.config.httpPort))).trim();
+        const https = (await prompt(rl, 'HTTPS port (0 = off)', String(st.config.httpsPort))).trim();
+        const redirect = await promptYesNo(rl, 'With a certificate, redirect port 80 to HTTPS?', st.config.redirect);
+        try {
+          const r = await apiPut('/web-server/config', { httpPort: http, httpsPort: https, redirect });
+          log('  ✓ saved');
+          for (const l of r.listeners ?? []) if (l.state === 'error') log(c.red(`  ✗ ${l.kind.toUpperCase()} :${l.port}: ${l.error}`));
+        } catch (e) {
+          log(`  ✗ ${e.message}`);
+        }
+      }
+    } catch (e) {
+      if (!(e instanceof Cancelled)) throw e;
+      log(c.gray('  (cancelled)'));
+    }
+  }
+}
+
 async function stepAccess(rl) {
   header('Access — where the server answers');
   for (;;) {
@@ -1225,8 +1362,9 @@ async function stepAccess(rl) {
       { value: 'add', label: 'Add domains', hint: '— e.g. dev.example.com, *.team.example.org' },
       ...(acc.allowedHosts.length ? [{ value: 'remove', label: 'Remove a domain' }, { value: 'clear', label: 'Clear the list', hint: '— accept any name again' }] : []),
       { value: 'cloudflare', label: 'Cloudflare Access', hint: '— require its sign-in on public addresses' },
+      { value: 'web', label: 'Ports & HTTPS certificate', hint: '— listen on 80 / 443, install a certificate' },
       { value: 'server', label: 'Public address & listening', hint: '— PUBLIC_URL, listen on this machine only' },
-      { value: 'done', label: '← Back' },
+      { value: 'done', label: OUT_LABEL() },
     ];
     const what = await promptChoice(rl, 'Access', choices, 'add', { back: 'done' });
     if (what === 'done') return;
@@ -1242,6 +1380,8 @@ async function stepAccess(rl) {
         if (await promptYesNo(rl, 'Clear the whole list?', false)) await putAccessDomains([]);
       } else if (what === 'cloudflare') {
         await configureCloudflareAccess(rl);
+      } else if (what === 'web') {
+        await stepWebServer(rl);
       } else if (what === 'server') {
         await configureServerAddress(rl, acc.server ?? { port: 3001, listenHost: '0.0.0.0', bindAddress: null, publicUrl: null });
       }
@@ -1444,6 +1584,7 @@ async function main() {
     await ensureSignedIn(rl);
 
     if (args.section) {
+      DIRECT = true;
       const names = async () => (await apiGet('/providers').catch(() => [])).map((p) => p.name);
       const sections = {
         providers: () => stepProviders(rl),

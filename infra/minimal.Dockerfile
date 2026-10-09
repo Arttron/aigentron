@@ -120,7 +120,7 @@ ENV NODE_ENV=production \
     DASHBOARD_BASE_URL=http://localhost:3001
 
 VOLUME /data
-EXPOSE 3001
+EXPOSE 3001 80 443
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD ["/app/infra/minimal-healthcheck.sh"]
