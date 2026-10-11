@@ -555,11 +555,13 @@ else
   # host disk) — left behind indefinitely across upgrades otherwise, easily
   # enough to exhaust disk on a small server after a few version bumps (found
   # live: three superseded release dirs plus litellm[proxy]'s own sizeable
-  # pip deps were enough to hit "No space left on device"). No rollback
-  # feature exists yet to need old ones kept around.
+  # pip deps were enough to hit "No space left on device"). The release that is running RIGHT NOW is kept (it is what `aigentron
+  # rollback` returns to, and what keeps the server alive if the build below fails); everything older goes.
+  PREV_RELEASE="$(basename "$(readlink "$CURRENT_LINK" 2>/dev/null || true)")"
   for d in "$INSTALL_DIR"/releases/*/; do
     d="${d%/}"
     [ "$(basename "$d")" = "$VERSION" ] && continue
+    [ -n "$PREV_RELEASE" ] && [ "$(basename "$d")" = "$PREV_RELEASE" ] && continue
     log "Removing superseded release dir $d"
     rm -rf "$d"
   done

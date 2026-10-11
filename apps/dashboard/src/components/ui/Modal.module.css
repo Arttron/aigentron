@@ -52,3 +52,7 @@
 .body {
   padding: 16px;
 }
+
+.wide {
+  max-width: 760px;
+}

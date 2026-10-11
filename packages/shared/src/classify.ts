@@ -91,6 +91,9 @@ export const PROPOSE_CLEANUP_TOOL = `${INTERNAL_TOOL_PREFIX}propose_cleanup`;
 export const SCHEDULES_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}schedules_list`;
 export const PROPOSE_SCHEDULE_TOOL = `${INTERNAL_TOOL_PREFIX}propose_schedule`;
 /** Where the server answers: reading the status is free; changing the allowed domains / Cloudflare Access is a gated proposal. */
+/** Updating the server itself: reading the status is free; starting an update is a gated proposal (the server restarts). */
+export const UPDATE_STATUS_TOOL = `${INTERNAL_TOOL_PREFIX}update_status`;
+export const PROPOSE_UPDATE_TOOL = `${INTERNAL_TOOL_PREFIX}propose_update`;
 export const ACCESS_STATUS_TOOL = `${INTERNAL_TOOL_PREFIX}access_status`;
 export const PROPOSE_ALLOWED_DOMAINS_TOOL = `${INTERNAL_TOOL_PREFIX}propose_allowed_domains`;
 export const PROPOSE_CLOUDFLARE_ACCESS_TOOL = `${INTERNAL_TOOL_PREFIX}propose_cloudflare_access`;
@@ -489,6 +492,14 @@ export function classifyToolCall(
         action === 'delete'
           ? `admin agent proposing to DELETE the schedule "${s('name')}"`
           : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the schedule "${s('name')}": ${s('cron') || '(same time)'} ${s('timezone')} — ${s('kind') || '(same kind)'}${text ? `: ${text}` : ''}${s('kind') === 'task' ? ` — it runs a task with agent "${s('agentName')}" each time (${s('taskMode') === 'new' ? 'a new task per run' : 'the same task, continued'}) and uses model budget` : ''}`,
+    };
+  }
+  if (name === PROPOSE_UPDATE_TOOL.toLowerCase()) {
+    const v = typeof toolInput.version === 'string' && toolInput.version.trim() ? toolInput.version.trim() : 'the latest release';
+    return {
+      dangerous: true,
+      summary: `propose_update ${v}${toolInput.force ? ' force' : ''} #${shortHash(JSON.stringify([toolInput.version, toolInput.force]))}`,
+      reason: `admin agent proposing to UPDATE this server to ${v}. The server restarts for a minute or two (the dashboard and chats are unreachable meanwhile)${toolInput.force ? ' and running tasks are interrupted' : ''}; the previous version is kept for a rollback`,
     };
   }
   if (name === PROPOSE_ALLOWED_DOMAINS_TOOL.toLowerCase()) {

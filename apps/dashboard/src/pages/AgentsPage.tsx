@@ -14,6 +14,8 @@ import {
   CheckboxGroup,
   Muted,
   ErrorText,
+  Modal,
+  Tabs,
 } from '@/components/ui';
 import styles from './AgentsPage.module.css';
 
@@ -43,7 +45,16 @@ const emptyForm: Form = {
   instructions: '',
 };
 
+const TABS = [
+  { id: 'agents', label: 'Agents' },
+  { id: 'packs', label: 'Starter packs' },
+] as const;
+type TabId = (typeof TABS)[number]['id'];
+
 export function AgentsPage() {
+  const [tab, setTab] = useState<TabId>(() =>
+    new URLSearchParams(window.location.search).get('tab') === 'packs' ? 'packs' : 'agents',
+  );
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [templates, setTemplates] = useState<AgentInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -128,7 +139,10 @@ export function AgentsPage() {
 
   // Templates are only needed by the "+ New agent" form; failing to load them just hides the picker.
   useEffect(() => {
-    api.listAgentTemplates().then(setTemplates).catch(() => setTemplates([]));
+    api
+      .listAgentTemplates()
+      .then(setTemplates)
+      .catch(() => setTemplates([]));
   }, []);
 
   /** Pre-fill the new-agent form from a shipped template. The name and provider stay the user's choice. */
@@ -151,7 +165,10 @@ export function AgentsPage() {
               mcp: t.mcp ?? [],
               instructions: t.instructions ?? '',
               // keep the user's provider unless the template pins one that exists here
-              provider: t.provider && providers.some((p) => p.name === t.provider) ? t.provider : f.provider,
+              provider:
+                t.provider && providers.some((p) => p.name === t.provider)
+                  ? t.provider
+                  : f.provider,
             }
           : f,
       );
@@ -226,157 +243,168 @@ export function AgentsPage() {
         </Card>
       )}
 
-      <PacksCard />
+      <Tabs tabs={TABS} active={tab} onChange={setTab} />
 
-      <Card>
-        <Row spaceBetween>
-          <SectionTitle className={styles.flush}>Agents ({agents.length})</SectionTitle>
-          <Button variant="primary" onClick={startNew}>
-            + New agent
-          </Button>
-        </Row>
-        <ul className={styles.list}>
-          {agents.map((a) => (
-            <li key={a.name} className={styles.item}>
-              <strong className={styles.name}>{a.name}</strong>
-              <Muted className={styles.desc}>{a.description}</Muted>
-              {a.provider && <Badge tone="neutral">{a.provider}</Badge>}
-              <Button size="sm" onClick={() => edit(a.name)}>
-                Edit
-              </Button>
-              {a.name.toLowerCase() === 'admin' ? (
-                <Badge tone="neutral">built-in</Badge>
-              ) : (
-                <Button variant="red" size="sm" onClick={() => remove(a.name)}>
-                  ✕
+      {tab === 'packs' && <PacksCard />}
+
+      {tab === 'agents' && (
+        <Card>
+          <Row spaceBetween>
+            <SectionTitle className={styles.flush}>Agents ({agents.length})</SectionTitle>
+            <Button variant="primary" onClick={startNew}>
+              + New agent
+            </Button>
+          </Row>
+          <ul className={styles.list}>
+            {agents.map((a) => (
+              <li key={a.name} className={styles.item}>
+                <strong className={styles.name}>{a.name}</strong>
+                <Muted className={styles.desc}>{a.description}</Muted>
+                {a.provider && <Badge tone="neutral">{a.provider}</Badge>}
+                <Button size="sm" onClick={() => edit(a.name)}>
+                  Edit
                 </Button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </Card>
+                {a.name.toLowerCase() === 'admin' ? (
+                  <Badge tone="neutral">built-in</Badge>
+                ) : (
+                  <Button variant="red" size="sm" onClick={() => remove(a.name)}>
+                    ✕
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {form && (
-        <Card as="form" onSubmit={save}>
-          <SectionTitle>{isNew ? 'New agent' : `Edit: ${form.name}`}</SectionTitle>
-          {isNew && templates.length > 0 && (
-            <Field label="Start from a template (optional — fills the fields below, you can edit everything)">
-              <select value="" onChange={(e) => void applyTemplate(e.target.value)}>
-                <option value="">— choose a template —</option>
-                {templates.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.name} — {(t.description ?? '').slice(0, 70)}
+        <Modal
+          title={isNew ? 'New agent' : `Edit agent: ${form.name}`}
+          onClose={() => setForm(null)}
+          wide
+        >
+          <form onSubmit={save}>
+            {isNew && templates.length > 0 && (
+              <Field label="Start from a template (optional — fills the fields below, you can edit everything)">
+                <select value="" onChange={(e) => void applyTemplate(e.target.value)}>
+                  <option value="">— choose a template —</option>
+                  {templates.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.name} — {(t.description ?? '').slice(0, 70)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {isNew && (
+              <Field label="Name (filename)">
+                <input
+                  value={form.name}
+                  onChange={(e) => upd('name', e.target.value)}
+                  placeholder="e.g. backend"
+                />
+              </Field>
+            )}
+            <Field label="Description">
+              <input
+                value={form.description}
+                onChange={(e) => upd('description', e.target.value)}
+              />
+            </Field>
+            <Field label="Provider (model endpoint)">
+              <select
+                className={styles.providerSelect}
+                value={form.provider}
+                onChange={(e) => upd('provider', e.target.value)}
+              >
+                <option value="">(default provider)</option>
+                {providers.map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name}
                   </option>
                 ))}
               </select>
             </Field>
-          )}
-          {isNew && (
-            <Field label="Name (filename)">
-              <input
-                value={form.name}
-                onChange={(e) => upd('name', e.target.value)}
-                placeholder="e.g. backend"
+            <Field label="Model (default uses the provider's default model)">
+              <select
+                className={styles.providerSelect}
+                value={form.model}
+                onChange={(e) => upd('model', e.target.value)}
+                disabled={!form.provider}
+              >
+                <option value="">default ({providerDefaultModel || 'provider default'})</option>
+                {modelOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+              {!form.provider ? (
+                <Muted className={styles.modelHint}>pick a provider to list its models</Muted>
+              ) : modelsLoading ? (
+                <Muted className={styles.modelHint}>loading models…</Muted>
+              ) : modelsError ? (
+                <Muted className={styles.modelHint}>could not load models: {modelsError}</Muted>
+              ) : null}
+            </Field>
+            <Field label="Fallback providers (tried in order if the primary run errors)">
+              <CheckboxGroup
+                options={providers.map((p) => p.name).filter((n) => n !== form.provider)}
+                selected={form.fallbackProviders}
+                onChange={(v) => setList('fallbackProviders', v)}
+                empty="no other providers to fall back to"
               />
             </Field>
-          )}
-          <Field label="Description">
-            <input value={form.description} onChange={(e) => upd('description', e.target.value)} />
-          </Field>
-          <Field label="Provider (model endpoint)">
-            <select
-              className={styles.providerSelect}
-              value={form.provider}
-              onChange={(e) => upd('provider', e.target.value)}
-            >
-              <option value="">(default provider)</option>
-              {providers.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Model (default uses the provider's default model)">
-            <select
-              className={styles.providerSelect}
-              value={form.model}
-              onChange={(e) => upd('model', e.target.value)}
-              disabled={!form.provider}
-            >
-              <option value="">
-                default ({providerDefaultModel || 'provider default'})
-              </option>
-              {modelOptions.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-            {!form.provider ? (
-              <Muted className={styles.modelHint}>pick a provider to list its models</Muted>
-            ) : modelsLoading ? (
-              <Muted className={styles.modelHint}>loading models…</Muted>
-            ) : modelsError ? (
-              <Muted className={styles.modelHint}>could not load models: {modelsError}</Muted>
-            ) : null}
-          </Field>
-          <Field label="Fallback providers (tried in order if the primary run errors)">
-            <CheckboxGroup
-              options={providers.map((p) => p.name).filter((n) => n !== form.provider)}
-              selected={form.fallbackProviders}
-              onChange={(v) => setList('fallbackProviders', v)}
-              empty="no other providers to fall back to"
-            />
-          </Field>
-          <Field label="Skills (none selected = all skills apply)">
-            <CheckboxGroup
-              options={skillOptions}
-              selected={form.skills}
-              onChange={(v) => setList('skills', v)}
-              empty="no skills found in ./agent/skills"
-            />
-          </Field>
-          <Field label="Disallowed tools (comma-separated; e.g. read-only reviewer)">
-            <input
-              value={form.disallowedTools}
-              onChange={(e) => upd('disallowedTools', e.target.value)}
-              placeholder="Write, Edit, NotebookEdit"
-            />
-          </Field>
-          <Field label="Allowed tools (comma-separated; blank = all available)">
-            <input
-              value={form.allowedTools}
-              onChange={(e) => upd('allowedTools', e.target.value)}
-              placeholder="leave blank unless restricting to a whitelist"
-            />
-          </Field>
-          <Field label="MCP servers (tool servers this agent may connect to)">
-            <CheckboxGroup
-              options={mcpOptions.map((m) => m.name)}
-              selected={form.mcp}
-              onChange={(v) => setList('mcp', v)}
-              empty="no MCP servers — add them under Settings → MCP servers"
-            />
-          </Field>
-          <Field label="Instructions (system prompt)">
-            <textarea
-              value={form.instructions}
-              onChange={(e) => upd('instructions', e.target.value)}
-              rows={8}
-            />
-          </Field>
-          <Row>
-            <Button
-              variant="primary"
-              type="submit"
-              disabled={busy || !form.instructions.trim() || (isNew && !form.name.trim())}
-            >
-              {busy ? 'Saving…' : 'Save'}
-            </Button>
-            <Button onClick={() => setForm(null)}>Cancel</Button>
-          </Row>
-        </Card>
+            <Field label="Skills (none selected = all skills apply)">
+              <CheckboxGroup
+                options={skillOptions}
+                selected={form.skills}
+                onChange={(v) => setList('skills', v)}
+                empty="no skills found in ./agent/skills"
+              />
+            </Field>
+            <Field label="Disallowed tools (comma-separated; e.g. read-only reviewer)">
+              <input
+                value={form.disallowedTools}
+                onChange={(e) => upd('disallowedTools', e.target.value)}
+                placeholder="Write, Edit, NotebookEdit"
+              />
+            </Field>
+            <Field label="Allowed tools (comma-separated; blank = all available)">
+              <input
+                value={form.allowedTools}
+                onChange={(e) => upd('allowedTools', e.target.value)}
+                placeholder="leave blank unless restricting to a whitelist"
+              />
+            </Field>
+            <Field label="MCP servers (tool servers this agent may connect to)">
+              <CheckboxGroup
+                options={mcpOptions.map((m) => m.name)}
+                selected={form.mcp}
+                onChange={(v) => setList('mcp', v)}
+                empty="no MCP servers — add them under Settings → MCP servers"
+              />
+            </Field>
+            <Field label="Instructions (system prompt)">
+              <textarea
+                value={form.instructions}
+                onChange={(e) => upd('instructions', e.target.value)}
+                rows={8}
+              />
+            </Field>
+            <Row>
+              <Button
+                variant="primary"
+                type="submit"
+                disabled={busy || !form.instructions.trim() || (isNew && !form.name.trim())}
+              >
+                {busy ? 'Saving…' : 'Save'}
+              </Button>
+              <Button onClick={() => setForm(null)}>Cancel</Button>
+            </Row>
+            {error && <ErrorText>{error}</ErrorText>}
+          </form>
+        </Modal>
       )}
     </>
   );

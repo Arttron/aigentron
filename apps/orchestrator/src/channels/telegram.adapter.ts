@@ -181,6 +181,11 @@ export class TelegramAdapter implements ChannelAdapter {
     }).catch((e) => this.logger.warn(`setMyCommands failed: ${(e as Error).message}`));
   }
 
+  /** Replace the command menu (built-in commands + one per agent). */
+  async setCommands(commands: { command: string; description: string }[]): Promise<void> {
+    await this.call('setMyCommands', { commands }).catch((e) => this.logger.warn(`setMyCommands failed: ${(e as Error).message}`));
+  }
+
   stop(): void {
     this.polling = false;
     this.abort?.abort();
@@ -247,6 +252,7 @@ export class TelegramAdapter implements ChannelAdapter {
           data,
           caption: m.caption,
           isReply: Boolean(m.reply_to_message),
+          ...replyInfo(m),
           messageId: String(m.message_id),
         });
       } catch (e) {
@@ -269,6 +275,7 @@ export class TelegramAdapter implements ChannelAdapter {
           mime,
           durationSec: v.duration,
           isReply: Boolean(m.reply_to_message),
+          ...replyInfo(m),
           messageId: String(m.message_id),
         });
       } catch (e) {
@@ -284,6 +291,7 @@ export class TelegramAdapter implements ChannelAdapter {
         userName: m.from?.username ?? m.from?.first_name,
         text: m.text,
         isReply: Boolean(m.reply_to_message),
+          ...replyInfo(m),
         messageId: String(m.message_id),
       });
       return;
@@ -369,7 +377,9 @@ interface TelegramUpdate {
     caption?: string;
     chat: { id: number };
     from?: { id: number; username?: string; first_name?: string };
-    reply_to_message?: unknown;
+    reply_to_message?: { message_id: number; text?: string; caption?: string };
+    /** A partial quote (the selected text of the replied-to message). */
+    quote?: { text?: string };
     photo?: { file_id: string }[];
     document?: { file_id: string; file_name?: string; mime_type?: string };
     voice?: { file_id: string; duration?: number; mime_type?: string };
@@ -389,6 +399,14 @@ interface TelegramUpdate {
     new_reaction: { type: string; emoji?: string }[];
     old_reaction: { type: string; emoji?: string }[];
   };
+}
+
+/** Which message a reply points at, and the quoted text (the selected part when the user quoted just a piece). */
+export function replyInfo(m: { reply_to_message?: { message_id: number; text?: string; caption?: string }; quote?: { text?: string } }): { replyToMessageId?: string; replyToText?: string } {
+  const r = m.reply_to_message;
+  if (!r) return {};
+  const text = (m.quote?.text ?? r.text ?? r.caption ?? '').trim().slice(0, 600);
+  return { replyToMessageId: String(r.message_id), ...(text ? { replyToText: text } : {}) };
 }
 
 function delay(ms: number): Promise<void> {

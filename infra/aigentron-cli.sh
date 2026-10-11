@@ -44,7 +44,7 @@ completion() {
 _aigentron() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update reset-password version completion help -h --help -v --version" -- "$cur") )
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update reset-password rollback version completion help -h --help -v --version" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   fi
@@ -75,6 +75,7 @@ _aigentron() {
     'doctor:check the common problems'
     'update:install the latest release'
     'reset-password:remove the dashboard password'
+    'rollback:go back to the previous release'
     'version:the installed version'
     'completion:print the tab-completion script'
     'help:show help'
@@ -120,6 +121,7 @@ $(say "${B}Run${N}")
 
 $(say "${B}Maintain${N}")
   aigentron update            install the latest release (keeps your data and settings)
+  aigentron rollback          go back to the previous release (bare-metal; the last one is kept)
   aigentron reset-password    forgot the dashboard password? removes all passwords
   aigentron version           (also -v, --version)
   aigentron completion bash|zsh   tab completion for this command (the installer sets it up)
@@ -197,6 +199,18 @@ case "${1:-}" in
       need_root update
       curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | INSTALL_MODE=bare INSTALL_DIR="$INSTALL_DIR" DATA_DIR="$DATA_DIR" sh
     fi ;;
+  rollback)
+    [ "$MODE" = docker ] && die "rollback is for bare-metal installs; under Docker, re-run the installer with VERSION=<the older version>"
+    need_root rollback
+    cur=$(basename "$(readlink "$CURRENT")")
+    prev=$(ls -1t "$INSTALL_DIR/releases" 2>/dev/null | grep -vx "$cur" | head -1 || true)
+    [ -n "$prev" ] || die "no previous release is kept on this server"
+    say "Rolling back ${B}$cur${N} → ${B}$prev${N}"
+    printf 'Type yes to continue: '; read -r ans || ans=
+    [ "$ans" = yes ] || { say "cancelled"; exit 1; }
+    ln -sfn "$INSTALL_DIR/releases/$prev" "$CURRENT"
+    systemctl restart "$SERVICE"
+    say "${G}✔${N} now on $prev (the database keeps any columns the newer version added — that is harmless)." ;;
   reset-password)
     say "${Y}This removes ALL dashboard passwords${N} — anyone who can reach the server can then open it until you set a new one."
     printf 'Type yes to continue: '; read -r ans || ans=

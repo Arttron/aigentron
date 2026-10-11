@@ -29,6 +29,7 @@ export const COMMAND_MENU: CommandDef[] = [
   { command: 'model', description: 'Set the model for new tasks', usage: '/model <name>' },
   { command: 'settings', description: 'Show what is selected' },
   { command: 'voice', description: 'Voice replies on/off', usage: '/voice on|off' },
+  { command: 'progress', description: 'Live status lines on/off', usage: '/progress on|off' },
   { command: 'mute', description: 'Mute routine updates' },
   { command: 'unmute', description: 'Resume updates' },
   { command: 'help', description: 'Show commands' },
@@ -39,5 +40,5 @@ export const HELP_TEXT = [
   'Commands:',
   ...COMMAND_MENU.map((c) => `${c.usage ?? `/${c.command}`} — ${c.description}`),
   '',
-  'A plain message continues the active task. Send a photo/file to attach it, or a voice message to speak to the assistant.',
+  'A plain message continues the active task. Reply to (quote) a message to talk to the task / agent that wrote it. /name text or @name text (e.g. /pm …) sends a message to that agent — see /agents; small typos in the name are fine. Send a photo/file to attach it, or a voice message to speak to the assistant.',
 ].join('\n');

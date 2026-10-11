@@ -1,14 +1,18 @@
-Aigentron v0.1.47
+Aigentron v0.1.48
 
-For people who are not programmers: scheduled tasks now stay in one conversation, and you can make the server refuse access by IP address.
+For people who are not programmers: update the server from the dashboard, quieter and smarter Telegram chats, and a tidier Agents page.
 
-Scheduled tasks (Settings → Schedules)
-- A schedule that starts an agent now continues ONE ongoing task by default: every run is a follow-up in the same task, so the agent remembers the earlier runs (for example a daily English lesson that builds on yesterday's). Before, every run created a new task.
-- You can still choose "start a separate new task every time" for a schedule. If the previous run is still working, the next one waits in the task's queue; after 30 days a fresh task starts so the conversation does not grow forever.
-- The admin assistant can set this too.
+Updating the server (Settings → General → Version & updates)
+- The dashboard shows the installed version, the newest release and what is new. "Update to X" (an operator confirms) installs it: the server restarts for a minute or two and the page reconnects by itself. Your data and settings are kept, and the previous version stays for a rollback (`sudo aigentron rollback` on the server).
+- The admin assistant can do it too — it tells you what is new, then shows an approval card; nothing happens until you approve. It will not update while tasks are running unless you accept that they are interrupted.
+- Works for a normal (bare-metal) install. A Docker install cannot replace itself: the page says a newer version exists and to run `aigentron update` on the server. The installer now also keeps the running release, so a failed build no longer leaves the server without code.
 
-Only your domains (Settings → General → Access, or `aigentron access`)
-- New option "Only these domains": from outside, opening the server by its IP address or a bare server name gives an error page instead of the dashboard. The server itself (agent hooks, health checks, SSH tunnel) and your domain keep working. The dashboard will not let you switch it on while you are connected by IP, so you cannot lock yourself out.
-- This does not replace passwords — set them in Settings → Security as well.
+Telegram
+- Chats are quiet by default: only the agent's answers (and anything that needs you) arrive. The live "what the agent is doing" line, "queued" notes and title headers are off; `/progress on` brings them back for a chat.
+- Reply to (quote) a message and it goes to the task and agent that wrote it, with your quote passed along as context.
+- Talk to a specific agent: `/pm text` or `@pm text`. Small typos in the name are forgiven, `/agents` lists the agents as tappable names, and each agent appears in the bot's `/` menu with autocomplete.
 
-Update note: this release adds two small columns for schedules; they are created automatically when the server starts.
+Agents page
+- Starter packs have their own tab, and "+ New agent" / "Edit" open in a dialog like adding a provider.
+
+Update note: this release adds a small table and a column for chats (created automatically when the server starts).

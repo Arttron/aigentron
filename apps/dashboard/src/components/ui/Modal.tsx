@@ -6,10 +6,13 @@ export function Modal({
   title,
   onClose,
   children,
+  wide,
 }: {
   title: ReactNode;
   onClose: () => void;
   children: ReactNode;
+  /** A roomier dialog for long forms. */
+  wide?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -22,7 +25,7 @@ export function Modal({
   return (
     <div className={styles.backdrop} onClick={onClose} role="presentation">
       <div
-        className={styles.dialog}
+        className={`${styles.dialog} ${wide ? styles.wide : ''}`}
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}

@@ -177,6 +177,9 @@ export interface AdminToolsWiring {
     enabled?: boolean;
     reason: string;
   }) => Promise<{ ok: boolean; message: string }>;
+  /** Updating the server: status is read-only; starting an update is human-approved. */
+  updateStatus: () => Promise<string>;
+  proposeUpdate: (input: { version?: string; force?: boolean; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Where the server answers: status is read-only; domains / Cloudflare Access changes are human-approved. */
   accessStatus: () => Promise<string>;
   proposeAllowedDomains: (input: { action: 'add' | 'remove' | 'set' | 'clear'; domains?: string[]; reason: string }) => Promise<{ ok: boolean; message: string }>;

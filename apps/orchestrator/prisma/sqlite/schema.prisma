@@ -248,10 +248,26 @@ model ChannelChatState {
   muted        Boolean  @default(false)
   // When true, final answers in this chat are also sent as a voice message (needs Settings → Voice).
   voice        Boolean  @default(false)
+  // When true, the chat also gets the live "what the agent is doing" status line and the system notes (queued / continuing / new task).
+  // Off by default: the chat then carries only the agent's answers (and anything that needs a human).
+  progress     Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@unique([channelId, chatId])
+}
+
+// Which task sent a message into a chat — so that replying to (quoting) it addresses that task / agent.
+model ChannelMessageLink {
+  id        String   @id @default(cuid())
+  channelId String
+  chatId    String
+  messageId String
+  taskId    String
+  createdAt DateTime @default(now())
+
+  @@unique([channelId, chatId, messageId])
+  @@index([createdAt])
 }
 
 /// An allowlist rule that auto-approves a matching dangerous tool call, added

@@ -32,6 +32,10 @@ export type IncomingEvent =
       text: string;
       /** True when the user replied to one of our messages (→ follow-up vs new task). */
       isReply: boolean;
+      /** The message this one replies to (quotes), when the transport says — used to address the task that sent it. */
+      replyToMessageId?: string;
+      /** The quoted text (the selected part when the transport supports partial quotes), trimmed. */
+      replyToText?: string;
       /** Id of this message in the transport, for reactToMessage (ack) — optional
        *  since not every transport can supply one. */
       messageId?: string;
@@ -72,6 +76,8 @@ export type IncomingEvent =
       /** Optional caption sent with the file. */
       caption?: string;
       isReply: boolean;
+      replyToMessageId?: string;
+      replyToText?: string;
       messageId?: string;
     }
   | {
@@ -86,6 +92,8 @@ export type IncomingEvent =
       /** Length in seconds, when the transport says. */
       durationSec?: number;
       isReply: boolean;
+      replyToMessageId?: string;
+      replyToText?: string;
       messageId?: string;
     }
   | {
@@ -117,6 +125,8 @@ export interface ChannelAdapter {
    *  "processing…" status line) — existing buttons/keyboard are preserved.
    *  Best-effort, optional — not every transport supports editing. */
   editMessage?(chatId: string, messageId: string, text: string): Promise<void>;
+  /** Replace the transport's command menu (the `/` list). Optional. */
+  setCommands?(commands: { command: string; description: string }[]): Promise<void>;
   /** Post spoken audio. Ogg/Opus shows as a voice message; other formats are sent as an audio file. Optional. */
   sendVoice?(chatId: string, audio: { data: Buffer; mime: string }, caption?: string): Promise<void>;
   /** Post an image (e.g. an agent screenshot). Optional — not every transport supports it. */

@@ -10,6 +10,7 @@ import {
   PROPOSE_PROVIDER_TOOL,
   PROPOSE_SCHEDULE_TOOL,
   PROPOSE_ALLOWED_DOMAINS_TOOL,
+  PROPOSE_UPDATE_TOOL,
   PROPOSE_CLOUDFLARE_ACCESS_TOOL,
   PROPOSE_CHANNEL_TOOL,
   PROPOSE_RESOURCE_TOOL,
@@ -36,6 +37,7 @@ import { ResourcesService } from '../resources/resources.service';
 import { cleanTags, validateMeta } from '../resources/resources-core';
 import type { PacksService } from '../packs/packs.service';
 import { describeSchedule } from '../schedules/schedule-core';
+import { UpdateService } from '../update/update.service';
 import { AccessService } from '../access/access.service';
 import { parseDomainList } from '../access/access-core';
 import { CloudflareAccessService } from '../access/cloudflare-access.service';
@@ -156,6 +158,9 @@ export class PlatformAdminService {
       this.schedulesCache = this.moduleRef.get(Cls, { strict: false });
     }
     return this.schedulesCache;
+  }
+  private get updateSvc(): UpdateService {
+    return this.moduleRef.get(UpdateService, { strict: false });
   }
   private get accessSvc(): AccessService {
     return this.moduleRef.get(AccessService, { strict: false });
@@ -651,6 +656,53 @@ export class PlatformAdminService {
   }
 
   // ---- schedules -------------------------------------------------------------
+
+  // ---- updating the server ----
+
+  async updateStatus(): Promise<string> {
+    const s = await this.updateSvc.status();
+    const lines = [
+      `Installed: ${s.current}.`,
+      s.latest ? `Newest release: ${s.latest}${s.newer ? ' — a NEWER version is available.' : ' — up to date.'}` : `Could not check for a newer release (${s.checkError ?? 'unknown'}).`,
+      s.newer && s.notes ? `What is new:\n${s.notes.slice(0, 1500)}` : '',
+      s.environment.canApply ? 'This server can update itself (the user approves first).' : `This server cannot update itself: ${s.environment.reason}`,
+      s.runningTasks ? `${s.runningTasks} task(s) are running or queued — an update would interrupt them.` : 'No tasks are running.',
+      s.last ? `Last update: ${s.last.state} (v${s.last.version}, ${s.last.finishedAt || s.last.startedAt}${s.last.error ? `, ${s.last.error}` : ''}).` : '',
+    ];
+    return lines.filter(Boolean).join('\n');
+  }
+
+  private async checkUpdate(p: { version?: string; force?: boolean; reason?: string }): Promise<string | null> {
+    if (!p.reason?.trim()) return 'give a reason.';
+    const s = await this.updateSvc.status();
+    if (!s.environment.canApply) return s.environment.reason ?? 'this server cannot update itself.';
+    const target = p.version?.trim().replace(/^v/, '') || s.latest;
+    if (!target) return `could not find a release to update to (${s.checkError ?? 'unknown'}).`;
+    if (p.version && !/^\d+\.\d+\.\d+$/.test(target)) return 'version must look like 0.1.48.';
+    if (!s.newer && !p.version) return `already up to date (${s.current}).`;
+    if (s.runningTasks > 0 && !p.force) return `${s.runningTasks} task(s) are running or queued — an update would interrupt them. Ask the user whether to wait or to update anyway (force: true).`;
+    return null;
+  }
+
+  async proposeUpdate(currentTaskId: string, sessionId: string, input: { version?: string; force?: boolean; reason: string }): Promise<ProposalResult> {
+    const why = await this.checkUpdate(input);
+    if (why) return { ok: false, message: `Rejected: ${why}` };
+    const denied = await this.proposals.requireApproval(
+      currentTaskId,
+      sessionId,
+      PROPOSE_UPDATE_TOOL,
+      { version: input.version, force: input.force === true, reason: input.reason },
+      (i) => String(i.version ?? '') === (input.version ?? '') && Boolean(i.force) === (input.force === true),
+    );
+    if (denied) return denied;
+    try {
+      const r = await this.updateSvc.apply({ version: input.version, force: input.force === true, by: 'admin assistant (approved)' });
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_update', summary: `Update to v${r.version} started — ${input.reason.slice(0, 80)}` });
+      return { ok: true, message: `Update to v${r.version} has started. The server restarts in a minute or two and the dashboard is unreachable until it is back — nothing more to do here. If something goes wrong the previous version is kept: \`aigentron rollback\` on the server.` };
+    } catch (e) {
+      return { ok: false, message: `Rejected: ${(e as Error).message}` };
+    }
+  }
 
   // ---- where the server answers: allowed domains + Cloudflare Access ----
 

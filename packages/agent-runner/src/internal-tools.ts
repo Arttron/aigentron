@@ -417,6 +417,31 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         },
       },
       {
+        name: 'update_status',
+        description:
+          "The installed version, the newest published release (with its release notes), whether this server can update itself (a bare-metal install can; a Docker install cannot — the user runs `aigentron update`), how many tasks are running, and the outcome of the last update. Read-only. Call it before proposing an update and tell the user what is new.",
+        shape: {},
+        handler: () => admin.updateStatus(),
+      },
+      {
+        name: 'propose_update',
+        description:
+          "Update this server to a newer release. `version` (e.g. 0.1.48) or omit it for the latest; `force: true` only if the user accepts that running tasks are interrupted (otherwise it refuses while tasks run). The server RESTARTS for a minute or two — you and the dashboard are unreachable meanwhile, so say so first and do not start other work. `reason` is required. A human reviews and must approve; this call blocks until they decide, then returns as soon as the update has started. The previous version is kept for a rollback (`aigentron rollback` on the server).",
+        shape: {
+          version: z.string().optional(),
+          force: z.boolean().optional(),
+          reason: z.string(),
+        },
+        handler: async (args) =>
+          (
+            await admin.proposeUpdate({
+              version: typeof args.version === 'string' && args.version.trim() ? args.version.trim() : undefined,
+              force: args.force === true,
+              reason: String(args.reason ?? ''),
+            })
+          ).message,
+      },
+      {
         name: 'access_status',
         description:
           "Where the server answers: the allowed domain names (and whether they are enforced), the public address from PUBLIC_URL, and whether Cloudflare Access is set up / on. Read-only. Use it before proposing changes.",

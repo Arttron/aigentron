@@ -50,6 +50,10 @@ allow-list can use the bot. When someone writes to the bot from a chat that is *
 "is this you?" line under the channel with **Allow / Dismiss** (it forgets strangers after an hour). I can set the whole thing up (`propose_channel`, `request_secret`,
 `channels_list`). When a request for a key comes through Telegram, the bot sends a one-time link (needs `PUBLIC_URL`) to a small page where the key is typed — the link works once, for 10 minutes, and can only fill that one value.
 
+**What the chat shows.** By default a chat is quiet: only the agent's answers (and anything that needs the person — approvals, questions, failures) arrive; the live "what the agent is doing" line and notes like "queued" / "new task started" are off. `/progress on` in a chat turns them on, `/progress off` back. **Replying to (quoting) a message** addresses the task — and the agent — that wrote it, even if the chat is on another task now (the quote itself is passed along as context); a plain message continues the chat's active task.
+
+**Talking to a specific agent:** `/agents` lists them as tappable `/names`; `/pm text` or `@pm text` sends that agent a message (its own task in the chat is continued, else a new one starts) — small typos in the name are forgiven, and each agent also appears in the bot's `/` command menu with autocomplete.
+
 ## Schedules (reminders and periodic tasks)
 
 Settings → **Schedules**: recurring jobs. Each one has a time ("every day at 09:30", weekdays, certain days, every N hours, or a raw cron), a time zone,
@@ -76,8 +80,9 @@ Settings → General → Approvals.
 
 ## Agents page (`/agents`)
 
-List of agents with **Edit** and ✕ (the built-in admin has a "built-in" badge instead — it can't be deleted).
-**+ New agent** opens the form. At the top, **Start from a template** (optional) lists the shipped templates (pm, architect, backend, frontend,
+Two tabs: **Agents** and **Starter packs** (ready-made sets of agents, skills, notes and switched-off schedules — see "Starter packs"; `/agents?tab=packs` opens it directly).
+The Agents tab lists agents with **Edit** and ✕ (the built-in admin has a "built-in" badge instead — it can't be deleted).
+**+ New agent** (and **Edit**) opens the form in a dialog. At the top, **Start from a template** (optional) lists the shipped templates (pm, architect, backend, frontend,
 designer, coder, reviewer, local-helper, researcher) — picking one pre-fills every field; then set the *Name*, choose a *Provider*, edit anything and save.
 Fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, and the system prompt ("instructions"). I can create and edit agents for the user via approvals — they can
 also do it by hand here.
@@ -88,7 +93,7 @@ Token and request usage per provider with ranges: Today, 7 days, 30 days, All ti
 
 ## Settings (`/settings`) — tabs
 
-**General**: Repository (GitHub) — *Repo URL* (blank = local workspace, no remote), *Base branch*, *GitHub token*,
+**General**: *Version & updates* — the installed version, the newest release with its notes, **Check now**, and **Update to X** (an operator confirms; the server restarts for a minute or two, the previous version is kept for `aigentron rollback`; a Docker install cannot update itself and says to run `aigentron update`; I can start it too with `propose_update`). Repository (GitHub) — *Repo URL* (blank = local workspace, no remote), *Base branch*, *GitHub token*,
 *Project subdirectory* (a RELATIVE folder inside the repo such as `apps/web`, or empty for the repo root — a git address/URL here is rejected; the URL goes in *Repo URL*); *Default lead agent*; *Escalations* (default channel + chat/thread id for questions from tasks with
 no channel); *Agent instructions (skill)* — text appended to every agent's prompt; *Verification gate* — commands run after
 each run + max auto-fix attempts; *Task queue* — concurrency; *Approvals* — timeout in seconds; *Display* — theme.

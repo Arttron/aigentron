@@ -9,7 +9,8 @@ import { ProvidersService } from '../providers/providers.service';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { SettingsService } from '../settings/settings.service';
 import { ChannelsService } from './channels.service';
-import { HELP_TEXT } from './command-menu';
+import { COMMAND_MENU, HELP_TEXT } from './command-menu';
+import { commandKey, matchAgent, parseAddress } from './agent-match';
 import type { MessageButton } from './channel-adapter';
 
 const HELP = HELP_TEXT;
@@ -50,6 +51,56 @@ export class ChannelCommandService {
     private readonly settings: SettingsService,
     private readonly voice: VoiceService,
   ) {}
+
+  // ---- addressing an agent: `/pm text`, `@pm text` ----
+
+  /** Names that already mean a built-in command (an agent of that name is reached with @name). */
+  private builtinKeys(): Set<string> {
+    return new Set([...COMMAND_MENU.map((c) => c.command), 'start', 'help', 'new', 'me', 'mute', 'unmute']);
+  }
+
+  /** Every agent with the command it can be reached by (null = no command of its own: a clash with a built-in or another agent). */
+  async agentDirectory(): Promise<{ name: string; description: string; key: string | null }[]> {
+    const builtin = this.builtinKeys();
+    const used = new Set<string>();
+    return (await this.agents.list()).map((a) => {
+      const k = commandKey(a.name);
+      const key = k && !builtin.has(k) && !used.has(k) ? k : null;
+      if (key) used.add(key);
+      return { name: a.name, description: (a.description ?? '').replace(/\s+/g, ' ').trim(), key };
+    });
+  }
+
+  /** The command menu entries for the agents (Telegram shows them, with autocomplete, when the person types `/`). */
+  async agentCommands(): Promise<{ command: string; description: string }[]> {
+    const room = Math.max(0, 100 - COMMAND_MENU.length);
+    return (await this.agentDirectory())
+      .filter((a) => a.key)
+      .slice(0, room)
+      .map((a) => ({ command: a.key!, description: (a.description || `Talk to ${a.name}`).slice(0, 100) }));
+  }
+
+  /**
+   * Is this message addressed to an agent (`/pm …` or `@pm …`)? Typos in the name are forgiven. Returns the agent and the rest of the
+   * message, or a `reply` when it cannot tell which one was meant. `null` = not an address (an ordinary message or a built-in command).
+   */
+  async resolveAddress(text: string): Promise<{ agent: string; rest: string; typed: string; fuzzy: boolean } | { reply: string } | null> {
+    const addr = parseAddress(text);
+    if (!addr) return null;
+    const key = commandKey(addr.typed);
+    if (addr.symbol === '/' && key && this.builtinKeys().has(key)) return null; // a built-in command
+    const dir = await this.agentDirectory();
+    const m = matchAgent(addr.typed, dir);
+    const link = (name: string) => {
+      const a = dir.find((d) => d.name === name);
+      return a?.key ? `/${a.key}` : `@${name}`;
+    };
+    if (m.kind === 'exact' || m.kind === 'fuzzy') return { agent: m.name, rest: addr.rest, typed: addr.typed, fuzzy: m.kind === 'fuzzy' };
+    if (m.kind === 'ambiguous') return { reply: `🤔 «${addr.typed}» could be ${m.names.map(link).join(', ')} — tap or type the one you mean.` };
+    // not an agent: an @-word is just text; an unknown /word gets a hint
+    if (addr.symbol === '@') return null;
+    return m.suggestions.length ? { reply: `Unknown command /${addr.typed}. Did you mean ${m.suggestions.map(link).join(' or ')}?` } : null;
+  }
 
   isCommand(text: string): boolean {
     return text.trim().startsWith('/');
@@ -101,6 +152,8 @@ export class ChannelCommandService {
         return this.setModel(ctx, arg);
       case '/voice':
         return this.voiceCmd(ctx, arg.toLowerCase());
+      case '/progress':
+        return this.progressCmd(ctx, arg.toLowerCase());
       case '/agents':
         return this.listAgents(ctx);
       case '/agent':
@@ -119,7 +172,7 @@ export class ChannelCommandService {
 
   /** `taskId` is null when nothing was actually created (e.g. the empty-text
    *  prompt below) — callers that want to react/track the run key off that. */
-  async newTask(ctx: CommandCtx, text: string): Promise<{ text: string; taskId: string | null }> {
+  async newTask(ctx: CommandCtx, text: string, agentOverride?: string): Promise<{ text: string; taskId: string | null }> {
     if (!text) {
       await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: null });
       return { text: '📝 Send the task description as your next message.', taskId: null };
@@ -127,7 +180,7 @@ export class ChannelCommandService {
     const state = await this.channels.chatState(ctx.channelId, ctx.chatId);
     const task = await this.tasks.create({
       prompt: text,
-      agentName: state.agent ?? undefined,
+      agentName: agentOverride ?? state.agent ?? undefined,
       provider: state.model ?? undefined,
       createdByChannel: `${ctx.kind}:${ctx.userId}`,
     });
@@ -197,17 +250,15 @@ export class ChannelCommandService {
   }
 
   private async listAgents(ctx: CommandCtx): Promise<string> {
-    const [agents, def, state] = await Promise.all([
-      this.agents.list(),
-      this.settings.defaultAgent(),
-      this.channels.chatState(ctx.channelId, ctx.chatId),
-    ]);
+    const [dir, def, state] = await Promise.all([this.agentDirectory(), this.settings.defaultAgent(), this.channels.chatState(ctx.channelId, ctx.chatId)]);
     const current = state.agent ?? def;
-    const lines = agents.map((a) => {
-      const line = `${a.name === current ? '▶' : '·'} ${a.name}${a.description ? ` — ${a.description}` : ''}`;
-      return line.length > 120 ? `${line.slice(0, 117)}…` : line;
+    // `/name` is a tappable link in Telegram: tapping it picks the agent; `/name text` (or `@name text`) sends it a message.
+    const lines = dir.map((a) => {
+      const handle = a.key ? `/${a.key}` : `@${a.name}`;
+      const line = `${a.name === current ? '▶' : '·'} ${handle}${a.description ? ` — ${a.description}` : ''}`;
+      return line.length > 140 ? `${line.slice(0, 137)}…` : line;
     });
-    return `Agents:\n${lines.join('\n')}\n\nUse /agent <name>.`;
+    return `Agents — tap a name to talk to it:\n${lines.join('\n')}\n\n/name text (or @name text) sends that agent a message — small typos in the name are fine. /agent <name> sets who starts new tasks (▶ now).`;
   }
 
   private async setAgent(ctx: CommandCtx, arg: string): Promise<string> {
@@ -303,6 +354,16 @@ export class ChannelCommandService {
       `Model: ${state.model ?? `${defProvider} (default)`}`,
       `Muted: ${state.muted ? 'yes' : 'no'}`,
     ].join('\n');
+  }
+
+  /** `/progress on|off` — the live "what the agent is doing" line and the system notes. Off by default: the chat shows only answers. */
+  private async progressCmd(ctx: CommandCtx, arg: string): Promise<string> {
+    if (arg !== 'on' && arg !== 'off') {
+      const st = await this.channels.chatState(ctx.channelId, ctx.chatId);
+      return `🛠 Live status lines are ${st.progress ? 'ON' : 'OFF'} in this chat — /progress on or /progress off.\n(Off: the chat carries only answers and anything that needs you.)`;
+    }
+    await this.channels.setChatState(ctx.channelId, ctx.chatId, { progress: arg === 'on' });
+    return arg === 'on' ? '🛠 Live status lines ON — you will see what the agent is doing, and notes like "queued". /progress off to quiet it again.' : '🤫 Live status lines OFF — only answers (and anything that needs you) arrive here.';
   }
 
   /** `/voice on|off` — also send final answers as a voice message in this chat (text is always sent). */

@@ -207,13 +207,37 @@ export class ChannelsService {
   async setChatState(
     channelId: string,
     chatId: string,
-    patch: { activeTaskId?: string | null; agent?: string | null; model?: string | null; muted?: boolean; voice?: boolean },
+    patch: { activeTaskId?: string | null; agent?: string | null; model?: string | null; muted?: boolean; voice?: boolean; progress?: boolean },
   ) {
     return this.prisma.channelChatState.upsert({
       where: { channelId_chatId: { channelId, chatId } },
       update: patch,
       create: { channelId, chatId, ...patch },
     });
+  }
+
+  // ---- which task sent which message (for quote-replies) ----
+
+  /** Remember that `taskId` sent this message into the chat; replying to it later addresses that task. */
+  async linkMessage(channelId: string, chatId: string, messageId: string, taskId: string): Promise<void> {
+    await this.prisma.channelMessageLink
+      .upsert({
+        where: { channelId_chatId_messageId: { channelId, chatId, messageId } },
+        update: { taskId },
+        create: { channelId, chatId, messageId, taskId },
+      })
+      .catch(() => undefined);
+  }
+
+  /** The task that sent a message (null when it was not one of a task's messages). */
+  async taskForMessage(channelId: string, chatId: string, messageId: string): Promise<string | null> {
+    const row = await this.prisma.channelMessageLink.findUnique({ where: { channelId_chatId_messageId: { channelId, chatId, messageId } }, select: { taskId: true } });
+    return row?.taskId ?? null;
+  }
+
+  /** Old links are of no use (nobody quotes a message from months ago). */
+  async pruneMessageLinks(days = 60): Promise<void> {
+    await this.prisma.channelMessageLink.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - days * 86_400_000) } } }).catch(() => undefined);
   }
 
   /** A readable one-liner for a task: latest reported summary, else title+status. */

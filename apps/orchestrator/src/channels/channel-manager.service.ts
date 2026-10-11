@@ -14,6 +14,7 @@ import { ApprovalsService } from '../approvals/approvals.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PresenceService } from '../presence/presence.service';
 import { ChannelsService } from './channels.service';
+import { COMMAND_MENU } from './command-menu';
 import { ChannelCommandService } from './channel-commands.service';
 import { PairingService } from './pairing.service';
 import { VoiceService } from '../voice/voice.service';
@@ -118,6 +119,9 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
    *  sendRunAttachments) — in-memory only, reset on restart like the maps
    *  above; worst case a file gets re-sent once after a restart. */
   private readonly sentAttachments = new Map<string, Set<string>>();
+  /** channelId → hash of the command menu last published (agent commands change as agents come and go). */
+  private readonly menuHash = new Map<string, string>();
+  private menuTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -134,11 +138,15 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    void this.channels.pruneMessageLinks();
     this.bus.subscribe((e) => void this.dispatchOutgoing(e).catch(() => undefined));
     await this.reload();
+    this.menuTimer = setInterval(() => void this.refreshCommandMenus(), 3 * 60_000);
+    this.menuTimer.unref?.();
   }
 
   onModuleDestroy(): void {
+    if (this.menuTimer) clearInterval(this.menuTimer);
     for (const a of this.adapters.values()) a.stop();
     this.adapters.clear();
     for (const t of this.escalationTimers) clearTimeout(t);
@@ -166,6 +174,20 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       } catch (e) {
         this.logger.warn(`Failed to start channel "${row.name}": ${(e as Error).message}`);
       }
+    }
+    this.menuHash.clear();
+    void this.refreshCommandMenus();
+  }
+
+  /** Publish the command menu (built-ins + one command per agent) to every channel that has one. Skips an unchanged menu. */
+  private async refreshCommandMenus(): Promise<void> {
+    const extra = await this.commands.agentCommands().catch(() => []);
+    const list = [...COMMAND_MENU.map((c) => ({ command: c.command, description: c.description })), ...extra];
+    const hash = JSON.stringify(list);
+    for (const [id, adapter] of this.adapters) {
+      if (!adapter.setCommands || this.menuHash.get(id) === hash) continue;
+      this.menuHash.set(id, hash);
+      await adapter.setCommands(list).catch(() => this.menuHash.delete(id));
     }
   }
 
@@ -198,9 +220,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     if (!dest) return; // dashboard-only task, or a subtask (no thread of its own)
     const chatState = await this.prisma.channelChatState.findUnique({
       where: { channelId_chatId: { channelId: dest.channel.id, chatId: dest.externalThreadId } },
-      select: { muted: true },
+      select: { muted: true, progress: true },
     });
-    if (chatState?.muted) return;
+    // The live "what the agent is doing" line is system information: only for chats that asked for it (/progress on).
+    if (chatState?.muted || !chatState?.progress) return;
     await this.updateStatusLine(dest.channel.id, dest.externalThreadId, payload.taskId, line);
   }
 
@@ -236,7 +259,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       await adapter.editMessage?.(existing.chatId, existing.messageId, line).catch(() => undefined);
       return;
     }
-    const sent = await this.send(channelId, chatId, line);
+    const sent = await this.send(channelId, chatId, line, undefined, taskId);
     if (sent) this.statusMessages.set(taskId, { channelId, chatId, messageId: sent.messageId });
   }
 
@@ -284,7 +307,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // Respect a chat's /mute (routine outcomes only; approvals bypass this).
     const chatState = await this.prisma.channelChatState.findUnique({
       where: { channelId_chatId: { channelId: dest.channel.id, chatId: dest.externalThreadId } },
-      select: { muted: true, voice: true },
+      select: { muted: true, voice: true, progress: true },
     });
     if (chatState?.muted) return;
 
@@ -295,10 +318,13 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       status === 'done'
         ? (await this.latestResult(taskId)) || (await this.channels.summarize(taskId))
         : task.error?.slice(0, 800) || (await this.channels.summarize(taskId));
+    // A finished task's message carries just the agent's answer (the title/status header is system information — shown only with
+    // /progress on, or when something needs attention). A subtask's answer says which subtask it is; replying to any of these messages
+    // addresses the task that sent it.
     const header = status === 'done' ? `${prefix}${icon} «${task.title}»` : `${prefix}${icon} «${task.title}» — ${status}`;
-    let text = `${header}\n\n${body}`;
+    let text = status === 'done' && !chatState?.progress ? (prefix ? `↳ ${task.title}\n\n${body}` : body) : `${header}\n\n${body}`;
     if (status === 'done' && task.prUrl) text += `\n\n${task.prUrl}`;
-    await this.send(dest.channel.id, dest.externalThreadId, text);
+    await this.send(dest.channel.id, dest.externalThreadId, text, undefined, taskId);
     if (status === 'done' && chatState?.voice) await this.speakReply(dest.channel.id, dest.externalThreadId, body);
     // Also deliver any new attachments the agent produced (screenshots as
     // photos, everything else — reports, archives, etc. — as documents).
@@ -344,7 +370,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // most recent ask". linkThread additionally binds for outbound updates.
     await this.channels.setChatState(channelId, chatId, { activeTaskId: taskId }).catch(() => undefined);
     await this.channels.linkThread(channelId, taskId, chatId).catch(() => undefined);
-    await this.send(channelId, chatId, text);
+    await this.send(channelId, chatId, text, undefined, taskId);
   }
 
   /**
@@ -450,6 +476,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     taskId: string,
   ): void {
     const list = this.approvalMessages.get(approvalId) ?? [];
+    void this.channels.linkMessage(channelId, chatId, messageId, taskId);
     list.push({ channelId, chatId, messageId, taskId });
     this.approvalMessages.set(approvalId, list);
   }
@@ -555,7 +582,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     }
     // The echo lets the person catch a mishearing before the agent acts on it.
     await reply(`🎤 «${text}»`);
-    await this.handleIncoming(row, { type: 'message', chatId: e.chatId, userId: e.userId, userName: e.userName, text, isReply: e.isReply, messageId: e.messageId });
+    await this.handleIncoming(row, { type: 'message', chatId: e.chatId, userId: e.userId, userName: e.userName, text, isReply: e.isReply, replyToMessageId: e.replyToMessageId, replyToText: e.replyToText, messageId: e.messageId });
   }
 
   /** Also speak a final answer, when the chat has voice replies on. Never blocks or fails the text reply. */
@@ -598,12 +625,16 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     chatId: string,
     text: string,
     buttons?: MessageButton[][],
+    /** The task this message speaks for: replying to (quoting) it later addresses that task. */
+    taskId?: string,
   ): Promise<{ messageId: string } | null> {
     const row = await this.channels.getRow(channelId).catch(() => null);
     if (!row) return null;
     const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
     try {
-      return await adapter.sendMessage(chatId, text, buttons);
+      const sent = await adapter.sendMessage(chatId, text, buttons);
+      if (sent && taskId) void this.channels.linkMessage(channelId, chatId, sent.messageId, taskId);
+      return sent;
     } catch (err) {
       this.logger.warn(`sendMessage failed: ${(err as Error).message}`);
       return null;
@@ -632,6 +663,9 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         this.ackMessages.set(taskId, { channelId, chatId, messageId: incomingMessageId });
         void this.react(channelId, chatId, incomingMessageId, result.queued ? '📥' : '👀');
       }
+      // "Queued" / "Continuing…" are system notes: only for chats that asked for them (/progress on). The reaction on the message (👀 / 📥)
+      // already says it was received.
+      if (!(await this.channels.chatState(channelId, chatId)).progress) return;
       const prefix = attachedLabel ? `📎 Attached ${attachedLabel} — ` : '';
       const sent = await this.send(
         channelId,
@@ -774,6 +808,13 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
 
     const ctx = { channelId, chatId: e.chatId, userId: e.userId, kind: row.kind };
 
+    // `/pm text` or `@pm text` — straight to that agent (small typos in the name are forgiven).
+    const addr = await this.commands.resolveAddress(e.text);
+    if (addr) {
+      await this.handleAddressed(row, e, addr);
+      return;
+    }
+
     // Slash commands manage the conversation (new-task, tasks, task, clear, …).
     if (this.commands.isCommand(e.text)) {
       const reply = await this.commands
@@ -787,21 +828,71 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Plain message → continue the active task; if none (or it's gone), start one.
+    // Plain message. Replying to (quoting) a message a task sent addresses THAT task — whichever agent wrote it, whatever the chat's
+    // active task is. Otherwise: continue the active task; if none (or it's gone), start one.
     const state = await this.channels.chatState(channelId, e.chatId);
+    const text = withQuote(e.text, e.replyToText);
+    const quoted = await this.quotedTask(channelId, e.chatId, e.replyToMessageId);
+    if (quoted) {
+      if (state.activeTaskId !== quoted) await this.channels.setChatState(channelId, e.chatId, { activeTaskId: quoted }).catch(() => undefined);
+      await this.deliverFollowUp(channelId, e.chatId, quoted, text, undefined, undefined, e.messageId);
+      return;
+    }
     if (state.activeTaskId) {
       const task = await this.prisma.task.findUnique({
         where: { id: state.activeTaskId },
         select: { status: true },
       });
       if (task) {
-        await this.deliverFollowUp(channelId, e.chatId, state.activeTaskId, e.text, undefined, undefined, e.messageId);
+        await this.deliverFollowUp(channelId, e.chatId, state.activeTaskId, text, undefined, undefined, e.messageId);
         return;
       }
       // active task was deleted — fall through to create a fresh one
     }
+    await this.startFromMessage(row, e, text, state.progress);
+  }
+
+  /** `/pm text` / `@pm text`: continue that agent's own task in this chat, else start one for it (the chat's default agent is untouched). */
+  private async handleAddressed(
+    row: ChannelRow,
+    e: Extract<IncomingEvent, { type: 'message' }>,
+    addr: { agent: string; rest: string; typed: string; fuzzy: boolean } | { reply: string },
+  ): Promise<void> {
+    const channelId = row.id;
+    if ('reply' in addr) {
+      await this.send(channelId, e.chatId, addr.reply);
+      return;
+    }
+    const state = await this.channels.chatState(channelId, e.chatId);
+    const active = state.activeTaskId ? await this.prisma.task.findUnique({ where: { id: state.activeTaskId }, select: { agentName: true } }) : null;
+    // a forgiven typo is echoed once so a wrong guess does not go unnoticed
+    if (addr.fuzzy) await this.send(channelId, e.chatId, `↪ «${addr.agent}» (you typed ${addr.typed})`);
+    if (!addr.rest) {
+      // just the name: talk to this agent from now on
+      await this.channels.setChatState(channelId, e.chatId, { agent: addr.agent, ...(active?.agentName === addr.agent ? {} : { activeTaskId: null }) });
+      await this.send(channelId, e.chatId, `💬 Now talking to «${addr.agent}» — send your message.`);
+      return;
+    }
+    const text = withQuote(addr.rest, e.replyToText);
+    if (state.activeTaskId && active?.agentName === addr.agent) {
+      await this.deliverFollowUp(channelId, e.chatId, state.activeTaskId, text, undefined, undefined, e.messageId);
+      return;
+    }
+    await this.startFromMessage(row, e, text, state.progress, addr.agent);
+  }
+
+  /** Start a task from a chat message (optionally for a named agent) and acknowledge it. */
+  private async startFromMessage(
+    row: ChannelRow,
+    e: Extract<IncomingEvent, { type: 'message' }>,
+    text: string,
+    progress: boolean,
+    agent?: string,
+  ): Promise<void> {
+    const channelId = row.id;
+    const ctx = { channelId, chatId: e.chatId, userId: e.userId, kind: row.kind };
     const created = await this.commands
-      .newTask(ctx, e.text)
+      .newTask(ctx, text, agent)
       .catch((err) => ({ text: `⚠️ ${(err as Error).message}`, taskId: null }));
     if (e.messageId && created.taskId) {
       // A brand-new task — track its ack message so the final outcome updates
@@ -811,7 +902,17 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     } else if (e.messageId && created.text.startsWith('⚠️')) {
       void this.react(channelId, e.chatId, e.messageId, '⚠️');
     }
-    await this.send(channelId, e.chatId, created.text);
+    // "New task … Updates will appear here" is a system note (/progress on); a failure is always shown.
+    if (progress || created.text.startsWith('⚠️') || !created.taskId) await this.send(channelId, e.chatId, created.text);
+  }
+
+  /** The task a quoted message came from (when it is still there), else null. */
+  private async quotedTask(channelId: string, chatId: string, replyToMessageId?: string): Promise<string | null> {
+    if (!replyToMessageId) return null;
+    const taskId = await this.channels.taskForMessage(channelId, chatId, replyToMessageId);
+    if (!taskId) return null;
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { id: true } });
+    return task ? taskId : null;
   }
 
   /** A photo/document from the chat → attach to the active task (or start one). */
@@ -822,19 +923,23 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const channelId = row.id;
     const state = await this.channels.chatState(channelId, e.chatId);
     const buf = Buffer.from(e.data, 'base64');
-    const caption = e.caption?.trim() || 'Review the attached file.';
+    const caption = withQuote(e.caption?.trim() || 'Review the attached file.', e.replyToText);
+    // a file sent as a reply goes to the task that wrote the quoted message
+    const quoted = await this.quotedTask(channelId, e.chatId, e.replyToMessageId);
+    const targetTask = quoted ?? state.activeTaskId;
+    if (quoted && state.activeTaskId !== quoted) await this.channels.setChatState(channelId, e.chatId, { activeTaskId: quoted }).catch(() => undefined);
 
-    if (state.activeTaskId) {
+    if (targetTask) {
       const task = await this.prisma.task.findUnique({
-        where: { id: state.activeTaskId },
+        where: { id: targetTask },
         select: { status: true },
       });
       if (task) {
-        const meta = await this.attachments.save(state.activeTaskId, e.fileName, Readable.from(buf));
+        const meta = await this.attachments.save(targetTask, e.fileName, Readable.from(buf));
         await this.deliverFollowUp(
           channelId,
           e.chatId,
-          state.activeTaskId,
+          targetTask,
           caption,
           [meta.name],
           meta.name,
@@ -860,6 +965,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       this.ackMessages.set(created.id, { channelId, chatId: e.chatId, messageId: e.messageId });
       void this.react(channelId, e.chatId, e.messageId, '👀');
     }
-    await this.send(channelId, e.chatId, `📎 New task «${created.title}» with ${meta.name}. Updates will appear here.`);
+    if (state.progress) await this.send(channelId, e.chatId, `📎 New task «${created.title}» with ${meta.name}. Updates will appear here.`);
   }
+}
+
+/** A reply carries what it quotes: give the agent that context in front of the message ("Replying to «…»"). */
+export function withQuote(text: string, quoted?: string): string {
+  const q = (quoted ?? '').replace(/\s+/g, ' ').trim();
+  return q ? `↩︎ Replying to «${q.length > 400 ? `${q.slice(0, 400)}…` : q}»\n\n${text}` : text;
 }
