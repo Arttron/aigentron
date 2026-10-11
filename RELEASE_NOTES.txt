@@ -1,20 +1,21 @@
-Aigentron v0.1.50
+Aigentron v0.1.51
 
-For people who are not programmers: agents can now see photos and watch videos, and you can take pictures right from the page.
+For people who are not programmers: agents can now ask you questions with answer buttons, you can talk to them about a photo or a video frame, and agents know what time it is.
 
-Camera and video
-- New "📷 Camera" in the attach menu (new task, message box) and on the Resources page. Over HTTPS it opens in the page: take several photos or record a clip, check them, attach. Without HTTPS your phone's own camera opens. Big photos are shrunk and their hidden data (such as location) is removed.
-- Videos up to 300 MB can be attached to tasks and kept in the Resources library, and they play in the dashboard (seeking works on phones too).
-- Telegram: videos, round video messages and GIFs now arrive as attachments. (Telegram bots can download only up to 20 MB; for bigger files the bot asks you to upload them in the dashboard.)
-- While an agent works, Telegram chats show "typing…", "recording a voice message…" or "sending a photo/video/document…".
+Questions with buttons
+- An agent that needs a decision asks you right away, with answer buttons, instead of guessing or stopping. The card appears at the bottom right of the dashboard on every page; in Telegram it arrives as a message with buttons.
+- Pick one, or tick several (☐/☑ in Telegram with a "✅ Done" button; checkboxes in the dashboard). You can also just reply with text — a number picks that option, "1, 3" picks several.
+- The first answer wins and every place updates at once. If nobody answers within an hour, the agent chooses a safe default itself or reports that it is blocked.
+- A question can show a picture, for example a video frame: "is this the crack?".
+- The English starter pack (tutor and quizmaster) uses it for drills. Packs you already installed keep their old agents — reinstall the pack to get it.
 
-How agents watch a video
-- The sound is turned into text with the time of each phrase, and frames are cut out of the picture. Agents can ask for a frame every N seconds, at exact times, or at the moments the speaker says "look here" / "смотри, вот тут" (or any words you choose).
-- Settings → Vision: choose which model describes photos and video frames (OpenAI, Anthropic, DeepSeek, or a local Ollama vision model), with a Test button. Settings → Voice is used for the sound (a Whisper model gives the timestamps).
-- ffmpeg is now installed by the installer and is part of the Docker images.
+Talking about photos and video
+- Click a photo or video in a task to open a viewer: pause on a moment (or take the photo as it is), draw a red rectangle round what you mean, type your question. The marked picture goes to the agent with the file name and the time.
+- Agents can ask for video frames at the moments the speaker says "look here" / "смотри, вот тут", every N seconds, or at exact times; the speech transcript now has times.
 
 Smaller changes
-- "Default lead agent" moved from Settings to the Agents page and saves as soon as you pick.
-- The terminal (aigentron / aigentron admin) reuses its sign-in, shows as one device in the list, and `aigentron logout` ends the session on the server.
+- Agents have a clock: the new current_time tool gives the date, day of the week and time (in the server's timezone, or the one asked for).
+- Telegram command menu: agents show up in the "/" autocomplete reliably. A failed publish used to be silent and never retried, so agents that already existed could be missing from the menu.
+- "Default lead agent" moved to the Agents page.
 
-Update note: if ffmpeg could not be installed automatically, run `aigentron doctor`; video features show a clear message until it is available.
+Update note: this release adds a small table and one column for the questions; they are created automatically when the server starts.

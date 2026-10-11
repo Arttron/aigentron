@@ -4,13 +4,16 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from '@nestjs/common';
-import { REQUEST_SECRET_TOOL, isTerminalStatus, type AgentLogEvent, type TaskStatus } from '@lds/shared';
+import { REQUEST_SECRET_TOOL, isTerminalStatus, type AgentLogEvent, type AgentQuestion, type TaskStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentEventBus, type BusEvent } from '../bus/agent-event-bus';
 import { Readable } from 'node:stream';
 import { readFile } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { MAX_PENDING_FOLLOWUPS, TasksService } from '../tasks/tasks.service';
 import { ApprovalsService } from '../approvals/approvals.service';
+import { QuestionsService } from '../questions/questions.service';
+import { resolveAnswer } from '../questions/questions-core';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PresenceService } from '../presence/presence.service';
 import { ChannelsService } from './channels.service';
@@ -131,6 +134,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     private readonly channels: ChannelsService,
     private readonly tasks: TasksService,
     private readonly approvals: ApprovalsService,
+    private readonly questions: QuestionsService,
     private readonly attachments: AttachmentsService,
     private readonly commands: ChannelCommandService,
     private readonly presence: PresenceService,
@@ -191,7 +195,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     for (const [id, adapter] of this.adapters) {
       if (!adapter.setCommands || this.menuHash.get(id) === hash) continue;
       this.menuHash.set(id, hash);
-      await adapter.setCommands(list).catch(() => this.menuHash.delete(id));
+      await adapter.setCommands(list).catch((e) => {
+        this.menuHash.delete(id); // try again at the next refresh (every 3 min)
+        this.logger.warn(`Publishing the command menu failed (will retry): ${(e as Error).message}`);
+      });
     }
   }
 
@@ -204,6 +211,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         return this.onTaskStatus(e.payload.taskId, e.payload.status);
       case 'agent-log':
         return this.onAgentLog(e.payload);
+      case 'question-created':
+        return this.onQuestionCreated(e.payload.question);
+      case 'question-resolved':
+        return this.onQuestionResolved(e.payload.question);
       case 'approval-created':
         return this.onApprovalCreated(e.payload.approval);
       case 'approval-resolved':
@@ -473,6 +484,97 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       select: { text: true },
     });
     return ev?.text?.trim() || null;
+  }
+
+  /** Question id → the chat messages posted for it (to edit when it is answered). */
+  private readonly questionMessages = new Map<string, { channelId: string; chatId: string; messageId: string; taskId: string }[]>();
+
+  private async onQuestionCreated(q: AgentQuestion): Promise<void> {
+    const dest = await this.channels.threadForTask(q.taskId);
+    if (dest) {
+      await this.postQuestion(dest.channel.id, dest.externalThreadId, q);
+      return;
+    }
+    // A dashboard task: give whoever is looking at the page a moment, then ask in the chats if it is still open and nobody is watching.
+    const timer = setTimeout(() => {
+      this.escalationTimers.delete(timer);
+      void (async () => {
+        if (this.presence.anyoneFocused()) return;
+        const row = await this.prisma.agentQuestion.findUnique({ where: { id: q.id }, select: { status: true } });
+        if (row?.status !== 'pending') return;
+        for (const ch of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
+          for (const chatId of this.channels.allowedChatIds(ch)) await this.postQuestion(ch.id, chatId, q);
+        }
+      })().catch((err) => this.logger.warn(`question escalation failed: ${(err as Error).message}`));
+    }, ESCALATE_DELAY_MS);
+    this.escalationTimers.add(timer);
+  }
+
+  /** The keyboard of a question: one button per option (a multiple-choice one shows ticks and a Done button). */
+  private questionButtons(q: AgentQuestion, picked: ReadonlySet<number>): { label: string; data: string }[][] {
+    const buttons = q.options.map((o, i) => ({
+      label: q.multiple ? `${picked.has(i) ? '☑' : '☐'} ${i + 1}. ${o}` : `${i + 1}. ${o}`,
+      data: q.multiple ? `qt:${q.id}:${i}` : `qa:${q.id}:${i}`,
+    }));
+    const rows = buttons.reduce<{ label: string; data: string }[][]>((acc, b) => {
+      const last = acc[acc.length - 1];
+      if (!q.multiple && last && last.length < 2 && last[0]!.label.length + b.label.length < 36) last.push(b);
+      else acc.push([b]);
+      return acc;
+    }, []);
+    if (q.multiple) rows.push([{ label: `✅ Done${picked.size ? ` (${picked.size})` : ''}`, data: `qd:${q.id}` }]);
+    return rows;
+  }
+
+  /** Multiple-choice ticks per question (kept in memory; a restart just starts the ticking over). */
+  private readonly questionPicks = new Map<string, Set<number>>();
+
+  /** Post a question with one button per option; the person can also just reply with text. */
+  private async postQuestion(channelId: string, chatId: string, q: AgentQuestion): Promise<void> {
+    const row = await this.channels.getRow(channelId).catch(() => null);
+    if (!row) return;
+    const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
+    try {
+      if (q.image && adapter.sendImage) {
+        const data = await readFile(q.image).catch(() => null);
+        if (data) await adapter.sendImage(chatId, { data, filename: basename(q.image) }).catch(() => undefined);
+      }
+      const lines = [`❓ ${q.question}`];
+      if (q.options.length) lines.push('', ...q.options.map((o, i) => `${i + 1}) ${o}`));
+      lines.push(
+        '',
+        q.multiple
+          ? `☑️ Tick one or more, then press Done${q.allowText ? ' — or reply with numbers ("1, 3") or your own answer.' : ' (or reply with numbers, e.g. "1, 3").'}`
+          : q.allowText || !q.options.length
+            ? '✍️ Tap a button or just reply with your own answer.'
+            : 'Tap a button (or reply with its number).',
+      );
+      const buttons = q.options.length ? this.questionButtons(q, new Set()) : undefined;
+      const { messageId } = await adapter.sendMessage(chatId, lines.join('\n'), buttons);
+      void this.channels.linkMessage(channelId, chatId, messageId, q.taskId);
+      const list = this.questionMessages.get(q.id) ?? [];
+      list.push({ channelId, chatId, messageId, taskId: q.taskId });
+      this.questionMessages.set(q.id, list);
+    } catch (err) {
+      this.logger.warn(`sendQuestion failed: ${(err as Error).message}`);
+    }
+  }
+
+  /** Answered / timed out / cancelled (from anywhere): drop the buttons and show how it ended, so nobody taps a stale one. */
+  private async onQuestionResolved(q: AgentQuestion): Promise<void> {
+    const refs = this.questionMessages.get(q.id);
+    this.questionMessages.delete(q.id);
+    this.questionPicks.delete(q.id);
+    if (!refs?.length) return;
+    const outcome =
+      q.status === 'answered' ? `✅ ${q.question}\n→ ${q.answer}${q.answeredBy ? ` (${q.answeredBy.replace(/^[a-z]+:/, '')})` : ''}` : q.status === 'timeout' ? `⌛ ${q.question}\n(no answer — the agent decided on its own)` : `ℹ️ ${q.question}\n(withdrawn)`;
+    for (const r of refs) await this.editApprovalMessage(r, outcome);
+  }
+
+  /** Whether this chat may answer the question: it got the message, or the task is threaded to the chat. */
+  private async chatMayAnswer(channelId: string, chatId: string, q: AgentQuestion): Promise<boolean> {
+    if ((this.questionMessages.get(q.id) ?? []).some((r) => r.channelId === channelId && r.chatId === chatId)) return true;
+    return Boolean(await this.prisma.channelThread.findFirst({ where: { channelId, externalThreadId: chatId, taskId: q.taskId }, select: { id: true } }));
   }
 
   private async onApprovalCreated(approval: ApprovalMsg): Promise<void> {
@@ -829,6 +931,37 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    if (e.type === 'question-answer') {
+      const q = await this.questions.get(e.questionId).catch(() => null);
+      if (!q || !(await this.chatMayAnswer(channelId, e.chatId, q))) {
+        this.logger.warn(`Chat ${e.chatId} not allowed to answer question ${e.questionId}`);
+        return;
+      }
+      await this.questions
+        .answer(e.questionId, { index: e.index }, { displayName: `${row.kind}:${e.userName ?? e.userId}` })
+        .catch((err) => this.logger.warn(`answer failed: ${(err as Error).message}`));
+      return;
+    }
+
+    if (e.type === 'question-toggle' || e.type === 'question-done') {
+      const q = await this.questions.get(e.questionId).catch(() => null);
+      if (!q || q.status !== 'pending' || !q.multiple || !(await this.chatMayAnswer(channelId, e.chatId, q))) return;
+      const picked = this.questionPicks.get(q.id) ?? new Set<number>();
+      this.questionPicks.set(q.id, picked);
+      if (e.type === 'question-done') {
+        if (!picked.size) return void (await this.send(channelId, e.chatId, '☑️ Tick at least one option first.'));
+        await this.questions
+          .answer(q.id, { indexes: [...picked] }, { displayName: `${row.kind}:${e.userName ?? e.userId}` })
+          .catch((err) => this.logger.warn(`answer failed: ${(err as Error).message}`));
+        return;
+      }
+      if (picked.has(e.index)) picked.delete(e.index);
+      else if (q.options[e.index] !== undefined) picked.add(e.index);
+      const ref = (this.questionMessages.get(q.id) ?? []).find((r) => r.channelId === channelId && r.chatId === e.chatId);
+      if (ref) await this.adapters.get(channelId)?.setButtons?.(e.chatId, ref.messageId, this.questionButtons(q, picked));
+      return;
+    }
+
     if (e.type === 'voice') {
       await this.handleVoice(row, e);
       return;
@@ -887,6 +1020,20 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const state = await this.channels.chatState(channelId, e.chatId);
     const text = withQuote(e.text, e.replyToText);
     const quoted = await this.quotedTask(channelId, e.chatId, e.replyToMessageId);
+    // An agent is waiting for an answer in this conversation: a plain message IS the answer (a number picks that option).
+    const waiting = quoted ?? state.activeTaskId;
+    const openQuestion = waiting ? await this.questions.pendingForTask(waiting).catch(() => null) : null;
+    if (openQuestion && (await this.chatMayAnswer(channelId, e.chatId, openQuestion))) {
+      const r = resolveAnswer(openQuestion.options, openQuestion.allowText, { text: e.text }, openQuestion.multiple);
+      if ('error' in r) {
+        await this.send(channelId, e.chatId, `❓ ${r.error}`);
+        return;
+      }
+      await this.questions
+        .answer(openQuestion.id, { text: e.text }, { displayName: `${row.kind}:${e.userName ?? e.userId}` })
+        .catch((err) => this.send(channelId, e.chatId, `⚠️ ${(err as Error).message}`));
+      return;
+    }
     if (quoted) {
       if (state.activeTaskId !== quoted) await this.channels.setChatState(channelId, e.chatId, { activeTaskId: quoted }).catch(() => undefined);
       await this.deliverFollowUp(channelId, e.chatId, quoted, text, undefined, undefined, e.messageId);

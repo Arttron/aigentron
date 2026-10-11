@@ -9,6 +9,7 @@ import {
 import type IORedis from 'ioredis';
 import type {
   AgentLogEvent,
+  AgentQuestion,
   AgentSessionStatus,
   ApprovalRequest,
   ApprovalStatus,
@@ -44,6 +45,8 @@ export type BusEvent =
       type: 'approval-resolved';
       payload: { approvalId: string; taskId: string; status: ApprovalStatus; ts: string };
     }
+  | { type: 'question-created'; payload: { question: AgentQuestion } }
+  | { type: 'question-resolved'; payload: { question: AgentQuestion } }
   | { type: 'followup-queue'; payload: { taskId: string; queue: PendingFollowUp[] } };
 
 /** Redis Pub/Sub channel all orchestrator instances share. */

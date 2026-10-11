@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TaskStatus } from '@lds/shared';
 import { isVideo } from '@/lib/capture';
+import { MediaViewer } from './MediaViewer';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
@@ -69,8 +70,11 @@ export function Transcript({
   status,
   terminal,
   fill = false,
+  onAsk,
 }: {
   taskId: string;
+  /** Lets a photo / video be opened for a conversation (mark a spot, ask). */
+  onAsk?: (prompt: string, attachments: string[]) => Promise<void>;
   lines: LogLine[];
   status: TaskStatus;
   terminal: boolean;
@@ -78,6 +82,7 @@ export function Transcript({
   fill?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
   const [look, setLook] = useLook();
   const [show, setShow] = useShow();
   // Follow new output unless the user has scrolled up. Captured from the user's
@@ -137,6 +142,12 @@ export function Transcript({
             target="_blank"
             rel="noreferrer"
             title={name}
+            onClick={(e) => {
+              // photos and videos open in the viewer (mark a spot and ask); other files open as before
+              if (!onAsk || !(isVideo(name) || /\.(jpe?g|png|webp|gif)$/i.test(name))) return;
+              e.preventDefault();
+              setViewing(name);
+            }}
           >
             {isVideo(name) ? (
               <video src={api.attachmentUrl(taskId, name)} className={styles.thumb} preload="metadata" muted />
@@ -276,6 +287,7 @@ export function Transcript({
           ↓ latest
         </button>
       )}
+      {viewing && <MediaViewer taskId={taskId} name={viewing} onClose={() => setViewing(null)} onAsk={onAsk} />}
     </div>
   );
 }

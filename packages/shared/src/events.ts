@@ -28,6 +28,9 @@ export const SERVER_EVENT = {
   agentStatus: 'agent:status',
   approvalCreated: 'approval:created',
   approvalResolved: 'approval:resolved',
+  /** An agent asked a question (ask_user) / it was answered, timed out or cancelled. */
+  questionCreated: 'question:created',
+  questionResolved: 'question:resolved',
   /** The task's pending-follow-up queue changed (enqueued/removed/drained) —
    *  from this client, another tab, or a channel. */
   followUpQueue: 'task:followup-queue',

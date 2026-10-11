@@ -29,6 +29,8 @@ import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
 import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
 import { ResourcesService } from '../resources/resources.service';
+import { describeNow } from './clock';
+import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
 import { isVideoName } from '../media/media-core';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
@@ -117,6 +119,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly codex: CodexService,
     private readonly resources: ResourcesService,
     private readonly media: MediaService,
+    private readonly questions: QuestionsService,
   ) {
     super();
   }
@@ -522,6 +525,13 @@ export class RealAgentExecutor extends AgentExecutor {
       onCreateSubtask: ctx.onCreateSubtask,
       onCheckSubtasks: ctx.onCheckSubtasks,
       onScheduleCheck: ctx.onScheduleCheck,
+      onCurrentTime: (input) => describeNow(new Date(), input.timezone),
+      onAskUser: async (input) =>
+        this.questions.ask(ctx.taskId, session.id, {
+          ...input,
+          // the picture shown with the question must be a real file of this task (never an arbitrary path)
+          image: input.image ? await this.media.safePath(input.image, ctx.worktreePath).catch(() => undefined) : undefined,
+        }),
       onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
       onLookAt: (input) => this.media.lookAt(input.path, input.question, ctx.worktreePath, input),
       onVideoDigest: (input) => this.media.videoDigest(input.path, ctx.worktreePath, input),

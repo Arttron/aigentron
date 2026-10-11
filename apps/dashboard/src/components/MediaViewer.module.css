@@ -1,0 +1,33 @@
+.stage {
+  display: flex;
+  justify-content: center;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.media {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+}
+.canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  cursor: crosshair;
+  touch-action: none;
+}
+.bar {
+  margin-top: 10px;
+  gap: 8px;
+  align-items: center;
+}
+.ask {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.ask input {
+  flex: 1;
+  min-width: 0;
+}

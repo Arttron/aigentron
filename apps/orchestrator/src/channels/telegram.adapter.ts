@@ -17,6 +17,9 @@ const CALLBACK_APPROVE = 'ap:';
 const CALLBACK_DENY = 'dn:';
 const CALLBACK_TASK = 'tk:';
 const CALLBACK_CANCEL = 'cn:';
+const CALLBACK_ANSWER = 'qa:'; // qa:<questionId>:<option index>
+const CALLBACK_TOGGLE = 'qt:'; // qt:<questionId>:<option index> — tick/untick (multiple choice)
+const CALLBACK_DONE = 'qd:'; // qd:<questionId> — send the ticked options
 
 /**
  * Telegram transport over the Bot API using long-polling (getUpdates) — no
@@ -146,6 +149,15 @@ export class TelegramAdapter implements ChannelAdapter {
     return { messageId: String(msg.message_id) };
   }
 
+  /** Swap the inline keyboard under a message (the ticks of a multiple-choice question). */
+  async setButtons(chatId: string, messageId: string, buttons: MessageButton[][]): Promise<void> {
+    await this.call('editMessageReplyMarkup', {
+      chat_id: chatId,
+      message_id: Number(messageId),
+      reply_markup: { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.label.slice(0, 64), callback_data: b.data.slice(0, 64) }))) },
+    }).catch(() => undefined); // unchanged / gone — best effort
+  }
+
   /** Edit a resolved approval message: drop the buttons and show the outcome. */
   async resolveApprovalMessage(chatId: string, messageId: string, outcome: string): Promise<void> {
     await this.call('editMessageText', {
@@ -188,7 +200,13 @@ export class TelegramAdapter implements ChannelAdapter {
 
   /** Replace the command menu (built-in commands + one per agent). */
   async setCommands(commands: { command: string; description: string }[]): Promise<void> {
-    await this.call('setMyCommands', { commands }).catch((e) => this.logger.warn(`setMyCommands failed: ${(e as Error).message}`));
+    // Telegram keeps a menu per scope: a narrower one (private chats / groups) overrides the default, so set all three.
+    // Errors are thrown (the caller retries later) — they used to be swallowed, which left a stale menu until the list changed.
+    for (const scope of [{ type: 'default' }, { type: 'all_private_chats' }, { type: 'all_group_chats' }]) {
+      await this.call('setMyCommands', { commands, scope });
+    }
+    const shown = await this.call<{ command: string }[]>('getMyCommands', { scope: { type: 'all_private_chats' } }).catch(() => []);
+    this.logger.log(`Telegram command menu set: ${commands.length} commands (${shown.length} visible in private chats)`);
   }
 
   stop(): void {
@@ -336,6 +354,30 @@ export class TelegramAdapter implements ChannelAdapter {
           userId: String(cq.from?.id ?? ''),
           userName: cq.from?.username ?? cq.from?.first_name,
           taskId: data.slice(CALLBACK_TASK.length),
+        });
+        return;
+      }
+      if (data.startsWith(CALLBACK_TOGGLE) || data.startsWith(CALLBACK_DONE)) {
+        await this.call('answerCallbackQuery', { callback_query_id: cq.id }).catch(() => undefined);
+        if (!cq.message) return;
+        const base = { chatId: String(cq.message.chat.id), userId: String(cq.from?.id ?? ''), userName: cq.from?.username ?? cq.from?.first_name };
+        if (data.startsWith(CALLBACK_DONE)) return void (await onEvent({ type: 'question-done', ...base, questionId: data.slice(CALLBACK_DONE.length) }));
+        const [questionId, idx] = data.slice(CALLBACK_TOGGLE.length).split(':');
+        if (!questionId || !/^\d+$/.test(idx ?? '')) return;
+        await onEvent({ type: 'question-toggle', ...base, questionId, index: Number(idx) });
+        return;
+      }
+      if (data.startsWith(CALLBACK_ANSWER)) {
+        await this.call('answerCallbackQuery', { callback_query_id: cq.id, text: 'Got it' }).catch(() => undefined);
+        const [questionId, idx] = data.slice(CALLBACK_ANSWER.length).split(':');
+        if (!cq.message || !questionId || !/^\d+$/.test(idx ?? '')) return;
+        await onEvent({
+          type: 'question-answer',
+          chatId: String(cq.message.chat.id),
+          userId: String(cq.from?.id ?? ''),
+          userName: cq.from?.username ?? cq.from?.first_name,
+          questionId,
+          index: Number(idx),
         });
         return;
       }

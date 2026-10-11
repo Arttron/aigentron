@@ -128,6 +128,31 @@ export interface AgentSession {
   endedAt: string | null;
 }
 
+export type QuestionStatus = 'pending' | 'answered' | 'timeout' | 'cancelled';
+
+/** A question an agent asked a human with `ask_user` — answer buttons in the dashboard and in channels. */
+export interface AgentQuestion {
+  id: string;
+  taskId: string;
+  agentSessionId: string | null;
+  question: string;
+  /** Answer choices (empty = free text only). */
+  options: string[];
+  /** The person may also type their own answer. */
+  allowText: boolean;
+  /** Several options may be chosen; the answer is the chosen ones joined with "; ". */
+  multiple: boolean;
+  /** Path of a picture shown with the question (inside the task's attachments / resources / workspace). */
+  image: string | null;
+  status: QuestionStatus;
+  answer: string | null;
+  /** Which button (0-based) was tapped, if one was. */
+  answerIndex: number | null;
+  answeredBy: string | null;
+  createdAt: string;
+  answeredAt: string | null;
+}
+
 export interface ApprovalRequest {
   id: string;
   taskId: string;

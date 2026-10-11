@@ -1,8 +1,10 @@
 import type {
+  AgentQuestion,
   AgentSession,
   ApprovalRequest,
   ChannelKind,
   PendingFollowUp,
+  QuestionStatus,
   Task,
   TaskStatus,
   UsageReport,
@@ -685,6 +687,15 @@ export const api = {
       body: file,
     }).then(unwrap<AttachmentMeta>),
 
+  listQuestions: (status?: QuestionStatus, taskId?: string) =>
+    fetch(`${API_BASE}/questions?${new URLSearchParams({ ...(status ? { status } : {}), ...(taskId ? { taskId } : {}) })}`, { cache: 'no-store' }).then(unwrap<AgentQuestion[]>),
+  answerQuestion: (id: string, answer: { index?: number; indexes?: number[]; text?: string }) =>
+    fetch(`${API_BASE}/questions/${encodeURIComponent(id)}/answer`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(answer),
+    }).then(unwrap<AgentQuestion>),
+  questionImageUrl: (id: string) => `${API_BASE}/questions/${encodeURIComponent(id)}/image`,
   mediaStatus: () =>
     fetch(`${API_BASE}/media`, { cache: 'no-store' }).then(
       unwrap<{ vision: { provider: string; model: string } | null; visionReady: boolean; ffmpeg: boolean; sttReady: boolean }>,

@@ -164,3 +164,9 @@ place above.
 
 ## Camera, video and Vision
 The 📎 menu has **📷 Camera** (photos / clips in the page over HTTPS, the phone's camera app otherwise); videos up to 300 MB can be attached to tasks and to the Resources library; Telegram videos, video messages and GIFs arrive as attachments (bots download ≤ 20 MB). Agents use `look_at` (a photo or video frames through the vision model) and `video_digest` (frames + transcript of the soundtrack); both accept `every_seconds` (step between frames, default ≈ one per 10 s), `at_seconds` (exact times) and `pointing` / `phrases` (frames at the moments the speaker says "look here" / given words — needs a Whisper-style speech model for timestamps). **Settings → Vision** picks the vision provider and model (not Claude/Codex sign-ins; *Test* shows a red square) and shows whether ffmpeg and speech recognition are available. Details: `docs/media.md`.
+
+## Questions from agents
+An agent can ask the person a question with **answer buttons** (`ask_user`): the card appears in the dock at the bottom right on every page (next to approvals), and in Telegram as a message with buttons — tap one or just reply with text (a number picks the option). The first answer wins; if nobody answers within an hour the agent chooses by itself or reports the task as blocked. Details: `docs/questions.md`.
+
+## Photo / video conversation and the clock
+Click a photo or video in a task to open the viewer: **Ask about this moment** / **Mark and ask** freezes the frame, lets the person draw a rectangle round what they mean and sends it to the agent as a follow-up (with the file name and the time). Agents have a `current_time` tool (date, time, weekday; optional IANA timezone — the default is the server's, which may differ from the user's).

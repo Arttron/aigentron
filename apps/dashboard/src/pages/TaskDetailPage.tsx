@@ -299,10 +299,11 @@ export function TaskDetailPage() {
               status={task.status}
               terminal={terminal}
               fill
+              onAsk={(p, a) => sendFollowUp(p, a, [])}
             />
           )}
           {tab === 'files' && (
-            <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} />
+            <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           )}
           {tab === 'tasks' && <TaskRelations task={task} onChange={refreshTask} />}
         </div>
@@ -375,11 +376,11 @@ export function TaskDetailPage() {
 
           <Card>
             <SectionTitle>Conversation</SectionTitle>
-            <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} />
+            <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           </Card>
           <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} />
 
-          <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} />
+          <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           <TaskRelations task={task} onChange={refreshTask} />
         </>
       )}

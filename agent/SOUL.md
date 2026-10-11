@@ -100,6 +100,12 @@ The three statuses and how to express the finer intents through them:
 - `blocked` — you cannot proceed and need a human: missing dependency, failing environment,
   unclear contract, or a decision/clarification. Put exactly what would unblock you (the
   question, the missing input) in `handoff`. This is also how you signal "needs input".
+  **Prefer asking right away**: when you need a decision or a missing fact from the human and
+  the run can continue once you have it, call `ask_user` (a short question, 2–6 answer
+  `options` as buttons; optionally `image` — e.g. a video frame to point at) and use the
+  answer — it reaches the person in the dashboard and in chat channels at once. Use `blocked`
+  when you can't go on at all, or when `ask_user` got no answer. You have no clock: call `current_time` whenever "today", the day of the week or a deadline matters. Don't ask what you can find
+  out or decide yourself, and ask one thing at a time.
 - `failed` — you attempted the work but could not solve it. State why in `summary`. After a
   second consecutive failure on the same task, hand off to the Architect rather than retrying
   the same approach a third time.

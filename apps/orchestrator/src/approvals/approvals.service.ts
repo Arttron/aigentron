@@ -408,7 +408,8 @@ export class ApprovalsService {
     const pending = await this.prisma.approvalRequest.count({
       where: { taskId, status: 'pending' },
     });
-    if (pending > 0) return;
+    const askedPending = await this.prisma.agentQuestion.count({ where: { taskId, status: 'pending' } });
+    if (pending + askedPending > 0) return;
     // Atomic, status-guarded flip: only a task still blocked on approval moves
     // back to running. This can't resurrect one that was cancelled/finished in
     // the meantime (the guard simply matches nothing).

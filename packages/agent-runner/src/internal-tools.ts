@@ -24,6 +24,8 @@ export type InternalToolHandlers = Pick<
   | 'onCheckSubtasks'
   | 'onScheduleCheck'
   | 'onSearchResources'
+  | 'onCurrentTime'
+  | 'onAskUser'
   | 'onLookAt'
   | 'onVideoDigest'
   | 'onStartPreview'
@@ -135,6 +137,33 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         params.onSearchResources!({
           query: typeof args.query === 'string' ? args.query : undefined,
           tag: typeof args.tag === 'string' ? args.tag : undefined,
+        }),
+    });
+  }
+
+  if (params.onCurrentTime) {
+    specs.push({
+      name: 'current_time',
+      description:
+        "The current date and time — you have no clock of your own, so call this whenever the answer depends on \"now\" (today's date, the day of the week, how long ago something was, a deadline, a schedule). `timezone` (optional): an IANA name such as \"Europe/Kyiv\" or \"America/New_York\"; by default the server's timezone, which may not be where the user is — if it matters, ask the user or use what you know about them.",
+      shape: { timezone: z.string().optional() },
+      handler: async (args) => params.onCurrentTime!({ timezone: typeof args.timezone === 'string' && args.timezone.trim() ? args.timezone.trim() : undefined }),
+    });
+  }
+
+  if (params.onAskUser) {
+    specs.push({
+      name: 'ask_user',
+      description:
+        "Ask the HUMAN a question and wait for the answer. Use it when you need a decision or a missing fact that you cannot find yourself — instead of guessing, and instead of ending your run with a question. `question`: short and specific. `options`: 2–6 short answer choices shown as buttons (in the dashboard and in the chat channels); leave it out for an open question. `multiple` (default false): the person may tick SEVERAL options (\"which of these topics do you want?\") — the answer lists the chosen ones. `allow_text` (default true): the person may also type their own answer. `image`: a full path of a photo / video frame to show with the question (e.g. a frame from video_digest — \"is THIS the crack?\"). Returns the answer; if nobody answers in time you get a note saying so — then choose the safest default yourself or report the task as blocked. Don't ask what you can decide or check yourself, and ask one thing at a time.",
+      shape: { question: z.string(), options: z.array(z.string()).optional(), allow_text: z.boolean().optional(), multiple: z.boolean().optional(), image: z.string().optional() },
+      handler: (args) =>
+        params.onAskUser!({
+          question: String(args.question ?? ''),
+          options: Array.isArray(args.options) ? (args.options as unknown[]).map(String) : [],
+          allowText: args.allow_text !== false,
+          multiple: args.multiple === true,
+          image: typeof args.image === 'string' && args.image ? args.image : undefined,
         }),
     });
   }

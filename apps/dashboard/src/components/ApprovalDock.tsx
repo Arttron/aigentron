@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { SERVER_EVENT, CLIENT_EVENT, type ApprovalRequest } from '@lds/shared';
+import { SERVER_EVENT, CLIENT_EVENT, type AgentQuestion, type ApprovalRequest } from '@lds/shared';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { ApprovalCard } from '@/components/ApprovalCard';
+import { QuestionCard } from '@/components/QuestionCard';
 import styles from './ApprovalDock.module.css';
 
 /**
@@ -14,6 +15,28 @@ import styles from './ApprovalDock.module.css';
  */
 export function ApprovalDock() {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  // Questions agents asked (ask_user) share the dock: the person is needed either way.
+  const [questions, setQuestions] = useState<AgentQuestion[]>([]);
+  useEffect(() => {
+    let active = true;
+    api
+      .listQuestions('pending')
+      .then((list) => active && setQuestions(list))
+      .catch(() => undefined);
+    const socket = getSocket();
+    const onAsked = (e: { question: AgentQuestion }) => setQuestions((prev) => (prev.some((q) => q.id === e.question.id) ? prev : [...prev, e.question]));
+    const onDone = (e: { question: AgentQuestion }) => setQuestions((prev) => prev.filter((q) => q.id !== e.question.id));
+    const onTaskGone = (e: { taskId: string }) => setQuestions((prev) => prev.filter((q) => q.taskId !== e.taskId));
+    socket.on(SERVER_EVENT.questionCreated, onAsked);
+    socket.on(SERVER_EVENT.questionResolved, onDone);
+    socket.on(SERVER_EVENT.taskDeleted, onTaskGone);
+    return () => {
+      active = false;
+      socket.off(SERVER_EVENT.questionCreated, onAsked);
+      socket.off(SERVER_EVENT.questionResolved, onDone);
+      socket.off(SERVER_EVENT.taskDeleted, onTaskGone);
+    };
+  }, []);
 
   // Pending approvals + live updates.
   useEffect(() => {
@@ -68,7 +91,7 @@ export function ApprovalDock() {
 
   // Flash the tab title while approvals are pending and the window is unfocused.
   useEffect(() => {
-    if (approvals.length === 0) return;
+    if (approvals.length + questions.length === 0) return;
     const original = document.title;
     let on = false;
     const tick = () => {
@@ -77,16 +100,16 @@ export function ApprovalDock() {
         return;
       }
       on = !on;
-      document.title = on ? `⚠ (${approvals.length}) Approval needed` : original;
+      document.title = on ? `⚠ (${approvals.length + questions.length}) ${questions.length ? 'Question' : 'Approval needed'}` : original;
     };
     const id = window.setInterval(tick, 1000);
     return () => {
       window.clearInterval(id);
       document.title = original;
     };
-  }, [approvals.length]);
+  }, [approvals.length, questions.length]);
 
-  if (approvals.length === 0) return null;
+  if (approvals.length + questions.length === 0) return null;
 
   return (
     <div className={styles.dock} role="region" aria-label="Pending approvals">
@@ -94,9 +117,12 @@ export function ApprovalDock() {
         <span className={styles.icon} aria-hidden>
           ⚠
         </span>
-        Approvals needed ({approvals.length})
+        {questions.length && !approvals.length ? 'Questions' : 'Approvals needed'} ({approvals.length + questions.length})
       </div>
       <div className={styles.list}>
+        {questions.map((q) => (
+          <QuestionCard key={q.id} question={q} showTask onGone={() => setQuestions((prev) => prev.filter((x) => x.id !== q.id))} />
+        ))}
         {approvals.map((a) => (
           <ApprovalCard
             key={a.id}

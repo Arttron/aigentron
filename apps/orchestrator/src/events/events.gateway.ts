@@ -137,6 +137,14 @@ export class EventsGateway
           .to(ROOM.task(event.payload.taskId))
           .emit(SERVER_EVENT.approvalResolved, event.payload);
         break;
+      case 'question-created':
+        this.server.to(ROOM.global).emit(SERVER_EVENT.questionCreated, event.payload);
+        this.server.to(ROOM.task(event.payload.question.taskId)).emit(SERVER_EVENT.questionCreated, event.payload);
+        break;
+      case 'question-resolved':
+        this.server.to(ROOM.global).emit(SERVER_EVENT.questionResolved, event.payload);
+        this.server.to(ROOM.task(event.payload.question.taskId)).emit(SERVER_EVENT.questionResolved, event.payload);
+        break;
       case 'followup-queue':
         this.server.to(ROOM.task(event.payload.taskId)).emit(SERVER_EVENT.followUpQueue, event.payload);
         break;

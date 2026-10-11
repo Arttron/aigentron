@@ -49,6 +49,33 @@ export type IncomingEvent =
       decision: 'approve' | 'deny';
     }
   | {
+      /** A tap on an answer button under an agent's question (ask_user). */
+      type: 'question-answer';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      questionId: string;
+      /** Which option (0-based). */
+      index: number;
+    }
+  | {
+      /** A tap on an option of a multiple-choice question: tick / untick it. */
+      type: 'question-toggle';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      questionId: string;
+      index: number;
+    }
+  | {
+      /** "Done" on a multiple-choice question: send what is ticked. */
+      type: 'question-done';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      questionId: string;
+    }
+  | {
       /** A tap on a task-list/subtask-list button — switch the chat's active task. */
       type: 'task-switch';
       chatId: string;
@@ -124,6 +151,8 @@ export interface ChannelAdapter {
    *  posted message's id so a caller can later edit it (e.g. a live status
    *  line) or react to it. */
   sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<{ messageId: string }>;
+  /** Replace the buttons under a message (tick marks on a multiple-choice question). Optional. */
+  setButtons?(chatId: string, messageId: string, buttons: MessageButton[][]): Promise<void>;
   /** Replace a previously-sent message's text in place (e.g. a live-updating
    *  "processing…" status line) — existing buttons/keyboard are preserved.
    *  Best-effort, optional — not every transport supports editing. */

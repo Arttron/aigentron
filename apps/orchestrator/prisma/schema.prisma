@@ -296,6 +296,33 @@ model AuthSession {
   @@index([expiresAt])
 }
 
+// A question an agent asked a human (ask_user): shown with answer buttons in the dashboard and in channels; the run waits for it.
+model AgentQuestion {
+  id             String    @id @default(cuid())
+  taskId         String
+  agentSessionId String?
+  question       String
+  // string[] of answer choices (empty = free text only)
+  options        Json
+  allowText      Boolean   @default(true)
+  // several options may be chosen (answer = the chosen ones joined)
+  multiple       Boolean   @default(false)
+  // an optional picture (path inside the task's attachments / resources) shown with the question
+  image          String?
+  // pending | answered | timeout | cancelled
+  status         String    @default("pending")
+  answer         String?
+  // which button (0-based) when one was tapped
+  answerIndex    Int?
+  answeredBy     String?
+  answeredById   String?
+  createdAt      DateTime  @default(now())
+  answeredAt     DateTime?
+
+  @@index([taskId])
+  @@index([status])
+}
+
 // Which task sent a message into a chat — so that replying to (quoting) it addresses that task / agent.
 model ChannelMessageLink {
   id        String   @id @default(cuid())

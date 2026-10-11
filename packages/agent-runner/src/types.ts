@@ -111,6 +111,10 @@ export interface RunAgentParams {
    */
   onSearchResources?: (input: { query?: string; tag?: string }) => Promise<string>;
   /** `look_at`: a vision model answers a question about a photo or a video's frames (path = a file from attachments / resources / the workspace). */
+  /** Ask the human a question (answer buttons in the dashboard / channels) and wait; resolves with the answer text for the model. */
+  /** The current date/time (optionally in an IANA timezone) as text for the model. */
+  onCurrentTime?: (input: { timezone?: string }) => string;
+  onAskUser?: (input: { question: string; options: string[]; allowText: boolean; multiple?: boolean; image?: string }) => Promise<string>;
   onLookAt?: (input: { path: string; question: string; everySeconds?: number; atSeconds?: number[]; phrases?: string[]; pointing?: boolean }) => Promise<string>;
   /** `video_digest`: frames (with paths to Read) and the transcript of a video. */
   onVideoDigest?: (input: { path: string; everySeconds?: number; atSeconds?: number[]; phrases?: string[]; pointing?: boolean }) => Promise<string>;

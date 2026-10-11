@@ -21,3 +21,7 @@ Limits: video ≤ 300 MB and ≤ 20 min, ≤ 8 images per `look_at`.
 Pick a provider and a vision-capable model (OpenAI, Anthropic, DeepSeek, local Ollama such as `qwen3-vl`); *Test* shows it a red square. Subscription
 logins (Claude / Codex sign-in) cannot be used here. Images leave the server for that provider and cost tokens; a local Ollama model is free.
 The tab also shows whether ffmpeg is installed (the installer and Docker images include it) and whether speech recognition is on.
+
+## Talking about a photo or a moment of a video
+In a task, click a photo or video (in the conversation or in Attachments) — it opens in a viewer. **💬 Ask about this moment** (video: pause where you want) or **💬 Mark and ask** (photo) freezes the picture; drag to draw a red rectangle round what you mean, type the question, **Ask**. The marked picture is attached to a follow-up message together with where it came from (file and time, e.g. "the frame of the video room.mp4 at 0:12.4"), so the agent can also look at other moments of the same video (`look_at` / `video_digest` with `at_seconds`).
+The agent can ask back with a picture too: `ask_user` takes an `image` (a video frame, a photo) — see `docs/questions.md`.

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { prepareFile } from '@/lib/capture';
 import { api, type AttachmentMeta } from '@/lib/api';
 import { Card, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { MediaViewer } from './MediaViewer';
 import styles from './Attachments.module.css';
 
 /**
@@ -9,7 +10,8 @@ import styles from './Attachments.module.css';
  * agents read/produced. Agents view images/PDF via the Read tool's vision and
  * read text-based formats as plain text either way.
  */
-export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSignal?: string }) {
+export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; reloadSignal?: string; onAsk?: (prompt: string, attachments: string[]) => Promise<void> }) {
+  const [viewing, setViewing] = useState<string | null>(null);
   const [items, setItems] = useState<AttachmentMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -73,7 +75,19 @@ export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSi
         {items.map((a) => {
           const url = api.attachmentUrl(taskId, a.name);
           return (
-            <a key={a.name} href={url} target="_blank" rel="noreferrer" className={styles.tile} title={a.name}>
+            <a
+              key={a.name}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className={styles.tile}
+              title={a.name}
+              onClick={(e) => {
+                if (!onAsk || !(a.mime.startsWith('video/') || a.mime.startsWith('image/'))) return;
+                e.preventDefault();
+                setViewing(a.name);
+              }}
+            >
               {a.mime.startsWith('video/') ? (
                 <video src={url} className={styles.thumb} preload="metadata" muted />
               ) : a.mime.startsWith('image/') ? (
@@ -86,6 +100,7 @@ export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSi
           );
         })}
       </div>
+      {viewing && <MediaViewer taskId={taskId} name={viewing} onClose={() => setViewing(null)} onAsk={onAsk} />}
     </Card>
   );
 }

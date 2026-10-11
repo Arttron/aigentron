@@ -32,6 +32,10 @@ export const SCHEDULE_CHECK_TOOL = `${INTERNAL_TOOL_PREFIX}schedule_check`;
 /** Start (or reuse) an ephemeral dev server for this task's worktree, for preview. */
 /** Read-only search over the project's resource library (notes/images/documents). Free for every agent. */
 /** Photos and video: `look_at` (a vision model looks at a photo / video frames), `video_digest` (frames + transcript of a video). Read-only. */
+/** Ask the human a question with answer buttons and wait for the answer. Not gated: the question itself is the human step. */
+/** The current date and time (agents have no clock of their own). Read-only. */
+export const CURRENT_TIME_TOOL = `${INTERNAL_TOOL_PREFIX}current_time`;
+export const ASK_USER_TOOL = `${INTERNAL_TOOL_PREFIX}ask_user`;
 export const LOOK_AT_TOOL = `${INTERNAL_TOOL_PREFIX}look_at`;
 export const VIDEO_DIGEST_TOOL = `${INTERNAL_TOOL_PREFIX}video_digest`;
 export const RESOURCES_SEARCH_TOOL = `${INTERNAL_TOOL_PREFIX}resources_search`;
