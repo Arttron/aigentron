@@ -157,6 +157,12 @@ export class AuthService implements OnModuleInit {
     return Number.isFinite(d) && d > 0 ? Math.min(d, 365) : 30;
   }
 
+  /** Logging out ends THIS session on the server too (not just the browser's cookie), so it also disappears from the list. */
+  async endCurrentSession(headers: Record<string, string | string[] | undefined>): Promise<void> {
+    const sid = this.sessionIdOf(headers);
+    if (sid && this.sessionUserId(headers)) await this.sessions.revokeOwn(sid);
+  }
+
   /** The session id carried by this request's cookie (for "this device" in the list and for noting activity). */
   sessionIdOf(headers: Record<string, string | string[] | undefined>): string | undefined {
     const s = this.state();

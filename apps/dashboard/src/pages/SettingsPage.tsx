@@ -14,6 +14,7 @@ import { McpEndpointManager } from '@/components/settings/McpEndpointManager';
 import { ChannelsManager } from '@/components/ChannelsManager';
 import { UsersManager } from '@/components/UsersManager';
 import { SchedulesManager } from '@/components/SchedulesManager';
+import { VisionSettings } from '@/components/settings/VisionSettings';
 import { VoiceSettings } from '@/components/settings/VoiceSettings';
 
 const TABS = [
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'channels', label: 'Channels' },
   { id: 'schedules', label: 'Schedules' },
   { id: 'voice', label: 'Voice' },
+  { id: 'vision', label: 'Vision' },
   { id: 'users', label: 'Users' },
   { id: 'sessions', label: 'Signed-in devices' },
 ] as const satisfies ReadonlyArray<TabDef<string>>;
@@ -57,6 +59,7 @@ export function SettingsPage() {
       {tab === 'channels' && <ChannelsManager />}
       {tab === 'schedules' && <SchedulesManager />}
       {tab === 'voice' && <VoiceSettings />}
+      {tab === 'vision' && <VisionSettings />}
       {tab === 'users' && <UsersManager />}
       {tab === 'sessions' && <SessionsSettings />}
     </>

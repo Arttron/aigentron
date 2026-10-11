@@ -51,7 +51,9 @@ active, with **Sign out** for each. You see your own; an **operator or admin see
 - Operators/admins: **Sign … out everywhere** ends all sessions of one person (their password stays).
 - **Changing or resetting a password ends all of that person's sessions** (when you change your own, this browser stays signed in). Removing a password does too.
 - "Sign out other browsers" under Security (everyone's) still exists; it ends every session of everyone.
-The addresses shown are the real client addresses (behind a tunnel the connecting proxy is trusted for `cf-connecting-ip`, see `TRUSTED_PROXY`). Sessions signed in before this feature
+The addresses shown are the real client addresses (behind a tunnel the connecting proxy is trusted for `cf-connecting-ip`, see `TRUSTED_PROXY`). **Logging out ends the session on the server too** (the dashboard's Sign out and `aigentron logout`), so it disappears from the list and the old cookie stops working. The terminal (`aigentron`, `aigentron admin`) keeps ONE
+session in `~/.local/state/aigentron/admin-session.json` (mode 0600) and reuses it, so running it again does not add a new device each time; if that session was ended or expired it signs in again.
+Sessions signed in before this feature
 keep working until they expire, but are not listed.
 
 ## Forgot the password

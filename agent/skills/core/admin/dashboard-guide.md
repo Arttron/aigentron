@@ -80,7 +80,7 @@ Settings → General → Approvals.
 
 ## Agents page (`/agents`)
 
-Two tabs: **Agents** and **Starter packs** (ready-made sets of agents, skills, notes and switched-off schedules — see "Starter packs"; `/agents?tab=packs` opens it directly).
+Two tabs: **Agents** and **Starter packs** (ready-made sets of agents, skills, notes and switched-off schedules — see "Starter packs"; `/agents?tab=packs` opens it directly). The **Agents** tab starts with *Default lead agent* (the agent that leads tasks which don't pick one; saved as soon as it is chosen — it used to live in Settings → General).
 The Agents tab lists agents with **Edit** and ✕ (the built-in admin has a "built-in" badge instead — it can't be deleted).
 **+ New agent** (and **Edit**) opens the form in a dialog. At the top, **Start from a template** (optional) lists the shipped templates (pm, architect, backend, frontend,
 designer, coder, reviewer, local-helper, researcher) — picking one pre-fills every field; then set the *Name*, choose a *Provider*, edit anything and save.
@@ -94,7 +94,7 @@ Token and request usage per provider with ranges: Today, 7 days, 30 days, All ti
 ## Settings (`/settings`) — tabs
 
 **General**: *Version & updates* — the installed version, the newest release with its notes, **Check now**, and **Update to X** (an operator confirms; the server restarts for a minute or two, the previous version is kept for `aigentron rollback`; a Docker install cannot update itself and says to run `aigentron update`; I can start it too with `propose_update`). Repository (GitHub) — *Repo URL* (blank = local workspace, no remote), *Base branch*, *GitHub token*,
-*Project subdirectory* (a RELATIVE folder inside the repo such as `apps/web`, or empty for the repo root — a git address/URL here is rejected; the URL goes in *Repo URL*); *Default lead agent*; *Escalations* (default channel + chat/thread id for questions from tasks with
+*Project subdirectory* (a RELATIVE folder inside the repo such as `apps/web`, or empty for the repo root — a git address/URL here is rejected; the URL goes in *Repo URL*); *Escalations* (default channel + chat/thread id for questions from tasks with
 no channel); *Agent instructions (skill)* — text appended to every agent's prompt; *Verification gate* — commands run after
 each run + max auto-fix attempts; *Task queue* — concurrency; *Approvals* — timeout in seconds; *Display* — theme.
 
@@ -161,3 +161,6 @@ and not on the web. Quotations are checked against what was actually read (`veri
 I can explain any of the above, create/edit/delete agents, clean up tasks, and configure providers (except secrets), always
 through approvals. I can't press buttons for them, change other settings, or see keys — for those I point to the exact
 place above.
+
+## Camera, video and Vision
+The 📎 menu has **📷 Camera** (photos / clips in the page over HTTPS, the phone's camera app otherwise); videos up to 300 MB can be attached to tasks and to the Resources library; Telegram videos, video messages and GIFs arrive as attachments (bots download ≤ 20 MB). Agents use `look_at` (a photo or video frames through the vision model) and `video_digest` (frames + transcript of the soundtrack); both accept `every_seconds` (step between frames, default ≈ one per 10 s), `at_seconds` (exact times) and `pointing` / `phrases` (frames at the moments the speaker says "look here" / given words — needs a Whisper-style speech model for timestamps). **Settings → Vision** picks the vision provider and model (not Claude/Codex sign-ins; *Test* shows a red square) and shows whether ffmpeg and speech recognition are available. Details: `docs/media.md`.

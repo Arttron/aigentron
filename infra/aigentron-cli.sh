@@ -44,7 +44,7 @@ completion() {
 _aigentron() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update reset-password rollback version completion help -h --help -v --version" -- "$cur") )
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update reset-password rollback logout version completion help -h --help -v --version" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   fi
@@ -76,6 +76,7 @@ _aigentron() {
     'update:install the latest release'
     'reset-password:remove the dashboard password'
     'rollback:go back to the previous release'
+    'logout:end this terminal\'s signed-in session'
     'version:the installed version'
     'completion:print the tab-completion script'
     'help:show help'
@@ -112,6 +113,7 @@ $(say "${B}Set up${N}")
   aigentron connection        how the setup menu reaches the server (rarely needed)
   aigentron access            allowed domains, Cloudflare Access, public address / listening
   aigentron admin [text]      chat with the admin assistant in the terminal
+  aigentron logout            end this terminal's signed-in session (it is remembered between runs)
 
 $(say "${B}Run${N}")
   aigentron status            is it running? version, health, address
@@ -149,6 +151,7 @@ doctor() {
   fi
   if health=$(curl -fsS --max-time 5 "http://127.0.0.1:$PORT/api/health" 2>/dev/null); then ok "answers on port $PORT"; else fail "nothing answers on port $PORT"; fi
   if [ "$MODE" = bare ]; then
+    if command -v ffmpeg >/dev/null 2>&1; then ok "ffmpeg is installed (video processing)"; else warn "ffmpeg is not installed — video processing is off (sudo apt install ffmpeg)"; fi
     if command -v ss >/dev/null 2>&1; then
       wide=$(ss -ltnH 2>/dev/null | awk '$4 ~ /(^0\.0\.0\.0|^\*|^\[::\]):4000$/' | head -1)
       if [ -n "$wide" ]; then warn "LiteLLM (port 4000) listens on all interfaces — update to 0.1.34+ so it is loopback-only"; else ok "LiteLLM is not exposed on the network"; fi
@@ -173,6 +176,7 @@ case "${1:-}" in
   access|domains|host) shift; node_script setup-wizard.mjs --section access "$@" ;;
   providers|channels|agents|advanced) sec="$1"; shift; node_script setup-wizard.mjs --section "$sec" "$@" ;;
   repo|repository) shift; node_script setup-wizard.mjs --section repo "$@" ;;
+  logout) shift; node_script setup-wizard.mjs --logout "$@" ;;
   admin|chat) shift; node_script admin-cli.mjs "$@" ;;
   version|-v|--version) version ;;
   doctor|check) doctor ;;

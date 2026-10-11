@@ -90,7 +90,8 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(200)
-  logout(@Res({ passthrough: true }) res: Response) {
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    await this.auth.endCurrentSession(req.headers);
     res.append('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
     return { ok: true };
   }

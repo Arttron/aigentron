@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { prepareFile } from '@/lib/capture';
 import { api, type AttachmentMeta } from '@/lib/api';
 import { Card, Row, Button, Muted, ErrorText } from '@/components/ui';
 import styles from './Attachments.module.css';
@@ -32,7 +33,7 @@ export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSi
     setError(null);
     try {
       for (const file of Array.from(files)) {
-        await api.uploadAttachment(taskId, file);
+        await api.uploadAttachment(taskId, await prepareFile(file));
       }
       refresh();
     } catch (e) {
@@ -73,7 +74,9 @@ export function Attachments({ taskId, reloadSignal }: { taskId: string; reloadSi
           const url = api.attachmentUrl(taskId, a.name);
           return (
             <a key={a.name} href={url} target="_blank" rel="noreferrer" className={styles.tile} title={a.name}>
-              {a.mime.startsWith('image/') ? (
+              {a.mime.startsWith('video/') ? (
+                <video src={url} className={styles.thumb} preload="metadata" muted />
+              ) : a.mime.startsWith('image/') ? (
                 <img src={url} alt={a.name} className={styles.thumb} />
               ) : (
                 <div className={styles.doc}>📄</div>

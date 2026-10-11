@@ -154,6 +154,7 @@ describe('describeAgent', () => {
     expect(describeAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0')).toBe('Edge on Windows');
     expect(describeAgent('Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0')).toBe('Firefox on Linux');
     expect(describeAgent('curl/8.4.0')).toBe('curl');
+    expect(describeAgent('aigentron-cli')).toBe('Terminal (aigentron)');
     expect(describeAgent('')).toBe('Unknown device');
   });
   it('a session id in the cookie round-trips, and junk ids are dropped', () => {

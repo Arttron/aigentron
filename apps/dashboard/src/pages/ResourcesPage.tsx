@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type AgentInfo, type ResourceInfo } from '@/lib/api';
 import { AppHeader, BackLink, Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
+import { hasLiveCamera, prepareFile } from '@/lib/capture';
+import { CameraCapture } from '@/components/CameraCapture';
 import styles from './ResourcesPage.module.css';
 
 const kb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-const ICON: Record<ResourceInfo['kind'], string> = { text: '📝', image: '🖼', pdf: '📄', file: '📎' };
+const ICON: Record<ResourceInfo['kind'], string> = { text: '📝', image: '🖼', pdf: '📄', video: '🎞', file: '📎' };
 
 interface Draft {
   id: string | null;
@@ -28,6 +30,8 @@ export function ResourcesPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const [camera, setCamera] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -56,7 +60,7 @@ export function ResourcesPage() {
     setError(null);
     let last: ResourceInfo | null = null;
     try {
-      for (const f of Array.from(files)) last = await api.uploadResource(f);
+      for (const f of Array.from(files)) last = await api.uploadResource(await prepareFile(f));
       await refresh();
       // One file: let the person add the description right away — agents decide what to read by it.
       if (last && Array.from(files).length === 1) await edit(last);
@@ -65,6 +69,7 @@ export function ResourcesPage() {
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
+      if (camRef.current) camRef.current.value = '';
     }
   };
 
@@ -122,11 +127,16 @@ export function ResourcesPage() {
             <Button variant="primary" disabled={busy} onClick={() => fileRef.current?.click()}>
               ⬆ Upload files
             </Button>
+            <Button disabled={busy} onClick={() => (hasLiveCamera() ? setCamera(true) : camRef.current?.click())}>
+              📷 Camera
+            </Button>
             <Button disabled={busy} onClick={() => setDraft({ id: null, kind: 'text', title: '', description: '', tags: '', agents: [], text: '' })}>
               📝 New note
             </Button>
-            <Muted>or drop files here (up to 25 MB each — images, PDF, text, anything)</Muted>
+            <Muted>or drop files here (up to 25 MB each, videos up to 300 MB — images, video, PDF, text, anything)</Muted>
           </Row>
+          <input ref={camRef} type="file" accept="image/*,video/*" capture="environment" hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
+          {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void upload(files)} />}
           <input ref={fileRef} type="file" multiple hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
         </div>
         <Row wrap>
@@ -152,7 +162,13 @@ export function ResourcesPage() {
         {shown.map((r) => (
           <div key={r.id} className={styles.card}>
             <a className={styles.thumb} href={api.resourceUrl(r.id)} target="_blank" rel="noreferrer" title="Open">
-              {r.kind === 'image' ? <img src={api.resourceUrl(r.id)} alt={r.title} loading="lazy" /> : <span aria-hidden>{ICON[r.kind]}</span>}
+              {r.kind === 'image' ? (
+                <img src={api.resourceUrl(r.id)} alt={r.title} loading="lazy" />
+              ) : r.kind === 'video' ? (
+                <video src={api.resourceUrl(r.id)} preload="metadata" muted />
+              ) : (
+                <span aria-hidden>{ICON[r.kind]}</span>
+              )}
             </a>
             <div className={styles.body}>
               <strong className={styles.title}>{r.title}</strong>

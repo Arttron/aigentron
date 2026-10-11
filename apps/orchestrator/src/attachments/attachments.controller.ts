@@ -1,6 +1,7 @@
 import { Controller, Get, Param, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { createReadStream } from 'node:fs';
+import { serveWithRanges } from '../media/serve-range';
 import { AttachmentsService } from './attachments.service';
 
 /** Attachments for a task, any file type (raw-body upload — no multer dependency). */
@@ -24,7 +25,7 @@ export class AttachmentsController {
   }
 
   @Get(':file')
-  async serve(@Param('id') id: string, @Param('file') file: string, @Res() res: Response) {
+  async serve(@Param('id') id: string, @Param('file') file: string, @Req() req: Request, @Res() res: Response) {
     const { path, mime, inline, name } = await this.attachments.filePath(id, file);
     res.setHeader('content-type', mime);
     res.setHeader('cache-control', 'private, max-age=300');
@@ -32,6 +33,8 @@ export class AttachmentsController {
     // instead of rendering — an uploaded .html/.svg/.js must never execute as
     // same-origin script just because its URL was opened in a browser tab.
     if (!inline) res.setHeader('content-disposition', `attachment; filename="${name}"`);
+    // Video needs byte ranges (browsers seek, and iOS refuses to play without them).
+    if (mime.startsWith('video/')) return serveWithRanges(req, res, path);
     createReadStream(path).pipe(res);
   }
 }

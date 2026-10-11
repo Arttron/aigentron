@@ -69,6 +69,27 @@ export function AgentsPage() {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
 
+  const [defaultLead, setDefaultLead] = useState('');
+  const [leadBusy, setLeadBusy] = useState(false);
+  useEffect(() => {
+    api
+      .getSettings()
+      .then((s) => setDefaultLead(s.defaultAgent ?? ''))
+      .catch(() => undefined);
+  }, []);
+  const changeLead = async (name: string) => {
+    setLeadBusy(true);
+    setError(null);
+    try {
+      await api.updateSettings({ defaultAgent: name });
+      setDefaultLead(name);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLeadBusy(false);
+    }
+  };
+
   const refresh = useCallback(async () => {
     try {
       const [a, p, sk, mcp] = await Promise.all([
@@ -248,33 +269,56 @@ export function AgentsPage() {
       {tab === 'packs' && <PacksCard />}
 
       {tab === 'agents' && (
-        <Card>
-          <Row spaceBetween>
-            <SectionTitle className={styles.flush}>Agents ({agents.length})</SectionTitle>
-            <Button variant="primary" onClick={startNew}>
-              + New agent
-            </Button>
-          </Row>
-          <ul className={styles.list}>
-            {agents.map((a) => (
-              <li key={a.name} className={styles.item}>
-                <strong className={styles.name}>{a.name}</strong>
-                <Muted className={styles.desc}>{a.description}</Muted>
-                {a.provider && <Badge tone="neutral">{a.provider}</Badge>}
-                <Button size="sm" onClick={() => edit(a.name)}>
-                  Edit
-                </Button>
-                {a.name.toLowerCase() === 'admin' ? (
-                  <Badge tone="neutral">built-in</Badge>
-                ) : (
-                  <Button variant="red" size="sm" onClick={() => remove(a.name)}>
-                    ✕
+        <>
+          <Card>
+            <SectionTitle>Default lead agent</SectionTitle>
+            <Field label="Agent used as the lead for tasks that don't pick one (it delegates to the rest)">
+              <select
+                value={defaultLead}
+                disabled={leadBusy}
+                onChange={(e) => void changeLead(e.target.value)}
+              >
+                <option value="">(none — generic lead)</option>
+                {agents.map((a) => (
+                  <option key={a.name} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Muted>
+              The lead orchestrates the run; e.g. <code>pm</code> plans and delegates to the team.
+              Saved as soon as you pick.
+            </Muted>
+          </Card>
+          <Card>
+            <Row spaceBetween>
+              <SectionTitle className={styles.flush}>Agents ({agents.length})</SectionTitle>
+              <Button variant="primary" onClick={startNew}>
+                + New agent
+              </Button>
+            </Row>
+            <ul className={styles.list}>
+              {agents.map((a) => (
+                <li key={a.name} className={styles.item}>
+                  <strong className={styles.name}>{a.name}</strong>
+                  <Muted className={styles.desc}>{a.description}</Muted>
+                  {a.provider && <Badge tone="neutral">{a.provider}</Badge>}
+                  <Button size="sm" onClick={() => edit(a.name)}>
+                    Edit
                   </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
+                  {a.name.toLowerCase() === 'admin' ? (
+                    <Badge tone="neutral">built-in</Badge>
+                  ) : (
+                    <Button variant="red" size="sm" onClick={() => remove(a.name)}>
+                      ✕
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </>
       )}
 
       {form && (

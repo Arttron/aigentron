@@ -20,7 +20,7 @@
 // ----------------------------------------------------------------------
 import { createInterface } from 'node:readline';
 import { spawnSync, execSync } from 'node:child_process';
-import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -330,15 +330,45 @@ function guessKind(baseUrl) {
 // ---- orchestrator REST client ----
 
 // If the dashboard password is already set, pass it as LDS_ADMIN_PASSWORD (it is used once to sign in).
-let sessionToken = '';
+const UA = 'aigentron-cli';
+/** The terminal's session token is kept (0600) and reused — the same file `aigentron admin` uses — so one terminal is ONE signed-in device. */
+const sessionFile = () => join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'aigentron', 'admin-session.json');
+const loadToken = () => {
+  try {
+    return JSON.parse(readFileSync(sessionFile(), 'utf8')).token || '';
+  } catch {
+    return '';
+  }
+};
+const saveToken = (t) => {
+  try {
+    mkdirSync(dirname(sessionFile()), { recursive: true, mode: 0o700 });
+    writeFileSync(sessionFile(), JSON.stringify({ token: t }), { mode: 0o600 });
+  } catch {
+    /* not fatal: we just sign in again next time */
+  }
+};
+const forgetToken = () => {
+  try {
+    rmSync(sessionFile(), { force: true });
+  } catch {
+    /* ignore */
+  }
+};
+let sessionToken = loadToken();
 /**
  * If the server has a sign-in password, sign in before doing anything (otherwise every call is rejected and the lists look empty).
  * LDS_ADMIN_PASSWORD / LDS_ADMIN_USER work for scripts; interactively we ask: who you are (when several users have a password), then
  * the password in a hidden prompt.
  */
 async function ensureSignedIn(rl) {
-  const status = await fetch(`${BASE}/api/auth/status`, { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
-  if (!status?.configured || status.authenticated) return;
+  const status = await fetch(`${BASE}/api/auth/status`, { cache: 'no-store', headers: { 'user-agent': UA, ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}) } }).then((r) => r.json()).catch(() => null);
+  if (!status?.configured) return;
+  if (status.authenticated) return; // the remembered session is still good — no password, no new device in the list
+  if (sessionToken) {
+    sessionToken = '';
+    forgetToken(); // expired or ended from the dashboard
+  }
   if (process.env.LDS_ADMIN_PASSWORD) {
     await signInFromEnv();
     log('  ✓ signed in');
@@ -351,10 +381,11 @@ async function ensureSignedIn(rl) {
     users.length > 1 ? await promptChoice(rl, 'Who are you?', users.map((u) => ({ value: u.id, label: u.displayName, hint: `(${u.role})` })), users[0].id) : users[0]?.id;
   for (let attempt = 0; attempt < 3; attempt++) {
     const password = await promptSecret(rl, 'Password: ');
-    const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user, password }) });
+    const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA }, body: JSON.stringify({ user, password }) });
     const j = await r.json().catch(() => ({}));
     if (r.ok && j.token) {
       sessionToken = j.token;
+      saveToken(sessionToken);
       log('  ✓ signed in');
       return;
     }
@@ -367,10 +398,11 @@ async function ensureSignedIn(rl) {
 async function signInFromEnv() {
   const password = process.env.LDS_ADMIN_PASSWORD;
   if (!password) throw new Error('The server has a sign-in password. Re-run with LDS_ADMIN_PASSWORD=<password> (and LDS_ADMIN_USER=<name> if several users have one) in the environment.');
-  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user: process.env.LDS_ADMIN_USER || undefined, password }) });
+  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA }, body: JSON.stringify({ user: process.env.LDS_ADMIN_USER || undefined, password }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.token) throw new Error(`sign-in failed: ${j.error || r.status}`);
   sessionToken = j.token;
+  saveToken(sessionToken);
 }
 // ---- activity indicator: anything that takes longer than a moment shows a spinner, so the menu never looks frozen ----
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -413,7 +445,7 @@ async function busy(label, fn) {
 }
 
 async function api(method, path, body, retried = false) {
-  const headers = { ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}) };
+  const headers = { 'user-agent': UA, ...(body !== undefined ? { 'content-type': 'application/json' } : {}), ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}) };
   const stop = startSpinner(busyLabel ?? 'Waiting for the server…');
   let res;
   try {
@@ -1554,6 +1586,7 @@ function parseArgs(argv) {
     if (a === '--orchestrator-url') args.orchestratorUrl = argv[++i];
     else if (a === '--advanced') args.advanced = true;
     else if (a === '--section') args.section = argv[++i];
+    else if (a === '--logout') args.logout = true;
     else if (a === '-h' || a === '--help') args.help = true;
   }
   return args;
@@ -1563,6 +1596,7 @@ function printHelp() {
   log('Usage: node infra/setup-wizard.mjs [--orchestrator-url <url>] [--advanced]');
   log('  --orchestrator-url  Orchestrator base URL (default: remembered from the first run, else http://localhost:3001)');
   log('  --advanced          Skip straight to the password-gated advanced-settings step');
+  log('  --logout            End this terminal\'s signed-in session on the server and forget it');
   log('  --section <name>    Jump straight to one section: providers | channels | agents | repo | access | advanced | connection');
 }
 
@@ -1588,6 +1622,15 @@ async function main() {
     log('\naborted');
     process.exit(130);
   });
+
+  if (args.logout) {
+    BASE = (args.orchestratorUrl || process.env.ORCHESTRATOR_URL || loadSaved().url || BASE).replace(/\/$/, '');
+    const had = Boolean(sessionToken);
+    if (had) await fetch(`${BASE}/api/auth/logout`, { method: 'POST', headers: { 'user-agent': UA, authorization: `Bearer ${sessionToken}` } }).catch(() => undefined);
+    forgetToken();
+    console.log(had ? `${c.green('✓')} Signed out — this terminal's session is ended on the server and forgotten.` : c.gray('This terminal was not signed in.'));
+    return;
+  }
 
   try {
     banner('Aigentron setup wizard', 'Esc goes back / cancels · Ctrl+C quits · re-run any time');

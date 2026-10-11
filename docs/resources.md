@@ -3,7 +3,7 @@
 A simple knowledge base made of plain files. Everything in it is available to **every agent of the project**.
 
 ## What goes in
-Text notes (Markdown), images (png/jpg/webp/gif), PDFs and any other file (≤ 25 MB each, ≤ 500 resources, ≤ 500 MB in total).
+Text notes (Markdown), images (png/jpg/webp/gif), PDFs, **videos** (mp4/mov/webm/mkv, ≤ 300 MB each — see `docs/media.md`) and any other file (≤ 25 MB each, ≤ 500 resources, ≤ 2 GB in total).
 Typical: house measurements and reference photos, a learner's profile and vocabulary, a style guide, a price list, meeting notes.
 
 ## How to add

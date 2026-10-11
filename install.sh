@@ -217,6 +217,14 @@ else
     log "curl not found — installing"
     pkg_install curl
   }
+  # ffmpeg cuts video into frames and extracts its sound (video understanding). Best effort: without it everything else works and
+  # video says it is not available.
+  ensure_ffmpeg() {
+    command -v ffmpeg >/dev/null 2>&1 && return 0
+    [ "$AUTO_INSTALL_DEPS" = "1" ] || { log "ffmpeg not found — video processing stays off (install ffmpeg to enable it)"; return 0; }
+    log "ffmpeg not found — installing (for video)"
+    pkg_install ffmpeg || log "could not install ffmpeg — video processing stays off (install it manually: ffmpeg)"
+  }
   ensure_git() {
     command -v git >/dev/null 2>&1 && return 0
     [ "$AUTO_INSTALL_DEPS" = "1" ] || die "git is required but not found on PATH"
@@ -311,6 +319,7 @@ else
   ensure_python3
   ensure_node
   ensure_uv
+  ensure_ffmpeg
   command -v pnpm >/dev/null 2>&1 || command -v corepack >/dev/null 2>&1 \
     || die "pnpm (or corepack, which provides it) is required but not found on PATH"
 fi

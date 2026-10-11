@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SERVER_EVENT, type PendingFollowUp } from '@lds/shared';
+import { ATTACH_ACCEPT, hasLiveCamera, isVideo, prepareFile } from '@/lib/capture';
+import { CameraCapture } from '@/components/CameraCapture';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
@@ -74,6 +76,8 @@ export function FollowUpForm({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const [camera, setCamera] = useState(false);
 
   const [queue, setQueue] = useState<PendingFollowUp[]>([]);
   // Id of the queued message currently loaded into the composer for editing.
@@ -115,13 +119,13 @@ export function FollowUpForm({
     el.style.height = `${Math.min(el.scrollHeight, 124)}px`;
   }, [text, compact, sheet]);
 
-  const pickFiles = async (files: FileList | null) => {
+  const pickFiles = async (files: FileList | File[] | null) => {
     if (!files?.length) return;
     setUploading(true);
     setError(null);
     try {
       for (const file of Array.from(files)) {
-        const meta = await api.uploadAttachment(taskId, file);
+        const meta = await api.uploadAttachment(taskId, await prepareFile(file));
         setStaged((s) => [...s, { name: meta.name, mime: meta.mime }]);
       }
     } catch (e) {
@@ -217,7 +221,10 @@ export function FollowUpForm({
     const kind = e.target.value;
     e.target.value = '';
     if (kind === 'file') fileRef.current?.click();
-    else if (kind === 'task') setShowRefs(true);
+    else if (kind === 'camera') {
+      if (hasLiveCamera()) setCamera(true);
+      else camRef.current?.click();
+    } else if (kind === 'task') setShowRefs(true);
   };
 
   const primaryLabel = sending
@@ -242,6 +249,8 @@ export function FollowUpForm({
                   alt={a.name}
                   className={styles.chipThumb}
                 />
+              ) : isVideo(a.name, a.mime) ? (
+                <span className={styles.chipDoc}>🎞</span>
               ) : (
                 <span className={styles.chipDoc}>📄</span>
               )}
@@ -265,11 +274,21 @@ export function FollowUpForm({
       <input
         ref={fileRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+        accept={ATTACH_ACCEPT}
         multiple
         className={styles.hidden}
         onChange={(e) => pickFiles(e.target.files)}
       />
+      {/* No live camera (plain HTTP): the phone's own camera app takes the shot. */}
+      <input
+        ref={camRef}
+        type="file"
+        accept="image/*,video/*"
+        capture="environment"
+        className={styles.hidden}
+        onChange={(e) => pickFiles(e.target.files)}
+      />
+      {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void pickFiles(files)} />}
     </>
   );
   const queueEl = (
@@ -405,7 +424,8 @@ export function FollowUpForm({
             disabled={uploading}
           >
             <option value="">{uploading ? '…' : '📎'}</option>
-            <option value="file">🖼 Image / file</option>
+            <option value="file">🖼 Image / video / file</option>
+            <option value="camera">📷 Camera</option>
             <option value="task">🔗 Task</option>
           </select>
           <textarea
@@ -474,7 +494,8 @@ export function FollowUpForm({
           disabled={uploading}
         >
           <option value="">{uploading ? 'Uploading…' : '📎 Attach…'}</option>
-          <option value="file">🖼 Image / file</option>
+          <option value="file">🖼 Image / video / file</option>
+            <option value="camera">📷 Camera</option>
           <option value="task">🔗 Task</option>
         </select>
         {(showRefs || references.length > 0) && (

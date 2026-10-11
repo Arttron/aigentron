@@ -110,6 +110,10 @@ export interface RunAgentParams {
    * matching entries with the file path to Read. Wired for every agent.
    */
   onSearchResources?: (input: { query?: string; tag?: string }) => Promise<string>;
+  /** `look_at`: a vision model answers a question about a photo or a video's frames (path = a file from attachments / resources / the workspace). */
+  onLookAt?: (input: { path: string; question: string; everySeconds?: number; atSeconds?: number[]; phrases?: string[]; pointing?: boolean }) => Promise<string>;
+  /** `video_digest`: frames (with paths to Read) and the transcript of a video. */
+  onVideoDigest?: (input: { path: string; everySeconds?: number; atSeconds?: number[]; phrases?: string[]; pointing?: boolean }) => Promise<string>;
   /**
    * When set, the agent gets a `preview_worktree` tool that starts (or reuses) an
    * ephemeral dev server for this task's worktree and returns its URL, so the

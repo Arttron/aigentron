@@ -142,7 +142,7 @@ async function signIn() {
   }
   const password = process.env.LDS_ADMIN_PASSWORD || (isTTY ? await ask('Password › ', { hidden: true }) : null);
   if (!password) throw new Error('Sign-in required: run this in a terminal, or set LDS_ADMIN_PASSWORD.');
-  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user: user || undefined, password }) });
+  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'aigentron-cli' }, body: JSON.stringify({ user: user || undefined, password }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.token) throw new Error(j.error || `sign-in failed (${r.status})`);
   sessionToken = j.token;
@@ -157,6 +157,7 @@ async function api(path, { method = 'GET', body } = {}, retried = false) {
   const res = await fetch(`${BASE}/api${path}`, {
     method,
     headers: {
+      'user-agent': 'aigentron-cli',
       'content-type': 'application/json',
       ...(opts.user ? { 'x-lds-user': opts.user } : {}),
       ...(sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}),

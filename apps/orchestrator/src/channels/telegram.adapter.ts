@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { Logger } from '@nestjs/common';
-import type { ChannelAdapter, IncomingHandler, MessageButton, OutgoingApproval } from './channel-adapter';
+import type { ChannelAdapter, ChatActivity, IncomingHandler, MessageButton, OutgoingApproval } from './channel-adapter';
 import { COMMAND_MENU } from './command-menu';
 
 /** Telegram bot config stored in Channel.config. */
@@ -181,6 +181,11 @@ export class TelegramAdapter implements ChannelAdapter {
     }).catch((e) => this.logger.warn(`setMyCommands failed: ${(e as Error).message}`));
   }
 
+  /** "typing…" / "recording a voice message…" etc. — Telegram shows it for ~5 s, so callers repeat it while busy. */
+  async setActivity(chatId: string, activity: ChatActivity): Promise<void> {
+    await this.call('sendChatAction', { chat_id: chatId, action: activity }).catch(() => undefined);
+  }
+
   /** Replace the command menu (built-in commands + one per agent). */
   async setCommands(commands: { command: string; description: string }[]): Promise<void> {
     await this.call('setMyCommands', { commands }).catch((e) => this.logger.warn(`setMyCommands failed: ${(e as Error).message}`));
@@ -234,15 +239,19 @@ export class TelegramAdapter implements ChannelAdapter {
 
   private async dispatch(u: TelegramUpdate, onEvent: IncomingHandler): Promise<void> {
     const m = u.message;
-    // A photo or document → download it and emit an attachment event.
-    if (m && (m.photo?.length || m.document)) {
-      const doc = m.document;
+    // A photo, video, round video message (video note), GIF/animation or document → download it and emit an attachment event.
+    // A video's soundtrack is transcribed later by the video_digest tool, so a video note needs no special voice path.
+    if (m && (m.photo?.length || m.document || m.video || m.video_note || m.animation)) {
+      const doc = m.document ?? m.video ?? m.video_note ?? m.animation;
       // Photos come in sizes; the last is the largest.
       const photo = m.photo?.[m.photo.length - 1];
       const fileId = doc?.file_id ?? photo?.file_id;
       if (!fileId) return;
+      const TG_LIMIT = 20 * 1024 * 1024; // what a bot is allowed to download
+      const tooBig = () => this.sendMessage(String(m.chat.id), '📎 That file is too big for Telegram bots to download (20 MB). Upload it in the dashboard instead (a photo/video button in the message box), or send a shorter clip.').catch(() => undefined);
+      if ((doc?.file_size ?? 0) > TG_LIMIT) return void (await tooBig());
       try {
-        const { data, fileName } = await this.downloadFile(fileId, doc?.file_name);
+        const { data, fileName } = await this.downloadFile(fileId, doc?.file_name ?? (m.video_note ? 'video-message.mp4' : m.video || m.animation ? 'video.mp4' : undefined));
         await onEvent({
           type: 'attachment',
           chatId: String(m.chat.id),
@@ -257,13 +266,14 @@ export class TelegramAdapter implements ChannelAdapter {
         });
       } catch (e) {
         this.logger.warn(`file download failed: ${(e as Error).message}`);
+        if (/too big/i.test((e as Error).message)) await tooBig();
       }
       return;
     }
-    // A voice message, an audio file or a round video note → download and emit a voice event (transcribed upstream).
-    if (m && (m.voice || m.audio || m.video_note)) {
-      const v = m.voice ?? m.audio ?? m.video_note!;
-      const mime = m.voice?.mime_type ?? m.audio?.mime_type ?? (m.video_note ? 'video/mp4' : 'audio/ogg');
+    // A voice message or an audio file → download and emit a voice event (transcribed upstream).
+    if (m && (m.voice || m.audio)) {
+      const v = (m.voice ?? m.audio)!;
+      const mime = m.voice?.mime_type ?? m.audio?.mime_type ?? 'audio/ogg';
       try {
         const { data } = await this.downloadFile(v.file_id, m.audio?.file_name);
         await onEvent({
@@ -381,10 +391,12 @@ interface TelegramUpdate {
     /** A partial quote (the selected text of the replied-to message). */
     quote?: { text?: string };
     photo?: { file_id: string }[];
-    document?: { file_id: string; file_name?: string; mime_type?: string };
+    document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+    video?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
     voice?: { file_id: string; duration?: number; mime_type?: string };
     audio?: { file_id: string; duration?: number; mime_type?: string; file_name?: string };
-    video_note?: { file_id: string; duration?: number };
+    video_note?: { file_id: string; duration?: number; file_size?: number; file_name?: undefined };
+    animation?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   };
   callback_query?: {
     id: string;

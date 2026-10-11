@@ -3,7 +3,7 @@
  * Pure helpers only (kinds, validation, search, the block that goes into an agent's prompt) — unit-tested.
  */
 
-export type ResourceKind = 'text' | 'image' | 'pdf' | 'file';
+export type ResourceKind = 'text' | 'image' | 'pdf' | 'video' | 'file';
 
 export interface ResourceEntry {
   id: string;
@@ -26,12 +26,15 @@ export interface ResourceEntry {
 }
 
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
-export const MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+/** A video may be much bigger (a walk-through of a room…). */
+export const MAX_VIDEO_FILE_BYTES = 300 * 1024 * 1024;
+export const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 export const MAX_RESOURCES = 500;
 /** A text resource is shown/edited in the dashboard and read whole by tools up to this size. */
 export const MAX_TEXT_BYTES = 1024 * 1024;
 
 const TEXT_EXT = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'yaml', 'yml', 'log']);
+const VIDEO_MIME: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 const OTHER_MIME: Record<string, string> = {
   txt: 'text/plain',
@@ -55,11 +58,14 @@ export function kindFor(ext: string): ResourceKind {
   if (TEXT_EXT.has(e)) return 'text';
   if (e in IMAGE_MIME) return 'image';
   if (e === 'pdf') return 'pdf';
+  if (e in VIDEO_MIME) return 'video';
   return 'file';
 }
-export const mimeFor = (ext: string): string => IMAGE_MIME[ext.toLowerCase()] ?? OTHER_MIME[ext.toLowerCase()] ?? 'application/octet-stream';
+export const mimeFor = (ext: string): string => IMAGE_MIME[ext.toLowerCase()] ?? VIDEO_MIME[ext.toLowerCase()] ?? OTHER_MIME[ext.toLowerCase()] ?? 'application/octet-stream';
+/** The size limit for one uploaded file of this kind. */
+export const maxBytesFor = (kind: ResourceKind): number => (kind === 'video' ? MAX_VIDEO_FILE_BYTES : MAX_FILE_BYTES);
 /** Safe to show inline in a browser (cannot run script). Everything else downloads. */
-export const isInline = (kind: ResourceKind): boolean => kind === 'image' || kind === 'pdf';
+export const isInline = (kind: ResourceKind): boolean => kind === 'image' || kind === 'pdf' || kind === 'video';
 
 export function cleanTags(input: unknown): string[] {
   const raw = Array.isArray(input) ? input : typeof input === 'string' ? input.split(/[,;\n]/) : [];
@@ -129,7 +135,7 @@ export function promptBlock(list: ResourceEntry[], pathOf: (r: ResourceEntry) =>
   const mine = list.filter((r) => appliesTo(r, agentName)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   if (!mine.length) return '';
   const shown = mine.slice(0, limit);
-  const lines = shown.map((r) => `- ${r.title}${r.description ? ` — ${r.description.replace(/\s+/g, ' ').slice(0, 160)}` : ''}${r.tags.length ? ` [${r.tags.join(', ')}]` : ''} (${r.kind}) → ${pathOf(r)}`);
+  const lines = shown.map((r) => `- ${r.title}${r.description ? ` — ${r.description.replace(/\s+/g, ' ').slice(0, 160)}` : ''}${r.tags.length ? ` [${r.tags.join(', ')}]` : ''} (${r.kind}) → ${pathOf(r)}${r.kind === 'video' ? '  (video — use video_digest / look_at)' : ''}`);
   return [
     '## Project resources',
     'The project keeps a shared library of notes, images and documents. Treat it as the source of truth for this project\'s facts, preferences, measurements and reference material: BEFORE answering from memory or guessing, check this list, and when an entry is relevant READ it (Read the path; images and PDFs are readable too) and follow it. Never invent what a resource would say. Never modify these files.',

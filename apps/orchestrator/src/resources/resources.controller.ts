@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { createReadStream } from 'node:fs';
+import { serveWithRanges } from '../media/serve-range';
 import { ResourcesService } from './resources.service';
 import { isInline } from './resources-core';
 import { RolesGuard } from '../identity/roles.guard';
@@ -45,13 +46,14 @@ export class ResourcesController {
   }
 
   @Get(':id/file')
-  async file(@Param('id') id: string, @Res() res: Response) {
+  async file(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const r = await this.resources.get(id);
     res.setHeader('content-type', r.mime);
     res.setHeader('cache-control', 'private, max-age=60');
     res.setHeader('x-content-type-options', 'nosniff');
     // Only images and PDFs render in the browser; everything else downloads (an uploaded .html must never run as script).
     if (!isInline(r.kind)) res.setHeader('content-disposition', `attachment; filename="${encodeURIComponent(r.originalName)}"`);
+    if (r.kind === 'video') return serveWithRanges(req, res, this.resources.pathOf(r));
     createReadStream(this.resources.pathOf(r)).pipe(res);
   }
 

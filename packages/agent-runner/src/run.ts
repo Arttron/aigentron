@@ -7,6 +7,8 @@ import {
   CHECK_SUBTASKS_TOOL,
   SCHEDULE_CHECK_TOOL,
   RESOURCES_SEARCH_TOOL,
+  LOOK_AT_TOOL,
+  VIDEO_DIGEST_TOOL,
   PREVIEW_TOOL,
   PROPOSE_LEARNED_SKILL_TOOL,
   PROPOSE_AGENT_TOOL,
@@ -161,6 +163,8 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onCheckSubtasks) names.push(CHECK_SUBTASKS_TOOL);
   if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
   if (params.onSearchResources) names.push(RESOURCES_SEARCH_TOOL);
+  if (params.onLookAt) names.push(LOOK_AT_TOOL);
+  if (params.onVideoDigest) names.push(VIDEO_DIGEST_TOOL);
   if (params.onStartPreview) names.push(PREVIEW_TOOL);
   if (params.onProposeLearnedSkill) names.push(PROPOSE_LEARNED_SKILL_TOOL);
   if (params.admin) {

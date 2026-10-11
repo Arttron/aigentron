@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { TaskStatus } from '@lds/shared';
+import { isVideo } from '@/lib/capture';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
@@ -137,7 +138,11 @@ export function Transcript({
             rel="noreferrer"
             title={name}
           >
-            <img src={api.attachmentUrl(taskId, name)} alt={name} className={styles.thumb} />
+            {isVideo(name) ? (
+              <video src={api.attachmentUrl(taskId, name)} className={styles.thumb} preload="metadata" muted />
+            ) : (
+              <img src={api.attachmentUrl(taskId, name)} alt={name} className={styles.thumb} />
+            )}
           </a>
         ))}
       </span>

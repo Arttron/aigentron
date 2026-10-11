@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type AgentInfo, type ChannelInfo, type Settings, type SettingsUpdate } from '@/lib/api';
+import { api, type ChannelInfo, type Settings, type SettingsUpdate } from '@/lib/api';
 import { Card, SectionTitle, Field, Row, Button, Muted, ErrorText } from '@/components/ui';
 import { resetAssistant } from '@/lib/float-position';
 import { applyThemePref, getThemePref, type ThemePref } from '@/lib/theme';
@@ -8,7 +8,6 @@ import styles from './GeneralSettingsForm.module.css';
 /** The non-secret app settings, edited in one form with an explicit Save. */
 export function GeneralSettingsForm() {
   const [s, setS] = useState<Settings | null>(null);
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -32,10 +31,6 @@ export function GeneralSettingsForm() {
 
   useEffect(() => {
     api
-      .listAgents()
-      .then(setAgents)
-      .catch(() => undefined);
-    api
       .listChannels()
       .then(setChannels)
       .catch(() => undefined);
@@ -50,7 +45,6 @@ export function GeneralSettingsForm() {
           concurrency: data.concurrency,
           debugMode: data.debugMode,
           agentInstructions: data.agentInstructions,
-          defaultAgent: data.defaultAgent ?? '',
           notifyChannelId: data.notifyChannelId ?? '',
           notifyChatId: data.notifyChatId ?? '',
           repoUrl: data.repoUrl ?? '',
@@ -132,27 +126,6 @@ export function GeneralSettingsForm() {
           With a repo set, each task branches off the latest <code>{form.repoBranch || 'main'}</code>;
           on success the branch is pushed and a PR is opened. Agents run in the subdirectory above
           (blank = repo root); they can still read/write anywhere in the checkout.
-        </Muted>
-      </Card>
-
-      <Card>
-        <SectionTitle>Default lead agent</SectionTitle>
-        <Field label="Agent used as the lead for tasks that don't pick one (it delegates to the rest)">
-          <select
-            className={styles.narrow}
-            value={form.defaultAgent ?? ''}
-            onChange={(e) => set('defaultAgent', e.target.value)}
-          >
-            <option value="">(none — generic lead)</option>
-            {agents.map((a) => (
-              <option key={a.name} value={a.name}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Muted className={styles.note}>
-          The lead orchestrates the run; e.g. <code>pm</code> plans and delegates to the team.
         </Muted>
       </Card>
 

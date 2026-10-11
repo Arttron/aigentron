@@ -24,6 +24,14 @@ function apiError(status: number, text: string): string {
  * OpenAI, Groq and a local Whisper/TTS server — only the provider's Base URL and key differ. The settings (which provider and
  * model for each half) live in `<secretsDir>/voice.json`; keys stay in the provider registry.
  */
+/** A phrase of recognised speech with the time it started (and, when the model gives them, its words). */
+export interface TimedSegment {
+  start: number;
+  end: number;
+  text: string;
+  words?: { start: number; end: number; text: string }[];
+}
+
 @Injectable()
 export class VoiceService {
   private readonly logger = new Logger(VoiceService.name);
@@ -87,6 +95,18 @@ export class VoiceService {
 
   /** Speech → text. */
   async transcribe(data: Buffer, mime?: string): Promise<string> {
+    return (await this.recognise(data, mime, false)).text;
+  }
+
+  /**
+   * Speech → text with the time each phrase started (for video: "look here" → the frame at that moment).
+   * Asks for segment timestamps (Whisper-style `verbose_json`); models that cannot give them (gpt-4o-transcribe …) return no segments.
+   */
+  async transcribeTimed(data: Buffer, mime?: string): Promise<{ text: string; segments: TimedSegment[] }> {
+    return this.recognise(data, mime, true);
+  }
+
+  private async recognise(data: Buffer, mime: string | undefined, timed: boolean): Promise<{ text: string; segments: TimedSegment[] }> {
     const stt = this.get().stt;
     if (!stt) throw new BadRequestException('Speech recognition is not set up — Settings → Voice.');
     if (!data.length) throw new BadRequestException('The recording is empty.');
@@ -94,20 +114,39 @@ export class VoiceService {
     const { base, headers } = await this.providers.audioEndpoint(stt.provider).catch((e) => {
       throw new BadRequestException((e as Error).message);
     });
-    const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(data)], { type: mime || 'audio/ogg' }), audioFileName(mime));
-    form.append('model', stt.model);
-    form.append('response_format', 'json');
-    if (stt.language) form.append('language', stt.language);
-    const res = await fetch(`${base}/audio/transcriptions`, { method: 'POST', headers, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch((e) => {
-      throw new BadRequestException(`Could not reach the speech service: ${(e as Error).message}`);
-    });
-    const text = await res.text();
-    if (!res.ok) throw new BadRequestException(`Speech recognition failed: ${apiError(res.status, text)}`);
+    const send = async (verbose: boolean) => {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array(data)], { type: mime || 'audio/ogg' }), audioFileName(mime));
+      form.append('model', stt.model);
+      form.append('response_format', verbose ? 'verbose_json' : 'json');
+      if (verbose) {
+        form.append('timestamp_granularities[]', 'segment');
+        form.append('timestamp_granularities[]', 'word');
+      }
+      if (stt.language) form.append('language', stt.language);
+      const res = await fetch(`${base}/audio/transcriptions`, { method: 'POST', headers, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch((e) => {
+        throw new BadRequestException(`Could not reach the speech service: ${(e as Error).message}`);
+      });
+      return { res, text: await res.text() };
+    };
+    let r = timed ? await send(true) : await send(false);
+    // The model does not know verbose_json (gpt-4o-transcribe …): plain text, no timestamps.
+    if (timed && !r.res.ok && r.res.status >= 400 && r.res.status < 500) r = await send(false);
+    if (!r.res.ok) throw new BadRequestException(`Speech recognition failed: ${apiError(r.res.status, r.text)}`);
     try {
-      return String((JSON.parse(text) as { text?: string }).text ?? '').trim();
+      const j = JSON.parse(r.text) as { text?: string; segments?: { start?: number; end?: number; text?: string }[]; words?: { start?: number; end?: number; word?: string }[] };
+      const words = (j.words ?? []).filter((w) => typeof w.start === 'number' && String(w.word ?? '').trim()).map((w) => ({ start: w.start!, end: typeof w.end === 'number' ? w.end : w.start!, text: String(w.word).trim() }));
+      const segments: TimedSegment[] = (j.segments ?? [])
+        .filter((x) => typeof x.start === 'number' && String(x.text ?? '').trim())
+        .map((x) => {
+          const start = x.start!;
+          const end = typeof x.end === 'number' ? x.end : start;
+          const own = words.filter((w) => w.start >= start - 0.05 && w.start < end + 0.05);
+          return { start, end, text: String(x.text).trim(), ...(own.length ? { words: own } : {}) };
+        });
+      return { text: String(j.text ?? '').trim(), segments };
     } catch {
-      return text.trim();
+      return { text: r.text.trim(), segments: [] };
     }
   }
 

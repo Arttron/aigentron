@@ -1,14 +1,20 @@
-Aigentron v0.1.49
+Aigentron v0.1.50
 
-For people who are not programmers: see and end who is signed in, and the ChatGPT (Codex) provider works properly.
+For people who are not programmers: agents can now see photos and watch videos, and you can take pictures right from the page.
 
-Signed-in devices (Settings → Signed-in devices)
-- A new tab lists every browser or device that is signed in: which one (for example "Chrome on macOS"), from which address, when it signed in and when it was last active. Each has a "Sign out" button and the device is signed out at once.
-- You see your own devices; an operator or admin sees everybody's and can sign a person out everywhere (their password stays). "Sign out my other devices" ends all your other sessions and keeps this one.
-- Changing or resetting someone's password now signs that person out on every device.
+Camera and video
+- New "📷 Camera" in the attach menu (new task, message box) and on the Resources page. Over HTTPS it opens in the page: take several photos or record a clip, check them, attach. Without HTTPS your phone's own camera opens. Big photos are shrunk and their hidden data (such as location) is removed.
+- Videos up to 300 MB can be attached to tasks and kept in the Resources library, and they play in the dashboard (seeking works on phones too).
+- Telegram: videos, round video messages and GIFs now arrive as attachments. (Telegram bots can download only up to 20 MB; for bigger files the bot asks you to upload them in the dashboard.)
+- While an agent works, Telegram chats show "typing…", "recording a voice message…" or "sending a photo/video/document…".
 
-ChatGPT (Codex) provider
-- The model picker lists the models Codex itself offers for your account, instead of a single fixed name.
-- Fixed: testing the provider before signing in showed an error about a missing CODEX_HOME folder. The folder is now created, the CLI's warning noise is gone, and the message tells you how to sign in (`aigentron providers` → Edit → sign in again).
+How agents watch a video
+- The sound is turned into text with the time of each phrase, and frames are cut out of the picture. Agents can ask for a frame every N seconds, at exact times, or at the moments the speaker says "look here" / "смотри, вот тут" (or any words you choose).
+- Settings → Vision: choose which model describes photos and video frames (OpenAI, Anthropic, DeepSeek, or a local Ollama vision model), with a Test button. Settings → Voice is used for the sound (a Whisper model gives the timestamps).
+- ffmpeg is now installed by the installer and is part of the Docker images.
 
-Update note: this release adds a small table for the device list; it is created automatically when the server starts. Sessions that were already signed in keep working but appear in the list only after the next sign-in.
+Smaller changes
+- "Default lead agent" moved from Settings to the Agents page and saves as soon as you pick.
+- The terminal (aigentron / aigentron admin) reuses its sign-in, shows as one device in the list, and `aigentron logout` ends the session on the server.
+
+Update note: if ffmpeg could not be installed automatically, run `aigentron doctor`; video features show a clear message until it is available.

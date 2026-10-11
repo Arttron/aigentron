@@ -29,6 +29,8 @@ import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
 import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
 import { ResourcesService } from '../resources/resources.service';
+import { MediaService } from '../media/media.service';
+import { isVideoName } from '../media/media-core';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -114,6 +116,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly internalMcp: InternalMcpService,
     private readonly codex: CodexService,
     private readonly resources: ResourcesService,
+    private readonly media: MediaService,
   ) {
     super();
   }
@@ -520,6 +523,8 @@ export class RealAgentExecutor extends AgentExecutor {
       onCheckSubtasks: ctx.onCheckSubtasks,
       onScheduleCheck: ctx.onScheduleCheck,
       onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
+      onLookAt: (input) => this.media.lookAt(input.path, input.question, ctx.worktreePath, input),
+      onVideoDigest: (input) => this.media.videoDigest(input.path, ctx.worktreePath, input),
       onStartPreview: () => this.preview.getOrStart(ctx.taskId, opts.workDir),
       onProposeLearnedSkill: (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.
@@ -1266,7 +1271,9 @@ function firstProseLine(raw: string): string | null {
 /** Append attachment paths to the prompt so the agent views them via Read. */
 function withAttachments(prompt: string, paths: string[]): string {
   if (!paths.length) return prompt;
-  const list = paths.map((p) => `- ${p}`).join('\n');
+  const isVideo = (p: string) => isVideoName(p);
+  const list = paths.map((p) => `- ${p}${isVideo(p) ? '  (video — use video_digest, then look_at if you need to see it)' : ''}`).join('\n');
   const lead = prompt.trim() ? prompt : 'Review the attached file(s).';
-  return `${lead}\n\nAttached files (use the Read tool to view them):\n${list}`;
+  const hasVideo = paths.some(isVideo);
+  return `${lead}\n\nAttached files (use the Read tool to view photos, documents and text${hasVideo ? '; for a video call the video_digest tool — frames and what was said — and look_at to ask a question about what is shown' : ''}):\n${list}`;
 }

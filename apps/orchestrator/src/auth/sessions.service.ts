@@ -103,6 +103,12 @@ export class SessionsService implements OnModuleInit {
     }));
   }
 
+  /** The session making this request signs out (logout button / `aigentron logout`): its cookie stops working everywhere. */
+  async revokeOwn(sid: string): Promise<void> {
+    this.revoked.add(sid);
+    await this.prisma.authSession.updateMany({ where: { id: sid }, data: { revokedAt: new Date() } }).catch(() => undefined);
+  }
+
   /** End one session. A person may end their own; an operator/admin anybody's. */
   async revoke(sid: string, viewer: { id: string; role: string }): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
     const row = await this.prisma.authSession.findUnique({ where: { id: sid } });

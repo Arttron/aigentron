@@ -7,7 +7,7 @@ import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import {
-  MAX_FILE_BYTES,
+  maxBytesFor,
   MAX_RESOURCES,
   MAX_TEXT_BYTES,
   MAX_TOTAL_BYTES,
@@ -153,7 +153,8 @@ export class ResourcesService {
     try {
       for await (const chunk of source) {
         size += (chunk as Buffer).length;
-        if (size > MAX_FILE_BYTES) throw new PayloadTooLargeException(`the file exceeds ${MAX_FILE_BYTES / 1024 / 1024} MB`);
+        const limit = maxBytesFor(kindFor(ext));
+        if (size > limit) throw new PayloadTooLargeException(`the file exceeds ${limit / 1024 / 1024} MB`);
         if (!out.write(chunk)) await once(out, 'drain');
       }
       out.end();

@@ -224,7 +224,7 @@ export interface ResourceInfo {
   title: string;
   description: string;
   tags: string[];
-  kind: 'text' | 'image' | 'pdf' | 'file';
+  kind: 'text' | 'image' | 'pdf' | 'video' | 'file';
   originalName: string;
   mime: string;
   size: number;
@@ -684,6 +684,18 @@ export const api = {
       },
       body: file,
     }).then(unwrap<AttachmentMeta>),
+
+  mediaStatus: () =>
+    fetch(`${API_BASE}/media`, { cache: 'no-store' }).then(
+      unwrap<{ vision: { provider: string; model: string } | null; visionReady: boolean; ffmpeg: boolean; sttReady: boolean }>,
+    ),
+  saveVision: (cfg: { provider: string; model: string } | null) =>
+    fetch(`${API_BASE}/vision`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(cfg ?? {}),
+    }).then(unwrap<{ ok: boolean; vision: { provider: string; model: string } | null }>),
+  testVision: () => fetch(`${API_BASE}/vision/test`, { method: 'POST' }).then(unwrap<{ ok: boolean; answer?: string; error?: string }>),
 
   attachmentUrl: (id: string, name: string) =>
     `${API_BASE}/tasks/${encodeURIComponent(id)}/attachments/${encodeURIComponent(name)}`,

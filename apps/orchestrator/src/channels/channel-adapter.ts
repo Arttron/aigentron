@@ -110,6 +110,9 @@ export type IncomingEvent =
 
 export type IncomingHandler = (event: IncomingEvent) => void | Promise<void>;
 
+/** What the bot appears to be doing (Telegram's sendChatAction actions). */
+export type ChatActivity = 'typing' | 'upload_photo' | 'upload_video' | 'upload_document' | 'record_voice' | 'upload_voice' | 'record_video_note';
+
 /** The base functions a channel transport implements. */
 export interface ChannelAdapter {
   readonly kind: string;
@@ -125,6 +128,11 @@ export interface ChannelAdapter {
    *  "processing…" status line) — existing buttons/keyboard are preserved.
    *  Best-effort, optional — not every transport supports editing. */
   editMessage?(chatId: string, messageId: string, text: string): Promise<void>;
+  /**
+   * Show a short-lived "the bot is doing something" status in the chat ("typing…", "recording a voice message…", "sending a photo…").
+   * Transports expire it after a few seconds, so callers repeat it while the work goes on. Optional.
+   */
+  setActivity?(chatId: string, activity: ChatActivity): Promise<void>;
   /** Replace the transport's command menu (the `/` list). Optional. */
   setCommands?(commands: { command: string; description: string }[]): Promise<void>;
   /** Post spoken audio. Ogg/Opus shows as a voice message; other formats are sent as an audio file. Optional. */

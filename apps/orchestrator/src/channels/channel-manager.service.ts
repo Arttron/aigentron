@@ -20,7 +20,7 @@ import { PairingService } from './pairing.service';
 import { VoiceService } from '../voice/voice.service';
 import { MAX_AUDIO_SECONDS } from '../voice/voice-core';
 import { SecretLinksService, secretLabel } from '../approvals/secret-links.service';
-import type { ChannelAdapter, IncomingEvent, MessageButton } from './channel-adapter';
+import type { ChannelAdapter, ChatActivity, IncomingEvent, MessageButton } from './channel-adapter';
 
 type ChannelRow = Awaited<ReturnType<ChannelsService['getRow']>>;
 
@@ -122,6 +122,8 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   /** channelId → hash of the command menu last published (agent commands change as agents come and go). */
   private readonly menuHash = new Map<string, string>();
   private menuTimer?: NodeJS.Timeout;
+  /** taskId → the repeating "typing…" status shown in the chat while the agent works. */
+  private readonly activity = new Map<string, { timer: NodeJS.Timeout; stopAt: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -147,6 +149,8 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy(): void {
     if (this.menuTimer) clearInterval(this.menuTimer);
+    for (const a of this.activity.values()) clearInterval(a.timer);
+    this.activity.clear();
     for (const a of this.adapters.values()) a.stop();
     this.adapters.clear();
     for (const t of this.escalationTimers) clearTimeout(t);
@@ -196,6 +200,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   private async dispatchOutgoing(e: BusEvent): Promise<void> {
     switch (e.type) {
       case 'task-status':
+        void this.onTaskActivity(e.payload.taskId, e.payload.status).catch(() => undefined);
         return this.onTaskStatus(e.payload.taskId, e.payload.status);
       case 'agent-log':
         return this.onAgentLog(e.payload);
@@ -208,6 +213,55 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       default:
         return;
     }
+  }
+
+  // ---- the "typing…" status while an agent works ----
+
+  /** Show `activity` in the chat now, and every 4 s until `stop()` (Telegram forgets it after ~5 s). */
+  private repeatActivity(channelId: string, chatId: string, activity: ChatActivity, maxMs = 20 * 60_000): { timer: NodeJS.Timeout; stopAt: number } {
+    const adapterOf = () => this.adapters.get(channelId);
+    const send = () => void adapterOf()?.setActivity?.(chatId, activity).catch(() => undefined);
+    send();
+    const stopAt = Date.now() + maxMs;
+    const timer = setInterval(() => {
+      if (Date.now() > stopAt) return clearInterval(timer);
+      send();
+    }, 4000);
+    timer.unref?.();
+    return { timer, stopAt };
+  }
+
+  /** Run `fn` (voice synthesis, a file upload…) with `activity` showing in the chat meanwhile. */
+  private async withActivity<T>(channelId: string, chatId: string, activity: ChatActivity, fn: () => Promise<T>): Promise<T> {
+    const a = this.repeatActivity(channelId, chatId, activity, 5 * 60_000);
+    try {
+      return await fn();
+    } finally {
+      clearInterval(a.timer);
+    }
+  }
+
+  /** While a task RUNS, its chat shows "typing…"; it stops when the task settles or waits for a human. */
+  private async onTaskActivity(taskId: string, status: TaskStatus): Promise<void> {
+    if (status !== 'running') {
+      const a = this.activity.get(taskId);
+      if (a) {
+        clearInterval(a.timer);
+        this.activity.delete(taskId);
+      }
+      return;
+    }
+    if (this.activity.has(taskId)) return;
+    let dest = await this.channels.threadForTask(taskId);
+    if (!dest) {
+      // a subtask has no thread of its own: its work shows in the parent's chat
+      const t = await this.prisma.task.findUnique({ where: { id: taskId }, select: { parentId: true } });
+      if (t?.parentId) dest = await this.channels.threadForTask(t.parentId);
+    }
+    if (!dest) return;
+    const st = await this.prisma.channelChatState.findUnique({ where: { channelId_chatId: { channelId: dest.channel.id, chatId: dest.externalThreadId } }, select: { muted: true } });
+    if (st?.muted || this.activity.has(taskId)) return;
+    this.activity.set(taskId, this.repeatActivity(dest.channel.id, dest.externalThreadId, 'typing'));
   }
 
   /** A live process step — update the task's compact status message (see
@@ -401,9 +455,9 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         const { path } = await this.attachments.filePath(taskId, meta.name);
         const data = await readFile(path);
         if (meta.mime.startsWith('image/') && adapter.sendImage) {
-          await adapter.sendImage(chatId, { data, filename: meta.name });
+          await this.withActivity(channelId, chatId, 'upload_photo', () => adapter.sendImage!(chatId, { data, filename: meta.name }));
         } else {
-          await adapter.sendDocument?.(chatId, { data, filename: meta.name, mime: meta.mime });
+          await this.withActivity(channelId, chatId, meta.mime.startsWith('video/') ? 'upload_video' : 'upload_document', async () => adapter.sendDocument?.(chatId, { data, filename: meta.name, mime: meta.mime }));
         }
       } catch (err) {
         this.logger.warn(`send attachment ${meta.name} failed: ${(err as Error).message}`);
@@ -571,7 +625,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     }
     let text: string;
     try {
-      text = await this.voice.transcribe(Buffer.from(e.data, 'base64'), e.mime);
+      text = await this.withActivity(row.id, e.chatId, 'typing', () => this.voice.transcribe(Buffer.from(e.data, 'base64'), e.mime));
     } catch (err) {
       await reply(`🎤 ⚠️ ${(err as Error).message}`);
       return;
@@ -593,7 +647,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
     if (!adapter.sendVoice) return;
     try {
-      const { audio, mime, truncated } = await this.voice.speak(text, 'opus');
+      const { audio, mime, truncated } = await this.withActivity(channelId, chatId, 'record_voice', () => this.voice.speak(text, 'opus'));
       await adapter.sendVoice(chatId, { data: audio, mime }, truncated ? '🔊 (shortened — the full answer is in the text above)' : undefined);
     } catch (err) {
       this.logger.warn(`voice reply failed: ${(err as Error).message}`);

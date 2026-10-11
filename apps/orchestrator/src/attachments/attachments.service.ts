@@ -17,6 +17,10 @@ import { AppConfigService } from '../config/app-config.service';
  */
 const INLINE_MIME_BY_EXT: Record<string, string> = {
   png: 'image/png',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   webp: 'image/webp',
@@ -27,6 +31,9 @@ const INLINE_MIME_BY_EXT: Record<string, string> = {
  *  file still force-downloads either way), just nicer than a blanket
  *  octet-stream for things like a .json/.csv reference file. */
 const KNOWN_MIME_BY_EXT: Record<string, string> = {
+  mkv: 'video/x-matroska',
+  avi: 'video/x-msvideo',
+  '3gp': 'video/3gpp',
   txt: 'text/plain',
   md: 'text/markdown',
   csv: 'text/csv',
@@ -56,6 +63,10 @@ function isInlineSafe(ext: string): boolean {
 }
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB
+/** A video may be much bigger (a walk-through of a room…). */
+const MAX_VIDEO_BYTES_ATT = 300 * 1024 * 1024;
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', '3gp']);
+const limitFor = (ext: string): number => (VIDEO_EXTS.has(ext) ? MAX_VIDEO_BYTES_ATT : MAX_BYTES);
 const TASK_ID_RE = /^[\w-]+$/;
 
 export interface AttachmentMeta {
@@ -102,7 +113,7 @@ export class AttachmentsService {
     try {
       for await (const chunk of source) {
         size += (chunk as Buffer).length;
-        if (size > MAX_BYTES) throw new PayloadTooLargeException(`file exceeds ${MAX_BYTES / 1024 / 1024}MB`);
+        if (size > limitFor(ext)) throw new PayloadTooLargeException(`file exceeds ${limitFor(ext) / 1024 / 1024}MB`);
         if (!out.write(chunk)) await once(out, 'drain');
       }
       out.end();

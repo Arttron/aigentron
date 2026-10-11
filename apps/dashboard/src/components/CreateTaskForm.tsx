@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { ATTACH_ACCEPT, hasLiveCamera, prepareFile } from '@/lib/capture';
+import { CameraCapture } from '@/components/CameraCapture';
 import { api, type AgentInfo } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
 import { TaskReferencePicker } from './TaskReferencePicker';
@@ -16,6 +18,12 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const [camera, setCamera] = useState(false);
+  const stage = async (files: File[]) => {
+    const ready = await Promise.all(files.map(prepareFile));
+    setStaged((s) => [...s, ...ready]);
+  };
 
   useEffect(() => {
     api
@@ -77,7 +85,10 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
     const kind = e.target.value;
     e.target.value = '';
     if (kind === 'file') fileRef.current?.click();
-    else if (kind === 'task') setShowRefs(true);
+    else if (kind === 'camera') {
+      if (hasLiveCamera()) setCamera(true);
+      else camRef.current?.click();
+    } else if (kind === 'task') setShowRefs(true);
   };
 
   const selected = agents.find((a) => a.name === agentName);
@@ -112,14 +123,26 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
       <input
         ref={fileRef}
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+        accept={ATTACH_ACCEPT}
         multiple
         className={styles.hidden}
         onChange={(e) => {
-          if (e.target.files) setStaged((s) => [...s, ...Array.from(e.target.files!)]);
+          if (e.target.files) void stage(Array.from(e.target.files));
           if (fileRef.current) fileRef.current.value = '';
         }}
       />
+      <input
+        ref={camRef}
+        type="file"
+        accept="image/*,video/*"
+        capture="environment"
+        className={styles.hidden}
+        onChange={(e) => {
+          if (e.target.files) void stage(Array.from(e.target.files));
+          if (camRef.current) camRef.current.value = '';
+        }}
+      />
+      {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void stage(files)} />}
 
       <Row wrap className={styles.controls}>
         {agents.length > 0 && (
@@ -146,7 +169,8 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
         )}
         <select className={styles.attachSelect} value="" onChange={onAttachKind} title="Attach">
           <option value="">📎 Attach…</option>
-          <option value="file">🖼 Image / file</option>
+          <option value="file">🖼 Image / video / file</option>
+          <option value="camera">📷 Camera</option>
           <option value="task">🔗 Task</option>
         </select>
         {(showRefs || references.length > 0) && (

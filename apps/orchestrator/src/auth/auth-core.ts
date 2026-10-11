@@ -181,7 +181,7 @@ export function describeAgent(ua: string | undefined | null): string {
   const s = ua ?? '';
   if (!s) return 'Unknown device';
   if (/^curl\//i.test(s)) return 'curl';
-  if (/^node|undici|node-fetch/i.test(s)) return 'Terminal (aigentron)';
+  if (/^aigentron-cli|^node|undici|node-fetch/i.test(s)) return 'Terminal (aigentron)';
   const browser = /Edg\//.test(s) ? 'Edge' : /OPR\/|Opera/.test(s) ? 'Opera' : /Firefox\//.test(s) ? 'Firefox' : /(Chrome|CriOS)\//.test(s) ? 'Chrome' : /Safari\//.test(s) ? 'Safari' : null;
   const os = /Windows/.test(s) ? 'Windows' : /(iPhone|iPad|iPod)/.test(s) ? 'iOS' : /Android/.test(s) ? 'Android' : /Mac OS X|Macintosh/.test(s) ? 'macOS' : /Linux|X11/.test(s) ? 'Linux' : null;
   if (browser && os) return `${browser} on ${os}`;

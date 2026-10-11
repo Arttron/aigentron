@@ -162,6 +162,36 @@ export class ProvidersService implements OnModuleInit {
     return { base, headers };
   }
 
+  /**
+   * Where to send a chat request (with images) for a provider: Anthropic's messages API, or an OpenAI-style chat-completions endpoint
+   * (OpenAI, DeepSeek, Ollama's /v1, any compatible server). Subscription logins (oauth-token / Codex) cannot be used for a direct call.
+   */
+  async chatEndpoint(name: string, model?: string): Promise<{ style: 'anthropic' | 'openai'; url: string; headers: Record<string, string>; kind: string; model: string }> {
+    const p = await this.getRow(name);
+    const kind = p.kind || defaultKind(p.baseUrl);
+    if (kind === 'codex' || p.authMode === 'oauth-token' || p.authMode === 'codex-login') {
+      throw new Error(`Provider "${name}" is a subscription login — it cannot be called directly. Use a provider with an API key (or a local one).`);
+    }
+    const authMode = p.authMode === 'api-key' ? 'api-key' : 'auth-token';
+    const { headers, error } = authHeaders(kind, { authMode, secret: p.secret });
+    if (error) throw new Error(`Provider "${name}": ${error}.`);
+    const chosen = (model ?? '').trim() || p.model;
+    if (kind === 'anthropic') {
+      const base = (p.baseUrl || 'https://api.anthropic.com').replace(/\/$/, '').replace(/\/v1$/, '');
+      return { style: 'anthropic', url: `${base}/v1/messages`, headers, kind, model: chosen };
+    }
+    const base = oaiBase(kind, p.baseUrl);
+    if (!base) throw new Error(`Provider "${name}" has no Base URL.`);
+    // A provider that points at the LiteLLM gateway is addressed by its route name: `<provider>/<model>`.
+    let id = chosen;
+    try {
+      if (chosen && new URL(base).origin === new URL(this.config.litellmBaseUrl).origin && !chosen.startsWith(`${name}/`)) id = `${name}/${chosen}`;
+    } catch {
+      /* not a URL */
+    }
+    return { style: 'openai', url: `${base}/chat/completions`, headers, kind, model: id };
+  }
+
   /** Shared Provider shape for resolveProvider. */
   async get(name: string): Promise<Provider> {
     return toProvider(await this.getRow(name));

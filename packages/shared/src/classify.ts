@@ -31,6 +31,9 @@ export const CONTINUE_RUN_TOOL = '__continue_run__';
 export const SCHEDULE_CHECK_TOOL = `${INTERNAL_TOOL_PREFIX}schedule_check`;
 /** Start (or reuse) an ephemeral dev server for this task's worktree, for preview. */
 /** Read-only search over the project's resource library (notes/images/documents). Free for every agent. */
+/** Photos and video: `look_at` (a vision model looks at a photo / video frames), `video_digest` (frames + transcript of a video). Read-only. */
+export const LOOK_AT_TOOL = `${INTERNAL_TOOL_PREFIX}look_at`;
+export const VIDEO_DIGEST_TOOL = `${INTERNAL_TOOL_PREFIX}video_digest`;
 export const RESOURCES_SEARCH_TOOL = `${INTERNAL_TOOL_PREFIX}resources_search`;
 export const PREVIEW_TOOL = `${INTERNAL_TOOL_PREFIX}preview_worktree`;
 /**

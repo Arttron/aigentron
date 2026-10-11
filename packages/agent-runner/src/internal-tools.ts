@@ -24,12 +24,24 @@ export type InternalToolHandlers = Pick<
   | 'onCheckSubtasks'
   | 'onScheduleCheck'
   | 'onSearchResources'
+  | 'onLookAt'
+  | 'onVideoDigest'
   | 'onStartPreview'
   | 'onProposeLearnedSkill'
   | 'admin'
 >;
 
 /** Build the list of internal tools that are wired (have a callback) for this run. */
+/** The tools' frame options (snake_case for the model) → the camelCase plan the server uses. */
+function framePlan(args: Record<string, unknown>): { everySeconds?: number; atSeconds?: number[]; phrases?: string[]; pointing?: boolean } {
+  return {
+    ...(typeof args.every_seconds === 'number' ? { everySeconds: args.every_seconds } : {}),
+    ...(Array.isArray(args.at_seconds) ? { atSeconds: args.at_seconds as number[] } : {}),
+    ...(Array.isArray(args.phrases) ? { phrases: args.phrases as string[] } : {}),
+    ...(args.pointing === true ? { pointing: true } : {}),
+  };
+}
+
 export function buildInternalToolSpecs(params: InternalToolHandlers): InternalToolSpec[] {
   const specs: InternalToolSpec[] = [];
 
@@ -124,6 +136,28 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           query: typeof args.query === 'string' ? args.query : undefined,
           tag: typeof args.tag === 'string' ? args.tag : undefined,
         }),
+    });
+  }
+
+  if (params.onLookAt) {
+    specs.push({
+      name: 'look_at',
+      description:
+        "Look at a PHOTO or a VIDEO and answer a question about it, using the project's vision model (works for any agent, even one whose own model cannot see images). `path`: the full path of the file (a task attachment, a resource from the library, or a file in the workspace). `question`: what you want to know — be specific (e.g. \"read the measurements on the tape\", \"is there mould on the wall\", \"what is wrong with this pronunciation exercise page\"). For a video it looks at frames spread over the whole clip (at most 8 are shown at once, evenly picked); `every_seconds` sets the step between frames (default: automatic). To look at the moments when the speaker POINTS at things (\"look here\", \"вот тут\"), set `pointing: true` (built-in list, Russian and English) and/or `phrases: [\"…\"]` (your own words); `at_seconds: [12, 40]` takes frames at exact times (read them from the timed transcript of video_digest). For a video you usually want video_digest first (it also gives you what was said).",
+      shape: { path: z.string(), question: z.string(), every_seconds: z.number().optional(), at_seconds: z.array(z.number()).optional(), phrases: z.array(z.string()).optional(), pointing: z.boolean().optional() },
+      handler: (args) =>
+        params.onLookAt!({ path: String(args.path), question: String(args.question ?? ''), ...framePlan(args) }),
+    });
+  }
+
+  if (params.onVideoDigest) {
+    specs.push({
+      name: 'video_digest',
+      description:
+        "Turn a VIDEO into something you can use: it returns frames spread over the clip (paths you can Read, or pass to look_at) and — when speech recognition is set up — a transcript of what was said. `path`: the full path of the video (task attachment or library resource). `every_seconds` (optional): take one frame every N seconds (min 1, up to 60 frames; default: about one per 10 s, 4–24 frames) — use a small step for fast action or a short clip, a large one for a long clip. The transcript is timestamped (`[0:12] …`). To get frames at the moments some words are said — the speaker says \"look here\" / \"смотри, вот тут\" — set `pointing: true` (built-in list, Russian and English) and/or `phrases: [\"…\"]`; each such frame is labelled with the words said. `at_seconds: [12, 40]` takes frames at exact times. A different frame plan re-takes the frames (the transcript is kept, so recognition is not paid for twice). The first call on a video takes a while (it is processed once and cached).",
+      shape: { path: z.string(), every_seconds: z.number().optional(), at_seconds: z.array(z.number()).optional(), phrases: z.array(z.string()).optional(), pointing: z.boolean().optional() },
+      handler: (args) =>
+        params.onVideoDigest!({ path: String(args.path), ...framePlan(args) }),
     });
   }
 
