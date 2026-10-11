@@ -2,13 +2,13 @@
 export const ATTACH_ACCEPT =
   'image/png,image/jpeg,image/webp,image/gif,application/pdf,video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.m4v,.webm,.mkv';
 
-const MAX_SIDE = 2048;
+const MAX_SIDE = 1600;
 
 export const isVideo = (name: string, mime?: string): boolean =>
   (mime ?? '').startsWith('video/') || /\.(mp4|m4v|mov|webm|mkv|avi|3gp)$/i.test(name);
 
 /**
- * Photos from a phone are 4000+ px with EXIF (GPS!). Re-encode a big photo as a ≤2048 px JPEG through a canvas —
+ * Photos from a phone are 4000+ px with EXIF (GPS!). Re-encode a big photo as a ≤1600 px JPEG through a canvas —
  * that also drops the metadata. Anything else (small images, GIF, PDF, video) passes through untouched.
  */
 export async function prepareFile(file: File): Promise<File> {

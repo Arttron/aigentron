@@ -83,7 +83,11 @@ export class KnowledgeController {
   async upload(@Param('name') name: string, @Req() req: Request) {
     const dec = (h: string) => {
       const v = req.header(h);
-      return v ? decodeURIComponent(v) : undefined;
+      try {
+        return v ? decodeURIComponent(v) : undefined;
+      } catch {
+        throw new BadRequestException(`The ${h} header is not valid URL-encoded text.`);
+      }
     };
     return this.kb.addFile(name, dec('x-filename') ?? 'upload.txt', await readBody(req), dec('x-title'));
   }
@@ -112,6 +116,8 @@ export class KnowledgeController {
 
   /** Try a search the way an agent would. */
   @Post(':name/search')
+  @UseGuards(RolesGuard)
+  @Roles('reviewer', 'task_setter', 'operator', 'admin')
   search(@Param('name') name: string, @Body() body: { query?: string; limit?: number }) {
     return this.kb.search(String(body?.query ?? ''), { kb: name, limit: body?.limit });
   }

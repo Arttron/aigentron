@@ -117,6 +117,8 @@ separate LiteLLM service. SQLite + an in-process queue replace them. Full design
 >
 > Where the project, agent files, secrets and env files live in each mode, and how cleanup works:
 > [`docs/workspace-layout.md`](docs/workspace-layout.md).
+>
+> Features: [media (camera, video, vision, pictures)](docs/media.md) · [questions with buttons](docs/questions.md) · [knowledge bases](docs/knowledge-base.md) · [discussion between agents](docs/discussions.md) · [browser through a proxy](docs/browser-proxy.md) · [voice](docs/voice.md) · [resources](docs/resources.md).
 
 **Status:** builds and runs correctly (verified end to end, including a real agent task
 against a real local Ollama through the self-managed LiteLLM). No container registry is

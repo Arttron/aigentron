@@ -1,10 +1,11 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, rm, stat, access, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, access, writeFile, copyFile } from 'node:fs/promises';
 import { join, basename, extname } from 'node:path';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
+import { ImageOptimizer } from '../media/image-optimizer.service';
 
 /**
  * Rendered/served inline as their real type — safe because a browser can only
@@ -87,7 +88,10 @@ export interface AttachmentMeta {
 export class AttachmentsService {
   private readonly logger = new Logger(AttachmentsService.name);
 
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly images: ImageOptimizer,
+  ) {}
 
   /** Absolute directory for a task's attachments. */
   dir(taskId: string): string {
@@ -123,8 +127,32 @@ export class AttachmentsService {
       await rm(dest, { force: true }).catch(() => undefined);
       throw e;
     }
+    // A phone photo is 4000 px and several MB: shrink it to what the agents need (a PNG may become a JPEG → the name can change).
+    if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
+      const r = await this.images.optimize(dest, undefined, false, (d, n) => this.uniqueName(d, n));
+      if (r.changed) {
+        const finalName = basename(r.path);
+        this.logger.log(`Saved attachment ${taskId}/${finalName} (${r.size}B, was ${size}B)`);
+        return { name: finalName, size: r.size, mime: mimeFor(extname(finalName).slice(1).toLowerCase()) };
+      }
+    }
     this.logger.log(`Saved attachment ${taskId}/${name} (${size}B)`);
     return { name, size, mime };
+  }
+
+  /** Copy an existing picture (a generated image in the workspace, a library resource …) into the task's attachments so the chat can show it. Returns the stored name. */
+  async adopt(taskId: string, srcPath: string): Promise<string> {
+    const ext = extname(srcPath).slice(1).toLowerCase();
+    if (!INLINE_MIME_BY_EXT[ext] || ext === 'pdf') throw new BadRequestException(`"${basename(srcPath)}" is not a picture I can show (png, jpg, webp, gif).`);
+    const dir = this.dir(taskId);
+    await mkdir(dir, { recursive: true });
+    const stat0 = await stat(srcPath);
+    if (stat0.size > MAX_BYTES * 3) throw new PayloadTooLargeException(`"${basename(srcPath)}" is too large to show.`);
+    const name = await this.uniqueName(dir, sanitize(basename(srcPath)));
+    const dest = join(dir, name);
+    await copyFile(srcPath, dest);
+    const r = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? await this.images.optimize(dest, undefined, false, (d, n) => this.uniqueName(d, n)) : { path: dest, changed: false };
+    return basename(r.path);
   }
 
   /**
@@ -140,7 +168,9 @@ export class AttachmentsService {
     if (buf.length > MAX_BYTES) throw new PayloadTooLargeException(`image exceeds ${MAX_BYTES / 1024 / 1024}MB`);
     const dir = this.dir(taskId);
     await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, name), buf);
+    const file = join(dir, name);
+    await writeFile(file, buf);
+    await this.images.optimize(file, undefined, true).catch(() => undefined); // a screenshot never needs to be 4K
     this.logger.log(`Saved screenshot ${taskId}/${name} (${buf.length}B)`);
   }
 
@@ -153,7 +183,7 @@ export class AttachmentsService {
       return [];
     }
     const metas = await Promise.all(
-      files.map(async (name) => {
+      files.filter((n) => !n.startsWith('.')).map(async (name) => {
         const ext = extname(name).slice(1).toLowerCase();
         const s = await stat(join(this.dir(taskId), name)).catch(() => null);
         return s && s.isFile() ? { name, size: s.size, mime: mimeFor(ext), mtime: s.mtimeMs } : null;

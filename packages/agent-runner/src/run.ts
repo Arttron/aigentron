@@ -13,6 +13,7 @@ import {
   KB_READ_TOOL,
   KB_SEARCH_TOOL,
   CURRENT_TIME_TOOL,
+  SHOW_IMAGES_TOOL,
   LOOK_AT_TOOL,
   VIDEO_DIGEST_TOOL,
   PREVIEW_TOOL,
@@ -169,6 +170,7 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onCheckSubtasks) names.push(CHECK_SUBTASKS_TOOL);
   if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
   if (params.onSearchResources) names.push(RESOURCES_SEARCH_TOOL);
+  if (params.onShowImages) names.push(SHOW_IMAGES_TOOL);
   if (params.onCurrentTime) names.push(CURRENT_TIME_TOOL);
   if (params.kb) names.push(KB_LIST_TOOL, KB_SEARCH_TOOL, KB_READ_TOOL, ...(params.kb.add ? [KB_ADD_TOOL] : []));
   if (params.onAskUser) names.push(ASK_USER_TOOL);

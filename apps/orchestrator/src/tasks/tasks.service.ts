@@ -7,6 +7,8 @@ import { TaskQueue } from '../queue/queue.constants';
 import { AgentEventBus } from '../bus/agent-event-bus';
 import { WorktreeService } from '../worktrees/worktree.service';
 import { AgentExecutor } from '../agent/agent-executor';
+import { matchAgent } from '../channels/agent-match';
+import { ModuleRef } from '@nestjs/core';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { SettingsService } from '../settings/settings.service';
@@ -74,14 +76,31 @@ export class TasksService {
     private readonly agents: AgentRegistryService,
     private readonly attachments: AttachmentsService,
     private readonly settings: SettingsService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /** `expert_codex` / `Expert-Codex` / a small typo → the real agent name; otherwise an error that lists the agents there are. */
+  private async resolveAgentName(typed: string): Promise<string> {
+    const list = await this.agents.list().catch(() => []);
+    if (list.some((a) => a.name === typed)) return typed;
+    const m = matchAgent(typed, list);
+    // Spelling variants (case, - vs _) are accepted; a real typo is NOT guessed (it could land on a different agent) — it is suggested.
+    if (m.kind === 'exact') return m.name;
+    const names = list.map((a) => a.name).join(', ') || 'none';
+    if (m.kind === 'fuzzy') throw new NotFoundException(`No agent named "${typed}" — did you mean "${m.name}"? Agents: ${names}.`);
+    throw new NotFoundException(
+      m.kind === 'ambiguous'
+        ? `Agent "${typed}" could be ${m.names.join(' or ')} — use the exact name. Agents: ${names}.`
+        : `No agent named "${typed}". Agents: ${names}.`,
+    );
+  }
 
   async create(dto: CreateTaskDto, createdById?: string) {
     // Explicit agent 404s on a bad name; otherwise fall back to the configured
     // default lead (e.g. pm), tolerating its absence.
     let agent = null;
     if (dto.agentName) {
-      agent = await this.agents.get(dto.agentName);
+      agent = await this.agents.get(await this.resolveAgentName(dto.agentName));
     } else {
       const def = await this.settings.defaultAgent();
       if (def) {
@@ -320,6 +339,13 @@ export class TasksService {
    */
   async followUp(id: string, prompt: string, attachments?: string[], references?: string[]) {
     const task = await this.get(id);
+    // While agents discuss in this chat, the person's message joins the discussion (answered at the next turn) instead of queueing a run.
+    const { DiscussionService } = await import('../discussion/discussion.service');
+    const discussion = this.moduleRef.get(DiscussionService, { strict: false });
+    if (discussion?.isActive(id)) {
+      await discussion.interject(id, prompt);
+      return { ...(await this.get(id)), queued: false as const, queueLength: 0 };
+    }
     if (!isTerminalStatus(task.status)) {
       return this.enqueueFollowUp(id, prompt, attachments, references);
     }

@@ -82,3 +82,39 @@ describe('extraction', () => {
     expect(htmlToText('<p>one</p><p>two &amp; three</p>')).toContain('two & three');
   });
 });
+
+describe('robustness (review findings)', () => {
+  it('numbered markers need a capital and at most 3 digits — years and lower-case list items are text', () => {
+    const doc = '# T\n\n2024. The company grew a lot in that year and needed more people.\n\n1. open the box and look inside.\n\n10) items were sold during the sale.\n\nPart 2 is better than part 1.';
+    expect(chunkText(doc, { strategy: 'section', minChars: 0 }).length).toBe(1);
+    const real = '# T\n\n1. Plaster must be 10 mm.\n\n2. Primer before paint.\n\nArticle 4. Liability stays with the owner.';
+    expect(chunkText(real, { strategy: 'section', minChars: 0 }).length).toBe(3);
+  });
+  it('every chunk fits maxChars and no text is lost, whatever the strategy', () => {
+    const words = Array.from({ length: 1200 }, (_, i) => `w${i}`).join(' ');
+    for (const strategy of ['section', 'paragraph', 'chars'] as const) {
+      for (const maxChars of [300, 800, 3000]) {
+        const chunks = chunkText(`# H\n\n${words}\n\n${words}`, { strategy, maxChars, overlap: 100, minChars: 50 });
+        expect(chunks.every((c) => c.text.length <= maxChars + 100)).toBe(true);
+        const all = chunks.map((c) => c.text).join(' ');
+        expect(all).toContain('w0');
+        expect(all).toContain('w1199');
+      }
+    }
+  });
+  it('cutChars always terminates, even when the overlap is as big as the window', () => {
+    expect(cutChars('a '.repeat(500), 100, 100).length).toBeGreaterThan(5);
+  });
+  it('indexes Chinese / Japanese text as character pairs', () => {
+    expect(tokenize('日本語のテキスト')).toContain('日本');
+    const idx = new Bm25Index();
+    idx.add('', '今日は天気がいいです');
+    idx.add('', 'Totally unrelated English text');
+    expect(idx.search('天気', 2)[0]!.idx).toBe(0);
+  });
+  it('a corrupt or foreign-sized vector does not break ranking', () => {
+    expect(() => decodeVector('abc')).toThrow();
+    const good = decodeVector(encodeVector([1, 0, 0]));
+    expect(topBySimilarity(decodeVector(encodeVector([1, 0])), [good, null], 3)[0]!.idx).toBe(0);
+  });
+});

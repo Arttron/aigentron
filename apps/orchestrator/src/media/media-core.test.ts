@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeMoments, momentsFromSpeech, POINTING_PHRASES, buildDigest, formatTime, insideRoot, isImageName, isVideoName, parseProbe, planFrames } from './media-core';
+import { mergeMoments, momentsFromSpeech, POINTING_PHRASES, buildDigest, formatTime, insideRoot, isImageName, isVideoName, parseProbe, planFrames, planImage } from './media-core';
 
 describe('names', () => {
   it('tells videos and images apart', () => {
@@ -98,5 +98,25 @@ describe('speech moments', () => {
     const t = buildDigest({ name: 'a.mp4', durationSec: 20, width: 0, height: 0, frames: [{ t: 5, path: '/f.jpg', why: '“вот тут”' }], transcript: 'x', segments: [{ start: 65, end: 70, text: 'hello' }] });
     expect(t).toContain('(said: “вот тут”)');
     expect(t).toContain('[1:05] hello');
+  });
+});
+
+describe('planImage', () => {
+  const f = (o: Partial<{ ext: string; width: number; height: number; bytes: number; hasAlpha: boolean }>) => ({ ext: 'jpg', width: 4000, height: 3000, bytes: 5_000_000, hasAlpha: false, ...o });
+  it('shrinks a big photo and leaves small / odd files alone', () => {
+    expect(planImage(f({}), 1600)).toEqual({ action: 'recompress', toExt: 'jpg', maxSide: 1600 });
+    expect(planImage(f({ width: 1200, height: 800, bytes: 120_000 }), 1600)).toEqual({ action: 'skip' });
+    expect(planImage(f({ ext: 'gif' }), 1600)).toEqual({ action: 'skip' });
+    expect(planImage(f({ ext: 'heic' }), 1600)).toEqual({ action: 'skip' });
+  });
+  it('a heavy PNG without transparency becomes a JPEG; with transparency it stays a PNG', () => {
+    expect(planImage(f({ ext: 'png', width: 1500, height: 1000, bytes: 2_000_000 }), 1600)).toEqual({ action: 'recompress', toExt: 'jpg', maxSide: 1600 });
+    expect(planImage(f({ ext: 'png', hasAlpha: true }), 1600)).toEqual({ action: 'recompress', toExt: 'png', maxSide: 1600 });
+  });
+  it('an animation is never flattened', () => {
+    expect(planImage(f({ ext: 'webp', frames: 12 }), 1600)).toEqual({ action: 'skip' });
+  });
+  it('a big photo that is lightly compressed is still reduced when it is too wide', () => {
+    expect(planImage(f({ width: 3000, height: 2000, bytes: 300_000 }), 1600).action).toBe('recompress');
   });
 });

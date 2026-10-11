@@ -25,6 +25,7 @@ export type InternalToolHandlers = Pick<
   | 'onScheduleCheck'
   | 'onSearchResources'
   | 'kb'
+  | 'onShowImages'
   | 'onCurrentTime'
   | 'onAskUser'
   | 'onLookAt'
@@ -174,6 +175,16 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         handler: (args) => add({ kb: String(args.kb ?? ''), title: String(args.title ?? ''), text: String(args.text ?? ''), source: typeof args.source === 'string' ? args.source : undefined }),
       });
     }
+  }
+
+  if (params.onShowImages) {
+    specs.push({
+      name: 'show_images',
+      description:
+        "Show pictures to the user IN THE CHAT — one picture, or an album of up to 10 (generated images, charts, screenshots, photos, video frames you extracted). `paths`: full paths of image files (png, jpg, webp, gif) in the task's attachments, the resource library or the workspace; `caption`: one short line (what they are). They appear inline in the dashboard conversation and are sent as a photo / album to chat channels like Telegram. Use it whenever the result IS a picture — don't just name the file. Several related images go in ONE call (an album), not one call each.",
+      shape: { paths: z.array(z.string()), caption: z.string().optional() },
+      handler: (args) => params.onShowImages!({ paths: Array.isArray(args.paths) ? (args.paths as unknown[]).map(String) : [], caption: typeof args.caption === 'string' ? args.caption : undefined }),
+    });
   }
 
   if (params.onCurrentTime) {

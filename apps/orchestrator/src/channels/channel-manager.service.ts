@@ -279,6 +279,20 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
    *  compactProcessLine). Most kinds are filtered out before this even runs a
    *  DB query, so this only costs a lookup for the kinds worth narrating. */
   private async onAgentLog(payload: AgentLogEvent): Promise<void> {
+    // a message in a discussion between agents: posted to the chat as it is said
+    if (payload.kind === 'discussion' && payload.speaker) {
+      const d = await this.channels.threadForTask(payload.taskId);
+      if (d) {
+        const st = await this.prisma.channelChatState.findUnique({ where: { channelId_chatId: { channelId: d.channel.id, chatId: d.externalThreadId } }, select: { muted: true } });
+        if (!st?.muted) await this.send(d.channel.id, d.externalThreadId, payload.speaker === 'system' ? payload.text : `🗣 ${payload.speaker}:\n${payload.text}`, undefined, payload.taskId);
+      }
+      return;
+    }
+    // pictures the agent chose to show (show_images): sent at once, as a photo or an album with the caption
+    if (payload.kind === 'assistant' && payload.attachments?.length) {
+      await this.deliverShown(payload.taskId, payload.attachments, payload.text).catch((e) => this.logger.warn(`show_images delivery failed: ${(e as Error).message}`));
+      return; // the caption went out with the pictures — no second "💭 …" status line for it
+    }
     const line = compactProcessLine(payload.kind, payload.text);
     if (!line) return;
     const dest = await this.channels.threadForTask(payload.taskId);
@@ -379,6 +393,11 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const icon = reactionIcon(status);
     // Post the agent's actual final answer (the `result` event) — not just a
     // status line. Fall back to the reported summary / title when there is none.
+    // a discussion between agents has no single answer: its messages were already posted one by one
+    if (status === 'done' && (await this.endedWithDiscussion(taskId))) {
+      await this.send(dest.channel.id, dest.externalThreadId, '✅ The discussion is over. Write here to continue the conversation.', undefined, taskId);
+      return;
+    }
     const body =
       status === 'done'
         ? (await this.latestResult(taskId)) || (await this.channels.summarize(taskId))
@@ -438,6 +457,43 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     await this.send(channelId, chatId, text, undefined, taskId);
   }
 
+  /** Send pictures an agent showed (single or album) to the task's chat right away and remember them as sent. */
+  private async deliverShown(taskId: string, names: string[], caption: string): Promise<void> {
+    const dest = await this.channels.threadForTask(taskId);
+    if (!dest) return;
+    const state = await this.prisma.channelChatState.findUnique({ where: { channelId_chatId: { channelId: dest.channel.id, chatId: dest.externalThreadId } }, select: { muted: true } });
+    if (state?.muted) return;
+    const sent = this.sentAttachments.get(taskId) ?? new Set<string>();
+    this.sentAttachments.set(taskId, sent);
+    const metas = (await this.attachments.list(taskId)).filter((m) => names.includes(m.name));
+    for (const m of metas) sent.add(m.name);
+    await this.sendPictures(dest.channel.id, dest.externalThreadId, taskId, metas, caption.trim());
+  }
+
+  /** Pictures as ONE album when the transport can (2–10), else one by one; the caption goes on the first. */
+  private async sendPictures(channelId: string, chatId: string, taskId: string, metas: { name: string; mime: string }[], caption: string): Promise<void> {
+    const row = await this.channels.getRow(channelId).catch(() => null);
+    if (!row) return;
+    const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
+    const files: { data: Buffer; filename: string }[] = [];
+    for (const m of metas) {
+      const { path } = await this.attachments.filePath(taskId, m.name);
+      files.push({ data: await readFile(path), filename: m.name });
+    }
+    if (!files.length) return;
+    await this.withActivity(channelId, chatId, 'upload_photo', async () => {
+      if (files.length >= 2 && adapter.sendImages) {
+        for (let i = 0; i < files.length; i += 10) {
+          const batch = files.slice(i, i + 10);
+          if (batch.length >= 2) await adapter.sendImages!(chatId, batch, i === 0 ? caption : undefined);
+          else await adapter.sendImage?.(chatId, batch[0]!, i === 0 ? caption : undefined);
+        }
+      } else {
+        for (let i = 0; i < files.length; i++) await adapter.sendImage?.(chatId, files[i]!, i === 0 ? caption : undefined);
+      }
+    });
+  }
+
   /**
    * Send any attachments the task has accumulated that haven't been pushed to
    * the channel yet — covers both tool-result screenshots (written by the
@@ -460,7 +516,14 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     if (!row) return;
     const adapter = this.adapters.get(channelId) ?? this.channels.buildAdapter(row);
     if (!adapter.sendImage && !adapter.sendDocument) return;
+    // pictures go out together as an album (2–10), everything else one by one
+    const pics = fresh.filter((m) => m.mime.startsWith('image/'));
+    if (pics.length >= 2 && adapter.sendImages) {
+      for (const m of pics) sent.add(m.name);
+      await this.sendPictures(channelId, chatId, taskId, pics, '').catch((err) => this.logger.warn(`send album failed: ${(err as Error).message}`));
+    }
     for (const meta of fresh) {
+      if (pics.length >= 2 && adapter.sendImages && meta.mime.startsWith('image/')) continue;
       sent.add(meta.name);
       try {
         const { path } = await this.attachments.filePath(taskId, meta.name);
@@ -474,6 +537,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`send attachment ${meta.name} failed: ${(err as Error).message}`);
       }
     }
+  }
+
+  /** The newest thing said in the task was a discussion message (no later `result`). */
+  private async endedWithDiscussion(taskId: string): Promise<boolean> {
+    const ev = await this.prisma.agentEvent.findFirst({ where: { taskId, kind: { in: ['discussion', 'result'] } }, orderBy: [{ createdAt: 'desc' }, { seq: 'desc' }], select: { kind: true } });
+    return ev?.kind === 'discussion';
   }
 
   /** The agent's most recent final answer (the latest `result` event) for a task. */

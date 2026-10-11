@@ -116,6 +116,20 @@ export class TelegramAdapter implements ChannelAdapter {
     if (!data.ok) throw new Error(data.description || `Telegram ${voice ? 'sendVoice' : 'sendAudio'} failed (${res.status})`);
   }
 
+  async sendImages(chatId: string, images: { data: Buffer; filename: string }[], caption?: string): Promise<void> {
+    const list = images.slice(0, 10);
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append(
+      'media',
+      JSON.stringify(list.map((img, i) => ({ type: 'photo', media: `attach://p${i}`, ...(i === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }))),
+    );
+    list.forEach((img, i) => form.append(`p${i}`, new Blob([new Uint8Array(img.data)]), img.filename));
+    const res = await fetch(`${API}/bot${this.token}/sendMediaGroup`, { method: 'POST', body: form });
+    const data = (await res.json()) as { ok: boolean; description?: string };
+    if (!data.ok) throw new Error(data.description || `Telegram sendMediaGroup failed (${res.status})`);
+  }
+
   async sendDocument(
     chatId: string,
     file: { data: Buffer; filename: string; mime?: string },

@@ -2,10 +2,11 @@ import { createWriteStream } from 'node:fs';
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { extname, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
+import { ImageOptimizer, RESOURCE_MAX_SIDE } from '../media/image-optimizer.service';
 import {
   maxBytesFor,
   MAX_RESOURCES,
@@ -42,7 +43,10 @@ export class ResourcesService {
   private readonly logger = new Logger(ResourcesService.name);
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly images: ImageOptimizer,
+  ) {}
 
   private get root(): string {
     return join(this.config.agentDir, 'resources');
@@ -160,10 +164,21 @@ export class ResourcesService {
       out.end();
       await once(out, 'finish');
       if (size === 0) throw new BadRequestException('the file is empty.');
+      // library pictures: shrunk to what is needed (a PNG may become a JPEG — the stored name follows)
+      let storedFile = file;
+      let storedExt = ext;
+      if (kindFor(ext) === 'image') {
+        const r = await this.images.optimize(dest, RESOURCE_MAX_SIDE);
+        if (r.changed) {
+          size = r.size;
+          storedFile = basename(r.path);
+          storedExt = extname(r.path).slice(1).toLowerCase();
+        }
+      }
       return await this.locked(async () => {
         await this.room(size);
         const now = new Date().toISOString();
-        const entry: ResourceEntry = { id, ...meta, kind: kindFor(ext), file, originalName: rawName.split(/[\\/]/).pop() ?? name, mime: mimeFor(ext), size, source: m.source ?? 'upload', createdAt: now, updatedAt: now };
+        const entry: ResourceEntry = { id, ...meta, kind: kindFor(storedExt), file: storedFile, originalName: storedExt === ext ? (rawName.split(/[\\/]/).pop() ?? name) : `${(rawName.split(/[\\/]/).pop() ?? name).replace(/\.[^.]+$/, '')}.${storedExt}`, mime: mimeFor(storedExt), size, source: m.source ?? 'upload', createdAt: now, updatedAt: now };
         await this.write([...(await this.read()), entry]);
         this.logger.log(`Resource "${meta.title}" uploaded (${size}B, ${entry.kind})`);
         return entry;

@@ -1,4 +1,5 @@
 import { VoiceService } from '../voice/voice.service';
+import { ModuleRef } from '@nestjs/core';
 import { Injectable } from '@nestjs/common';
 import { isTerminalStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -50,6 +51,7 @@ export class ChannelCommandService {
     private readonly agents: AgentRegistryService,
     private readonly settings: SettingsService,
     private readonly voice: VoiceService,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   // ---- addressing an agent: `/pm text`, `@pm text` ----
@@ -154,6 +156,8 @@ export class ChannelCommandService {
         return this.voiceCmd(ctx, arg.toLowerCase());
       case '/progress':
         return this.progressCmd(ctx, arg.toLowerCase());
+      case '/discuss':
+        return this.discuss(ctx, arg);
       case '/agents':
         return this.listAgents(ctx);
       case '/agent':
@@ -259,6 +263,31 @@ export class ChannelCommandService {
       return line.length > 140 ? `${line.slice(0, 137)}…` : line;
     });
     return `Agents — tap a name to talk to it:\n${lines.join('\n')}\n\n/name text (or @name text) sends that agent a message — small typos in the name are fine. /agent <name> sets who starts new tasks (▶ now).`;
+  }
+
+  /** `/discuss pm architect: topic` — the agents talk to each other in a new chat (rounds=N as the first word sets the length). */
+  private async discuss(ctx: CommandCtx, arg: string): Promise<string> {
+    const usage = 'Usage: /discuss <agent> <agent> [more]: <topic> — e.g. /discuss pm architect: should we rewrite the app? (optional rounds=2 first). See /agents.';
+    const colon = arg.indexOf(':');
+    if (colon < 1) return usage;
+    let names = arg.slice(0, colon).split(/[\s,]+/).filter(Boolean).map((n) => n.replace(/^[/@]/, ''));
+    const topic = arg.slice(colon + 1).trim();
+    let rounds: number | undefined;
+    const r = names.find((n) => /^rounds?=\d+$/i.test(n));
+    if (r) {
+      rounds = Number(r.split('=')[1]);
+      names = names.filter((n) => n !== r);
+    }
+    if (names.length < 2 || !topic) return usage;
+    const { DiscussionService } = await import('../discussion/discussion.service');
+    try {
+      const { taskId } = await this.moduleRef.get(DiscussionService, { strict: false }).start({ topic, agents: names, rounds, summaryBy: names[0], createdByChannel: `${ctx.kind}:${ctx.userId}` });
+      await this.channels.linkThread(ctx.channelId, taskId, ctx.chatId);
+      await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: taskId });
+      return `💬 Discussion started: ${names.join(', ')}. Their messages appear here one by one — write in this chat to join in (they answer you first); /cancel stops it.`;
+    } catch (e) {
+      return `⚠️ ${(e as Error).message.replace(/^\d+ [^—]*— /, '')}`;
+    }
   }
 
   private async setAgent(ctx: CommandCtx, arg: string): Promise<string> {

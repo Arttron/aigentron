@@ -44,7 +44,7 @@ export class MediaService {
     return (await this.video.digest(file, cleanPlan(plan))).text;
   }
 
-  async lookAt(path: string, question: string, worktree?: string, plan?: Parameters<typeof cleanPlan>[0]): Promise<string> {
+  async lookAt(path: string, question: string, worktree?: string, plan?: Parameters<typeof cleanPlan>[0], own?: { provider: string; model: string }): Promise<string> {
     const file = await this.safePath(path, worktree);
     const images: LookImage[] = [];
     let intro = '';
@@ -60,6 +60,6 @@ export class MediaService {
     } else {
       throw new Error('look_at takes a photo (jpg, png, webp, gif) or a video.');
     }
-    return this.vision.describe(images, `${intro}${question}`);
+    return this.vision.describe(images, `${intro}${question}`, own);
   }
 }

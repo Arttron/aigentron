@@ -58,11 +58,14 @@ export interface AgentLogEvent {
     | 'delegation'
     | 'tool_result'
     | 'result'
+    | 'discussion'
     | 'stderr';
   /** Rendered text for display. */
   text: string;
   /** Attachment filenames sent with a `prompt` message (for inline thumbnails). */
   attachments?: string[];
+  /** Who said it (kind `discussion`: the agent taking part). */
+  speaker?: string;
   /** Monotonic sequence number within the session, for ordering. */
   seq: number;
   ts: string;

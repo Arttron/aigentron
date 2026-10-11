@@ -444,6 +444,8 @@ model AgentEvent {
   text           String
   // Attachment filenames for `prompt` (user message) events — inline thumbnails.
   attachments    String     @default("[]")
+  // who said it, for a discussion between agents (kind 'discussion'); null for everything else
+  speaker        String?
   createdAt      DateTime     @default(now())
 
   @@index([agentSessionId, seq])

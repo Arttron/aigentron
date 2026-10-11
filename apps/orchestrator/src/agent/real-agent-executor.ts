@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { readFile, readdir, stat } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
 import {
@@ -30,6 +30,7 @@ import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { stripMark } from '../discussion/discussion-core';
 import { describeNow } from './clock';
 import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
@@ -128,14 +129,17 @@ export class RealAgentExecutor extends AgentExecutor {
 
   async run(ctx: TaskRunContext): Promise<AgentRunOutcome> {
     const task = await this.prisma.task.findUniqueOrThrow({ where: { id: ctx.taskId } });
-    const agentDef = task.agentName
-      ? await this.agents.get(task.agentName).catch(() => null)
+    // A discussion turn runs the named participant, not the task's own agent.
+    const agentName = ctx.discussion?.agent ?? task.agentName;
+    const agentDef = agentName
+      ? await this.agents.get(agentName).catch(() => null)
       : null;
     const defaultProvider = await this.settings.defaultProvider();
 
     // Setup that is the same across every failover attempt (provider-independent).
     const { githubToken } = await this.settings.workspaceConfig();
-    const mcpServers = await this.mcp.resolveMany(agentDef?.mcp ?? [], { GITHUB_TOKEN: githubToken });
+    // A discussion participant only talks: none of the agent's own MCP servers (their tools could write somewhere).
+    const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(agentDef?.mcp ?? [], { GITHUB_TOKEN: githubToken });
     const attachmentPaths = await this.attachments.paths(ctx.taskId).catch(() => []);
     // Which attachments belong to THIS message (inline thumbnails): the ones
     // explicitly sent, else — on the first run — all (uploaded with the opener).
@@ -146,7 +150,7 @@ export class RealAgentExecutor extends AgentExecutor {
         : attachmentPaths.map((p) => basename(p));
     // Agent cwd: the worktree root, or the configured subdir within it. The
     // worktree root stays the write boundary (passed separately to the runner).
-    const chat = agentDef?.mode === 'chat';
+    const chat = agentDef?.mode === 'chat' || Boolean(ctx.discussion);
     const workDir = chat ? ctx.worktreePath : await this.settings.workDir(ctx.worktreePath);
     // Orient every agent (lead AND delegated sub-agents share this cwd): its cwd
     // IS the project (a per-task worktree checkout), so none of them hunt for a
@@ -157,18 +161,19 @@ export class RealAgentExecutor extends AgentExecutor {
       : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared, projectMap);
     // Other registered agents become delegatable subagents (each on its own provider);
     // a chat agent talks to the user directly and delegates to no one.
-    const agents = chat ? {} : await this.buildSubagents(task.agentName, defaultProvider, orientation);
+    const leadProvider = task.providerOverride ?? agentDef?.provider ?? defaultProvider;
+    const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation);
     if (Object.keys(agents).length) {
       this.logger.log(`Task ${task.id} subagents: [${Object.keys(agents).join(', ')}]`);
     }
-    const appendSystemPrompt = await this.buildInstructions(agentDef);
+    const appendSystemPrompt = (await this.buildInstructions(agentDef)) + roster;
 
     // Resume the most recent session with a Claude session id on a follow-up
     // (first attempt only) — including one that ended `errored` by hitting the
     // step limit, so "continue" truly resumes the conversation (with full
     // context) rather than starting fresh.
     let resumeSessionId: string | undefined;
-    if (ctx.followUpPrompt) {
+    if (ctx.followUpPrompt && !ctx.discussion) {
       const last = await this.prisma.agentSession.findFirst({
         where: {
           taskId: ctx.taskId,
@@ -182,7 +187,7 @@ export class RealAgentExecutor extends AgentExecutor {
 
     // Provider chain: the primary followed by declared fallbacks (existing, with
     // a model), deduped. On a provider-level failure we walk to the next.
-    const chain = await this.resolveProviderChain(agentDef, defaultProvider, task.providerOverride);
+    const chain = await this.resolveProviderChain(agentDef, defaultProvider, ctx.discussion ? null : task.providerOverride);
     if (!chain.length) {
       throw new Error('No runnable provider: set a default model on the provider or pick one on the agent.');
     }
@@ -427,16 +432,29 @@ export class RealAgentExecutor extends AgentExecutor {
     // always kept; the intermediate process trace (thinking/tool calls/system
     // chatter) is only worth the DB weight when someone's actually debugging —
     // it still streams live either way, just isn't replayed on the next page load.
-    const alwaysPersist = (kind: AgentEvent['kind']) => kind === 'prompt' || kind === 'result';
+    const alwaysPersist = (event: AgentEvent) => event.kind === 'prompt' || event.kind === 'result' || event.kind === 'discussion' || (event.kind === 'assistant' && Boolean(event.attachments?.length));
 
     let lastEventAt = Date.now();
     let lastEventKind = 'system';
-    const onEvent = (event: AgentEvent): void => {
+    let lastAssistantText = '';
+    const onEvent = (raw: AgentEvent): void => {
+      let event = raw;
+      // A discussion turn: its final answer becomes a message BY that participant (and is handed back to the discussion).
+      if (ctx.discussion && event.kind === 'assistant' && event.text.trim()) lastAssistantText = event.text;
+      if (ctx.discussion && event.kind === 'result') {
+        if (event.isError) {
+          // an error ("API Error 401", "run aborted") is not something the participant SAID: keep it out of the conversation
+          ctx.discussion.collect.error = event.text || 'the run failed';
+          return;
+        }
+        ctx.discussion.collect.text = event.text.trim() || lastAssistantText;
+        event = { kind: 'discussion', speaker: ctx.discussion.agent, text: stripMark(ctx.discussion.collect.text) };
+      }
       lastEventAt = Date.now();
       lastEventKind = event.kind;
       if (event.kind === 'system') capturedSessionId = event.sessionId || capturedSessionId;
       const current = seq++;
-      let attachments: string[] = event.kind === 'prompt' ? (event.attachments ?? []) : [];
+      let attachments: string[] = event.kind === 'prompt' || event.kind === 'assistant' ? (event.attachments ?? []) : [];
       // Images a tool returned (e.g. an MCP browser screenshot) are saved as task
       // attachments so they render inline in the transcript + gallery.
       if (event.kind === 'tool_result' && event.images?.length) {
@@ -461,11 +479,12 @@ export class RealAgentExecutor extends AgentExecutor {
           kind: event.kind,
           text: event.text,
           attachments,
+          ...(event.kind === 'discussion' ? { speaker: event.speaker } : {}),
           seq: current,
           ts,
         },
       });
-      if (!debugMode && !alwaysPersist(event.kind)) return;
+      if (!debugMode && !alwaysPersist(event)) return;
       writeChain = writeChain.then(() =>
         this.prisma.agentEvent
           .create({
@@ -479,6 +498,7 @@ export class RealAgentExecutor extends AgentExecutor {
               // the app is compiled against the postgres-typed client (the
               // canonical, narrower shape — same tradeoff as PrismaModule's cast).
               attachments: encodeAttachments(this.config, attachments) as string[],
+              speaker: event.kind === 'discussion' ? event.speaker : null,
             },
           })
           .catch((err) => this.logger.warn(`Failed to persist event: ${(err as Error).message}`)),
@@ -488,7 +508,8 @@ export class RealAgentExecutor extends AgentExecutor {
     // On a fallback attempt, lead the transcript with why we failed over.
     if (opts.leadingNote) onEvent({ kind: 'stderr', text: opts.leadingNote });
     // Record the user's message so the transcript reads as a chat.
-    onEvent({ kind: 'prompt', text: prompt, attachments: opts.messageAttachments });
+    if (!ctx.discussion) onEvent({ kind: 'prompt', text: prompt, attachments: opts.messageAttachments });
+    else if (ctx.discussion.opening) onEvent({ kind: 'prompt', text: ctx.discussion.opening.text, attachments: ctx.discussion.opening.attachments });
 
     const abortController = new AbortController();
     // Abort any stale controller for this task before replacing it.
@@ -528,25 +549,45 @@ export class RealAgentExecutor extends AgentExecutor {
       onCheckSubtasks: ctx.onCheckSubtasks,
       onScheduleCheck: ctx.onScheduleCheck,
       kb: {
-        list: () => this.knowledge.listReport(agentDef?.name),
-        search: (input) => this.knowledge.searchReport(input, agentDef?.name),
-        read: (input) => this.knowledge.readReport(input, agentDef?.name),
-        add: (input) => this.knowledge.addReport(input, agentDef?.name),
+        list: () => this.knowledge.listReport(agentDef?.name ?? null),
+        search: (input) => this.knowledge.searchReport(input, agentDef?.name ?? null),
+        read: (input) => this.knowledge.readReport(input, agentDef?.name ?? null),
+        ...(ctx.discussion ? {} : { add: (input: { kb: string; title: string; text: string; source?: string }) => this.knowledge.addReport(input, agentDef?.name ?? null) }),
       },
       onCurrentTime: (input) => describeNow(new Date(), input.timezone),
-      onAskUser: async (input) =>
+      onShowImages: async (input) => {
+        const paths = [...new Set(input.paths)].slice(0, 10);
+        if (!paths.length) throw new Error('show_images needs at least one image path.');
+        const names: string[] = [];
+        const skipped: string[] = [];
+        for (const p of paths) {
+          try {
+            const real = await this.media.safePath(p, ctx.worktreePath);
+            // already one of this task's attachments → just reference it; otherwise copy it in
+            const own = await realpath(this.attachments.dir(ctx.taskId)).catch(() => this.attachments.dir(ctx.taskId));
+            const name = dirname(real) === own ? basename(real) : await this.attachments.adopt(ctx.taskId, real);
+            if (!names.includes(name)) names.push(name);
+          } catch (e) {
+            skipped.push(`${basename(p)} (${(e as Error).message.slice(0, 80)})`);
+          }
+        }
+        if (!names.length) throw new Error(`None of the pictures could be shown: ${skipped.join('; ')}`);
+        onEvent({ kind: 'assistant', text: (input.caption ?? '').trim(), attachments: names });
+        return `Shown ${names.length} picture(s) to the user${names.length > 1 ? ' as an album' : ''}.${skipped.length ? ` Skipped: ${skipped.join('; ')}` : ''}`;
+      },
+      onAskUser: ctx.discussion ? undefined : async (input) =>
         this.questions.ask(ctx.taskId, session.id, {
           ...input,
           // the picture shown with the question must be a real file of this task (never an arbitrary path)
           image: input.image ? await this.media.safePath(input.image, ctx.worktreePath).catch(() => undefined) : undefined,
         }),
       onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
-      onLookAt: (input) => this.media.lookAt(input.path, input.question, ctx.worktreePath, input),
+      onLookAt: (input) => this.media.lookAt(input.path, input.question, ctx.worktreePath, input, { provider: provider.name, model }),
       onVideoDigest: (input) => this.media.videoDigest(input.path, ctx.worktreePath, input),
-      onStartPreview: () => this.preview.getOrStart(ctx.taskId, opts.workDir),
-      onProposeLearnedSkill: (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
+      onStartPreview: ctx.discussion ? undefined : () => this.preview.getOrStart(ctx.taskId, opts.workDir),
+      onProposeLearnedSkill: ctx.discussion ? undefined : (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.
-      admin: agentDef?.name === 'admin' ? this.adminTools(ctx.taskId, session.id) : undefined,
+      admin: agentDef?.name === 'admin' && !ctx.discussion ? this.adminTools(ctx.taskId, session.id) : undefined,
     };
     const internalReg = isCodex ? this.internalMcp.register(toolHandlers) : null;
     const codexOpts: CodexRunOptions | undefined = isCodex
@@ -571,9 +612,10 @@ export class RealAgentExecutor extends AgentExecutor {
           maxTurns: this.config.agentMaxTurns,
           resumeSessionId,
           appendSystemPrompt: opts.appendSystemPrompt,
-          allowedTools: agentDef?.allowedTools,
+          // A discussion participant only talks (and may look things up): no editing, no shell, no delegation.
+          allowedTools: ctx.discussion ? ['Read', 'Grep', 'Glob'] : agentDef?.allowedTools,
           // Block SendMessage so the lead delegates via the Task tool.
-          disallowedTools: [...(agentDef?.disallowedTools ?? []), 'SendMessage'],
+          disallowedTools: [...(agentDef?.disallowedTools ?? []), 'SendMessage', ...(ctx.discussion ? ['Bash', 'Write', 'Edit', 'NotebookEdit', 'Task', 'Agent', 'WebFetch', 'WebSearch'] : [])],
           mcpServers: opts.mcpServers,
           agents: opts.agents,
           settingsDir: join(this.config.agentDir, 'runs', ctx.taskId),
@@ -595,6 +637,7 @@ export class RealAgentExecutor extends AgentExecutor {
       // actually completed. (finally still clears it on the throw paths.)
       clearTimeout(timer);
       if (idleTimer) clearInterval(idleTimer);
+      if (ctx.discussion && !ctx.discussion.collect.text.trim() && !ctx.discussion.collect.error && lastAssistantText.trim()) onEvent({ kind: 'result', text: lastAssistantText, isError: false, numTurns: 0, costUsd: 0 });
       await writeChain;
 
       const finalSessionId = result.sessionId ?? capturedSessionId;
@@ -921,24 +964,33 @@ export class RealAgentExecutor extends AgentExecutor {
    */
   private async buildSubagents(
     leadName: string | null,
-    defaultProvider: string,
+    leadProvider: string,
     orientation: string,
-  ): Promise<Record<string, SubagentDefinition>> {
+  ): Promise<{ map: Record<string, SubagentDefinition>; roster: string }> {
     const map: Record<string, SubagentDefinition> = {};
-    const defaultProviderRow = await this.providers.get(defaultProvider).catch(() => null);
-    if (defaultProviderRow && isOauthToken(defaultProviderRow)) {
-      this.logger.debug(
-        `Default provider "${defaultProvider}" is oauth-token — subagent delegation disabled for this task`,
-      );
-      return map;
+    const others: { name: string; description: string; how: string }[] = [];
+    // The connection the run uses is the LEAD's provider (its own, or the default): a subscription login there cannot be shared.
+    const leadRow = await this.providers.get(leadProvider).catch(() => null);
+    const leadIsOauth = Boolean(leadRow && isOauthToken(leadRow));
+    if (leadIsOauth) {
+      this.logger.debug(`Lead provider "${leadProvider}" is oauth-token — the Task tool is not offered for this task (agents are reached with create_subtask)`);
     }
     const summaries = await this.agents.list().catch(() => []);
     for (const s of summaries) {
       if (s.name === leadName || isBuiltinAgent(s.name)) continue; // built-ins aren't delegation targets
       const def = await this.agents.get(s.name).catch(() => null);
       if (!def) continue;
-      const model = await this.subagentModel(def, defaultProvider).catch(() => null);
-      if (!model) continue;
+      const desc = (def.description || s.name).replace(/\s+/g, ' ').trim().slice(0, 120);
+      const why = leadIsOauth ? 'the lead runs on a subscription login' : await this.whyNotSubagent(def, leadProvider);
+      if (why) {
+        others.push({ name: s.name, description: desc, how: `create_subtask {agent:"${s.name}"} only (${why})` });
+        continue;
+      }
+      const model = await this.subagentModel(def, leadProvider).catch(() => null);
+      if (!model) {
+        others.push({ name: s.name, description: desc, how: `create_subtask {agent:"${s.name}"} only (no model set)` });
+        continue;
+      }
       // Sub-agents share the lead's worktree/cwd — give them the same orientation
       // so a delegated agent knows its working directory is the project.
       map[s.name] = {
@@ -947,8 +999,23 @@ export class RealAgentExecutor extends AgentExecutor {
         model,
         ...(def.allowedTools?.length ? { tools: def.allowedTools } : {}),
       };
+      others.push({ name: s.name, description: desc, how: `Task tool, subagent_type "${s.name}" (or create_subtask)` });
     }
-    return map;
+    // The lead is told how to reach each colleague: an agent on another runtime / a subscription login is NOT in the Task tool's list
+    // ("Agent type … not found. Available agents: none") — it has to be started as a subtask.
+    const roster = others.length
+      ? `\n\n## Your colleagues\nReach each one the way it says — an agent marked "create_subtask only" is NOT available to the Task tool (do not try it there); start it with create_subtask {agent, prompt}. Names are exact.\n${others.map((o) => `- ${o.name}: ${o.description} — ${o.how}`).join('\n')}`
+      : '';
+    return { map, roster };
+  }
+
+  /** Why an agent cannot be a Task-tool subagent of this lead (null = it can). */
+  private async whyNotSubagent(def: AgentDef, leadProvider: string): Promise<string | null> {
+    const provider = await this.providers.get(def.provider ?? leadProvider).catch(() => null);
+    if (!provider) return 'its provider is missing';
+    if (provider.kind === 'codex') return 'it runs on Codex, another runtime';
+    if (isOauthToken(provider)) return 'it uses a subscription login';
+    return null;
   }
 
   /** The model name a subagent runs on: its LiteLLM route, or the bare model. */
@@ -1074,7 +1141,7 @@ export class RealAgentExecutor extends AgentExecutor {
       if (block) parts.push(block);
     }
     // Knowledge bases: one line per base this agent may search (the content stays out of the prompt).
-    const kbBlock = await this.knowledge.promptBlock(agent?.name).catch(() => '');
+    const kbBlock = await this.knowledge.promptBlock(agent?.name ?? null).catch(() => '');
     if (kbBlock) parts.push(kbBlock.trim());
     return parts.join('\n\n');
   }

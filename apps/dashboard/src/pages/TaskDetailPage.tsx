@@ -14,6 +14,8 @@ import { Tabs } from '@/components/ui/Tabs';
 import { StatusBadge } from '@/components/StatusBadge';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { Transcript, type LogLine } from '@/components/Transcript';
+import { DiscussionModal } from '@/components/DiscussionModal';
+import { DiscussionBar } from '@/components/DiscussionBar';
 import { FollowUpForm } from '@/components/FollowUpForm';
 import { TaskRelations } from '@/components/TaskRelations';
 import { Attachments } from '@/components/Attachments';
@@ -39,6 +41,7 @@ export function TaskDetailPage() {
 
   const [task, setTask] = useState<TaskDetail | null>(null);
   const [lines, setLines] = useState<LogLine[]>([]);
+  const [discussing, setDiscussing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [debug, setDebug] = useState(false);
@@ -98,6 +101,7 @@ export function TaskDetailPage() {
             kind: e.kind,
             text: e.text,
             attachments: e.attachments,
+            speaker: e.speaker ?? undefined,
             ts: e.createdAt,
           });
         }
@@ -114,7 +118,7 @@ export function TaskDetailPage() {
     const onLog = (e: AgentLogEvent) => {
       if (e.taskId !== id) return;
       const key = lineKey(e.agentSessionId, e.seq);
-      addLine(key, { id: key, kind: e.kind, text: e.text, attachments: e.attachments, ts: e.ts });
+      addLine(key, { id: key, kind: e.kind, text: e.text, attachments: e.attachments, speaker: e.speaker, ts: e.ts });
       // A tool shared an image (screenshot, etc.) → refresh the gallery live.
       if (e.attachments?.length) setAssetTick((n) => n + 1);
     };
@@ -205,7 +209,7 @@ export function TaskDetailPage() {
   const terminal = task ? isTerminalStatus(task.status) : false;
   // Hide verbose intermediate 'assistant' lines unless debug mode is on
   // (the final answer is already shown once as 'result').
-  let visibleLines = debug ? lines : lines.filter((l) => l.kind !== 'assistant');
+  let visibleLines = debug ? lines : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
   // Until the run emits the opening `prompt` event, seed the request from the
   // task so the conversation always shows what was asked.
   if (task && !visibleLines.some((l) => l.kind === 'prompt')) {
@@ -256,6 +260,7 @@ export function TaskDetailPage() {
                   Pushed ↗
                 </ButtonLink>
               )}
+              {terminal && <Button onClick={() => setDiscussing(true)}>💬 Discuss</Button>}
               {!terminal && (
                 <Button variant="red" onClick={cancel} disabled={busy}>
                   Cancel task
@@ -292,6 +297,7 @@ export function TaskDetailPage() {
         </div>
 
         <div className={tab === 'chat' ? styles.paneChat : styles.paneScroll}>
+          {tab === 'chat' && <DiscussionBar taskId={id} running={!terminal} />}
           {tab === 'chat' && (
             <Transcript
               taskId={id}
@@ -343,6 +349,11 @@ export function TaskDetailPage() {
                     Pushed ↗
                   </ButtonLink>
                 )}
+                {terminal && (
+                  <Button onClick={() => setDiscussing(true)} title="Let several agents discuss in this chat">
+                    💬 Discuss
+                  </Button>
+                )}
                 {!terminal && (
                   <Button variant="red" onClick={cancel} disabled={busy}>
                     Cancel
@@ -376,6 +387,7 @@ export function TaskDetailPage() {
 
           <Card>
             <SectionTitle>Conversation</SectionTitle>
+            <DiscussionBar taskId={id} running={!terminal} />
             <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           </Card>
           <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} />
@@ -384,6 +396,7 @@ export function TaskDetailPage() {
           <TaskRelations task={task} onChange={refreshTask} />
         </>
       )}
+      {discussing && <DiscussionModal taskId={id} initialTopic={task?.prompt} onClose={() => setDiscussing(false)} onStarted={() => refreshTask()} />}
     </>
   );
 }

@@ -104,19 +104,19 @@ that don't pick an agent"), and one row per provider with **Test**, **Edit**, de
 
 **LiteLLM**: the model routes of the LiteLLM gateway (advanced).
 **MCP servers**: external tool servers agents can use. Each has a JSON config; the list shows the built-in ones
-(playwright, github, postgres, code-intel and **research**). To add one: type a *name* in the field above the JSON box
+(playwright, **playwright-proxy** (the same browser through the operator's proxy, set up in the server's `.env`), github, postgres, code-intel and **research**). To add one: type a *name* in the field above the JSON box
 (the **Add** button stays disabled until a name is entered), edit the JSON (stdio `{command,args}` or `{type:"http",url}`;
 SSE servers are skipped by the Codex runtime), press **Add**. A config may contain `"readOnlyTools": ["*"]` (or a list of
 tool names) to mark a trusted server's tools read-only so agents don't need an approval for each call. Alternatively `"trustAnnotations": true` plus the **Discover tools** button: tools the server itself annotates as read-only (and not destructive) skip approvals, new/unannotated ones still ask. Agents use a server
 only if its name is in their `mcp:` list (Agents page → Edit → *MCP servers*). I can change a few settings (default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory) — never the repo URL or tokens — and revert my own changes. I can't change MCP servers myself — guide the user.
-**MCP endpoint**: lets outside clients (e.g. Claude Desktop) drive this platform. **Channels**: chat channels such as
+**Vision**: which model describes photos and video frames for the agents (provider + model, **Test** shows it a red square; unsaved changes are flagged and Test saves them first) — see "Camera, video and Vision". **MCP endpoint**: lets outside clients (e.g. Claude Desktop) drive this platform. **Channels**: chat channels such as
 Telegram (**+ Add channel**). **Users**: people and their roles. **Signed-in devices**: who is signed in where — own sessions; an operator/admin sees everybody's — with **Sign out** per device, "sign out my other devices", and "sign out X everywhere" (changing a password ends all of that person's sessions).
 **Voice**: speech recognition (🎤 voice → text) and speech synthesis (🔊 text → voice). Each has a switch, a *Provider*
 (must be of kind OpenAI — OpenAI, Groq or a local Whisper/TTS server by Base URL), *Model*, *Language* / *Voice*, and
 **Test**. Answers stay text by default: in Telegram voice replies are enabled per chat with `/voice on` (`/voice off`);
 in the dashboard use the 🔊 button on an answer, the "read answers aloud" switch, or **🎙 Voice mode** (the input is
 replaced by an orb showing listening / thinking / speaking). Cloud providers receive the audio/text — say so. The browser
-microphone needs HTTPS or localhost. I can't set this up myself (it needs a provider key) — guide the user.
+microphone needs HTTPS or localhost. A Whisper-style speech model also gives the timestamps video analysis uses ("frames at the moments the speaker says look here"). I can't set this up myself (it needs a provider key) — guide the user.
 
 ## How-tos
 
@@ -173,3 +173,12 @@ Click a photo or video in a task to open the viewer: **Ask about this moment** /
 
 ## Knowledge bases (`/knowledge`, header link 🧠 Knowledge)
 Large reference material agents search instead of carrying in the prompt (regulations, manuals, textbooks, saved web pages). **+ New base** (name, one-line description, which agents; none ticked = all), then upload PDF / Word / Markdown / text / HTML / CSV, add a note, pick something from Resources, or pull in the web pages the research tools saved. Documents are cut into passages (strategy *section* / *paragraph* / *chars*, max size, overlap — Settings has a preview). Search is keyword (BM25) and always works; with an embedding provider chosen in the base's settings it also searches by meaning (costs a few cents, text goes to that provider). Agents use `kb_list`, `kb_search`, `kb_read` (and `kb_add` only when the base allows it). I cannot create bases myself — guide the person through the page. Details: `docs/knowledge-base.md`.
+
+## Pictures in the chat and their size
+Agents show pictures with `show_images` (one large picture, or an album grid; click opens the viewer with ‹ ›). In Telegram they arrive as a photo or an album. Every uploaded picture is shrunk automatically (longest side ≤ 1600 px, library ≤ 2000, JPEG re-encode, location data dropped; transparent PNGs stay PNG). Details: `docs/media.md`.
+
+## Browser through a proxy
+A second browser MCP server, `playwright-proxy`, sends ALL its traffic through the operator's proxy (for geo-blocked / IP-bound sites). Setup is on the server, never in chat: `PLAYWRIGHT_PROXY_SERVER` (host:port), `PLAYWRIGHT_PROXY_USER`, `PLAYWRIGHT_PROXY_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; give an agent `playwright-proxy` in its MCP list to use it. I cannot read or set these credentials — guide the person. Details: `docs/browser-proxy.md`.
+
+## Discussion between agents
+Several agents can talk to each other in one chat: **💬 Discuss** (New task form, or in a chat's header/⋯ menu) — topic, 2–6 agents, rounds, who writes the conclusion; in Telegram `/discuss pm architect: topic`. Each agent answers in turn (short, read-only), the person can join in any time, **Wrap up** jumps to the conclusion, **Stop** ends it. Details: `docs/discussions.md`.

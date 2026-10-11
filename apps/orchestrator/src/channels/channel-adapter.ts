@@ -168,6 +168,8 @@ export interface ChannelAdapter {
   sendVoice?(chatId: string, audio: { data: Buffer; mime: string }, caption?: string): Promise<void>;
   /** Post an image (e.g. an agent screenshot). Optional — not every transport supports it. */
   sendImage?(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void>;
+  /** Post 2–10 pictures as ONE album (Telegram: a media group). Optional — callers fall back to sendImage one by one. */
+  sendImages?(chatId: string, images: { data: Buffer; filename: string }[], caption?: string): Promise<void>;
   /** Post an arbitrary file as a downloadable document (anything the image path
    *  doesn't cover — pdf/zip/docx/log/etc). Optional — not every transport
    *  supports it. */

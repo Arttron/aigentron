@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { AppConfigService } from './config/app-config.service';
 import { CloudflareAccessService } from './access/cloudflare-access.service';
@@ -41,7 +42,7 @@ function installProcessGuards(): void {
 
 async function bootstrap(): Promise<void> {
   installProcessGuards();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(AppConfigService);
   // Domain allow-list (Settings → General → Access). Applies to everything, the dashboard files included. Local names, IPs and
   // single-word hosts always pass, so port forwarding / ssh -L / opening the server by IP behave as before.
@@ -57,6 +58,8 @@ async function bootstrap(): Promise<void> {
     if (!cfAccess.required(host) || (await cfAccess.check(req.headers)).ok) return next();
     res.status(403).type('text/plain').send('Cloudflare Access sign-in is required for this address.');
   });
+  // Notes and previews for the knowledge bases arrive as JSON (Nest's default limit is 100 kB).
+  app.useBodyParser('json', { limit: '3mb' });
   app.setGlobalPrefix('api');
   app.enableCors({
     origin: config.corsOrigin,

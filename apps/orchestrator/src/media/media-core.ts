@@ -178,3 +178,32 @@ export function insideRoot(path: string, roots: readonly string[]): boolean {
   if (p.split('/').includes('..')) return false;
   return roots.some((r) => p === norm(r) || p.startsWith(`${norm(r)}/`));
 }
+
+// ------------------------------------------------------------- image sizes
+
+/** What to do with an uploaded picture so it is as small as the agents (and people) need — a phone photo is 4000 px and 5 MB. */
+export interface ImageFacts {
+  ext: string;
+  width: number;
+  height: number;
+  bytes: number;
+  hasAlpha: boolean;
+  /** more than one = an animation (left alone) */
+  frames?: number;
+}
+export type ImagePlan = { action: 'skip' } | { action: 'recompress'; toExt: 'jpg' | 'png'; maxSide: number };
+
+/** Pictures at or below these are left alone: already small. */
+const SMALL_BYTES = 350 * 1024;
+
+export function planImage(f: ImageFacts, maxSide: number): ImagePlan {
+  const ext = f.ext.toLowerCase();
+  if (!['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return { action: 'skip' }; // gif (may be animated), svg, heic, … untouched
+  if (!(f.width > 0 && f.height > 0)) return { action: 'skip' };
+  if ((f.frames ?? 1) > 1) return { action: 'skip' }; // an animated WebP would be flattened to its first frame
+  const long = Math.max(f.width, f.height);
+  if (long <= maxSide && f.bytes <= SMALL_BYTES) return { action: 'skip' };
+  const photoLike = !f.hasAlpha; // transparency must survive: keep PNG for those
+  if (long <= maxSide && f.bytes <= SMALL_BYTES * 2 && ext === 'png' && !photoLike) return { action: 'skip' };
+  return { action: 'recompress', toExt: photoLike ? 'jpg' : 'png', maxSide };
+}

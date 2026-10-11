@@ -17,6 +17,7 @@ export function VisionSettings() {
   const [status, setStatus] = useState<{ ffmpeg: boolean; sttReady: boolean } | null>(null);
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
+  const [saved, setSaved] = useState({ provider: '', model: '' });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -27,6 +28,7 @@ export function VisionSettings() {
         setStatus(st);
         setProvider(st.vision?.provider ?? '');
         setModel(st.vision?.model ?? '');
+        setSaved({ provider: st.vision?.provider ?? '', model: st.vision?.model ?? '' });
       })
       .catch((e) => setMsg({ ok: false, text: (e as Error).message }));
   }, []);
@@ -46,11 +48,18 @@ export function VisionSettings() {
     }
   };
 
-  const save = () => run(async () => {
+  const dirty = provider !== saved.provider || model !== saved.model;
+  const persist = async () => {
     await api.saveVision(provider && model ? { provider, model } : null);
+    setSaved(provider && model ? { provider, model } : { provider: '', model: '' });
+  };
+  const save = () => run(async () => {
+    await persist();
     return provider && model ? 'Saved.' : 'Vision is switched off.';
   });
+  // the test always uses what is on screen: unsaved changes are saved first
   const test = () => run(async () => {
+    if (dirty) await persist();
     const r = await api.testVision();
     if (!r.ok) throw new Error(r.error ?? 'The test failed.');
     return `Works — it answered: “${r.answer}”`;
@@ -61,7 +70,7 @@ export function VisionSettings() {
       <SectionTitle>Vision — let agents look at photos and video</SectionTitle>
       <Muted>
         The <code>look_at</code> and <code>video_digest</code> tools show photos (and frames of a video) to this model and give the agent its description. Pick a model that can see
-        images — your agent's own model does not matter. Photos and frames leave this server for the chosen provider, and it costs tokens (a local Ollama vision model is free).
+        images — your agent's own model does not matter. If you leave it off, an agent running on a cloud model (Claude, OpenAI-style) uses its own model for this; other agents get an error. Photos and frames leave this server for the chosen provider, and it costs tokens (a local Ollama vision model is free).
       </Muted>
       {status && (
         <Muted>
@@ -83,13 +92,14 @@ export function VisionSettings() {
         <ModelSelect provider={provider} value={model} onChange={setModel} suggestions={SUGGESTED[providers.find((p) => p.name === provider)?.kind ?? ''] ?? []} placeholder="— choose a model —" />
       </Field>
       <Row wrap>
-        <Button variant="primary" disabled={busy} onClick={save}>
+        <Button variant={dirty ? 'primary' : undefined} disabled={busy || !dirty} onClick={save}>
           Save
         </Button>
         <Button disabled={busy || !provider || !model} onClick={test}>
           Test (shows it a red square)
         </Button>
       </Row>
+      {dirty && <Muted>● Not saved yet — press Save (the Test button saves the selection too).</Muted>}
       {msg && (msg.ok ? <Muted>{msg.text}</Muted> : <ErrorText>{msg.text}</ErrorText>)}
     </Card>
   );

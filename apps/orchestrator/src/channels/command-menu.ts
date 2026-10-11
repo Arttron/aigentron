@@ -24,6 +24,7 @@ export const COMMAND_MENU: CommandDef[] = [
   { command: 'pr', description: 'Pull request link' },
   { command: 'web', description: 'Open in the dashboard' },
   { command: 'agents', description: 'List agents' },
+  { command: 'discuss', description: 'Agents discuss a topic', usage: '/discuss pm architect: topic' },
   { command: 'agent', description: 'Set the agent for new tasks', usage: '/agent <name>' },
   { command: 'models', description: 'List models' },
   { command: 'model', description: 'Set the model for new tasks', usage: '/model <name>' },

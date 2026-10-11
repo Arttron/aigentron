@@ -22,10 +22,16 @@ Large reference material that agents **search** instead of carrying in the promp
 Settings: max size (default 3000 characters), overlap (200), merge pieces shorter than (200 — only inside one section). The settings dialog has a **preview**: paste a sample and see how it would be cut. New settings apply to documents added afterwards; to re-cut one, remove and add it again (the original files are not kept — only the passages).
 
 ## Limits and notes
-- 20 MB per file, 5 M characters per document, 60 000 passages per base; scans (PDF without text) need OCR, which is not available yet.
+- 20 MB per file, 5 M characters per document, 20 000 passages per base (the index lives in memory — a bigger corpus needs an external store, see the plan); scans (PDF without text) need OCR, which is not available yet.
 - Who manages bases: operator and admin; agents only search/read (and add notes to bases where "agents may add notes" is on).
-- The index lives in memory per base and is rebuilt after a change; a base of tens of thousands of passages loads in a moment.
+- The index lives in memory per base and is rebuilt after a change; it is built page by page without freezing the server (a few seconds for ~10 000 passages) and patched in place while embeddings are being made.
 - API: `GET/POST /api/knowledge`, `PATCH/DELETE /api/knowledge/:name`, `…/docs`, `…/docs/upload` (raw body + `x-filename`), `…/docs/note`, `…/import/resource`, `…/import/research`, `…/search`, `POST /api/knowledge/preview`.
+
+## Notes on safety and limits
+- Passages returned to agents are fenced as quoted data (`<passage>`), with a one-line reminder that they are not instructions. An agent with no known identity sees only bases open to everyone.
+- PDFs: at most 600 pages and 60 s to read; Word files: refused when the declared unpacked size is huge. Notes and previews arrive as JSON (limit 3 MB).
+- Embeddings use at most the first 8 000 characters of a passage (models such as nomic-embed-text cut at ~2 000 tokens anyway); keyword search always sees the whole passage.
+- Chinese / Japanese / Korean text is indexed as character pairs.
 
 ## Not (yet) included
 OCR for scans, connecting an external database (the design is in `docs/plan-knowledge-base.md`), `verify_quote` over knowledge-base documents, admin-agent tools to create/bind bases (the admin guides you through the dashboard instead).

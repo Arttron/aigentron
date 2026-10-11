@@ -93,6 +93,27 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8931:8931"
 
+  # The same browser, but ALL its traffic goes through a proxy (egress IP of another country, an IP the target site allows, …).
+  # Credentials come from .env: PLAYWRIGHT_PROXY_SERVER (host:port), PLAYWRIGHT_PROXY_USER, PLAYWRIGHT_PROXY_PASS
+  # (optional PLAYWRIGHT_PROXY_BYPASS). Start it with `docker compose --profile proxy up -d playwright-mcp-proxy`; agents reach it
+  # as the `playwright-proxy` MCP server (tools mcp__playwright-proxy__*) — see agent/skills/core/playwright.md.
+  playwright-mcp-proxy:
+    image: mcr.microsoft.com/playwright/mcp:latest
+    profiles: ["proxy"]
+    environment:
+      PLAYWRIGHT_PROXY_SERVER: ${PLAYWRIGHT_PROXY_SERVER:-}
+      PLAYWRIGHT_PROXY_USER: ${PLAYWRIGHT_PROXY_USER:-}
+      PLAYWRIGHT_PROXY_PASS: ${PLAYWRIGHT_PROXY_PASS:-}
+      PLAYWRIGHT_PROXY_BYPASS: ${PLAYWRIGHT_PROXY_BYPASS:-}
+    volumes:
+      - ./infra/playwright-proxy-config.cjs:/proxy/config.cjs:ro
+    entrypoint:
+      - "sh"
+      - "-c"
+      - "node /proxy/config.cjs /tmp/pw-proxy.json && unset PLAYWRIGHT_PROXY_USER PLAYWRIGHT_PROXY_PASS PLAYWRIGHT_PROXY_SERVER PLAYWRIGHT_PROXY_BYPASS && exec node /app/cli.js --headless --browser chromium --no-sandbox --host 0.0.0.0 --port 8932 --allowed-hosts playwright-mcp-proxy:8932,localhost:8932 --config /tmp/pw-proxy.json"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8932:8932"
+
   # Dev server for the project under development (./project), so the playwright
   # MCP has a reachable preview target on the compose network at
   # http://project-dev:3000 (host: :3100). Serves the BASE ./project — a task's

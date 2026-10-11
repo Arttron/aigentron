@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { ModuleRef } from '@nestjs/core';
 import {
   classifyToolCall,
+  forbiddenBrowserNavigation,
   CONTINUE_RUN_TOOL,
   PROPOSE_AGENT_DELETE_TOOL,
   PROPOSE_AGENT_TOOL,
@@ -105,6 +106,12 @@ export class ApprovalsService {
    * ones create a pending approval and move the task to `needs_approval`.
    */
   async check(input: HookCheckInput): Promise<HookCheckResponse> {
+    // Some things are never asked about: a browser pointed at file: / chrome: pages could read the container's secrets.
+    const forbidden = forbiddenBrowserNavigation(input.toolName, input.toolInput);
+    if (forbidden) {
+      this.logger.warn(`Refused ${input.toolName} (task ${input.taskId}): ${String(input.toolInput.url).slice(0, 80)}`);
+      return { allow: false, reason: forbidden };
+    }
     const readOnlyMcp = input.toolName.startsWith('mcp__')
       ? await this.moduleRef.get(McpService, { strict: false }).readOnlyMap().catch(() => ({}))
       : undefined;

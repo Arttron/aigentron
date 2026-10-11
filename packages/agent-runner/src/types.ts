@@ -121,6 +121,8 @@ export interface RunAgentParams {
     read: (input: { doc: string; chunk?: number }) => Promise<string>;
     add?: (input: { kb: string; title: string; text: string; source?: string }) => Promise<string>;
   };
+  /** Show pictures in the chat (single or an album); resolves with the text the model reads. */
+  onShowImages?: (input: { paths: string[]; caption?: string }) => Promise<string>;
   onAskUser?: (input: { question: string; options: string[]; allowText: boolean; multiple?: boolean; image?: string }) => Promise<string>;
   onLookAt?: (input: { path: string; question: string; everySeconds?: number; atSeconds?: number[]; phrases?: string[]; pointing?: boolean }) => Promise<string>;
   /** `video_digest`: frames (with paths to Read) and the transcript of a video. */
@@ -282,7 +284,8 @@ export interface SubagentDefinition {
 export type AgentEvent =
   | { kind: 'prompt'; text: string; attachments?: string[] }
   | { kind: 'system'; sessionId: string; model: string; text: string }
-  | { kind: 'assistant'; text: string }
+  | { kind: 'discussion'; speaker: string; text: string }
+  | { kind: 'assistant'; text: string; /** pictures shown with this message (task attachment names) — show_images */ attachments?: string[] }
   | { kind: 'tool_use'; toolName: string; input: Record<string, unknown>; text: string }
   | { kind: 'delegation'; text: string }
   | {

@@ -34,6 +34,8 @@ export const SCHEDULE_CHECK_TOOL = `${INTERNAL_TOOL_PREFIX}schedule_check`;
 /** Photos and video: `look_at` (a vision model looks at a photo / video frames), `video_digest` (frames + transcript of a video). Read-only. */
 /** Ask the human a question with answer buttons and wait for the answer. Not gated: the question itself is the human step. */
 /** The current date and time (agents have no clock of their own). Read-only. */
+/** Show pictures (single / album) in the chat. Read-only. */
+export const SHOW_IMAGES_TOOL = `${INTERNAL_TOOL_PREFIX}show_images`;
 export const CURRENT_TIME_TOOL = `${INTERNAL_TOOL_PREFIX}current_time`;
 /** Knowledge bases: search / read passages, list what exists, add a note (only to bases that allow it). Not gated. */
 export const KB_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}kb_list`;
@@ -264,6 +266,20 @@ function isLocalNavUrl(url: string): boolean {
   );
 }
 
+/**
+ * A browser must never be pointed at local files or browser-internal pages (file:///proc/self/environ, chrome://…): that is how a page
+ * could read secrets of the browser container. Refused outright — no approval card can make it acceptable. Returns the reason, or null.
+ */
+export function forbiddenBrowserNavigation(toolName: string, toolInput: Record<string, unknown>): string | null {
+  const m = /^mcp__playwright(?:-proxy)?__browser_navigate$/i.exec(toolName);
+  if (!m) return null;
+  const url = typeof toolInput.url === 'string' ? toolInput.url.trim() : '';
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(url)?.[1]?.toLowerCase();
+  if (!scheme || scheme === 'http' || scheme === 'https') return null;
+  if (url.toLowerCase() === 'about:blank') return null;
+  return `Refused: the browser may only open http(s) addresses (not ${scheme}:). Local files and browser pages are off limits.`;
+}
+
 /** True if an `mcp__<server>__<tool>` call is a safe read-only/navigation op. */
 function isReadOnlyMcpTool(
   name: string,
@@ -276,7 +292,7 @@ function isReadOnlyMcpTool(
   const tool = parts.slice(2).join('__');
   // Operator-declared read-only tools (never for playwright's navigation, which has its own URL rule).
   const allow = declared?.[server];
-  if (allow && server !== 'playwright' && (allow.includes('*') || allow.includes(tool))) return true;
+  if (allow && server !== 'playwright' && server !== 'playwright-proxy' && (allow.includes('*') || allow.includes(tool))) return true;
   switch (server) {
     case 'code-intel':
       return CODE_INTEL_READONLY.has(tool);
@@ -288,6 +304,7 @@ function isReadOnlyMcpTool(
       // also configured read-only, so write tools aren't even exposed.
       return /(^|_)(get|list|search|read|download)(_|$)/i.test(tool);
     case 'playwright':
+    case 'playwright-proxy': // the same browser behind a proxy — same rules (non-local navigation stays gated)
       if (tool === 'browser_navigate') {
         return isLocalNavUrl(typeof toolInput.url === 'string' ? toolInput.url : '');
       }

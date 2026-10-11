@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { TaskStatus } from '@lds/shared';
 import { isVideo } from '@/lib/capture';
 import { MediaViewer } from './MediaViewer';
@@ -16,6 +16,8 @@ export interface LogLine {
   kind: string;
   text: string;
   attachments?: string[];
+  /** who said it — a message in a discussion between agents */
+  speaker?: string;
   ts?: string;
 }
 
@@ -46,6 +48,7 @@ export function buildItems(lines: LogLine[]): Item[] {
     const l = lines[i]!;
     if (l.kind === 'prompt') items.push({ type: 'user', line: l });
     else if (l.kind === 'assistant') items.push({ type: 'agent', line: l, final: false });
+    else if (l.kind === 'discussion') items.push({ type: 'agent', line: l, final: false });
     else if (l.kind === 'result') items.push({ type: 'agent', line: l, final: true });
     else if (l.kind === 'tool_use') {
       const next = lines[i + 1];
@@ -57,6 +60,13 @@ export function buildItems(lines: LogLine[]): Item[] {
     else items.push({ type: 'note', line: l });
   }
   return items;
+}
+
+/** A steady colour per speaker so a conversation between several agents is easy to follow. */
+export function speakerColor(name: string): string {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h} 62% 58%)`;
 }
 
 const firstLine = (s: string, max = 110) => {
@@ -82,7 +92,7 @@ export function Transcript({
   fill?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [viewing, setViewing] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<{ name: string; names?: string[] } | null>(null);
   const [look, setLook] = useLook();
   const [show, setShow] = useShow();
   // Follow new output unless the user has scrolled up. Captured from the user's
@@ -132,8 +142,32 @@ export function Transcript({
     return <Muted>No output.</Muted>;
   }
 
-  const thumbs = (attachments?: string[]) =>
-    attachments && attachments.length > 0 ? (
+  const isPic = (n: string) => /\.(jpe?g|png|webp|gif)$/i.test(n);
+  /** An agent's pictures: one large, several as an album grid (click → the viewer, with ‹ › through the album). */
+  const album = (names: string[]): ReactNode => {
+    const pics = names.filter(isPic);
+    const rest = names.filter((n) => !isPic(n));
+    return (
+      <>
+        {pics.length > 0 && (
+          <div className={cn(styles.album, pics.length === 1 && styles.albumOne, pics.length === 2 && styles.albumTwo)} data-count={Math.min(pics.length, 9)}>
+            {pics.slice(0, 9).map((name, i) => (
+              <button key={`${name}-${i}`} type="button" className={styles.albumCell} title={name} onClick={() => setViewing({ name, names: pics })}>
+                <img src={api.attachmentUrl(taskId, name)} alt={name} loading="lazy" />
+                {i === 8 && pics.length > 9 && <span className={styles.albumMore}>+{pics.length - 9}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        {rest.length > 0 && thumbs(rest)}
+      </>
+    );
+  };
+
+  const thumbs = (attachments?: string[], asAlbum = false): ReactNode =>
+    asAlbum && attachments && attachments.some(isPic) ? (
+      album(attachments)
+    ) : attachments && attachments.length > 0 ? (
       <span className={styles.thumbs}>
         {attachments.map((name) => (
           <a
@@ -146,7 +180,7 @@ export function Transcript({
               // photos and videos open in the viewer (mark a spot and ask); other files open as before
               if (!onAsk || !(isVideo(name) || /\.(jpe?g|png|webp|gif)$/i.test(name))) return;
               e.preventDefault();
-              setViewing(name);
+              setViewing({ name });
             }}
           >
             {isVideo(name) ? (
@@ -227,8 +261,8 @@ export function Transcript({
           if (it.type === 'agent') {
             return (
               <div key={it.line.id} className={cn(styles.agentMsg, it.final && styles.final)}>
-                <span className={styles.prompt} aria-label="agent">
-                  {it.final ? 'done>' : 'agent>'}
+                <span className={styles.prompt} aria-label={it.line.speaker ?? 'agent'} style={it.line.speaker ? { color: speakerColor(it.line.speaker) } : undefined}>
+                  {it.line.speaker ? `${it.line.speaker}>` : it.final ? 'done>' : 'agent>'}
                 </span>
                 {ts(it.line)}
                 <div className={styles.agentBody}>
@@ -236,7 +270,7 @@ export function Transcript({
                   {it.final && autoSpeak && it.line.id === lastFinalId && (
                     <SpeakButton text={it.line.text} abs />
                   )}
-                  {thumbs(it.line.attachments)}
+                  {thumbs(it.line.attachments, true)}
                 </div>
               </div>
             );
@@ -287,7 +321,7 @@ export function Transcript({
           ↓ latest
         </button>
       )}
-      {viewing && <MediaViewer taskId={taskId} name={viewing} onClose={() => setViewing(null)} onAsk={onAsk} />}
+      {viewing && <MediaViewer taskId={taskId} name={viewing.name} names={viewing.names} onClose={() => setViewing(null)} onAsk={onAsk} />}
     </div>
   );
 }

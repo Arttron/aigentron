@@ -24,6 +24,16 @@ export interface TaskRunContext {
   onCheckSubtasks?: () => Promise<{ id: string; title: string; status: string; summary: string }[]>;
   /** When set, the agent can schedule a delayed re-run of this task ("check back later"). */
   onScheduleCheck?: (input: { delaySeconds: number; note?: string }) => Promise<{ delaySeconds: number }>;
+  /**
+   * One turn of a discussion between agents: run THIS agent (instead of the task's own) as a conversational, read-only participant on
+   * `followUpPrompt`; its reply is stored as a `discussion` message by that speaker and handed back in `collect.text`.
+   */
+  discussion?: {
+    agent: string;
+    collect: { text: string; /** set when the turn ended in an error (then `text` stays empty) */ error?: string };
+    /** The first turn also records what the human asked, as the opening message of the conversation. */
+    opening?: { text: string; attachments?: string[] };
+  };
 }
 
 /**

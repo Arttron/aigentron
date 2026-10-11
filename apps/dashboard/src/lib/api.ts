@@ -327,6 +327,8 @@ export interface TranscriptEvent {
   kind: string;
   text: string;
   attachments?: string[];
+  /** who said it (kind 'discussion') */
+  speaker?: string | null;
   createdAt: string;
 }
 
@@ -613,6 +615,15 @@ export const api = {
   resourceUrl: (id: string) => `${API_BASE}/resources/${encodeURIComponent(id)}/file`,
 
   // ---- knowledge bases ----
+  startDiscussion: (body: { taskId?: string; topic: string; agents: string[]; rounds?: number; summaryBy?: string | null }) =>
+    fetch(`${API_BASE}/discussions`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<{ taskId: string }>),
+  discussionState: (taskId: string) =>
+    fetch(`${API_BASE}/discussions/${encodeURIComponent(taskId)}`, { cache: 'no-store' }).then(
+      unwrap<{ active: boolean; topic?: string; agents?: string[]; turn?: number; total?: number; speaker?: string | null; summaryBy?: string | null }>,
+    ),
+  concludeDiscussion: (taskId: string) => fetch(`${API_BASE}/discussions/${encodeURIComponent(taskId)}/conclude`, { method: 'POST' }).then(unwrap<{ ok: boolean }>),
+  stopDiscussion: (taskId: string) => fetch(`${API_BASE}/discussions/${encodeURIComponent(taskId)}/stop`, { method: 'POST' }).then(unwrap<{ ok: boolean }>),
+
   listKb: () => fetch(`${API_BASE}/knowledge`, { cache: 'no-store' }).then(unwrap<KbInfo[]>),
   createKb: (body: KbInput) => fetch(`${API_BASE}/knowledge`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<KbInfo>),
   updateKb: (name: string, body: Omit<Partial<KbInput>, 'embedProvider' | 'embedModel'> & { embedProvider?: string | null; embedModel?: string | null }) =>

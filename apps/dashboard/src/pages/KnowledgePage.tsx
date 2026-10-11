@@ -69,9 +69,10 @@ export function KnowledgePage() {
   const pending = open && open.embedProvider && open.embedded < open.chunks;
   useEffect(() => {
     if (!pending) return;
-    const t = setInterval(() => void refresh(), 4000);
+    // only the counters move: re-read the bases, not the agents / providers as well
+    const t = setInterval(() => void api.listKb().then(setBases).catch(() => undefined), 4000);
     return () => clearInterval(t);
-  }, [pending, refresh]);
+  }, [pending]);
 
   const run = async (fn: () => Promise<string | void>) => {
     setBusy(true);
@@ -126,11 +127,16 @@ export function KnowledgePage() {
     });
 
   // dry run of the chunking settings on a pasted sample
+  const chunkingKey = draft ? JSON.stringify(draft.chunking) : '';
   useEffect(() => {
-    if (!draft || !sample.trim()) return setPreview(null);
-    const t = setTimeout(() => void api.previewKb(sample, draft.chunking).then(setPreview).catch(() => setPreview(null)), 400);
-    return () => clearTimeout(t);
-  }, [draft, sample]);
+    if (!chunkingKey || !sample.trim()) return setPreview(null);
+    let live = true; // a slow answer to an older keystroke must not replace a newer one
+    const t = setTimeout(() => void api.previewKb(sample, JSON.parse(chunkingKey) as KbChunking).then((r) => live && setPreview(r)).catch(() => live && setPreview(null)), 400);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [chunkingKey, sample]);
 
   const embedders = providers.filter((p) => p.kind !== 'anthropic' && p.kind !== 'codex' && p.authMode !== 'oauth-token');
   const num = (v: string, d: number) => (v === '' ? d : Number(v));
@@ -276,8 +282,9 @@ export function KnowledgePage() {
                   variant="red"
                   size="sm"
                   disabled={busy}
+                  aria-label={`Remove ${d.title}`}
                   onClick={() => {
-                    if (window.confirm(`Remove "${d.title}" from the base?`)) void run(() => api.deleteKbDoc(d.id).then(() => undefined));
+                    if (window.confirm(`Remove "${d.title}" from the base?`)) void run(() => api.deleteKbDoc(d.id).then(() => setHits(null)));
                   }}
                 >
                   ✕

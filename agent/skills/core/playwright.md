@@ -29,6 +29,30 @@ itself, not the app.
 
 ---
 
+## Browsing through a proxy (`playwright-proxy`)
+
+Some pages must be opened from another country or from an IP the site allows (geo-blocked content, a
+site that rejects the server's address). For those there is a SECOND browser, `playwright-proxy`: the same
+tools with ALL its traffic going through the operator's proxy. Use it only when the normal browser is
+blocked or the task needs that egress IP — it is slower and the proxy may be metered.
+
+- Add `playwright-proxy` to your `mcp:` list (Agents → Edit → MCP servers). Its tools are
+  `mcp__playwright-proxy__browser_navigate`, `…__browser_snapshot`, `…__browser_take_screenshot`, … — the same
+  names as above with the server name `playwright-proxy`.
+- Which browser: local/dev URLs and anything that works directly → `playwright`. A public site that is blocked,
+  rate-limited by IP or region-locked → `playwright-proxy`. Don't use the proxy browser for the project's own
+  preview URLs (`preview_worktree`, `project-dev`) — the proxy cannot reach the internal network.
+- Rules are the same: capture tools run freely; navigating to a non-local URL and clicking/typing go through the
+  approval gate. Each browser keeps its own tabs and cookies; don't expect a login made in one to exist in the other.
+- If the tools are missing or the first navigation fails with a proxy / connection error, report it in your status
+  (`blocked`, with the error text) — do NOT try other proxies, and **never ask for or print the proxy login/password**
+  (they live only in the server's `.env`; you never see them).
+- Operator setup (once): put the proxy in the server's `.env` — `PLAYWRIGHT_PROXY_SERVER=host:port`,
+  `PLAYWRIGHT_PROXY_USER=login`, `PLAYWRIGHT_PROXY_PASS=password` (optional `PLAYWRIGHT_PROXY_BYPASS=host1,host2`) — then
+  `docker compose --profile proxy up -d playwright-mcp-proxy`. Details: `docs/browser-proxy.md`.
+
+---
+
 ## Workflow
 
 ```

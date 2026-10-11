@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ATTACH_ACCEPT, hasLiveCamera, prepareFile } from '@/lib/capture';
 import { CameraCapture } from '@/components/CameraCapture';
 import { api, type AgentInfo } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { DiscussionModal } from '@/components/DiscussionModal';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import styles from './CreateTaskForm.module.css';
 
@@ -20,6 +22,8 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const [camera, setCamera] = useState(false);
+  const [discussing, setDiscussing] = useState(false);
+  const navigate = useNavigate();
   const stage = async (files: File[]) => {
     const ready = await Promise.all(files.map(prepareFile));
     setStaged((s) => [...s, ...ready]);
@@ -179,9 +183,13 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
         <Button variant="primary" type="submit" disabled={!canSubmit}>
           {busy ? 'Creating…' : 'Create task'}
         </Button>
+        <Button type="button" onClick={() => setDiscussing(true)} title="Several agents discuss a topic in a new chat">
+          💬 Discuss
+        </Button>
         {error && <ErrorText>{error}</ErrorText>}
       </Row>
       {selected?.description && <Muted className={styles.desc}>{selected.description}</Muted>}
+      {discussing && <DiscussionModal initialTopic={prompt} onClose={() => setDiscussing(false)} onStarted={(id) => navigate(`/tasks/${id}`)} />}
     </Card>
   );
 }

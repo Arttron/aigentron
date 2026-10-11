@@ -131,9 +131,11 @@ export class VisionService {
   }
 
   /** Ask the vision model about up to a few images. Returns its answer. */
-  async describe(images: LookImage[], question: string): Promise<string> {
-    const cfg = this.get();
-    if (!cfg) throw new Error('No vision model is set up. An operator can choose one in Settings → Vision (any provider whose model can see images).');
+  async describe(images: LookImage[], question: string, own?: VisionConfig): Promise<string> {
+    // The configured vision model; without one, the model this agent is running on — when it is a cloud API model (those can see images).
+    let cfg = this.get();
+    if (!cfg && own?.provider && (await this.ownCanSee(own))) cfg = own;
+    if (!cfg) throw new Error('No vision model is set up. An operator can choose one in Settings → Vision (any provider whose model can see images) — the model this agent runs on cannot be used for it.');
     const ep = await this.providers.chatEndpoint(cfg.provider, cfg.model);
     const model = ep.model;
     if (!model) throw new Error(`Provider "${cfg.provider}" has no default model — choose a model in Settings → Vision.`);
@@ -149,6 +151,18 @@ export class VisionService {
     const answer = ep.style === 'anthropic' ? (j.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('') : (j.choices?.[0]?.message?.content ?? '');
     if (!answer.trim()) throw new Error('The vision model returned no text.');
     return answer.trim();
+  }
+
+  /** Can the agent's own model be used as the eyes? Only a direct API provider of a kind whose models take images (Anthropic, OpenAI-style). */
+  private async ownCanSee(own: VisionConfig): Promise<boolean> {
+    try {
+      const p = await this.providers.get(own.provider);
+      if (p.kind !== 'anthropic' && p.kind !== 'openai') return false;
+      await this.providers.chatEndpoint(own.provider, own.model); // throws for subscription logins
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Settings → Vision "Test": show it a red square and see whether it says so. */

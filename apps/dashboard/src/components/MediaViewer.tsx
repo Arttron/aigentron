@@ -15,16 +15,20 @@ const stamp = (t: number): string => `${Math.floor(t / 60)}:${(t % 60).toFixed(1
  */
 export function MediaViewer({
   taskId,
-  name,
+  name: first,
+  names,
   onClose,
   onAsk,
 }: {
   taskId: string;
   name: string;
+  /** The other pictures of the album this one belongs to (‹ › step through them). */
+  names?: string[];
   onClose: () => void;
   /** Send the follow-up (prompt + uploaded attachment names). Omitted = view only. */
   onAsk?: (prompt: string, attachments: string[]) => Promise<void>;
 }) {
+  const [name, setName] = useState(first);
   const url = api.attachmentUrl(taskId, name);
   const video = isVideo(name);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -32,6 +36,20 @@ export function MediaViewer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const base = useRef<HTMLCanvasElement | null>(null);
   const [frame, setFrame] = useState<{ t: number | null } | null>(null);
+  const at = names ? names.indexOf(name) : -1;
+  const step = (d: number) => {
+    if (!names || names.length < 2) return;
+    setName(names[(at + d + names.length) % names.length]!);
+  };
+  useEffect(() => {
+    if (frame) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') step(-1);
+      if (e.key === 'ArrowRight') step(1);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [names, at, frame]);
   const [rect, setRect] = useState<Rect | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const [text, setText] = useState('');
@@ -132,6 +150,15 @@ export function MediaViewer({
           <img ref={imgRef} className={styles.media} src={url} alt={name} />
         )}
       </div>
+      {!frame && names && names.length > 1 && (
+        <Row wrap className={styles.bar}>
+          <Button onClick={() => step(-1)}>‹</Button>
+          <Muted>
+            {at + 1} / {names.length}
+          </Muted>
+          <Button onClick={() => step(1)}>›</Button>
+        </Row>
+      )}
       {!frame && (
         <Row wrap className={styles.bar}>
           {onAsk && (

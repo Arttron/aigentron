@@ -8,11 +8,23 @@ const RU_STEM = 5;
 const STOP = new Set(['the', 'a', 'an', 'of', 'to', 'in', 'on', 'and', 'or', 'is', 'are', 'for', 'with', 'и', 'в', 'на', 'с', 'по', 'к', 'о', 'у', 'за', 'из', 'от', 'что', 'это', 'как']);
 
 /** Light, language-agnostic normalisation: lowercase, split on non-letters, cheap stemming. "Running"/"runs" and "стенами"/"стене" meet. */
+const CJK = /([\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]+)/u;
+
 export function tokenize(text: string): string[] {
   const out: string[] = [];
-  for (const raw of text.toLowerCase().normalize('NFKC').split(/[^\p{L}\p{N}]+/u)) {
-    if (!raw || raw.length < 2 || STOP.has(raw)) continue;
-    out.push(stem(raw));
+  for (const piece of text.toLowerCase().normalize('NFKC').split(/[^\p{L}\p{N}]+/u)) {
+    if (!piece) continue;
+    // Chinese / Japanese / Korean have no spaces: index overlapping character pairs (a lone character stands for itself)
+    for (const raw of CJK.test(piece) ? piece.split(CJK).filter(Boolean) : [piece]) {
+      if (CJK.test(raw)) {
+        const chars = [...raw];
+        if (chars.length === 1) out.push(raw);
+        for (let i = 0; i + 1 < chars.length; i++) out.push(chars[i]! + chars[i + 1]!);
+        continue;
+      }
+      if (raw.length < 2 || STOP.has(raw)) continue;
+      out.push(stem(raw));
+    }
   }
   return out;
 }
@@ -63,7 +75,14 @@ export function cleanChunking(input: Partial<ChunkingConfig> | null | undefined)
   return { strategy, maxChars, overlap: Math.min(num(input?.overlap, d.overlap, 0, 2000), Math.floor(maxChars / 2)), minChars: Math.min(num(input?.minChars, d.minChars, 0, 2000), Math.floor(maxChars / 2)) };
 }
 
-const MARKER = /^(?:#{1,6}\s|(?:\d+\.){1,4}\d*\s+\S|\d{1,3}[.)]\s+\S|(?:article|section|chapter|part|статья|глава|раздел|часть|п\.|пункт)\s*\d+)/i;
+/**
+ * A line that starts a new clause: a Markdown heading, a numbered clause that begins with a capital (`1.2 Plaster …`, `3) The …` — not a year
+ * like "2024. The company" nor a lower-case list item), or a keyword heading with its number and a separator (`Article 4.`, `Статья 4:`).
+ */
+const MARKER = new RegExp(
+  '^(?:#{1,6}\\s|(?:\\d{1,3}\\.){1,4}\\d{0,3}\\s+[\\p{Lu}("«\\[\\d]|\\d{1,3}[.)]\\s+[\\p{Lu}("«\\[]|(?:Article|Section|Chapter|Part|Статья|Глава|Раздел|Часть|п\\.|Пункт)\\s*\\d+(?:\\.\\d+)*\\s*[.:—–-])',
+  'u',
+);
 
 /** Cut a long text into windows of ≤ max characters, snapping to a sentence / word boundary, repeating `overlap` characters. */
 export function cutChars(text: string, max: number, overlap: number): string[] {

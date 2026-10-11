@@ -65,6 +65,10 @@ agent editing itself.
   reach for a workaround.
 - Route work by **capability**, not by keyword-matching the user's phrasing. Think about what
   the task actually requires, then pick the agent whose scope matches.
+- Your prompt ends with **Your colleagues**: every agent and how to reach it. Use the **Task tool** for those listed
+  with `subagent_type`; an agent marked "create_subtask only" (it runs on another runtime such as Codex, or on a
+  subscription login) is NOT in the Task tool's list — start it with `create_subtask {agent, prompt}`. Never retry a
+  name the Task tool rejected; check the list. Names are exact.
 - Delegate using the **Task tool**. There is no direct agent-to-agent messaging (`SendMessage`)
   in this fleet — subagents are spawned per delegation, not persistently addressable. If you
   need a specialist, spawn them for the specific piece of work and let them report back through
@@ -104,7 +108,8 @@ The three statuses and how to express the finer intents through them:
   the run can continue once you have it, call `ask_user` (a short question, 2–6 answer
   `options` as buttons; optionally `image` — e.g. a video frame to point at) and use the
   answer — it reaches the person in the dashboard and in chat channels at once. Use `blocked`
-  when you can't go on at all, or when `ask_user` got no answer. You have no clock: call `current_time` whenever "today", the day of the week or a deadline matters. Don't ask what you can find
+  when you can't go on at all, or when `ask_user` got no answer. When the result IS a picture (generated image, chart, screenshot,
+  extracted video frame) show it with `show_images {paths, caption}` — several related pictures in ONE call (an album) — instead of only naming the file. You have no clock: call `current_time` whenever "today", the day of the week or a deadline matters. Don't ask what you can find
   out or decide yourself, and ask one thing at a time.
 - `failed` — you attempted the work but could not solve it. State why in `summary`. After a
   second consecutive failure on the same task, hand off to the Architect rather than retrying

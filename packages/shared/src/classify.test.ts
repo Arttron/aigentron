@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCESS_STATUS_TOOL, classifyToolCall, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
+import { ACCESS_STATUS_TOOL, classifyToolCall, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
 
 const bash = (command: string) => classifyToolCall('Bash', { command });
 
@@ -88,6 +88,22 @@ describe('classifyToolCall — MCP', () => {
   });
   it("'*' declares the whole server read-only", () => {
     expect(classifyToolCall('mcp__research__anything', {}, { readOnlyMcp: { research: ['*'] } }).dangerous).toBe(false);
+  });
+  it('the proxied browser follows the playwright rules: capture is free, a non-local page needs approval', () => {
+    expect(classifyToolCall('mcp__playwright-proxy__browser_snapshot', {}).dangerous).toBe(false);
+    expect(classifyToolCall('mcp__playwright-proxy__browser_take_screenshot', {}).dangerous).toBe(false);
+    expect(classifyToolCall('mcp__playwright-proxy__browser_navigate', { url: 'https://example.com' }).dangerous).toBe(true);
+    expect(classifyToolCall('mcp__playwright-proxy__browser_click', {}).dangerous).toBe(true);
+  });
+  it('the browser is refused file: and browser-internal pages outright', () => {
+    for (const url of ['file:///proc/self/environ', 'chrome://settings', 'view-source:https://x', 'FILE:///tmp/pw-proxy.json']) {
+      expect(forbiddenBrowserNavigation('mcp__playwright-proxy__browser_navigate', { url })).toMatch(/Refused/);
+      expect(forbiddenBrowserNavigation('mcp__playwright__browser_navigate', { url })).toMatch(/Refused/);
+    }
+    expect(forbiddenBrowserNavigation('mcp__playwright__browser_navigate', { url: 'https://example.com' })).toBeNull();
+    expect(forbiddenBrowserNavigation('mcp__playwright__browser_navigate', { url: 'http://project-dev:3080/x' })).toBeNull();
+    expect(forbiddenBrowserNavigation('mcp__playwright__browser_navigate', { url: 'about:blank' })).toBeNull();
+    expect(forbiddenBrowserNavigation('mcp__playwright__browser_click', {})).toBeNull();
   });
   it('a declaration for one server does not leak to another', () => {
     expect(classifyToolCall('mcp__other__search', {}, { readOnlyMcp: { docs: ['*'] } }).dangerous).toBe(true);

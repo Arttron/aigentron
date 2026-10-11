@@ -18,6 +18,8 @@ const DEFAULT_MCP_SERVERS = [
   // /mcp endpoint did not load tools). Needs playwright-mcp's --allowed-hosts to
   // include the service name (set in docker-compose).
   { name: 'playwright', config: { type: 'sse', url: 'http://playwright-mcp:8931/sse' } },
+  // The same browser behind a proxy (compose profile `proxy`, credentials in .env) — see agent/skills/core/playwright.md.
+  { name: 'playwright-proxy', config: { type: 'sse', url: 'http://playwright-mcp-proxy:8932/sse' } },
   {
     name: 'github',
     config: {
