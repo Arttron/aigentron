@@ -9,6 +9,11 @@ import { WorktreeService } from '../worktrees/worktree.service';
 import { AgentExecutor } from '../agent/agent-executor';
 import { matchAgent } from '../channels/agent-match';
 import { ModuleRef } from '@nestjs/core';
+import { TitlesService } from '../titles/titles.service';
+import { fallbackTitle, isWeakPrompt } from '../titles/title-core';
+import { TASK_TYPES, isTaskType, typeWhere } from './task-types';
+import { isDoneMessage } from './done-intent';
+import { STATUS_FILTERS, isStatusFilter, statusesOf } from './task-status-filter';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { SettingsService } from '../settings/settings.service';
@@ -77,7 +82,53 @@ export class TasksService {
     private readonly attachments: AttachmentsService,
     private readonly settings: SettingsService,
     private readonly moduleRef: ModuleRef,
+    private readonly titles: TitlesService,
   ) {}
+
+  /** Statuses a person may accept as finished: the agent's result is waiting, or the run ended without one and the person is content anyway. */
+  private static readonly ACCEPTABLE: readonly TaskStatus[] = ['review', 'blocked', 'stalled', 'failed'];
+
+  /**
+   * The person says the task is finished (button, `/done`, or "done" in a message): `done`. Only a person does this for a top-level task —
+   * agents' runs end in `review`. Subtasks are finished by their lead, not here.
+   */
+  async markDone(id: string): Promise<Task> {
+    const task = await this.get(id);
+    if (task.status === 'done') return serializeTask(task);
+    if (!TasksService.ACCEPTABLE.includes(task.status as TaskStatus)) {
+      throw new ConflictException(
+        isTerminalStatus(task.status as TaskStatus) ? `A ${task.status} task cannot be marked done — start it again with a message first.` : `The task is still ${task.status} — wait until the agent has finished.`,
+      );
+    }
+    await this.setStatus(id, 'done');
+    this.logger.log(`Task ${id} accepted as done by a person`);
+    return serializeTask(await this.get(id));
+  }
+
+  /** Name a task from its request right away (in the background) — unless the request says too little to name it from. */
+  private nameSoon(task: { id: string; prompt: string; agentName: string | null; titleState?: string }, attachments?: string[]): void {
+    if ((task.titleState ?? 'auto') !== 'auto' || isWeakPrompt(task.prompt)) return;
+    void this.nameTask(task.id, { prompt: task.prompt, attachments, agent: task.agentName }).catch(() => undefined);
+  }
+
+  /** After the first answer: a task still named by its first line (a vague request) is named from the whole context. */
+  private async nameAfterRun(id: string): Promise<void> {
+    const row = await this.prisma.task.findUnique({ where: { id }, select: { titleState: true, prompt: true, agentName: true } });
+    if (!row || row.titleState !== 'auto') return;
+    const first = await this.prisma.agentEvent.findFirst({ where: { taskId: id, kind: 'result' }, orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }], select: { text: true } });
+    const files = (await this.attachments.list(id).catch(() => [])).map((a) => a.name);
+    await this.nameTask(id, { prompt: row.prompt, attachments: files, agent: row.agentName, answer: first?.text ?? null });
+  }
+
+  private async nameTask(id: string, ctx: { prompt: string; attachments?: string[]; agent?: string | null; answer?: string | null }): Promise<void> {
+    const title = await this.titles.suggest(ctx);
+    if (!title) return;
+    // only a task that is still auto-named: a person's or creator's title is never overwritten, and a task is named once
+    const r = await this.prisma.task.updateMany({ where: { id, titleState: 'auto' }, data: { title, titleState: 'generated' } });
+    if (!r.count) return;
+    const fresh = await this.prisma.task.findUnique({ where: { id } });
+    if (fresh) this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(fresh) } });
+  }
 
   /** `expert_codex` / `Expert-Codex` / a small typo → the real agent name; otherwise an error that lists the agents there are. */
   private async resolveAgentName(typed: string): Promise<string> {
@@ -112,7 +163,10 @@ export class TasksService {
         }
       }
     }
-    const title = dto.title?.trim() || deriveTitle(dto.prompt);
+    // A title given by the creator (a schedule, a discussion, a lead's subtask) is final; otherwise it starts as the first line and a better one is
+    // generated from the context once the task starts (and again after the first answer when the request was too vague to name it).
+    const given = dto.title?.trim();
+    const title = given || fallbackTitle(dto.prompt);
     // A subtask's parent must exist; reject a dangling parentId early.
     if (dto.parentId) await this.get(dto.parentId);
 
@@ -120,6 +174,8 @@ export class TasksService {
       data: {
         prompt: dto.prompt,
         title,
+        titleState: given ? 'manual' : 'auto',
+        kind: (dto as { kind?: string }).kind === 'discussion' ? 'discussion' : 'task',
         status: 'queued',
         agentName: agent?.name ?? null,
         createdById: createdById ?? null,
@@ -140,6 +196,7 @@ export class TasksService {
     // run reading the attachments dir before the files land); it then /start-s.
     if (dto.autostart !== false) {
       await this.queue.enqueue({ taskId: task.id, attachments: dto.attachments });
+      this.nameSoon(task, dto.attachments);
     }
     return task;
   }
@@ -325,6 +382,7 @@ export class TasksService {
       throw new ConflictException(`Task ${id} is ${task.status}, cannot start`);
     }
     await this.queue.enqueue({ taskId: id, attachments });
+    this.nameSoon(task, attachments);
     return task;
   }
 
@@ -339,6 +397,11 @@ export class TasksService {
    */
   async followUp(id: string, prompt: string, attachments?: string[], references?: string[]) {
     const task = await this.get(id);
+    // "Done" / "готово" / "задача завершена" — the person closes the task; nothing is sent to the agent.
+    if (isDoneMessage(prompt) && !attachments?.length && TasksService.ACCEPTABLE.includes(task.status as TaskStatus)) {
+      await this.markDone(id);
+      return { ...(await this.get(id)), queued: false as const, queueLength: 0 };
+    }
     // While agents discuss in this chat, the person's message joins the discussion (answered at the next turn) instead of queueing a run.
     const { DiscussionService } = await import('../discussion/discussion.service');
     const discussion = this.moduleRef.get(DiscussionService, { strict: false });
@@ -485,7 +548,32 @@ export class TasksService {
    * grouped view stays whole within a page. With a query, we search across all
    * tasks (title/prompt, plus exact id) and return the matches flat.
    */
-  async list(params: { q?: string; page?: number; pageSize?: number } = {}) {
+  /** Names of conversational agents (mode: chat) — they define the "chat" task type. */
+  private async chatAgentNames(): Promise<string[]> {
+    return (await this.agents.list().catch(() => [])).filter((a) => a.mode === 'chat').map((a) => a.name);
+  }
+
+  /** How many tasks of each type there are (the numbers on the filter chips). */
+  async typeCounts(): Promise<Record<string, number> & { all: number }> {
+    const chat = await this.chatAgentNames();
+    const counts = await Promise.all(TASK_TYPES.map((tp) => this.prisma.task.count({ where: typeWhere(tp, chat) as never })));
+    const out: Record<string, number> = {};
+    TASK_TYPES.forEach((tp, i) => (out[tp] = counts[i]!));
+    return { ...out, all: counts.reduce((a, b) => a + b, 0) } as Record<string, number> & { all: number };
+  }
+
+  /** How many tasks are in each status (and the two groups) — the numbers on the status chips. Optionally within one type. */
+  async statusCounts(type?: string): Promise<Record<string, number>> {
+    const typed = isTaskType(type) ? typeWhere(type, await this.chatAgentNames()) : {};
+    const rows = await this.prisma.task.groupBy({ by: ['status'], where: typed as never, _count: { _all: true } });
+    const by: Record<string, number> = {};
+    for (const r of rows) by[r.status] = r._count._all;
+    const out: Record<string, number> = {};
+    for (const f of STATUS_FILTERS) out[f] = statusesOf(f).reduce((n, s) => n + (by[s] ?? 0), 0);
+    return out;
+  }
+
+  async list(params: { q?: string; type?: string; status?: string; page?: number; pageSize?: number } = {}) {
     const page = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 25));
     const q = params.q?.trim();
@@ -498,15 +586,19 @@ export class TasksService {
     // case-insensitive by default, so omitting it there is the equivalent
     // behavior for the common case, not a degraded one.
     const insensitive = this.config.storageDriver === 'postgres' ? ({ mode: 'insensitive' } as const) : {};
-    const where = q
-      ? {
-          OR: [
-            { title: { contains: q, ...insensitive } },
-            { prompt: { contains: q, ...insensitive } },
-            { id: q },
-          ],
-        }
-      : { parentId: null };
+    const type = isTaskType(params.type) ? params.type : null;
+    const typed = type ? typeWhere(type, await this.chatAgentNames()) : null;
+    // SQLite's LIKE only ignores case for ASCII: for other scripts (Cyrillic, Greek, accents …) try the usual spellings of the query as well
+    const spellings = this.config.storageDriver === 'postgres' || !q || !/[^\p{ASCII}]/u.test(q) ? [q ?? ''] : [...new Set([q, q.toLowerCase(), q.toUpperCase(), q.charAt(0).toUpperCase() + q.slice(1).toLowerCase()])];
+    const search = {
+      OR: [...spellings.flatMap((s) => [{ title: { contains: s, ...insensitive } }, { prompt: { contains: s, ...insensitive } }]), { id: q ?? '' }],
+    };
+    // A type filter decides the shape itself (subtasks are listed flat; the others are top-level tasks); without one, no search = top-level only.
+    const status = isStatusFilter(params.status) ? params.status : null;
+    const byStatus = status ? { status: { in: statusesOf(status) } } : null;
+    // A status filter looks at ALL levels (a blocked subtask under a finished parent must be found), so it also lists tasks flat.
+    const parts = [typed, byStatus, q ? search : null].filter(Boolean);
+    const where = (parts.length ? (parts.length === 1 ? parts[0] : { AND: parts }) : { parentId: null }) as never;
 
     const [top, total] = await this.prisma.$transaction([
       this.prisma.task.findMany({
@@ -520,7 +612,7 @@ export class TasksService {
     ]);
 
     let items = top;
-    if (!q && top.length) {
+    if (!q && type !== 'subtask' && !status && top.length) {
       const children = await this.prisma.task.findMany({
         where: { parentId: { in: top.map((t) => t.id) } },
         orderBy: { createdAt: 'asc' },
@@ -637,6 +729,7 @@ export class TasksService {
     // The task just settled — drain one pending follow-up if the queue has any
     // (runFollowUpNow's own setStatus('queued') call is NOT terminal, so this
     // doesn't recurse). Never let a drain failure mask the status change itself.
+    if (status === 'review' || status === 'done') void this.nameAfterRun(id).catch(() => undefined);
     if (isTerminalStatus(status)) {
       await this.drainPendingFollowUp(id).catch((err) =>
         this.logger.warn(`drain pending follow-up failed for ${id}: ${(err as Error).message}`),
@@ -644,11 +737,6 @@ export class TasksService {
     }
     return task;
   }
-}
-
-function deriveTitle(prompt: string): string {
-  const firstLine = prompt.trim().split('\n')[0]?.trim() ?? 'Untitled task';
-  return firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
 }
 
 function truncate(text: string, max: number): string {

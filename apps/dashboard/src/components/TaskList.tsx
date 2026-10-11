@@ -38,7 +38,7 @@ export function TaskList({
         <div className={cn(styles.item, isChild && styles.child)}>
           {isChild && <span className={styles.branch} aria-hidden />}
           <StatusBadge status={t.status} />
-          <Link className={styles.title} to={`/tasks/${t.id}`}>
+          <Link className={styles.title} dir="auto" to={`/tasks/${t.id}`}>
             {t.title}
           </Link>
           {!isChild && kids.length > 0 && (

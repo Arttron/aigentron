@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { SERVER_EVENT, type PendingFollowUp } from '@lds/shared';
 import { ATTACH_ACCEPT, hasLiveCamera, isVideo, prepareFile } from '@/lib/capture';
+import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { CameraCapture } from '@/components/CameraCapture';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
@@ -217,9 +218,7 @@ export function FollowUpForm({
     }
   };
 
-  const onAttachKind = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const kind = e.target.value;
-    e.target.value = '';
+  const onAttachKind = (kind: AttachKind) => {
     if (kind === 'file') fileRef.current?.click();
     else if (kind === 'camera') {
       if (hasLiveCamera()) setCamera(true);
@@ -415,20 +414,8 @@ export function FollowUpForm({
         )}
         {queueEl}
         <div className={styles.dockRow}>
-          <select
-            className={styles.attachIcon}
-            value=""
-            onChange={onAttachKind}
-            title="Attach"
-            aria-label="Attach"
-            disabled={uploading}
-          >
-            <option value="">{uploading ? '…' : '📎'}</option>
-            <option value="file">🖼 Image / video / file</option>
-            <option value="camera">📷 Camera</option>
-            <option value="task">🔗 Task</option>
-          </select>
-          <textarea
+          <AttachMenu compact onPick={onAttachKind} busy={uploading} />
+          <textarea dir="auto"
             ref={taRef}
             className={styles.dockInput}
             aria-label="Message"
@@ -470,7 +457,7 @@ export function FollowUpForm({
             you&gt;
           </span>
         )}
-        <textarea
+        <textarea dir="auto"
           className={styles.input}
           aria-label="Message"
           placeholder="Type a message — Enter sends, Shift+Enter adds a line. Attach images/PDFs with 📎"
@@ -486,18 +473,7 @@ export function FollowUpForm({
       {fileEl}
 
       <Row wrap className={styles.actions}>
-        <select
-          className={styles.attachSelect}
-          value=""
-          onChange={onAttachKind}
-          title="Attach"
-          disabled={uploading}
-        >
-          <option value="">{uploading ? 'Uploading…' : '📎 Attach…'}</option>
-          <option value="file">🖼 Image / video / file</option>
-            <option value="camera">📷 Camera</option>
-          <option value="task">🔗 Task</option>
-        </select>
+        <AttachMenu onPick={onAttachKind} busy={uploading} />
         {(showRefs || references.length > 0) && (
           <TaskReferencePicker value={references} onChange={setReferences} excludeId={taskId} />
         )}

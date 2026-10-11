@@ -47,7 +47,7 @@ export class QuestionsService implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     // A task that was cancelled / ended takes its open questions with it (the waiting agent gets "cancelled", chat buttons go away).
     this.unsubscribe = this.bus.subscribe((e) => {
-      if (e.type === 'task-status' && ['cancelled', 'failed', 'stalled', 'done', 'blocked'].includes(e.payload.status)) void this.cancelForTask(e.payload.taskId).catch(() => undefined);
+      if (e.type === 'task-status' && ['cancelled', 'failed', 'stalled', 'review', 'done', 'blocked'].includes(e.payload.status)) void this.cancelForTask(e.payload.taskId).catch(() => undefined);
       if (e.type === 'task-deleted') void this.cancelForTask(e.payload.taskId).catch(() => undefined);
     });
   }

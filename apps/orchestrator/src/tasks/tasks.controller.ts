@@ -24,6 +24,18 @@ export class TasksController {
     return this.tasks.list(dto);
   }
 
+  /** Counts per task type (the filter chips). */
+  @Get('type-counts')
+  typeCounts() {
+    return this.tasks.typeCounts();
+  }
+
+  /** Counts per status (the status chips), optionally within one `type`. */
+  @Get('status-counts')
+  statusCounts(@Query('type') type?: string) {
+    return this.tasks.statusCounts(type);
+  }
+
   @Get(':id')
   get(@Param('id') id: string) {
     return this.tasks.get(id);
@@ -38,6 +50,14 @@ export class TasksController {
   @Post(':id/start')
   start(@Param('id') id: string, @Body() dto: FollowUpDto) {
     return this.tasks.start(id, dto.attachments);
+  }
+
+  /** The person accepts the task as finished (`review` / `blocked` / `stalled` / `failed` → `done`). */
+  @Post(':id/done')
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
+  done(@Param('id') id: string) {
+    return this.tasks.markDone(id);
   }
 
   @Post(':id/follow-up')

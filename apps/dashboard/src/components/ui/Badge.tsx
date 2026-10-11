@@ -6,6 +6,7 @@ export type BadgeTone =
   | 'queued'
   | 'running'
   | 'needs_approval'
+  | 'review'
   | 'done'
   | 'failed'
   | 'cancelled'

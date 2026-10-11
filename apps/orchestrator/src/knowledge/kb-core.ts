@@ -8,11 +8,13 @@ const RU_STEM = 5;
 const STOP = new Set(['the', 'a', 'an', 'of', 'to', 'in', 'on', 'and', 'or', 'is', 'are', 'for', 'with', 'и', 'в', 'на', 'с', 'по', 'к', 'о', 'у', 'за', 'из', 'от', 'что', 'это', 'как']);
 
 /** Light, language-agnostic normalisation: lowercase, split on non-letters, cheap stemming. "Running"/"runs" and "стенами"/"стене" meet. */
-const CJK = /([\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]+)/u;
+/** Scripts written without spaces between words: indexed as character pairs. */
+const CJK = /([\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0e00-\u0e7f\u0e80-\u0eff\u1000-\u109f\u1780-\u17ff]+)/u;
 
 export function tokenize(text: string): string[] {
   const out: string[] = [];
-  for (const piece of text.toLowerCase().normalize('NFKC').split(/[^\p{L}\p{N}]+/u)) {
+  // combining marks (Hindi / Thai vowel signs, Arabic harakat, accents) belong to their word — they are not separators
+  for (const piece of text.toLowerCase().normalize('NFKC').replace(/[\u0610-\u061a\u064b-\u065f\u0670]/g, '').split(/[^\p{L}\p{N}\p{M}]+/u)) {
     if (!piece) continue;
     // Chinese / Japanese / Korean have no spaces: index overlapping character pairs (a lone character stands for itself)
     for (const raw of CJK.test(piece) ? piece.split(CJK).filter(Boolean) : [piece]) {
@@ -31,8 +33,15 @@ export function tokenize(text: string): string[] {
 
 export function stem(w: string): string {
   if (/^\d+$/.test(w)) return w;
-  if (/[а-яё]/.test(w)) return w.length > RU_STEM ? w.slice(0, RU_STEM) : w;
-  if (!/^[a-z]+$/.test(w)) return w.length > 7 ? w.slice(0, 7) : w;
+  // Cyrillic (Russian, Ukrainian, Bulgarian, Serbian …) and Greek: a fixed-length stem copes with their rich endings
+  if (/[\u0400-\u04ff\u0370-\u03ff]/.test(w)) return w.length > RU_STEM ? w.slice(0, RU_STEM) : w;
+  // other Latin-script languages (accents, umlauts …): a prefix of 7 characters; scripts that mark meaning with combining signs
+  // (Hindi, Thai, Arabic, Hebrew …) are left whole — cutting them would split a letter from its vowel sign
+  if (!/^[a-z]+$/.test(w)) {
+    if (!/^[\p{Script=Latin}\p{N}]+$/u.test(w)) return w;
+    const chars = [...w];
+    return chars.length > 7 ? chars.slice(0, 7).join('') : w;
+  }
   let r = w;
   for (const s of EN_SUFFIXES) {
     if (w.length > s.length + 2 && w.endsWith(s)) {
@@ -80,7 +89,7 @@ export function cleanChunking(input: Partial<ChunkingConfig> | null | undefined)
  * like "2024. The company" nor a lower-case list item), or a keyword heading with its number and a separator (`Article 4.`, `Статья 4:`).
  */
 const MARKER = new RegExp(
-  '^(?:#{1,6}\\s|(?:\\d{1,3}\\.){1,4}\\d{0,3}\\s+[\\p{Lu}("«\\[\\d]|\\d{1,3}[.)]\\s+[\\p{Lu}("«\\[]|(?:Article|Section|Chapter|Part|Статья|Глава|Раздел|Часть|п\\.|Пункт)\\s*\\d+(?:\\.\\d+)*\\s*[.:—–-])',
+  '^(?:#{1,6}\\s|(?:\\d{1,3}\\.){1,4}\\d{0,3}\\s+[\\p{Lu}\\p{Lo}("«\\[\\d]|\\d{1,3}[.)]\\s*[\\p{Lu}\\p{Lo}("«\\[]|(?:Article|Section|Chapter|Part|Artikel|Abschnitt|Kapitel|Artículo|Capítulo|Sección|Articolo|Capitolo|Artykuł|Rozdział|Madde|Bölüm|Стаття|Розділ|Статья|Глава|Раздел|Часть|п\\.|Пункт)\\s*\\d+(?:\\.\\d+)*\\s*[.:—–-]|第\\s*[\\d一二三四五六七八九十百]+\\s*[章条條節节款项項編编])',
   'u',
 );
 
@@ -92,7 +101,7 @@ export function cutChars(text: string, max: number, overlap: number): string[] {
     let end = Math.min(text.length, start + max);
     if (end < text.length) {
       const window = text.slice(start, end);
-      const sentence = Math.max(window.lastIndexOf('. '), window.lastIndexOf('.\n'), window.lastIndexOf('? '), window.lastIndexOf('! '), window.lastIndexOf('\n\n'));
+      const sentence = Math.max(window.lastIndexOf('. '), window.lastIndexOf('.\n'), window.lastIndexOf('? '), window.lastIndexOf('! '), window.lastIndexOf('\n\n'), ...['。', '！', '？', '．', '।', '؟', '။'].map((c) => window.lastIndexOf(c)));
       const space = window.lastIndexOf(' ');
       const cut = sentence > max * 0.5 ? sentence + 1 : space > max * 0.5 ? space : -1;
       if (cut > 0) end = start + cut;

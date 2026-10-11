@@ -5,6 +5,7 @@ const LABELS: Record<TaskStatus, string> = {
   queued: 'queued',
   running: 'running',
   needs_approval: 'needs approval',
+  review: 'ready — confirm',
   done: 'done',
   failed: 'failed',
   cancelled: 'cancelled',

@@ -57,7 +57,7 @@ export interface KbHit {
   score: number;
 }
 
-const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/i;
+const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}\p{M}_ -]{0,39}$/u;
 const MAX_TEXT_CHARS = 5_000_000;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 /** What the in-memory index handles comfortably (BM25 postings + vectors); a bigger corpus needs an external store. */
@@ -155,7 +155,7 @@ export class KnowledgeService {
 
   async create(input: { name?: string; description?: string; agents?: unknown; chunking?: Partial<ChunkingConfig>; agentWrite?: boolean; embedProvider?: string; embedModel?: string }): Promise<KbInfo> {
     const name = String(input.name ?? '').trim();
-    if (!NAME_RE.test(name)) throw new BadRequestException('The name: letters, digits, "-" or "_" (up to 40), e.g. building-codes.');
+    if (!NAME_RE.test(name)) throw new BadRequestException('The name: letters (any language), digits, "-", "_" or a space (up to 40), e.g. building-codes or строительные нормы.');
     if (await this.prisma.knowledgeBase.findUnique({ where: { name } })) throw new ConflictException(`A knowledge base named "${name}" already exists.`);
     const embed = await this.checkEmbedding(input.embedProvider, input.embedModel);
     const row = await this.prisma.knowledgeBase.create({

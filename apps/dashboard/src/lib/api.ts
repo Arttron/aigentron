@@ -60,8 +60,14 @@ export interface TaskPage {
 }
 
 /** Query params for the paginated/searchable task list. */
+export type TaskStatusFilter = 'queued' | 'running' | 'needs_approval' | 'review' | 'done' | 'blocked' | 'failed' | 'stalled' | 'cancelled' | 'active' | 'attention';
+
+export type TaskTypeFilter = 'task' | 'subtask' | 'chat' | 'scheduled' | 'channel' | 'discussion';
+
 export interface ListTasksParams {
   q?: string;
+  type?: TaskTypeFilter;
+  status?: TaskStatusFilter;
   page?: number;
   pageSize?: number;
 }
@@ -453,6 +459,8 @@ export const api = {
   listTasks: (params: ListTasksParams = {}) => {
     const qs = new URLSearchParams();
     if (params.q) qs.set('q', params.q);
+    if (params.type) qs.set('type', params.type);
+    if (params.status) qs.set('status', params.status);
     if (params.page) qs.set('page', String(params.page));
     if (params.pageSize) qs.set('pageSize', String(params.pageSize));
     const suffix = qs.toString() ? `?${qs}` : '';
@@ -466,6 +474,10 @@ export const api = {
       );
   },
 
+  taskStatusCounts: (type?: TaskTypeFilter) =>
+    fetch(`${API_BASE}/tasks/status-counts${type ? `?type=${type}` : ''}`, { cache: 'no-store' }).then(unwrap<Record<TaskStatusFilter, number>>),
+  taskTypeCounts: () => fetch(`${API_BASE}/tasks/type-counts`, { cache: 'no-store' }).then(unwrap<Record<TaskTypeFilter | 'all', number>>),
+
   getTask: (id: string) =>
     fetch(`${API_BASE}/tasks/${id}`, { cache: 'no-store' }).then(unwrap<TaskDetail>),
 
@@ -473,6 +485,9 @@ export const api = {
     fetch(`${API_BASE}/tasks/${id}/transcript`, { cache: 'no-store' }).then(
       unwrap<TranscriptEvent[]>,
     ),
+
+  /** The person accepts the task as finished. */
+  markTaskDone: (id: string) => fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/done`, { method: 'POST' }).then(unwrap<unknown>),
 
   startTask: (id: string, attachments?: string[]) =>
     fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/start`, {
@@ -615,7 +630,9 @@ export const api = {
   resourceUrl: (id: string) => `${API_BASE}/resources/${encodeURIComponent(id)}/file`,
 
   // ---- knowledge bases ----
-  startDiscussion: (body: { taskId?: string; topic: string; agents: string[]; rounds?: number; summaryBy?: string | null }) =>
+  translate: (text: string, to: string) =>
+    fetch(`${API_BASE}/translate`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ text, to }) }).then(unwrap<{ ok: boolean; text?: string; error?: string }>),
+  startDiscussion: (body: { taskId?: string; topic: string; agents: string[]; rounds?: number; language?: 'compact' | 'user'; summaryBy?: string | null }) =>
     fetch(`${API_BASE}/discussions`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<{ taskId: string }>),
   discussionState: (taskId: string) =>
     fetch(`${API_BASE}/discussions/${encodeURIComponent(taskId)}`, { cache: 'no-store' }).then(
@@ -789,6 +806,27 @@ export const api = {
       body: JSON.stringify(answer),
     }).then(unwrap<AgentQuestion>),
   questionImageUrl: (id: string) => `${API_BASE}/questions/${encodeURIComponent(id)}/image`,
+  diskStatus: () =>
+    fetch(`${API_BASE}/maintenance/disk`, { cache: 'no-store' }).then(
+      unwrap<{ path: string; totalBytes: number; freeBytes: number; usedPercent: number; level: 'ok' | 'warn' | 'critical'; warnBelowBytes: number; criticalBelowBytes: number; checkedAt: string; relief?: { at: string; bytes: number } | null } | null>,
+    ),
+  maintenanceReport: () =>
+    fetch(`${API_BASE}/maintenance/report`, { cache: 'no-store' }).then(
+      unwrap<{
+        runs: { count: number; bytes: number; stale: number; staleBytes: number };
+        worktrees: { count: number; bytes: number; stale: number };
+        attachments: { bytes: number; oldTasksBytes: number };
+        caches: { digests: { count: number; bytes: number; stale: number; staleBytes: number }; research: { count: number; bytes: number; stale: number; staleBytes: number }; digestRetentionDays: number; researchRetentionDays: number };
+        resources: { bytes: number };
+        retentionDays: number;
+      }>,
+    ),
+  relieveDisk: () => fetch(`${API_BASE}/maintenance/relieve`, { method: 'POST' }).then(unwrap<{ digests: number; research: number; runs: number; bytes: number }>),
+  getTitleSettings: () => fetch(`${API_BASE}/titles`, { cache: 'no-store' }).then(unwrap<{ enabled: boolean; provider: string; model: string }>),
+  saveTitleSettings: (body: { enabled: boolean; provider: string; model: string }) =>
+    fetch(`${API_BASE}/titles`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<{ enabled: boolean; provider: string; model: string }>),
+  testTitle: (prompt?: string) =>
+    fetch(`${API_BASE}/titles/test`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ prompt }) }).then(unwrap<{ ok: boolean; title?: string; provider?: string; error?: string }>),
   mediaStatus: () =>
     fetch(`${API_BASE}/media`, { cache: 'no-store' }).then(
       unwrap<{ vision: { provider: string; model: string } | null; visionReady: boolean; ffmpeg: boolean; sttReady: boolean }>,

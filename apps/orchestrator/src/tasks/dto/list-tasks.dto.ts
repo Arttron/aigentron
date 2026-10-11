@@ -9,6 +9,18 @@ export class ListTasksDto {
   @MaxLength(200)
   q?: string;
 
+  /** Only tasks in this status (a status, or `active` / `attention`). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  status?: string;
+
+  /** Only this type of task (task | subtask | chat | scheduled | channel | discussion). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  type?: string;
+
   /** 1-based page number. */
   @IsOptional()
   @Type(() => Number)

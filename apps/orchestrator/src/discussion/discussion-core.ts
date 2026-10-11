@@ -8,6 +8,10 @@ export const DEFAULT_ROUNDS = 3;
 export const TRANSCRIPT_CHARS = 9000;
 export const AGREED_MARK = '[[AGREED]]';
 
+/** How the agents talk: `compact` = terse English among themselves (cheapest; the conclusion is still in the person's language), `user` = the person's own language throughout. */
+export type DiscussionLanguage = 'compact' | 'user';
+export const cleanLanguage = (v: unknown): DiscussionLanguage => (v === 'user' ? 'user' : 'compact');
+
 export interface Turn {
   /** agent name, or "Human" for something the person added */
   speaker: string;
@@ -51,7 +55,7 @@ export function trimTranscript(turns: readonly Turn[], maxChars = TRANSCRIPT_CHA
 }
 
 /** What a participant is asked on its turn. */
-export function buildTurnPrompt(o: { topic: string; speaker: string; participants: readonly string[]; turns: readonly Turn[]; turnNumber: number; totalTurns: number; humanHint?: boolean }): string {
+export function buildTurnPrompt(o: { topic: string; speaker: string; participants: readonly string[]; turns: readonly Turn[]; turnNumber: number; totalTurns: number; humanHint?: boolean; language?: DiscussionLanguage }): string {
   const others = o.participants.filter((p) => p !== o.speaker);
   const { shown, omitted } = trimTranscript(o.turns);
   const convo = shown.length
@@ -66,7 +70,9 @@ export function buildTurnPrompt(o: { topic: string; speaker: string; participant
     '',
     `This is turn ${o.turnNumber} of ${o.totalTurns}. Speak in your own role and voice. Rules:`,
     '- Answer the other participants: agree, object, add what they missed, ask a pointed question — do not repeat what was already said.',
-    '- Be concrete and brief (at most ~150 words). No greetings, no preamble, no sign-off; do not write "name:" before your message.',
+    ...(o.language === 'user'
+      ? ['- Be concrete and brief (at most ~150 words), in the language the topic is written in. No greetings, no preamble, no sign-off; do not write "name:" before your message.']
+      : ['- Write in terse English, telegraphic style, at most ~80 words: claim, reason, next point — no greetings, no thanks, no preamble, no sign-off, no restating what was said; do not write "name:" before your message. (Tokens cost money; the person gets a conclusion in their own language at the end.)']),
     '- Say plainly where you disagree and why; do not agree just to be polite.',
     `- If you fully agree with the others and have nothing to add, say so in one sentence and end with ${AGREED_MARK}.`,
     '- If the human added a message, answer it first.',
@@ -84,7 +90,7 @@ export function buildSummaryPrompt(o: { topic: string; speaker: string; particip
     omitted ? `(${omitted} earlier message(s) left out)` : '',
     shown.map((t) => `${t.speaker}: ${t.text.trim()}`).join('\n\n'),
     '',
-    'Write the outcome in at most 200 words: what was agreed, where the participants still disagree (and why), and the recommended next step. Be fair to every participant; do not invent points nobody made.',
+    'Write the outcome in at most 200 words, IN THE LANGUAGE THE TOPIC IS WRITTEN IN (the person reads this; the discussion itself may have been in English): what was agreed, where the participants still disagree (and why), and the recommended next step. Be fair to every participant; do not invent points nobody made.',
   ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
 }
 

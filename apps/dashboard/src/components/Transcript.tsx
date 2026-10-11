@@ -93,6 +93,14 @@ export function Transcript({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState<{ name: string; names?: string[] } | null>(null);
+  const [translated, setTranslated] = useState<Record<string, string>>({});
+  const translate = (id: string, text: string) => {
+    setTranslated((m) => ({ ...m, [id]: '…' }));
+    void api
+      .translate(text, navigator.language || 'English')
+      .then((r) => setTranslated((m) => ({ ...m, [id]: r.ok && r.text ? r.text : `⚠ ${r.error ?? 'could not translate'}` })))
+      .catch((e) => setTranslated((m) => ({ ...m, [id]: `⚠ ${(e as Error).message}` })));
+  };
   const [look, setLook] = useLook();
   const [show, setShow] = useShow();
   // Follow new output unless the user has scrolled up. Captured from the user's
@@ -253,7 +261,7 @@ export function Transcript({
                   you&gt;
                 </span>
                 {ts(it.line)}
-                {it.line.text && <span className={styles.userText}>{it.line.text}</span>}
+                {it.line.text && <span className={styles.userText} dir="auto">{it.line.text}</span>}
                 {thumbs(it.line.attachments)}
               </div>
             );
@@ -262,11 +270,24 @@ export function Transcript({
             return (
               <div key={it.line.id} className={cn(styles.agentMsg, it.final && styles.final)}>
                 <span className={styles.prompt} aria-label={it.line.speaker ?? 'agent'} style={it.line.speaker ? { color: speakerColor(it.line.speaker) } : undefined}>
-                  {it.line.speaker ? `${it.line.speaker}>` : it.final ? 'done>' : 'agent>'}
+                  {it.line.speaker ? `${it.line.speaker}>` : it.final ? 'result>' : 'agent>'}
                 </span>
                 {ts(it.line)}
                 <div className={styles.agentBody}>
                   <Markdown text={it.line.text} />
+                  {it.line.speaker && it.line.speaker !== 'system' && (
+                    <div>
+                      {translated[it.line.id] === undefined ? (
+                        <button type="button" className={styles.translateBtn} onClick={() => translate(it.line.id, it.line.text)} title="Translate into your language (a few tokens)">
+                          🌐 translate
+                        </button>
+                      ) : (
+                        <div className={styles.translated} dir="auto">
+                          {translated[it.line.id]}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {it.final && autoSpeak && it.line.id === lastFinalId && (
                     <SpeakButton text={it.line.text} abs />
                   )}
@@ -307,6 +328,11 @@ export function Transcript({
             </div>
           );
         })}
+        {status === 'review' && (
+          <div className={cn(styles.line, styles.working)}>
+            ✅ The agent has finished. Happy with the result? Write “done” (or press Mark as done) to close the task — or write what to change.
+          </div>
+        )}
         {WORKING[status] && (
           <div className={cn(styles.line, styles.working)}>
             {WORKING[status]}

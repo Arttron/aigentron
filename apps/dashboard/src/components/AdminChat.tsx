@@ -243,7 +243,7 @@ export function AdminChat() {
       // Open: only this chat's task triggers a reaction. Closed: any task does.
       // `blocked` is a hand-off to a human, not a failure, so it doesn't count as an error.
       const relevant = !openRef.current || e.taskId === taskIdRef.current;
-      if (relevant && e.status === 'done') react('success');
+      if (relevant && (e.status === 'review' || e.status === 'done')) react('success');
       else if (relevant && (e.status === 'failed' || e.status === 'stalled')) react('error');
     };
     const onApprovalCreated = () => setPendingApprovals((n) => n + 1);
@@ -423,7 +423,7 @@ export function AdminChat() {
                   onVoiceMode={() => setVoiceOnly(true)}
                 />
                 <div className={styles.composer}>
-                  <textarea
+                  <textarea dir="auto"
                     className={styles.input}
                     rows={2}
                     value={text}

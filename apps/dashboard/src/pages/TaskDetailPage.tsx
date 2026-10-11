@@ -180,6 +180,18 @@ export function TaskDetailPage() {
     }
   };
 
+  const markDone = async () => {
+    setBusy(true);
+    try {
+      await api.markTaskDone(id);
+      refreshTask();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const remove = async () => {
     if (!window.confirm('Delete this task and its branch/worktree?')) return;
     setBusy(true);
@@ -260,6 +272,7 @@ export function TaskDetailPage() {
                   Pushed ↗
                 </ButtonLink>
               )}
+              {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && <Button onClick={markDone}>✅ Mark as done</Button>}
               {terminal && <Button onClick={() => setDiscussing(true)}>💬 Discuss</Button>}
               {!terminal && (
                 <Button variant="red" onClick={cancel} disabled={busy}>
@@ -348,6 +361,11 @@ export function TaskDetailPage() {
                   <ButtonLink href={task.pushedTo} target="_blank" rel="noreferrer">
                     Pushed ↗
                   </ButtonLink>
+                )}
+                {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && (
+                  <Button variant={task.status === 'review' ? 'primary' : undefined} onClick={markDone} disabled={busy} title="Accept the result — the task becomes “done”">
+                    ✅ Mark as done
+                  </Button>
                 )}
                 {terminal && (
                   <Button onClick={() => setDiscussing(true)} title="Let several agents discuss in this chat">

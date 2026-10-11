@@ -538,6 +538,7 @@ if [ "$INSTALL_MODE" = docker ]; then
   run_container() {
     docker run -d --name "$CONTAINER_NAME" \
       --restart unless-stopped \
+      --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
       -p 3001:3001 $1 \
       --add-host host.docker.internal:host-gateway \
       -v "$DATA_VOLUME:/data" \

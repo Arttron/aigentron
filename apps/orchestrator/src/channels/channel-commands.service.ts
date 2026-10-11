@@ -156,6 +156,11 @@ export class ChannelCommandService {
         return this.voiceCmd(ctx, arg.toLowerCase());
       case '/progress':
         return this.progressCmd(ctx, arg.toLowerCase());
+      case '/done': {
+        const id = await this.activeTaskId(ctx);
+        if (!id) return 'No active task. Use /tasks.';
+        return this.tasks.markDone(id).then(() => '✅ Marked as done.').catch((e) => `⚠️ ${(e as Error).message}`);
+      }
       case '/discuss':
         return this.discuss(ctx, arg);
       case '/agents':
@@ -278,10 +283,13 @@ export class ChannelCommandService {
       rounds = Number(r.split('=')[1]);
       names = names.filter((n) => n !== r);
     }
+    // `lang=user`: the agents talk in the person's language (costs more tokens); by default they talk terse English and the conclusion is in the person's language
+    const lang = names.find((n) => /^lang(?:uage)?=user$/i.test(n)) ? 'user' : 'compact';
+    names = names.filter((n) => !/^lang(?:uage)?=/i.test(n));
     if (names.length < 2 || !topic) return usage;
     const { DiscussionService } = await import('../discussion/discussion.service');
     try {
-      const { taskId } = await this.moduleRef.get(DiscussionService, { strict: false }).start({ topic, agents: names, rounds, summaryBy: names[0], createdByChannel: `${ctx.kind}:${ctx.userId}` });
+      const { taskId } = await this.moduleRef.get(DiscussionService, { strict: false }).start({ topic, agents: names, rounds, language: lang, summaryBy: names[0], createdByChannel: `${ctx.kind}:${ctx.userId}` });
       await this.channels.linkThread(ctx.channelId, taskId, ctx.chatId);
       await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: taskId });
       return `💬 Discussion started: ${names.join(', ')}. Their messages appear here one by one — write in this chat to join in (they answer you first); /cancel stops it.`;

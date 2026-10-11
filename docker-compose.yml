@@ -14,8 +14,16 @@ name: local-dev-server
 # Published ports bind to 127.0.0.1 by default (these services have no authentication and LiteLLM/Postgres ship with
 # dev credentials). Set BIND_ADDRESS=0.0.0.0 in .env only when you deliberately expose the stack — then also set
 # LITELLM_MASTER_KEY, MCP_TOKEN and put it behind a VPN or an authenticating proxy.
+# Container logs rotate (3 × 20 MB per container) — without this Docker keeps them forever and they fill the disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   postgres:
+    logging: *default-logging
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: postgres
@@ -34,6 +42,7 @@ services:
       retries: 10
 
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
@@ -49,6 +58,7 @@ services:
   # Anthropic-compatible proxy in front of the host's Ollama. Gives local
   # models a working /v1/messages tool-use API for the Claude Agent SDK.
   litellm:
+    logging: *default-logging
     # Pinned to the stable channel (not the floating main-latest) for reproducible boots.
     image: ghcr.io/berriai/litellm:main-stable
     command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
@@ -77,6 +87,7 @@ services:
   # so it's behind a profile: `docker compose --profile mcp up`. Agents reach it
   # at http://playwright-mcp:8931/sse (the seeded `playwright` MCP server).
   playwright-mcp:
+    logging: *default-logging
     image: mcr.microsoft.com/playwright/mcp:latest
     profiles: ["mcp"]
     # --allowed-hosts: the server rejects requests whose Host isn't in this list
@@ -98,6 +109,7 @@ services:
   # (optional PLAYWRIGHT_PROXY_BYPASS). Start it with `docker compose --profile proxy up -d playwright-mcp-proxy`; agents reach it
   # as the `playwright-proxy` MCP server (tools mcp__playwright-proxy__*) — see agent/skills/core/playwright.md.
   playwright-mcp-proxy:
+    logging: *default-logging
     image: mcr.microsoft.com/playwright/mcp:latest
     profiles: ["proxy"]
     environment:
@@ -121,6 +133,7 @@ services:
   # the follow-up for true worktree preview). Behind the `mcp` profile alongside
   # playwright-mcp: `docker compose --profile mcp up -d`.
   project-dev:
+    logging: *default-logging
     image: node:22-bookworm-slim
     profiles: ["mcp"]
     working_dir: /workspace/repo
@@ -140,6 +153,7 @@ services:
       - ${PROJECT_HOST_PATH:-./project}:/workspace/repo
 
   orchestrator:
+    logging: *default-logging
     build:
       context: .
       dockerfile: infra/dev.Dockerfile
@@ -227,6 +241,7 @@ services:
       start_period: 120s
 
   dashboard:
+    logging: *default-logging
     build:
       context: .
       dockerfile: infra/dev.Dockerfile
@@ -259,6 +274,7 @@ services:
   # Start with: docker compose --profile tunnel up -d   (or `make tunnel-up`). Needs TUNNEL_TOKEN in .env;
   # set the tunnel's public hostname to http://orchestrator:3001 in the Cloudflare dashboard. See docs/remote-access.md.
   cloudflared:
+    logging: *default-logging
     image: cloudflare/cloudflared:latest
     profiles: ["tunnel"]
     command: tunnel --no-autoupdate run

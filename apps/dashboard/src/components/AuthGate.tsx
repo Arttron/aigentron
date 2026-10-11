@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import { AUTH_REQUIRED_EVENT, authApi, type AuthStatus, type LoginUser } from '@/lib/auth';
 import { AuthContext } from '@/lib/auth-context';
 import { getSocket } from '@/lib/socket';
+import { DiskBanner } from '@/components/DiskBanner';
 import { Button, Card, ErrorText, Field, Modal, Muted, Row } from '@/components/ui';
 import styles from './AuthGate.module.css';
 
@@ -159,6 +160,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           )}
         </div>
       )}
+      <DiskBanner />
       {setting && (
         <Modal title="Set a password" onClose={() => setSetting(false)}>
           <Muted>One password protects the dashboard and the API. You stay signed in on this browser for 30 days.</Muted>

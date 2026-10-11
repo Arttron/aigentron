@@ -32,7 +32,8 @@ export interface AgentDef {
 /** Public (list) shape — without the full instructions body. */
 export type AgentSummary = Omit<AgentDef, 'instructions'>;
 
-const NAME_RE = /^[\w-]+$/;
+/** Agent names: letters, digits, `_` and `-` of any script (an agent may be called «помощник» or 助手). */
+export const NAME_RE = /^[\p{L}\p{N}\p{M}_-]+$/u;
 /** Built-in agents: can't be deleted, and a save can't clobber them via the create/edit API. */
 export const BUILTIN_AGENTS = ['admin'];
 export const isBuiltinAgent = (name: string): boolean => BUILTIN_AGENTS.includes(name.toLowerCase());

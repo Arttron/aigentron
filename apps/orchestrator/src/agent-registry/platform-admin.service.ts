@@ -28,6 +28,7 @@ import { TasksService } from '../tasks/tasks.service';
 import { ProvidersService } from '../providers/providers.service';
 import { SettingsService } from '../settings/settings.service';
 import { MaintenanceService } from '../maintenance/maintenance.service';
+import { DiskMonitorService } from '../maintenance/disk-monitor.service';
 import { StatsService } from '../stats/stats.service';
 import { AdminAuditService, type AuditEntry } from './admin-audit.service';
 import type { SchedulesService } from '../schedules/schedules.service';
@@ -51,7 +52,7 @@ import { AgentRegistryService, isBuiltinAgent } from './agent-registry.service';
 
 const MAX_LIST = 200;
 const DEFAULT_LIST = 50;
-const STATUSES = ['queued', 'running', 'needs_approval', 'done', 'failed', 'cancelled', 'blocked', 'stalled'];
+const STATUSES = ['queued', 'running', 'needs_approval', 'review', 'done', 'failed', 'cancelled', 'blocked', 'stalled'];
 
 /**
  * Platform management for the admin agent. Reading is free (`tasks_list`); every mutation
@@ -949,14 +950,22 @@ export class PlatformAdminService {
     };
   }
 
+  private get diskMonitor(): DiskMonitorService {
+    return this.moduleRef.get(DiskMonitorService, { strict: false });
+  }
   private get maintenance(): MaintenanceService {
     return this.moduleRef.get(MaintenanceService, { strict: false });
   }
 
   async maintenanceReport(): Promise<string> {
     const r = await this.maintenance.report();
+    const disk = this.diskMonitor.status();
     const mb = (n: number) => `${(n / 1024 / 1024).toFixed(0)} MB`;
+    const gb = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GB`;
     return [
+      disk ? `Disk: ${gb(disk.freeBytes)} free of ${gb(disk.totalBytes)} (${100 - disk.usedPercent}% free) — ${disk.level === 'ok' ? 'fine' : disk.level === 'warn' ? 'LOW (warning)' : 'CRITICALLY LOW'}. The server checks every 10 minutes, warns on the dashboard and in the chat, and at "critical" frees caches by itself.` : 'Disk: could not be read.',
+      `Task attachments: ${mb(r.attachments.bytes)}; ${mb(r.attachments.oldTasksBytes)} of that belong to tasks finished more than 90 days ago (user files — never deleted automatically; delete old tasks with propose_task_action if the user agrees).`,
+      `Video digests (frames + transcript, regenerable): ${r.caches.digests.count} (${mb(r.caches.digests.bytes)}), ${r.caches.digests.stale} older than ${r.caches.digestRetentionDays} days — pruned automatically. Fetched web pages (research cache): ${r.caches.research.count} (${mb(r.caches.research.bytes)}), ${r.caches.research.stale} older than ${r.caches.researchRetentionDays} days — pruned automatically. Resource library: ${mb(r.resources.bytes)}.`,
       `Run folders: ${r.runs.count} (${mb(r.runs.bytes)}); ${r.runs.stale} older than ${r.retentionDays} days (${mb(r.runs.staleBytes)}) — these are removed automatically every few hours.`,
       `Old git worktrees: ${r.worktrees.count} (${mb(r.worktrees.bytes)}); ${r.worktrees.stale} older than ${r.worktreeRetentionDays} days and finished — removed only on request.`,
       `agent/task-* branches in the project repo: ${r.branches.agentBranches} (${r.branches.stale} belong to finished tasks). Deleting a branch discards any commit that was never pushed.`,
@@ -1127,7 +1136,7 @@ export class PlatformAdminService {
     const e = (await this.audit.get(id)) as AuditEntry;
     const u = e.undo!;
     // The journal is a file on disk: never trust its names/paths blindly.
-    if ((u.kind === 'agent' || u.kind === 'agent_delete' || u.kind === 'skill') && (!/^[\w-]{1,60}$/.test(u.name) || (u.kind !== 'skill' && isBuiltinAgent(u.name)))) {
+    if ((u.kind === 'agent' || u.kind === 'agent_delete' || u.kind === 'skill') && (!/^[\p{L}\p{N}\p{M}_-]{1,60}$/u.test(u.name) || (u.kind !== 'skill' && isBuiltinAgent(u.name)))) {
       return { ok: false, message: 'Refusing to revert: the journal entry has an invalid or protected name.' };
     }
     if ((u.kind === 'agent' || u.kind === 'agent_delete' || u.kind === 'skill') && u.snapshot && !resolve(u.snapshot).startsWith(resolve(this.config.agentDir, '.snapshots') + sep)) {

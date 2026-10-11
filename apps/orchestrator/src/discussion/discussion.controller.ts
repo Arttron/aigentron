@@ -14,7 +14,7 @@ export class DiscussionController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles('task_setter', 'operator', 'admin')
-  start(@Body() body: { taskId?: string; topic?: string; agents?: string[]; rounds?: number; summaryBy?: string | null }, @CurrentUser() user: UserRow) {
+  start(@Body() body: { taskId?: string; topic?: string; agents?: string[]; rounds?: number; language?: string; summaryBy?: string | null }, @CurrentUser() user: UserRow) {
     return this.discussions.start({ ...body, createdById: user.id });
   }
 

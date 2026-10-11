@@ -1,0 +1,63 @@
+.root {
+  position: relative;
+  display: inline-block;
+}
+.btn,
+.iconBtn {
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: var(--inset-sm);
+  color: var(--text);
+  font: inherit;
+  padding: 9px 12px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.iconBtn {
+  width: 54px;
+  padding: 10px 6px;
+  font-size: 16px;
+}
+.btn:disabled,
+.iconBtn:disabled {
+  opacity: 0.6;
+}
+.menu {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  min-width: 210px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: var(--radius);
+  background: var(--bg-elev, var(--bg));
+  box-shadow: var(--raised);
+}
+.menu button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 12px 12px; /* roomy enough for a thumb */
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.menu button:hover,
+.menu button:active {
+  background: var(--accent-soft);
+}
+
+.up {
+  bottom: calc(100% + 6px);
+}
+.down {
+  top: calc(100% + 6px);
+}
+.right {
+  left: auto;
+  right: 0;
+}

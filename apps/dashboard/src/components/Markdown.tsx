@@ -51,7 +51,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 export function Markdown({ text }: { text: string }) {
   const blocks = parseMarkdown(text);
   return (
-    <div className={styles.md}>
+    <div className={styles.md} dir="auto">
       {blocks.map((b, i) => {
         switch (b.t) {
           case 'h':

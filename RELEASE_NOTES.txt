@@ -1,25 +1,25 @@
-Aigentron v0.1.53
+Aigentron v0.1.54
 
-For people who are not programmers: agents can talk to each other, show you pictures and albums, and use a browser through your proxy; uploaded pictures are shrunk automatically; plus a round of fixes from a code review.
+For people who are not programmers: "done" is now yours to set, tasks get meaningful names and filters, the server watches its disk, attaching files works on phones, and the service handles any language while spending fewer tokens.
 
-Agents discuss with each other
-- New "💬 Discuss" (on the New task form and in a chat's header): pick 2–6 agents, a topic and the number of rounds. The agents answer each other in turn, right in the chat, each message labelled with who said it. In Telegram: /discuss pm architect: topic.
-- You can join in at any moment (they answer you first), press "Wrap up" for the conclusion, or stop it. If everyone agrees, it ends early. A provider error is never shown as something an agent said.
+"Done" is set by you
+- When an agent finishes, the task becomes "ready — confirm". It becomes "done" only when you say so: press "✅ Mark as done" (in the task, or under the answer in Telegram), send /done in Telegram, or write a short explicit "done" / "готово" / "完成" (about 20 languages). Anything else you write continues the task. A blocked or failed task can also be accepted as it is. Subtasks still finish by themselves for their lead. Tasks that were already done stay done.
 
-Pictures
-- Agents can show one picture or an album (up to 10) in the chat: large single picture or a grid in the dashboard (click to open, arrows to step through), a photo or album in Telegram.
-- Every uploaded picture is shrunk to what is needed (long side up to 1600 px, JPEG, location data removed; transparent PNGs stay PNG). Same for screenshots made by agents and for the library.
+Task list
+- New tasks get a short title made from their context (what you wrote, attached files, and — for a vague request — the first answer) by a small model, in the language of the request. Titles you or a schedule set are never changed. Settings → General → Task titles (on/off, provider, "Try it").
+- Filters above the list: by status (Needs attention, Active, Ready, Done, Blocked, Approval, Failed, Stalled, Cancelled) and by type (Tasks, Chats, From chats, Scheduled, Discussions, Subtasks), with counts. Your choice is remembered.
 
-Browser through a proxy
-- A second browser service sends all its traffic through your proxy (for geo-blocked sites or IP-bound pages). Put PLAYWRIGHT_PROXY_SERVER (host:port), PLAYWRIGHT_PROXY_USER and PLAYWRIGHT_PROXY_PASS in the server's .env and start it with: docker compose --profile proxy up -d playwright-mcp-proxy. Agents use it as the "playwright-proxy" MCP server. The browser can no longer open local files or browser pages, and the proxy login is not left in the container's environment.
+Disk and cleanup
+- The server checks free disk space every 10 minutes. When it gets low you see a banner on every page and get a message in your chat; when it is critical it clears regenerable caches by itself (video frames, old fetched web pages, old run folders) — never your files. Settings → General → Disk & cleanup shows what takes the space and has "Free up space now". Container logs now rotate.
 
-Agents find each other
-- The lead agent is told exactly how to reach each colleague. Agents on Codex or on a subscription login are not available to the Task tool — they are started as subtasks. Names like expert_codex / expert-codex are accepted. This fixes "Agent type … not found. Available agents: none".
+Phones
+- Attaching images and files in "New task" and in messages did not open on phones; fixed (the 📎 is a small menu now, and the camera option is in it).
 
-Vision
-- If no vision model is set up, look_at uses the agent's own cloud model (Claude / OpenAI-style). Settings → Vision shows unsaved changes, and Test saves them first.
+Any language, fewer tokens
+- File names and agent names in any script work; agents are found by /name or @name, typos forgiven. Knowledge-base search handles Cyrillic, Greek, Arabic, Hebrew, Hindi, Thai, Vietnamese, Chinese, Japanese, Korean. Right-to-left text displays correctly; voice recognition lists 50 languages; long Telegram messages are cut without breaking emoji.
+- To save tokens, agents talk to each other in terse English; only what you read (answers, questions, discussion conclusions) is in your language. In a discussion the agents use English by default, each message has a "🌐 translate" link, and you can choose "Your language" instead (or /discuss lang=user in Telegram).
 
-Knowledge bases — fixes from a review
-- Large bases no longer freeze the server while the index is built; the index is always current; changing the embedding model can no longer mix vectors; an agent that cannot be identified sees only open bases; passages are handed to agents as quoted data; PDF and Word reading has limits; Chinese/Japanese text is searchable. A base now holds up to 20,000 passages.
+Other
+- A discussion or a chat ends as "ready — confirm" like any task.
 
-Update note: this release adds one small column for discussion messages; it is created automatically when the server starts. To use the proxy browser, add the three PLAYWRIGHT_PROXY_* lines to .env and start the new service as above.
+Update note: this release adds a new task status ("review"), a task kind and a title flag; the database changes apply automatically when the server starts. If you have agents with long instructions in a non-English language, ask the admin to rewrite them in concise English — instructions are paid for on every run.

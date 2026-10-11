@@ -9,6 +9,7 @@ export function DiscussionModal({ taskId, initialTopic, onClose, onStarted }: { 
   const [topic, setTopic] = useState(initialTopic ?? '');
   const [rounds, setRounds] = useState(3);
   const [summaryBy, setSummaryBy] = useState('');
+  const [language, setLanguage] = useState<'compact' | 'user'>('compact');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +24,7 @@ export function DiscussionModal({ taskId, initialTopic, onClose, onStarted }: { 
     setBusy(true);
     setError(null);
     try {
-      const r = await api.startDiscussion({ taskId, topic, agents: picked, rounds, summaryBy: summaryBy || null });
+      const r = await api.startDiscussion({ taskId, topic, agents: picked, rounds, language, summaryBy: summaryBy || null });
       onStarted(r.taskId);
       onClose();
     } catch (e) {
@@ -66,6 +67,12 @@ export function DiscussionModal({ taskId, initialTopic, onClose, onStarted }: { 
           </select>
         </Field>
       </Row>
+      <Field label="Language of the agents">
+        <select value={language} onChange={(e) => setLanguage(e.target.value as 'compact' | 'user')}>
+          <option value="compact">Terse English among themselves — cheapest (translate a message with 🌐; the conclusion is in your language)</option>
+          <option value="user">Your language throughout — uses noticeably more tokens</option>
+        </select>
+      </Field>
       {picked.length >= 2 && <Muted>{turns} reply(ies) in total{summaryBy ? ' + the conclusion' : ''}. They may stop earlier if everyone agrees.</Muted>}
       {error && <ErrorText>{error}</ErrorText>}
       <Row>

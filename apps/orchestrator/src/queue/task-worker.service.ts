@@ -223,7 +223,8 @@ export class TaskWorkerService implements OnModuleInit {
           return;
         }
 
-        await this.tasks.setStatus(taskId, 'done');
+        // The agent is finished: the person accepts the result. (A subtask is accepted by its lead, so it is simply done.)
+        await this.tasks.setStatus(taskId, task.parentId ? 'done' : 'review');
         // Publish (best-effort; never fails the task):
         //  - shared mode: push the current branch straight to origin (no PR) if
         //    a repo is configured — the agent's commits go up as-is.
@@ -294,7 +295,7 @@ export class TaskWorkerService implements OnModuleInit {
       await this.tasks.setStatus(taskId, 'blocked', outcome.reportedSummary.slice(0, 500));
       return;
     }
-    await this.tasks.setStatus(taskId, 'done');
+    await this.tasks.setStatus(taskId, after.parentId ? 'done' : 'review');
     this.logger.log(`Chat task ${taskId} turn finished`);
   }
 

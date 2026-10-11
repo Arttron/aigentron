@@ -14,7 +14,7 @@ const MAX_AGENT_BYTES = 20 * 1024;
 const MAX_SKILL_BYTES = 16 * 1024;
 const NAME_MAX = 60;
 // Same charset as the Agents API (\w + dash) so agents created in the UI can be edited here too.
-const AGENT_NAME_RE = /^[\w-]+$/;
+const AGENT_NAME_RE = /^[\p{L}\p{N}\p{M}_-]+$/u;
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 const RESERVED_NAMES = ['readme'];
 /** Custom (user/admin-made) skills live under core/custom — a protected path for agents, untouched by the shipped-skills sync. */

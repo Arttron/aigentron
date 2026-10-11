@@ -18,6 +18,8 @@ export type TaskStatus =
   | 'queued'
   | 'running'
   | 'needs_approval'
+  // the agent finished and is waiting for the PERSON to accept the result — `done` is set only by a person (or by a lead for its own subtasks)
+  | 'review'
   | 'done'
   | 'failed'
   | 'cancelled'
@@ -28,6 +30,7 @@ export const TASK_STATUSES: readonly TaskStatus[] = [
   'queued',
   'running',
   'needs_approval',
+  'review',
   'done',
   'failed',
   'cancelled',
@@ -37,6 +40,7 @@ export const TASK_STATUSES: readonly TaskStatus[] = [
 
 /** Terminal states — a task in one of these will never change again. */
 export const TERMINAL_TASK_STATUSES: readonly TaskStatus[] = [
+  'review',
   'done',
   'failed',
   'cancelled',

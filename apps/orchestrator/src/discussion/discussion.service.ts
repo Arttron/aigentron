@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { encodeAttachments } from '../prisma/agent-event-attachments';
 import { isBuiltinAgent } from '../agent-registry/agent-registry.service';
-import { AGREED_MARK, allAgreed, buildSummaryPrompt, buildTurnPrompt, cleanParticipants, cleanRounds, stripMark, type Turn } from './discussion-core';
+import { AGREED_MARK, allAgreed, buildSummaryPrompt, buildTurnPrompt, cleanLanguage, cleanParticipants, cleanRounds, stripMark, type DiscussionLanguage, type Turn } from './discussion-core';
 
 interface Active {
   taskId: string;
@@ -19,6 +19,7 @@ interface Active {
   agents: string[];
   rounds: number;
   summaryBy: string | null;
+  language: DiscussionLanguage;
   turns: Turn[];
   /** 1-based number of the turn being played (0 before the first) */
   turn: number;
@@ -40,6 +41,7 @@ export interface DiscussionState {
   total?: number;
   speaker?: string | null;
   summaryBy?: string | null;
+  language?: DiscussionLanguage;
 }
 
 /**
@@ -67,7 +69,7 @@ export class DiscussionService {
 
   state(taskId: string): DiscussionState {
     const a = this.active.get(taskId);
-    return a ? { active: true, topic: a.topic, agents: a.agents, turn: a.turn, total: a.total, speaker: a.speaker, summaryBy: a.summaryBy } : { active: false };
+    return a ? { active: true, topic: a.topic, agents: a.agents, turn: a.turn, total: a.total, speaker: a.speaker, summaryBy: a.summaryBy, language: a.language } : { active: false };
   }
 
   /** `expert_codex` / `Expert-Codex` / a small typo → the agent's real name; an error that lists the agents otherwise. */
@@ -87,7 +89,7 @@ export class DiscussionService {
   }
 
   /** Begin a discussion in an existing chat (task) or in a new one. Returns at once; the turns play in the background. */
-  async start(input: { taskId?: string; topic?: string; agents?: unknown; rounds?: unknown; summaryBy?: string | null; attachments?: string[]; createdById?: string; createdByChannel?: string }): Promise<{ taskId: string }> {
+  async start(input: { taskId?: string; topic?: string; agents?: unknown; rounds?: unknown; language?: unknown; summaryBy?: string | null; attachments?: string[]; createdById?: string; createdByChannel?: string }): Promise<{ taskId: string }> {
     const topic = String(input.topic ?? '').trim();
     if (!topic) throw new BadRequestException('Say what the agents should discuss.');
     const cleaned = cleanParticipants(input.agents);
@@ -103,10 +105,10 @@ export class DiscussionService {
       if (this.active.has(taskId)) throw new ConflictException('A discussion is already running in this chat.');
       if (!isTerminalStatus(task.status)) throw new ConflictException('This chat is busy — wait until the agent has finished, then start the discussion.');
     } else {
-      const created = await this.tasks.create({ prompt: topic, title: `Discussion: ${topic.split('\n')[0]!.slice(0, 70)}`, agentName: agents[0], autostart: false, ...(input.createdByChannel ? { createdByChannel: input.createdByChannel } : {}) } as never, input.createdById);
+      const created = await this.tasks.create({ prompt: topic, title: `Discussion: ${topic.split('\n')[0]!.slice(0, 70)}`, agentName: agents[0], autostart: false, kind: 'discussion', ...(input.createdByChannel ? { createdByChannel: input.createdByChannel } : {}) } as never, input.createdById);
       taskId = created.id;
     }
-    const a: Active = { taskId, topic, agents, rounds, summaryBy, turns: [], turn: 0, total: agents.length * rounds + (summaryBy ? 1 : 0), speaker: null, human: [], stop: false, conclude: false, attachments: input.attachments, seq: 1_000_000 };
+    const a: Active = { taskId, topic, agents, rounds, summaryBy, language: cleanLanguage(input.language), turns: [], turn: 0, total: agents.length * rounds + (summaryBy ? 1 : 0), speaker: null, human: [], stop: false, conclude: false, attachments: input.attachments, seq: 1_000_000 };
     this.active.set(taskId, a);
     await this.tasks.setStatus(taskId, 'running');
     void this.play(a).catch((e) => this.logger.error(`Discussion in ${taskId} crashed: ${(e as Error).message}`));
@@ -198,7 +200,7 @@ export class DiscussionService {
         for (const h of a.human.splice(0)) a.turns.push({ speaker: 'Human', text: h });
         const speaker = a.agents[i % a.agents.length]!;
         a.turn = i + 1;
-        const prompt = buildTurnPrompt({ topic: a.topic, speaker, participants: a.agents, turns: a.turns, turnNumber: i + 1, totalTurns: turnsTotal, humanHint: true });
+        const prompt = buildTurnPrompt({ topic: a.topic, speaker, participants: a.agents, turns: a.turns, turnNumber: i + 1, totalTurns: turnsTotal, humanHint: true, language: a.language });
         const text = await this.turnOf(a, speaker, prompt, i === 0);
         if (await this.halted(a)) {
           ended = 'cancelled';
@@ -232,7 +234,7 @@ export class DiscussionService {
     } finally {
       this.active.delete(a.taskId);
       const task = await this.prisma.task.findUnique({ where: { id: a.taskId }, select: { status: true } });
-      if (task && !isTerminalStatus(task.status)) await this.tasks.setStatus(a.taskId, ended === 'failed' ? 'failed' : 'done', ended === 'failed' ? 'discussion stopped' : undefined);
+      if (task && !isTerminalStatus(task.status)) await this.tasks.setStatus(a.taskId, ended === 'failed' ? 'failed' : 'review', ended === 'failed' ? 'discussion stopped' : undefined);
     }
   }
 

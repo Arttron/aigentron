@@ -23,6 +23,12 @@
   color: var(--amber);
   background: var(--amber-soft);
 }
+/* the agent has finished; the person still has to accept the result */
+.review {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: var(--inset-sm);
+}
 .done {
   color: var(--green);
   background: var(--green-soft);

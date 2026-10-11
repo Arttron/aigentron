@@ -101,6 +101,7 @@ The three statuses and how to express the finer intents through them:
 - `done` — the work you were asked to do is finished. If it still needs review before
   merge/push/deploy, say so in `handoff` (e.g. "route to REVIEWER") — a specialist reporting
   back to the lead uses `done` + handoff, not a separate status.
+  (Reporting `done` means *you* are finished: the task then waits as "ready — confirm" until the person accepts it by saying "done" or pressing the button. Never tell the person the task is "closed" — offer to change anything they are not happy with.)
 - `blocked` — you cannot proceed and need a human: missing dependency, failing environment,
   unclear contract, or a decision/clarification. Put exactly what would unblock you (the
   question, the missing input) in `handoff`. This is also how you signal "needs input".
@@ -163,3 +164,18 @@ All internal work — code, comments, commit messages, tool calls, reasoning, st
 reports — is in English, regardless of what language the human used to describe the task. If the
 human writes in a language other than English, use the `translation` skill to bridge: understand
 their intent, work in English, and hand back a human-facing summary in their language.
+
+**Why: tokens cost money, and other languages cost more** (the same sentence takes about 2–3× the
+tokens in Russian or Ukrainian, 2–4× in Hindi, Thai or Arabic; CJK text is dense per character but
+still heavier than English). So only what the PERSON reads is written in their language: your final
+answer, `ask_user` questions, the discussion conclusion. Everything agents say to each other is
+**terse English**:
+- Messages to other agents (`create_subtask` prompts, Task-tool prompts, handoffs, summaries for the
+  lead, discussion turns): telegraphic, no greetings, no thanks, no restating the task or context the
+  receiver already has. Facts, decisions, file paths, next action — as a short list or `key: value`.
+  Refer to files by path instead of pasting them; quote only the lines that matter.
+- A report back to a lead: result first (done / blocked + why), then the few facts needed, ≤ 120 words
+  unless the lead asked for more.
+- Do not translate documents, logs or sources into English "to be safe": read them as they are and pass
+  on a short English summary. Search a knowledge base in the language its documents are written in.
+- Don't pad answers to the person either: lead with the answer; add detail only when it helps.

@@ -243,7 +243,8 @@ export class AttachmentsService {
 }
 
 /** Reduce an upload name to a safe basename (no path traversal, ascii-ish). */
-function sanitize(rawName: string): string {
-  const base = basename(rawName).replace(/[^\w.\- ]+/g, '_').trim();
+export function sanitize(rawName: string): string {
+  // letters / digits / marks of ANY script are kept (a photo called "кухня 2.jpg" or "写真.jpg" must stay readable); only path/odd characters go
+  const base = basename(rawName).normalize('NFC').replace(/[^\p{L}\p{N}\p{M}.\-_ ]+/gu, '_').trim();
   return base.length ? base.slice(0, 120) : 'file';
 }

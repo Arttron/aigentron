@@ -46,7 +46,7 @@ describe('DiscussionService', () => {
     const { taskId } = await svc.start({ topic: 'T', agents: ['pm', 'dev'], rounds: 2, summaryBy: 'pm' });
     await settled(svc, taskId);
     expect(fake.calls).toEqual(['pm', 'dev', 'pm', 'dev', 'pm']);
-    expect(fake.statuses).toEqual(['running', 'done']);
+    expect(fake.statuses).toEqual(['running', 'review']); // a person accepts the result
   });
   it('stops early when a whole round agrees', async () => {
     const { svc, fake } = make({ reply: () => ({ text: `fine ${AGREED_MARK}` }) });

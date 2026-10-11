@@ -50,3 +50,13 @@ describe('transcript and agreement', () => {
     expect(stripMark(`yes ${AGREED_MARK}`)).toBe('yes');
   });
 });
+
+describe('token-lean language', () => {
+  it('agents talk terse English by default, their own language when asked; the conclusion is for the person', () => {
+    const base = { topic: 'Обсудить релиз', speaker: 'dev', participants: ['pm', 'dev'], turns: [], turnNumber: 1, totalTurns: 4 };
+    expect(buildTurnPrompt(base)).toContain('terse English');
+    expect(buildTurnPrompt({ ...base, language: 'user' })).toContain('language the topic is written in');
+    expect(buildTurnPrompt({ ...base, language: 'user' })).not.toContain('terse English');
+    expect(buildSummaryPrompt({ topic: 'Обсудить релиз', speaker: 'pm', participants: ['pm', 'dev'], turns: [] })).toContain('IN THE LANGUAGE THE TOPIC IS WRITTEN IN');
+  });
+});

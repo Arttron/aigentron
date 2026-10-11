@@ -143,6 +143,10 @@ model Task {
   id           String     @id @default(cuid())
   prompt       String
   title        String
+  // auto = the first line of the request (a better name may still be generated); generated = named from the context; manual = set by a person / the creator
+  titleState   String     @default("auto")
+  // what kind of work it is: task | discussion (a round-table between agents); the other task types are derived from parent / origin / agent
+  kind         String     @default("task")
   status       String @default("queued")
   branch       String?
   worktreePath String?
@@ -182,6 +186,7 @@ model Task {
   @@index([status])
   @@index([createdById])
   @@index([parentId])
+  @@index([kind])
 }
 
 /// A follow-up message held for a task that's still running (not terminal) —

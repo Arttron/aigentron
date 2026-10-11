@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readdir, rm, stat } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
@@ -17,7 +18,17 @@ export interface MaintenanceReport {
   runs: { count: number; bytes: number; stale: number; staleBytes: number };
   worktrees: { count: number; bytes: number; stale: number };
   branches: { agentBranches: number; stale: number };
+  /** All task attachments, and the part that belongs to tasks finished more than 90 days ago (user files: never deleted automatically). */
+  attachments: { bytes: number; oldTasksBytes: number };
+  caches: CacheReport & { digestRetentionDays: number; researchRetentionDays: number };
+  resources: { bytes: number };
   note: string;
+}
+
+/** What the caches hold (all of it is regenerated on demand, so it is safe to prune). */
+export interface CacheReport {
+  digests: { count: number; bytes: number; stale: number; staleBytes: number };
+  research: { count: number; bytes: number; stale: number; staleBytes: number };
 }
 
 export interface CleanupRequest {
@@ -68,6 +79,95 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
   get worktreeRetentionDays(): number {
     return this.num('WORKTREE_RETENTION_DAYS', 30);
   }
+  /** Frames + transcript cached next to a video (regenerated when the video is used again, which costs a little speech recognition). */
+  get digestRetentionDays(): number {
+    return this.num('DIGEST_RETENTION_DAYS', 30);
+  }
+  /** Web pages the research tools fetched (kept so quotes can be verified; old ones are re-fetched when needed). */
+  get researchRetentionDays(): number {
+    return this.num('RESEARCH_CACHE_RETENTION_DAYS', 180);
+  }
+
+  private get dataDir(): string {
+    return dirname(this.config.agentDir);
+  }
+
+  /** `<video>.digest` folders (task attachments and library files). */
+  private async digestDirs(): Promise<{ path: string; mtime: number }[]> {
+    const roots: string[] = [join(this.config.agentDir, 'resources', 'files')];
+    for (const t of await readdir(this.config.attachmentsDir).catch(() => [] as string[])) roots.push(join(this.config.attachmentsDir, t));
+    const out: { path: string; mtime: number }[] = [];
+    for (const root of roots) {
+      for (const name of await readdir(root).catch(() => [] as string[])) {
+        if (!name.endsWith('.digest')) continue;
+        const p = join(root, name);
+        const s = await stat(p).catch(() => null);
+        if (s?.isDirectory()) out.push({ path: p, mtime: s.mtimeMs });
+      }
+    }
+    return out;
+  }
+
+  private async researchFiles(): Promise<{ path: string; mtime: number; bytes: number }[]> {
+    const dir = join(this.config.agentDir, 'research-cache');
+    const out: { path: string; mtime: number; bytes: number }[] = [];
+    for (const name of await readdir(dir).catch(() => [] as string[])) {
+      if (!name.endsWith('.json')) continue;
+      const s = await stat(join(dir, name)).catch(() => null);
+      if (s?.isFile()) out.push({ path: join(dir, name), mtime: s.mtimeMs, bytes: s.size });
+    }
+    return out;
+  }
+
+  async cacheReport(): Promise<CacheReport> {
+    const dCut = Date.now() - this.digestRetentionDays * DAY;
+    const rCut = Date.now() - this.researchRetentionDays * DAY;
+    const digests = await this.digestDirs();
+    const sized = await Promise.all(digests.map(async (d) => ({ ...d, bytes: await this.dirBytes(d.path) })));
+    const research = await this.researchFiles();
+    const dStale = this.digestRetentionDays > 0 ? sized.filter((d) => d.mtime < dCut) : [];
+    const rStale = this.researchRetentionDays > 0 ? research.filter((r) => r.mtime < rCut) : [];
+    return {
+      digests: { count: sized.length, bytes: sized.reduce((a, d) => a + d.bytes, 0), stale: dStale.length, staleBytes: dStale.reduce((a, d) => a + d.bytes, 0) },
+      research: { count: research.length, bytes: research.reduce((a, r) => a + r.bytes, 0), stale: rStale.length, staleBytes: rStale.reduce((a, r) => a + r.bytes, 0) },
+    };
+  }
+
+  /** Remove cached digests / fetched pages older than the given days (0 = all digests). Regenerable data only. */
+  async pruneCaches(o: { digestDays?: number; researchDays?: number } = {}): Promise<{ digests: number; research: number; bytes: number }> {
+    const dDays = o.digestDays ?? this.digestRetentionDays;
+    const rDays = o.researchDays ?? this.researchRetentionDays;
+    let bytes = 0;
+    let digests = 0;
+    let research = 0;
+    if (dDays >= 0 && (o.digestDays !== undefined || this.digestRetentionDays > 0)) {
+      const cut = Date.now() - dDays * DAY;
+      for (const d of await this.digestDirs()) {
+        if (d.mtime >= cut && dDays > 0) continue;
+        bytes += await this.dirBytes(d.path);
+        await rm(d.path, { recursive: true, force: true }).catch(() => undefined);
+        digests += 1;
+      }
+    }
+    if (rDays > 0) {
+      const cut = Date.now() - rDays * DAY;
+      for (const r of await this.researchFiles()) {
+        if (r.mtime >= cut) continue;
+        bytes += r.bytes;
+        await rm(r.path, { force: true }).catch(() => undefined);
+        research += 1;
+      }
+    }
+    return { digests, research, bytes };
+  }
+
+  /** The emergency button (also used automatically when the disk is critically full): all digests, pages older than 30 days, run folders older than 3 days. */
+  async relieve(): Promise<{ digests: number; research: number; runs: number; bytes: number }> {
+    const c = await this.pruneCaches({ digestDays: 0, researchDays: 30 });
+    const r = await this.cleanup({ dryRun: false, runs: true, worktrees: false, olderThanDays: 3 });
+    this.logger.warn(`Space relief: ${c.digests} digest cache(s), ${c.research} cached page(s), ${r.runsRemoved} run folder(s) — ${mb(c.bytes + r.runBytes)}`);
+    return { digests: c.digests, research: c.research, runs: r.runsRemoved, bytes: c.bytes + r.runBytes };
+  }
 
   private get runsDir(): string {
     return join(this.config.agentDir, 'runs');
@@ -89,6 +189,8 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
     try {
       const worktrees = /^(1|true|yes)$/i.test(process.env.CLEANUP_WORKTREES ?? '');
       const res = await this.cleanup({ dryRun: false, runs: this.retentionDays > 0, worktrees, deleteBranches: false });
+      const caches = await this.pruneCaches();
+      if (caches.digests || caches.research) this.logger.log(`Scheduled cache pruning: ${caches.digests} digest cache(s), ${caches.research} cached page(s) (${mb(caches.bytes)})`);
       if (res.runsRemoved || res.worktreesRemoved) {
         this.logger.log(`Scheduled cleanup: ${res.runsRemoved} run folder(s) (${mb(res.runBytes)}), ${res.worktreesRemoved} worktree(s)`);
       }
@@ -192,6 +294,22 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
     }
   }
 
+  /** Size of the attachment folders of tasks that finished (or were deleted) more than `days` ago — user files, so only reported. */
+  private async oldTaskAttachmentBytes(days: number): Promise<number> {
+    const ids = await readdir(this.config.attachmentsDir).catch(() => [] as string[]);
+    const st = await this.statuses(ids);
+    const last = await this.lastActive(ids);
+    const cutoff = Date.now() - days * DAY;
+    let bytes = 0;
+    for (const id of ids) {
+      const s = st.get(id);
+      if (s && ACTIVE.includes(s)) continue;
+      if ((last.get(id) ?? 0) >= cutoff && s) continue;
+      bytes += await this.dirBytes(join(this.config.attachmentsDir, id));
+    }
+    return bytes;
+  }
+
   async report(): Promise<MaintenanceReport> {
     const runs = await this.runIds();
     const stale = this.retentionDays > 0 ? await this.staleRuns(this.retentionDays) : [];
@@ -205,6 +323,9 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
       runs: { count: runs.length, bytes: await this.dirBytes(this.runsDir), stale: stale.length, staleBytes: stale.reduce((a, r) => a + r.bytes, 0) },
       worktrees: { count: wts.length, bytes: await this.dirBytes(this.config.worktreesRoot), stale: wts.filter((w) => w.stale).length },
       branches: { agentBranches: branches.length, stale: staleBranches.length },
+      attachments: { bytes: await this.dirBytes(this.config.attachmentsDir), oldTasksBytes: await this.oldTaskAttachmentBytes(90) },
+      caches: { ...(await this.cacheReport()), digestRetentionDays: this.digestRetentionDays, researchRetentionDays: this.researchRetentionDays },
+      resources: { bytes: await this.dirBytes(join(this.config.agentDir, 'resources')) },
       note: 'Run folders hold per-task working files; worktrees/branches are leftovers of the old per-task worktree mode inside the project repository. Branches may contain commits that were never pushed.',
     };
   }

@@ -15,6 +15,11 @@ export function commandKey(name: string): string | null {
   return k || null;
 }
 
+/** A name for matching, in any script: NFKC, lower-case, every run of non-letters/digits becomes `_` ("Помощник Иван" → "помощник_иван"). */
+export function nameKey(name: string): string {
+  return name.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}\p{M}]+/gu, '_').replace(/^_+|_+$/g, '');
+}
+
 /** Optimal-string-alignment distance (insert / delete / replace / swap two neighbours each cost 1). */
 export function editDistance(a: string, b: string): number {
   const m = a.length;
@@ -50,9 +55,9 @@ const tolerance = (len: number) => (len <= 3 ? 0 : len <= 7 ? 1 : 2);
 
 /** Find the agent a typed name means. `exact` = spelled right (any case / separator); `fuzzy` = a typo was forgiven. */
 export function matchAgent(input: string, agents: readonly AgentRef[]): AgentMatch {
-  const typed = commandKey(input);
+  const typed = nameKey(input);
   if (!typed) return { kind: 'none', suggestions: [] };
-  const keyed = agents.map((a) => ({ name: a.name, key: commandKey(a.name) ?? a.name.toLowerCase() }));
+  const keyed = agents.map((a) => ({ name: a.name, key: nameKey(a.name) || a.name.toLowerCase() }));
 
   const exact = keyed.filter((a) => a.key === typed || flat(a.key) === flat(typed) || a.name.toLowerCase() === input.trim().toLowerCase());
   if (exact.length === 1) return { kind: 'exact', name: exact[0]!.name };
@@ -83,7 +88,7 @@ export function matchAgent(input: string, agents: readonly AgentRef[]): AgentMat
 
 /** `/pm text`, `/pm@MyBot text` or `@pm text` at the start of a message → the typed name, the symbol used and the rest. */
 export function parseAddress(text: string): { symbol: '/' | '@'; typed: string; rest: string } | null {
-  const m = /^\s*([/@])([A-Za-z0-9][A-Za-z0-9_-]{0,39})(?:@\w+)?(?:\s+([\s\S]*))?$/.exec(text);
+  const m = /^\s*([/@])([\p{L}\p{N}][\p{L}\p{N}\p{M}_-]{0,39})(?:@\w+)?(?:\s+([\s\S]*))?$/u.exec(text);
   if (!m) return null;
   return { symbol: m[1] as '/' | '@', typed: m[2]!, rest: (m[3] ?? '').trim() };
 }

@@ -78,7 +78,17 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 | `CODEX_AUTH_HOME`, `CODEX_BIN` | `<secrets>/codex`, `codex` | Shared ChatGPT sign-in location / binary. |
 | `BRAVE_API_KEY` or `RESEARCH_SEARXNG_URL` | unset | Search backend for the research MCP (fetch works without). |
 | `RUNS_RETENTION_DAYS` | `14` (`0` = never) | Run folders older than this are removed (never for live tasks). |
+| `DIGEST_RETENTION_DAYS`, `RESEARCH_CACHE_RETENTION_DAYS` | `30`, `180` (`0` = never) | Cached video digests (frames + transcript) and fetched web pages older than this are removed automatically — both are regenerated on demand. |
+| `DISK_WARN_PERCENT`, `DISK_WARN_GB`, `DISK_CRITICAL_PERCENT`, `DISK_CRITICAL_GB` | `15`, `3`, `7`, `1` | Free-space limits (see "Disk space" below). The percentage is capped on big disks (warn under 20 GB, critical under 8 GB). |
 | `WORKTREE_RETENTION_DAYS`, `CLEANUP_WORKTREES` | `30`, `false` | Old worktrees are only removed on request (admin → *propose_cleanup*, or `POST /api/maintenance/cleanup`), unless `CLEANUP_WORKTREES=true`. |
+
+## 4a. Disk space
+
+- **Monitoring:** the server reads the free space of the data disk every 10 minutes. When it drops below the *warn* limit a banner appears across the dashboard, Settings → General → **Disk & cleanup** shows the numbers and what takes the space, and a message goes to the default notification chat (Settings → Escalations) — or, if none is set, to every allowed chat of every enabled channel (at most every 12 h while it stays low).
+- **Automatic relief at *critical*:** all video digests, fetched pages older than 30 days and run folders older than 3 days are removed by the server itself (once per 6 h). Never your files, tasks, notes or knowledge bases. **Free up space now** does the same on demand (`POST /api/maintenance/relieve`).
+- **Regular tidying (every 6 h):** run folders (14 days), video digests (30 days), fetched pages (180 days). Task attachments (your files) are only *reported* — the report shows how much belongs to tasks finished more than 90 days ago; delete those tasks yourself or ask the admin.
+- **Container logs** are rotated (3 × 20 MB per container) in the compose file and in the installer's `docker run`.
+- What is *not* handled yet: database growth (events/sessions of old tasks) and old Docker images kept for rollback — `aigentron doctor` and `docker system df` show them.
 
 ## 5. What to back up
 

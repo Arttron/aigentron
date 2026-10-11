@@ -14,6 +14,8 @@ import { McpEndpointManager } from '@/components/settings/McpEndpointManager';
 import { ChannelsManager } from '@/components/ChannelsManager';
 import { UsersManager } from '@/components/UsersManager';
 import { SchedulesManager } from '@/components/SchedulesManager';
+import { DiskSettings } from '@/components/settings/DiskSettings';
+import { TitleSettings } from '@/components/settings/TitleSettings';
 import { VisionSettings } from '@/components/settings/VisionSettings';
 import { VoiceSettings } from '@/components/settings/VoiceSettings';
 
@@ -45,10 +47,12 @@ export function SettingsPage() {
       {tab === 'general' && (
         <>
           <UpdateSettings />
+          <DiskSettings />
           <SecuritySettings />
           <AccessSettings />
           <WebServerSettings />
           <CloudflareAccessSettings />
+          <TitleSettings />
           <GeneralSettingsForm />
         </>
       )}

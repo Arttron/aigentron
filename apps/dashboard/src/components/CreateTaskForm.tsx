@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ATTACH_ACCEPT, hasLiveCamera, prepareFile } from '@/lib/capture';
+import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { CameraCapture } from '@/components/CameraCapture';
 import { api, type AgentInfo } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
@@ -85,9 +86,7 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
   };
 
   // Single "Attach" menu → an image/file (opens the picker) or a task reference.
-  const onAttachKind = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const kind = e.target.value;
-    e.target.value = '';
+  const onAttachKind = (kind: AttachKind) => {
     if (kind === 'file') fileRef.current?.click();
     else if (kind === 'camera') {
       if (hasLiveCamera()) setCamera(true);
@@ -100,7 +99,7 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
   return (
     <Card as="form" onSubmit={submit}>
       <SectionTitle>New task</SectionTitle>
-      <textarea
+      <textarea dir="auto"
         placeholder="Describe the task… (⌘/Ctrl+Enter to create) — attach references with 📎"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
@@ -171,12 +170,7 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
             ))}
           </select>
         )}
-        <select className={styles.attachSelect} value="" onChange={onAttachKind} title="Attach">
-          <option value="">📎 Attach…</option>
-          <option value="file">🖼 Image / video / file</option>
-          <option value="camera">📷 Camera</option>
-          <option value="task">🔗 Task</option>
-        </select>
+        <AttachMenu onPick={onAttachKind} />
         {(showRefs || references.length > 0) && (
           <TaskReferencePicker value={references} onChange={setReferences} />
         )}

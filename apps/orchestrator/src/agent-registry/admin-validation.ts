@@ -16,7 +16,7 @@ export interface ProviderProposal {
 /** Why a provider proposal is malformed (null = fine). Note there is deliberately no secret field. */
 export function validateProviderProposal(p: Partial<ProviderProposal>): string | null {
   const name = (p.name ?? '').trim();
-  if (!/^[\w-]{1,60}$/.test(name)) return 'provider name must be letters, digits, dash or underscore (max 60).';
+  if (!/^[\p{L}\p{N}\p{M}_-]{1,60}$/u.test(name)) return 'provider name must be letters, digits, dash or underscore (max 60).';
   if (!p.kind || !PROVIDER_KINDS.includes(p.kind)) return `kind must be one of: ${PROVIDER_KINDS.join(', ')}.`;
   const allowed = p.kind === 'codex' ? PROVIDER_AUTH_MODES.codex : PROVIDER_AUTH_MODES.other;
   if (!p.authMode || !allowed.includes(p.authMode)) return `for kind ${p.kind}, authMode must be one of: ${allowed.join(', ')}.`;
@@ -49,7 +49,7 @@ export function validateSettingsChanges(ch: Record<string, unknown> | undefined)
   };
   const err = int('verifyMaxAttempts', 0, 10) ?? int('concurrency', 1, 16) ?? int('approvalTimeoutSeconds', 30, 3600);
   if (err) return err;
-  if (ch.defaultAgent !== undefined && (typeof ch.defaultAgent !== 'string' || !/^[\w-]{1,60}$/.test(ch.defaultAgent))) return 'defaultAgent must be an agent name.';
+  if (ch.defaultAgent !== undefined && (typeof ch.defaultAgent !== 'string' || !/^[\p{L}\p{N}\p{M}_-]{1,60}$/u.test(ch.defaultAgent))) return 'defaultAgent must be an agent name.';
   if (ch.verifyCommands !== undefined && (typeof ch.verifyCommands !== 'string' || ch.verifyCommands.length > 2000)) return 'verifyCommands must be text up to 2000 characters.';
   if (ch.agentInstructions !== undefined && (typeof ch.agentInstructions !== 'string' || !ch.agentInstructions.trim() || ch.agentInstructions.length > 4000)) return 'agentInstructions must be non-empty text up to 4000 characters.';
   if (ch.repoBranch !== undefined && (typeof ch.repoBranch !== 'string' || !/^[\w./-]{1,100}$/.test(ch.repoBranch) || ch.repoBranch.includes('..'))) return 'repoBranch must be a plain branch name.';

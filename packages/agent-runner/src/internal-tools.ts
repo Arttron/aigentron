@@ -85,7 +85,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'create_subtask',
       description:
-        'Decompose this task into an independent subtask. Use it to split work into scoped units — each subtask runs on its own (its own worktree and agent) and starts immediately. Give a clear `prompt` (a full instruction, not a title), an optional short `title`, and optionally the specialist `agent` to run it (e.g. backend, frontend, coder). Returns the new subtask id. Prefer this over doing everything yourself when the work has distinct parts.',
+        'Decompose this task into an independent subtask. Use it to split work into scoped units — each subtask runs on its own (its own worktree and agent) and starts immediately. Give a clear `prompt` — a full instruction, not a title, in terse English (facts and the next action; no pleasantries, no retelling of what the receiver can read itself) — an optional short `title`, and optionally the specialist `agent` to run it (e.g. backend, frontend, coder). Returns the new subtask id. Prefer this over doing everything yourself when the work has distinct parts.',
       shape: { prompt: z.string(), title: z.string().optional(), agent: z.string().optional() },
       handler: async (args) => {
         const created = await params.onCreateSubtask!({
@@ -155,7 +155,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'kb_search',
         description:
-          "Search the project's knowledge bases (large reference material: regulations, manuals, textbooks, saved web pages). Returns the best passages with their document id, passage number and source. `query`: a few specific words (the question's key terms — not a whole sentence); `kb` (optional): search one base only; `limit` (default 6). Prefer it over guessing, and cite the source of a passage you rely on. If the results look thin, try synonyms or another language.",
+          "Search the project's knowledge bases (large reference material: regulations, manuals, textbooks, saved web pages). Returns the best passages with their document id, passage number and source. `query`: a few specific words (the question's key terms — not a whole sentence) IN THE LANGUAGE OF THE DOCUMENTS (a Russian manual is found with Russian words; keyword search does not translate); `kb` (optional): search one base only; `limit` (default 6). Prefer it over guessing, and cite the source of a passage you rely on. If the results look thin, try synonyms or another language.",
         shape: { query: z.string(), kb: z.string().optional(), limit: z.number().optional() },
         handler: (args) => kb.search({ query: String(args.query ?? ''), kb: typeof args.kb === 'string' && args.kb ? args.kb : undefined, limit: typeof args.limit === 'number' ? args.limit : undefined }),
       },

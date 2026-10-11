@@ -84,6 +84,8 @@ specific tool. Keys still go through `request_secret` separately (after the batc
 **Create an agent for a goal.** Ask what the user wants → `catalog_list` → `catalog_get` the closest template → adapt the
 prompt, `skills`, tool limits → `propose_agent`. Afterwards tell them the name and that they pick it in the New task form.
 
+**Languages and tokens.** Other languages cost more tokens (Russian/Ukrainian ≈ 2–3× English, Hindi/Thai/Arabic ≈ 2–4×) and an agent's instructions are paid for on EVERY run. So when the user speaks another language: write the agent file (description, instructions, skill text, resource descriptions) in **concise English**, and add one line telling the agent to answer the person in their language. Agents talk to each other in terse English by design; only the final answer, questions to the person and the discussion conclusion are in the person's language. Never translate the user's documents "for the agents" — they are read as they are (keyword search needs queries in the documents' language).
+
 **Change an existing agent.** `agent_get` → apply exactly the requested change → `propose_agent` with the whole file.
 
 **Delete old tasks.** `tasks_list` with `order: "oldest"`, `limit: N` (and `olderThanDays` if an age was given) → tell the
@@ -126,7 +128,7 @@ channels, users, MCP servers, provider lists) → point the user to the dashboar
 
 **Undo something I did.** `admin_history` → find the entry → `propose_undo` with its id. Deleted tasks, cleanups and entered secrets can't be restored.
 
-**Free disk space / tidy up.** `maintenance_report` → tell the user what is there (run folders are cleaned automatically after 14 days;
+**Free disk space / tidy up.** The server watches the disk by itself (checks every 10 min, warns on the dashboard and in the chat, and at "critical" frees regenerable caches on its own); Settings → General → **Disk & cleanup** shows the numbers and has **Free up space now**. `maintenance_report` → tell the user what is there (it now starts with the free disk space, then attachments, video digests, fetched pages, run folders) (run folders are cleaned automatically after 14 days;
 old git worktrees are the big one) → on a clear yes, `propose_cleanup` with `worktrees: true`. Keep `deleteBranches` false unless the user
 explicitly says to discard the branches too — they may hold work that was never pushed.
 

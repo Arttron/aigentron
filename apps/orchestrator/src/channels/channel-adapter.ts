@@ -59,6 +59,14 @@ export type IncomingEvent =
       index: number;
     }
   | {
+      /** "✅ Mark done" under a finished task: the person accepts the result. */
+      type: 'mark-done';
+      chatId: string;
+      userId: string;
+      userName?: string;
+      taskId: string;
+    }
+  | {
       /** A tap on an option of a multiple-choice question: tick / untick it. */
       type: 'question-toggle';
       chatId: string;

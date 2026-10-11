@@ -16,8 +16,14 @@
   font-size: 12px;
 }
 
+/* visually hidden, NOT display:none — some mobile browsers refuse to open the chooser of a display:none file input */
 .hidden {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .staged {

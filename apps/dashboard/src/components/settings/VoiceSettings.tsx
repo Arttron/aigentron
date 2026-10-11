@@ -9,7 +9,7 @@ import styles from './VoiceSettings.module.css';
 const STT_MODELS = ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1', 'whisper-large-v3-turbo'];
 const TTS_MODELS = ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'];
 const VOICES = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
-const LANGS: [string, string][] = [['', 'automatic'], ['en', 'English'], ['ru', 'Russian'], ['uk', 'Ukrainian'], ['de', 'German'], ['fr', 'French'], ['es', 'Spanish'], ['pl', 'Polish']];
+const LANGS: [string, string][] = [['', 'automatic (recommended)'], ['en', 'English'], ['ru', 'Russian'], ['uk', 'Ukrainian'], ['be', 'Belarusian'], ['pl', 'Polish'], ['cs', 'Czech'], ['sk', 'Slovak'], ['bg', 'Bulgarian'], ['sr', 'Serbian'], ['hr', 'Croatian'], ['ro', 'Romanian'], ['hu', 'Hungarian'], ['de', 'German'], ['nl', 'Dutch'], ['fr', 'French'], ['es', 'Spanish'], ['pt', 'Portuguese'], ['it', 'Italian'], ['ca', 'Catalan'], ['el', 'Greek'], ['tr', 'Turkish'], ['sv', 'Swedish'], ['no', 'Norwegian'], ['da', 'Danish'], ['fi', 'Finnish'], ['lt', 'Lithuanian'], ['lv', 'Latvian'], ['et', 'Estonian'], ['ka', 'Georgian'], ['hy', 'Armenian'], ['az', 'Azerbaijani'], ['kk', 'Kazakh'], ['uz', 'Uzbek'], ['he', 'Hebrew'], ['ar', 'Arabic'], ['fa', 'Persian'], ['ur', 'Urdu'], ['hi', 'Hindi'], ['bn', 'Bengali'], ['ta', 'Tamil'], ['te', 'Telugu'], ['th', 'Thai'], ['vi', 'Vietnamese'], ['id', 'Indonesian'], ['ms', 'Malay'], ['zh', 'Chinese'], ['ja', 'Japanese'], ['ko', 'Korean'], ['sw', 'Swahili']];
 
 interface Draft {
   sttOn: boolean;

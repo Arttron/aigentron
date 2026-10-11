@@ -17,6 +17,7 @@ const CALLBACK_APPROVE = 'ap:';
 const CALLBACK_DENY = 'dn:';
 const CALLBACK_TASK = 'tk:';
 const CALLBACK_CANCEL = 'cn:';
+const CALLBACK_DONE_TASK = 'md:'; // md:<taskId> — the person accepts the task as done
 const CALLBACK_ANSWER = 'qa:'; // qa:<questionId>:<option index>
 const CALLBACK_TOGGLE = 'qt:'; // qt:<questionId>:<option index> — tick/untick (multiple choice)
 const CALLBACK_DONE = 'qd:'; // qd:<questionId> — send the ticked options
@@ -26,6 +27,15 @@ const CALLBACK_DONE = 'qd:'; // qd:<questionId> — send the ticked options
  * public URL needed, so it works on a local/self-hosted server. Sends plain
  * messages and approval prompts with inline Approve/Deny buttons.
  */
+/** Cut to `max` UTF-16 units (Telegram's limit) without splitting an emoji / rare CJK character in two, adding an ellipsis. */
+export function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let end = max - 1;
+  const c = text.charCodeAt(end - 1);
+  if (c >= 0xd800 && c <= 0xdbff) end -= 1; // the cut would fall between the halves of a surrogate pair
+  return `${text.slice(0, end)}…`;
+}
+
 export class TelegramAdapter implements ChannelAdapter {
   readonly kind = 'telegram';
   private readonly logger: Logger;
@@ -62,7 +72,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
   async sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<{ messageId: string }> {
     // Telegram caps a message at 4096 chars — truncate defensively.
-    const body = text.length > 4096 ? `${text.slice(0, 4093)}…` : text;
+    const body = clip(text, 4096);
     const msg = await this.call<{ message_id: number }>('sendMessage', {
       chat_id: chatId,
       text: body,
@@ -85,7 +95,7 @@ export class TelegramAdapter implements ChannelAdapter {
   /** Replace a message's text in place — omitting reply_markup leaves any
    *  existing inline keyboard (e.g. the "⏹ Cancel" button) untouched. */
   async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
-    const body = text.length > 4096 ? `${text.slice(0, 4093)}…` : text;
+    const body = clip(text, 4096);
     await this.call('editMessageText', {
       chat_id: chatId,
       message_id: Number(messageId),
@@ -392,6 +402,18 @@ export class TelegramAdapter implements ChannelAdapter {
           userName: cq.from?.username ?? cq.from?.first_name,
           questionId,
           index: Number(idx),
+        });
+        return;
+      }
+      if (data.startsWith(CALLBACK_DONE_TASK)) {
+        await this.call('answerCallbackQuery', { callback_query_id: cq.id, text: 'Marking done…' }).catch(() => undefined);
+        if (!cq.message) return;
+        await onEvent({
+          type: 'mark-done',
+          chatId: String(cq.message.chat.id),
+          userId: String(cq.from?.id ?? ''),
+          userName: cq.from?.username ?? cq.from?.first_name,
+          taskId: data.slice(CALLBACK_DONE_TASK.length),
         });
         return;
       }

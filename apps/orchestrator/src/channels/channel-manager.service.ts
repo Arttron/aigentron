@@ -14,6 +14,7 @@ import { MAX_PENDING_FOLLOWUPS, TasksService } from '../tasks/tasks.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { QuestionsService } from '../questions/questions.service';
 import { resolveAnswer } from '../questions/questions-core';
+import { isDoneMessage } from '../tasks/done-intent';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PresenceService } from '../presence/presence.service';
 import { ChannelsService } from './channels.service';
@@ -50,6 +51,7 @@ const STATUS_EDIT_MIN_MS = 1500;
 function reactionIcon(status: TaskStatus): string {
   switch (status) {
     case 'done':
+    case 'review':
       return '✅';
     case 'blocked':
       return '⛔';
@@ -360,12 +362,14 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // no queued/running/needs_approval churn (approvals are posted
     // separately), and 'cancelled' already got its own confirmation
     // synchronously (the /cancel command/button sends it directly).
-    if (!['done', 'failed', 'blocked', 'stalled'].includes(status)) return;
+    if (!['review', 'done', 'failed', 'blocked', 'stalled'].includes(status)) return;
     const task = await this.prisma.task.findUnique({
       where: { id: taskId },
       select: { title: true, prUrl: true, error: true, parentId: true },
     });
     if (!task) return;
+    // `done` of a top-level task is the PERSON's confirmation (already answered on the spot): nothing more to post. A subtask's `done` is its lead's result.
+    if (status === 'done' && !task.parentId) return;
     // Subtasks have no thread of their own — surface their result in the parent chat.
     let dest = await this.channels.threadForTask(taskId);
     const prefix = !dest && task.parentId ? '↳ Subtask ' : '';
@@ -391,25 +395,27 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     if (chatState?.muted) return;
 
     const icon = reactionIcon(status);
+    // The agent's work is finished (a top-level task: waiting for the person to accept it; a subtask: done for its lead).
+    const answered = status === 'review' || status === 'done';
     // Post the agent's actual final answer (the `result` event) — not just a
     // status line. Fall back to the reported summary / title when there is none.
     // a discussion between agents has no single answer: its messages were already posted one by one
-    if (status === 'done' && (await this.endedWithDiscussion(taskId))) {
-      await this.send(dest.channel.id, dest.externalThreadId, '✅ The discussion is over. Write here to continue the conversation.', undefined, taskId);
+    const acceptButton = status === 'review' ? [[{ label: '✅ Mark done', data: `md:${taskId}` }]] : undefined;
+    if (answered && (await this.endedWithDiscussion(taskId))) {
+      await this.send(dest.channel.id, dest.externalThreadId, '✅ The discussion is over. Write here to continue it — or tap Mark done.', acceptButton, taskId);
       return;
     }
-    const body =
-      status === 'done'
-        ? (await this.latestResult(taskId)) || (await this.channels.summarize(taskId))
-        : task.error?.slice(0, 800) || (await this.channels.summarize(taskId));
+    const body = answered ? (await this.latestResult(taskId)) || (await this.channels.summarize(taskId)) : task.error?.slice(0, 800) || (await this.channels.summarize(taskId));
     // A finished task's message carries just the agent's answer (the title/status header is system information — shown only with
     // /progress on, or when something needs attention). A subtask's answer says which subtask it is; replying to any of these messages
     // addresses the task that sent it.
-    const header = status === 'done' ? `${prefix}${icon} «${task.title}»` : `${prefix}${icon} «${task.title}» — ${status}`;
-    let text = status === 'done' && !chatState?.progress ? (prefix ? `↳ ${task.title}\n\n${body}` : body) : `${header}\n\n${body}`;
-    if (status === 'done' && task.prUrl) text += `\n\n${task.prUrl}`;
-    await this.send(dest.channel.id, dest.externalThreadId, text, undefined, taskId);
-    if (status === 'done' && chatState?.voice) await this.speakReply(dest.channel.id, dest.externalThreadId, body);
+    const header = answered ? `${prefix}${icon} «${task.title}»` : `${prefix}${icon} «${task.title}» — ${status}`;
+    let text = answered && !chatState?.progress ? (prefix ? `↳ ${task.title}\n\n${body}` : body) : `${header}\n\n${body}`;
+    if (answered && task.prUrl) text += `\n\n${task.prUrl}`;
+    // A task that failed / stalled / is blocked can also be accepted as it is — the button is offered for those too.
+    const buttons = acceptButton ?? (!prefix && ['blocked', 'stalled', 'failed'].includes(status) ? [[{ label: '✅ Mark done anyway', data: `md:${taskId}` }]] : undefined);
+    await this.send(dest.channel.id, dest.externalThreadId, text, buttons, taskId);
+    if (answered && chatState?.voice) await this.speakReply(dest.channel.id, dest.externalThreadId, body);
     // Also deliver any new attachments the agent produced (screenshots as
     // photos, everything else — reports, archives, etc. — as documents).
     await this.sendRunAttachments(dest.channel.id, dest.externalThreadId, taskId).catch((err) =>
@@ -841,6 +847,21 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Post plain text to a chat of a channel (scheduled reminders, pairing replies). False when it could not be delivered. */
+  /**
+   * A notice for the operators that belongs to no task (disk space, …): to the default notification chat (Settings → Escalations), or — when none
+   * is set — to every allowed chat of every enabled channel.
+   */
+  async notifyOperators(text: string): Promise<void> {
+    const settings = await this.prisma.appSettings.findUnique({ where: { id: 'singleton' }, select: { notifyChannelId: true, notifyChatId: true } });
+    if (settings?.notifyChannelId && settings.notifyChatId) {
+      await this.send(settings.notifyChannelId, settings.notifyChatId, text);
+      return;
+    }
+    for (const row of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
+      for (const chatId of this.channels.allowedChatIds(row)) await this.send(row.id, chatId, text);
+    }
+  }
+
   async sendText(channelId: string, chatId: string, text: string): Promise<boolean> {
     return (await this.send(channelId, chatId, text)) !== null;
   }
@@ -883,6 +904,16 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     incomingMessageId?: string,
   ): Promise<void> {
     try {
+      // The person says the task is finished ("done", "готово"): close it, don't start a run.
+      if (isDoneMessage(text) && !attachments?.length) {
+        const cur = await this.prisma.task.findUnique({ where: { id: taskId }, select: { status: true } });
+        if (cur && ['review', 'blocked', 'stalled', 'failed'].includes(cur.status)) {
+          await this.tasks.markDone(taskId);
+          if (incomingMessageId) void this.react(channelId, chatId, incomingMessageId, '✅');
+          await this.send(channelId, chatId, '✅ Marked as done.', undefined, taskId);
+          return;
+        }
+      }
       const result = await this.tasks.followUp(taskId, text, attachments);
       if (incomingMessageId) {
         this.ackMessages.set(taskId, { channelId, chatId, messageId: incomingMessageId });
@@ -1009,6 +1040,17 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       await this.questions
         .answer(e.questionId, { index: e.index }, { displayName: `${row.kind}:${e.userName ?? e.userId}` })
         .catch((err) => this.logger.warn(`answer failed: ${(err as Error).message}`));
+      return;
+    }
+
+    if (e.type === 'mark-done') {
+      // only a chat that belongs to the task may close it
+      const mine = await this.prisma.channelThread.findFirst({ where: { channelId, externalThreadId: e.chatId, taskId: e.taskId }, select: { id: true } });
+      if (!mine) return void this.logger.warn(`Chat ${e.chatId} may not close task ${e.taskId}`);
+      await this.tasks
+        .markDone(e.taskId)
+        .then(() => this.send(channelId, e.chatId, '✅ Marked as done.', undefined, e.taskId))
+        .catch((err) => this.send(channelId, e.chatId, `⚠️ ${(err as Error).message}`));
       return;
     }
 
