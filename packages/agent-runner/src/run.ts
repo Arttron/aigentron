@@ -8,6 +8,10 @@ import {
   SCHEDULE_CHECK_TOOL,
   RESOURCES_SEARCH_TOOL,
   ASK_USER_TOOL,
+  KB_ADD_TOOL,
+  KB_LIST_TOOL,
+  KB_READ_TOOL,
+  KB_SEARCH_TOOL,
   CURRENT_TIME_TOOL,
   LOOK_AT_TOOL,
   VIDEO_DIGEST_TOOL,
@@ -166,6 +170,7 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
   if (params.onSearchResources) names.push(RESOURCES_SEARCH_TOOL);
   if (params.onCurrentTime) names.push(CURRENT_TIME_TOOL);
+  if (params.kb) names.push(KB_LIST_TOOL, KB_SEARCH_TOOL, KB_READ_TOOL, ...(params.kb.add ? [KB_ADD_TOOL] : []));
   if (params.onAskUser) names.push(ASK_USER_TOOL);
   if (params.onLookAt) names.push(LOOK_AT_TOOL);
   if (params.onVideoDigest) names.push(VIDEO_DIGEST_TOOL);

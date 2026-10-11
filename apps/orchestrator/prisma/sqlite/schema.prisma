@@ -273,6 +273,62 @@ model AuthSession {
   @@index([expiresAt])
 }
 
+// ---- Knowledge base: documents are cut into chunks and searched in-app (BM25 + optional embeddings) ----
+model KnowledgeBase {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String   @default("")
+  // string[] of agent names that use it (empty = all agents)
+  agents      Json
+  // ChunkingConfig (strategy / maxChars / overlap / minChars)
+  chunking    Json
+  // optional embeddings: provider + model + dimension (recorded: a model change needs a re-index)
+  embedProvider String?
+  embedModel    String?
+  embedDim      Int?
+  // agents may add notes themselves (kb_add)
+  agentWrite  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  docs        KnowledgeDoc[]
+  chunks      KnowledgeChunk[]
+}
+
+model KnowledgeDoc {
+  id        String   @id @default(cuid())
+  kbId      String
+  kb        KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+  title     String
+  // where it came from (file name, URL, "note")
+  source    String?
+  // note | file | url | research | resource
+  kind      String   @default("file")
+  // content hash — the same text is not added twice to one base
+  hash      String
+  size      Int      @default(0)
+  createdAt DateTime @default(now())
+  chunks    KnowledgeChunk[]
+
+  @@index([kbId])
+  @@unique([kbId, hash])
+}
+
+model KnowledgeChunk {
+  id        String   @id @default(cuid())
+  kbId      String
+  kb        KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+  docId     String
+  doc       KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+  idx       Int
+  heading   String   @default("")
+  text      String
+  // unit-length Float32 vector, base64 (null = not embedded)
+  embedding String?
+
+  @@index([kbId])
+  @@index([docId])
+}
+
 // A question an agent asked a human (ask_user): shown with answer buttons in the dashboard and in channels; the run waits for it.
 model AgentQuestion {
   id             String    @id @default(cuid())

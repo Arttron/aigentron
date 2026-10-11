@@ -114,6 +114,13 @@ export interface RunAgentParams {
   /** Ask the human a question (answer buttons in the dashboard / channels) and wait; resolves with the answer text for the model. */
   /** The current date/time (optionally in an IANA timezone) as text for the model. */
   onCurrentTime?: (input: { timezone?: string }) => string;
+  /** Knowledge bases (the orchestrator answers; agents never see credentials or other bases). */
+  kb?: {
+    list: () => Promise<string>;
+    search: (input: { query: string; kb?: string; limit?: number }) => Promise<string>;
+    read: (input: { doc: string; chunk?: number }) => Promise<string>;
+    add?: (input: { kb: string; title: string; text: string; source?: string }) => Promise<string>;
+  };
   onAskUser?: (input: { question: string; options: string[]; allowText: boolean; multiple?: boolean; image?: string }) => Promise<string>;
   onLookAt?: (input: { path: string; question: string; everySeconds?: number; atSeconds?: number[]; phrases?: string[]; pointing?: boolean }) => Promise<string>;
   /** `video_digest`: frames (with paths to Read) and the transcript of a video. */

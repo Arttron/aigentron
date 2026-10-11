@@ -11,6 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { StatsPage } from './pages/StatsPage';
 import { SecretLinkPage } from './pages/SecretLinkPage';
 import { ResourcesPage } from './pages/ResourcesPage';
+import { KnowledgePage } from './pages/KnowledgePage';
 
 installAuthFetch();
 
@@ -26,6 +27,7 @@ const router = createBrowserRouter([
       { path: '/settings', element: <SettingsPage /> },
       { path: '/stats', element: <StatsPage /> },
       { path: '/resources', element: <ResourcesPage /> },
+      { path: '/knowledge', element: <KnowledgePage /> },
     ],
   },
 ]);

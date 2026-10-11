@@ -110,6 +110,7 @@ export function TaskListPage() {
             <ConnStatus connected={connected} />
             <Link to="/agents">🧑‍💻 Agents</Link>
             <Link to="/resources">📚 Resources</Link>
+            <Link to="/knowledge">🧠 Knowledge</Link>
             <Link to="/stats">📊 Stats</Link>
             <Link to="/settings">⚙ Settings</Link>
           </>

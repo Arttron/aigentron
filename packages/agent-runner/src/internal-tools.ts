@@ -24,6 +24,7 @@ export type InternalToolHandlers = Pick<
   | 'onCheckSubtasks'
   | 'onScheduleCheck'
   | 'onSearchResources'
+  | 'kb'
   | 'onCurrentTime'
   | 'onAskUser'
   | 'onLookAt'
@@ -139,6 +140,40 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           tag: typeof args.tag === 'string' ? args.tag : undefined,
         }),
     });
+  }
+
+  if (params.kb) {
+    const kb = params.kb;
+    specs.push(
+      {
+        name: 'kb_list',
+        description: 'List the knowledge bases you can search (name, what is in it, size). Use before kb_search when you do not know which one fits.',
+        shape: {},
+        handler: () => kb.list(),
+      },
+      {
+        name: 'kb_search',
+        description:
+          "Search the project's knowledge bases (large reference material: regulations, manuals, textbooks, saved web pages). Returns the best passages with their document id, passage number and source. `query`: a few specific words (the question's key terms — not a whole sentence); `kb` (optional): search one base only; `limit` (default 6). Prefer it over guessing, and cite the source of a passage you rely on. If the results look thin, try synonyms or another language.",
+        shape: { query: z.string(), kb: z.string().optional(), limit: z.number().optional() },
+        handler: (args) => kb.search({ query: String(args.query ?? ''), kb: typeof args.kb === 'string' && args.kb ? args.kb : undefined, limit: typeof args.limit === 'number' ? args.limit : undefined }),
+      },
+      {
+        name: 'kb_read',
+        description: 'Read a document of a knowledge base: with `chunk` the whole passage (use it to read around a search hit — previous/next passages), without it the outline of the document. `doc`: the document id from kb_search.',
+        shape: { doc: z.string(), chunk: z.number().optional() },
+        handler: (args) => kb.read({ doc: String(args.doc ?? ''), chunk: typeof args.chunk === 'number' ? args.chunk : undefined }),
+      },
+    );
+    if (kb.add) {
+      const add = kb.add;
+      specs.push({
+        name: 'kb_add',
+        description: 'Add a note to a knowledge base so it can be found later (only bases that allow agents to add notes — kb_list says which). `kb`: its name; `title`; `text` (Markdown); `source` (where the facts came from — a URL or file). Add facts worth keeping, not chatter.',
+        shape: { kb: z.string(), title: z.string(), text: z.string(), source: z.string().optional() },
+        handler: (args) => add({ kb: String(args.kb ?? ''), title: String(args.title ?? ''), text: String(args.text ?? ''), source: typeof args.source === 'string' ? args.source : undefined }),
+      });
+    }
   }
 
   if (params.onCurrentTime) {

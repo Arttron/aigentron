@@ -35,6 +35,11 @@ export const SCHEDULE_CHECK_TOOL = `${INTERNAL_TOOL_PREFIX}schedule_check`;
 /** Ask the human a question with answer buttons and wait for the answer. Not gated: the question itself is the human step. */
 /** The current date and time (agents have no clock of their own). Read-only. */
 export const CURRENT_TIME_TOOL = `${INTERNAL_TOOL_PREFIX}current_time`;
+/** Knowledge bases: search / read passages, list what exists, add a note (only to bases that allow it). Not gated. */
+export const KB_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}kb_list`;
+export const KB_SEARCH_TOOL = `${INTERNAL_TOOL_PREFIX}kb_search`;
+export const KB_READ_TOOL = `${INTERNAL_TOOL_PREFIX}kb_read`;
+export const KB_ADD_TOOL = `${INTERNAL_TOOL_PREFIX}kb_add`;
 export const ASK_USER_TOOL = `${INTERNAL_TOOL_PREFIX}ask_user`;
 export const LOOK_AT_TOOL = `${INTERNAL_TOOL_PREFIX}look_at`;
 export const VIDEO_DIGEST_TOOL = `${INTERNAL_TOOL_PREFIX}video_digest`;

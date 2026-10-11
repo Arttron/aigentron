@@ -1,21 +1,16 @@
-Aigentron v0.1.51
+Aigentron v0.1.52
 
-For people who are not programmers: agents can now ask you questions with answer buttons, you can talk to them about a photo or a video frame, and agents know what time it is.
+For people who are not programmers: a knowledge base your agents can search, plus a few fixes.
 
-Questions with buttons
-- An agent that needs a decision asks you right away, with answer buttons, instead of guessing or stopping. The card appears at the bottom right of the dashboard on every page; in Telegram it arrives as a message with buttons.
-- Pick one, or tick several (☐/☑ in Telegram with a "✅ Done" button; checkboxes in the dashboard). You can also just reply with text — a number picks that option, "1, 3" picks several.
-- The first answer wins and every place updates at once. If nobody answers within an hour, the agent chooses a safe default itself or reports that it is blocked.
-- A question can show a picture, for example a video frame: "is this the crack?".
-- The English starter pack (tutor and quizmaster) uses it for drills. Packs you already installed keep their old agents — reinstall the pack to get it.
-
-Talking about photos and video
-- Click a photo or video in a task to open a viewer: pause on a moment (or take the photo as it is), draw a red rectangle round what you mean, type your question. The marked picture goes to the agent with the file name and the time.
-- Agents can ask for video frames at the moments the speaker says "look here" / "смотри, вот тут", every N seconds, or at exact times; the speech transcript now has times.
+Knowledge bases (new page: 🧠 Knowledge)
+- Keep large reference material — regulations, manuals, textbooks, saved web pages, your own notes — in a knowledge base. Agents search it instead of carrying everything in the prompt, and cite the source.
+- Upload PDF (with a text layer), Word (.docx), Markdown, text, HTML or CSV; write a note; pick something from Resources; or pull in web pages the research tools saved. The same text is never added twice.
+- Documents are cut into passages by sections, paragraphs or fixed size; the settings have a preview where you paste a sample and see how it will be cut.
+- Search by keywords always works — offline, no key needed (English and Russian). Optionally give a base an embedding model (OpenAI-compatible or local Ollama) and it also finds passages by meaning; the two are combined. It costs a few cents per million words and the text goes to that provider.
+- Choose which agents use each base (none = all). Agents get kb_list, kb_search and kb_read, and kb_add only on bases where you allow agents to add notes.
 
 Smaller changes
-- Agents have a clock: the new current_time tool gives the date, day of the week and time (in the server's timezone, or the one asked for).
-- Telegram command menu: agents show up in the "/" autocomplete reliably. A failed publish used to be silent and never retried, so agents that already existed could be missing from the menu.
-- "Default lead agent" moved to the Agents page.
+- Model and voice pickers (Settings → Voice, Vision, and the knowledge base settings) are real drop-downs: suggestions, the models the provider reports, and "Other…" to type a name. They no longer look like browser autocomplete.
+- Settings → Version & updates: the Update button no longer sticks to Check now.
 
-Update note: this release adds a small table and one column for the questions; they are created automatically when the server starts.
+Update note: this release adds three small tables for the knowledge base; they are created automatically when the server starts. Scanned PDFs (no text layer) are not readable yet.

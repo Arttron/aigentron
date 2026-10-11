@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type ProviderInfo } from '@/lib/api';
 import { loadVoice, voiceApi, type VoiceSettings as VoiceCfg } from '@/lib/voice';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
+import { ModelSelect, SelectWithOther } from '@/components/ModelSelect';
 import { VoiceTryout } from './VoiceTryout';
 import styles from './VoiceSettings.module.css';
 
@@ -132,12 +133,7 @@ export function VoiceSettings() {
           <>
             <Field label="Provider">{providerSelect(d.sttProvider, (v) => set({ sttProvider: v }))}</Field>
             <Field label="Model">
-              <input list="stt-models" value={d.sttModel} onChange={(e) => set({ sttModel: e.target.value })} />
-              <datalist id="stt-models">
-                {STT_MODELS.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
+              <ModelSelect provider={d.sttProvider} value={d.sttModel} onChange={(m) => set({ sttModel: m })} suggestions={STT_MODELS} match={/whisper|transcri|speech|stt|asr/i} />
             </Field>
             <Field label="Language of your speech">
               <select value={d.sttLang} onChange={(e) => set({ sttLang: e.target.value })}>
@@ -161,20 +157,10 @@ export function VoiceSettings() {
           <>
             <Field label="Provider">{providerSelect(d.ttsProvider, (v) => set({ ttsProvider: v }))}</Field>
             <Field label="Model">
-              <input list="tts-models" value={d.ttsModel} onChange={(e) => set({ ttsModel: e.target.value })} />
-              <datalist id="tts-models">
-                {TTS_MODELS.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
+              <ModelSelect provider={d.ttsProvider} value={d.ttsModel} onChange={(m) => set({ ttsModel: m })} suggestions={TTS_MODELS} match={/tts|speech|voice|kokoro|piper|bark/i} />
             </Field>
             <Field label="Voice">
-              <input list="tts-voices" value={d.ttsVoice} onChange={(e) => set({ ttsVoice: e.target.value })} />
-              <datalist id="tts-voices">
-                {VOICES.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
+              <SelectWithOther value={d.ttsVoice} options={VOICES} onChange={(m) => set({ ttsVoice: m })} />
             </Field>
             <Field label="Longest text to read aloud (characters; longer answers are cut at a sentence — the full text is always shown)">
               <input type="number" min={200} max={4000} step={100} value={d.ttsMax} onChange={(e) => set({ ttsMax: Number(e.target.value) || 1500 })} />

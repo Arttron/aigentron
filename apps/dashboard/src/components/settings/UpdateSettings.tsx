@@ -100,21 +100,18 @@ export function UpdateSettings() {
         <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto', margin: '10px 0', fontSize: 12.5 }}>{st.notes}</pre>
       )}
 
-      {st.newer && phase === 'idle' &&
-        (st.environment.canApply ? (
-          <Row wrap>
-            <Button variant="primary" disabled={busy} onClick={apply}>
-              Update to {st.latest}
-            </Button>
-            {st.runningTasks > 0 && <Muted>{st.runningTasks} task(s) running — they would be interrupted.</Muted>}
-          </Row>
-        ) : (
-          <Muted>
-            ⓘ {st.environment.reason} {st.environment.kind === 'docker' || st.environment.kind === 'bare-metal' ? <>On the server: <code>sudo aigentron update</code>.</> : null}
-          </Muted>
-        ))}
+      {st.newer && phase === 'idle' && !st.environment.canApply && (
+        <Muted>
+          ⓘ {st.environment.reason} {st.environment.kind === 'docker' || st.environment.kind === 'bare-metal' ? <>On the server: <code>sudo aigentron update</code>.</> : null}
+        </Muted>
+      )}
 
-      <Row wrap>
+      <Row wrap style={{ marginTop: 12 }}>
+        {st.newer && phase === 'idle' && st.environment.canApply && (
+          <Button variant="primary" disabled={busy} onClick={apply}>
+            Update to {st.latest}
+          </Button>
+        )}
         <Button disabled={busy || phase !== 'idle'} onClick={() => void load(true)}>
           Check now
         </Button>
@@ -124,6 +121,9 @@ export function UpdateSettings() {
           </a>
         )}
       </Row>
+      {st.newer && phase === 'idle' && st.environment.canApply && st.runningTasks > 0 && (
+        <Muted>{st.runningTasks} task(s) running — they would be interrupted.</Muted>
+      )}
       {err && <ErrorText>{err}</ErrorText>}
       {st.last?.state === 'failed' && (
         <ErrorText>

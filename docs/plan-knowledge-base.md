@@ -1,6 +1,6 @@
 # Plan: knowledge base with pluggable storage
 
-> Status: DRAFT (2026-10-07). Refines §2.3 of docs/plan-domain-packs.md after the owner's requirement:
+> Status: **K1 + K4 + part of K5 BUILT (2026-10-12)** — see `docs/knowledge-base.md` (in-app BM25, optional embeddings with hybrid ranking, chunking strategies + preview, PDF/docx ingest, `kb_*` tools, dashboard page). Still open: K2/K3 (external databases, attached mode), OCR, admin `propose_kb` tools, `verify_quote` over KB. Original draft (2026-10-07): Refines §2.3 of docs/plan-domain-packs.md after the owner's requirement:
 > **the user must be able to connect any database as a knowledge store — local or remote.**
 > Storage is a connection, like Providers and MCP servers; nothing about it is hard-wired.
 

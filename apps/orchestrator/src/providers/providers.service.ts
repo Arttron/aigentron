@@ -192,6 +192,16 @@ export class ProvidersService implements OnModuleInit {
     return { style: 'openai', url: `${base}/chat/completions`, headers, kind, model: id };
   }
 
+  /**
+   * Where to send an EMBEDDINGS request: an OpenAI-style `/embeddings` endpoint (OpenAI, a local Ollama's /v1, any compatible server).
+   * Anthropic has none, and subscription logins cannot be called directly.
+   */
+  async embeddingEndpoint(name: string, model?: string): Promise<{ url: string; headers: Record<string, string>; model: string }> {
+    const e = await this.chatEndpoint(name, model);
+    if (e.style !== 'openai') throw new Error(`Provider "${name}" (${e.kind}) has no embeddings API. Use an OpenAI-compatible or Ollama provider.`);
+    return { url: e.url.replace(/\/chat\/completions$/, '/embeddings'), headers: e.headers, model: e.model };
+  }
+
   /** Shared Provider shape for resolveProvider. */
   async get(name: string): Promise<Provider> {
     return toProvider(await this.getRow(name));

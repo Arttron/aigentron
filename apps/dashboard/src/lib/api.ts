@@ -378,6 +378,61 @@ async function unwrap<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface KbChunking {
+  strategy: 'section' | 'paragraph' | 'chars';
+  maxChars: number;
+  overlap: number;
+  minChars: number;
+}
+export interface KbInfo {
+  id: string;
+  name: string;
+  description: string;
+  agents: string[];
+  chunking: KbChunking;
+  embedProvider: string | null;
+  embedModel: string | null;
+  embedDim: number | null;
+  agentWrite: boolean;
+  docs: number;
+  chunks: number;
+  embedded: number;
+  createdAt: string;
+}
+export interface KbInput {
+  name?: string;
+  description?: string;
+  agents?: string[];
+  chunking?: KbChunking;
+  agentWrite?: boolean;
+  embedProvider?: string;
+  embedModel?: string;
+}
+export interface KbDoc {
+  id: string;
+  title: string;
+  source: string | null;
+  kind: string;
+  size: number;
+  chunks: number;
+  createdAt: string;
+}
+export interface KbAdded {
+  docId: string;
+  chunks: number;
+  duplicate: boolean;
+}
+export interface KbHit {
+  kb: string;
+  docId: string;
+  docTitle: string;
+  source: string | null;
+  chunk: number;
+  heading: string;
+  text: string;
+  score: number;
+}
+
 const jsonHeaders = { 'content-type': 'application/json' };
 
 /** Safe status of the hosted MCP entry point (never includes the token value). */
@@ -556,6 +611,33 @@ export const api = {
     fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ResourceInfo>),
   deleteResource: (id: string) => fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
   resourceUrl: (id: string) => `${API_BASE}/resources/${encodeURIComponent(id)}/file`,
+
+  // ---- knowledge bases ----
+  listKb: () => fetch(`${API_BASE}/knowledge`, { cache: 'no-store' }).then(unwrap<KbInfo[]>),
+  createKb: (body: KbInput) => fetch(`${API_BASE}/knowledge`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<KbInfo>),
+  updateKb: (name: string, body: Omit<Partial<KbInput>, 'embedProvider' | 'embedModel'> & { embedProvider?: string | null; embedModel?: string | null }) =>
+    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}`, { method: 'PATCH', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<KbInfo>),
+  deleteKb: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(unwrap<{ name: string }>),
+  listKbDocs: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/docs`, { cache: 'no-store' }).then(unwrap<KbDoc[]>),
+  addKbNote: (name: string, body: { title: string; text: string }) =>
+    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/docs/note`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<KbAdded>),
+  uploadKbFile: (name: string, file: File) =>
+    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/docs/upload`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-filename': encodeURIComponent(file.name) },
+      body: file,
+    }).then(unwrap<KbAdded>),
+  importKbResource: (name: string, id: string) =>
+    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/import/resource`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ id }) }).then(unwrap<KbAdded>),
+  importKbResearch: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/import/research`, { method: 'POST' }).then(unwrap<{ added: number; skipped: number }>),
+  deleteKbDoc: (id: string) => fetch(`${API_BASE}/knowledge/docs/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
+  searchKb: (name: string, query: string) =>
+    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/search`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ query, limit: 6 }) }).then(unwrap<{ hits: KbHit[]; note?: string }>),
+  previewKb: (text: string, chunking: KbChunking) =>
+    fetch(`${API_BASE}/knowledge/preview`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ text, chunking }) }).then(
+      unwrap<{ total: number; avg: number; max: number; chunks: { heading: string; chars: number; text: string }[] }>,
+    ),
+  reembedKb: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/reembed`, { method: 'POST' }).then(unwrap<{ started: boolean }>),
 
   listSchedules: () => fetch(`${API_BASE}/schedules`, { cache: 'no-store' }).then(unwrap<ScheduleInfo[]>),
   createSchedule: (body: ScheduleInput) =>

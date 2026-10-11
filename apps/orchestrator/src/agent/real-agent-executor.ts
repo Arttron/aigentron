@@ -29,6 +29,7 @@ import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
 import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
 import { ResourcesService } from '../resources/resources.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
 import { describeNow } from './clock';
 import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
@@ -120,6 +121,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly resources: ResourcesService,
     private readonly media: MediaService,
     private readonly questions: QuestionsService,
+    private readonly knowledge: KnowledgeService,
   ) {
     super();
   }
@@ -525,6 +527,12 @@ export class RealAgentExecutor extends AgentExecutor {
       onCreateSubtask: ctx.onCreateSubtask,
       onCheckSubtasks: ctx.onCheckSubtasks,
       onScheduleCheck: ctx.onScheduleCheck,
+      kb: {
+        list: () => this.knowledge.listReport(agentDef?.name),
+        search: (input) => this.knowledge.searchReport(input, agentDef?.name),
+        read: (input) => this.knowledge.readReport(input, agentDef?.name),
+        add: (input) => this.knowledge.addReport(input, agentDef?.name),
+      },
       onCurrentTime: (input) => describeNow(new Date(), input.timezone),
       onAskUser: async (input) =>
         this.questions.ask(ctx.taskId, session.id, {
@@ -1065,6 +1073,9 @@ export class RealAgentExecutor extends AgentExecutor {
       const block = await this.resources.promptIndex(agent?.name);
       if (block) parts.push(block);
     }
+    // Knowledge bases: one line per base this agent may search (the content stays out of the prompt).
+    const kbBlock = await this.knowledge.promptBlock(agent?.name).catch(() => '');
+    if (kbBlock) parts.push(kbBlock.trim());
     return parts.join('\n\n');
   }
 

@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import { api, type ProviderInfo } from '@/lib/api';
+import { ModelSelect } from '@/components/ModelSelect';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
 
-const MODELS = ['gpt-4o-mini', 'gpt-4o', 'claude-sonnet-5-5', 'claude-haiku-4-5-20251001', 'qwen3-vl:latest', 'llama3.2-vision'];
+/** Vision-capable models worth suggesting per kind of provider (the provider's own list follows in the drop-down). */
+const SUGGESTED: Record<string, string[]> = {
+  openai: ['gpt-4o-mini', 'gpt-4o'],
+  anthropic: ['claude-haiku-4-5-20251001', 'claude-sonnet-5-5'],
+  deepseek: [],
+  ollama: ['qwen3-vl:latest', 'llama3.2-vision'],
+};
 
 /** Settings → Vision: which model looks at photos and video frames for the agents (look_at / video_digest tools). */
 export function VisionSettings() {
@@ -73,12 +80,7 @@ export function VisionSettings() {
         </select>
       </Field>
       <Field label="Model">
-        <input list="vision-models" value={model} onChange={(e) => setModel(e.target.value)} placeholder="gpt-4o-mini" />
-        <datalist id="vision-models">
-          {MODELS.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
+        <ModelSelect provider={provider} value={model} onChange={setModel} suggestions={SUGGESTED[providers.find((p) => p.name === provider)?.kind ?? ''] ?? []} placeholder="— choose a model —" />
       </Field>
       <Row wrap>
         <Button variant="primary" disabled={busy} onClick={save}>

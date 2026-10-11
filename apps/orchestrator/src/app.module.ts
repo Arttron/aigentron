@@ -11,6 +11,7 @@ import { TasksModule } from './tasks/tasks.module';
 import { TaskWorkerModule } from './queue/task-worker.module';
 import { ApprovalsModule } from './approvals/approvals.module';
 import { QuestionsModule } from './questions/questions.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 import { SettingsModule } from './settings/settings.module';
 import { UsersModule } from './users/users.module';
 import { AgentRegistryModule } from './agent-registry/agent-registry.module';
@@ -70,6 +71,7 @@ import { HealthController } from './health/health.controller';
     TaskWorkerModule,
     ApprovalsModule,
     QuestionsModule,
+    KnowledgeModule,
     SettingsModule,
     UsersModule,
     AgentRegistryModule,
