@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LoginLimiter,
   clientAddress,
+  describeAgent,
   canRemovePassword,
   hashPassword,
   isLoopback,
@@ -143,5 +144,22 @@ describe('clientAddress', () => {
     for (let i = 0; i < 20; i++) l.fail(clientAddress('198.51.100.9', '172.18.0.5', ['172.18.0.5']), i);
     expect(l.wait(clientAddress('198.51.100.9', '172.18.0.5', ['172.18.0.5']), 30)).toBeGreaterThan(0);
     expect(l.wait(clientAddress('203.0.113.1', '172.18.0.5', ['172.18.0.5']), 30)).toBe(0);
+  });
+});
+
+describe('describeAgent', () => {
+  it('names common browsers and systems', () => {
+    expect(describeAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36')).toBe('Chrome on macOS');
+    expect(describeAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1')).toBe('Safari on iOS');
+    expect(describeAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0')).toBe('Edge on Windows');
+    expect(describeAgent('Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0')).toBe('Firefox on Linux');
+    expect(describeAgent('curl/8.4.0')).toBe('curl');
+    expect(describeAgent('')).toBe('Unknown device');
+  });
+  it('a session id in the cookie round-trips, and junk ids are dropped', () => {
+    const tok = signSession('k', { exp: Date.now() + 1000, epoch: 1, uid: 'u', ue: 1, sid: 'a'.repeat(32) });
+    expect(verifySession('k', tok)?.sid).toBe('a'.repeat(32));
+    const bad = signSession('k', { exp: Date.now() + 1000, epoch: 1, uid: 'u', ue: 1, sid: '../../x' });
+    expect(verifySession('k', bad)?.sid).toBeUndefined();
   });
 });

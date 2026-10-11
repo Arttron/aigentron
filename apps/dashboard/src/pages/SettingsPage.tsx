@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { AppHeader, BackLink, Tabs, type TabDef } from '@/components/ui';
 import { GeneralSettingsForm } from '@/components/settings/GeneralSettingsForm';
 import { SecuritySettings } from '@/components/settings/SecuritySettings';
+import { SessionsSettings } from '@/components/settings/SessionsSettings';
 import { AccessSettings } from '@/components/settings/AccessSettings';
 import { CloudflareAccessSettings } from '@/components/settings/CloudflareAccessSettings';
 import { WebServerSettings } from '@/components/settings/WebServerSettings';
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'schedules', label: 'Schedules' },
   { id: 'voice', label: 'Voice' },
   { id: 'users', label: 'Users' },
+  { id: 'sessions', label: 'Signed-in devices' },
 ] as const satisfies ReadonlyArray<TabDef<string>>;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -56,6 +58,7 @@ export function SettingsPage() {
       {tab === 'schedules' && <SchedulesManager />}
       {tab === 'voice' && <VoiceSettings />}
       {tab === 'users' && <UsersManager />}
+      {tab === 'sessions' && <SessionsSettings />}
     </>
   );
 }

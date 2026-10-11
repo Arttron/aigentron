@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { AuthService } from './auth.service';
+import { SessionsService } from './sessions.service';
 import { ownAddresses } from '../access/own-addresses';
 import { isMachineRoute, isPublicRoute, isThisMachine } from './auth-core';
 
@@ -14,6 +15,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly auth: AuthService,
     private readonly config: AppConfigService,
+    private readonly sessions: SessionsService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -30,6 +32,7 @@ export class AuthGuard implements CanActivate {
     const uid = this.auth.sessionUserId(req.headers);
     if (uid) {
       req.authUserId = uid; // RolesGuard acts as THIS user — the x-lds-user header is ignored once sign-in is on
+      this.sessions.touch(this.auth.sessionIdOf(req.headers));
       return true;
     }
     if (isMachineRoute(path) && isThisMachine(req.socket?.remoteAddress, ownAddresses())) return true;

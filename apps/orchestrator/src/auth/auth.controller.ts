@@ -1,6 +1,9 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { SessionsService } from './sessions.service';
+import { CurrentUser } from '../identity/current-user.decorator';
+import type { UserRow } from '../users/users.service';
 import { lookup } from 'node:dns/promises';
 import { SESSION_COOKIE, clientAddress } from './auth-core';
 import { publicOrigin } from '../config/cors';
@@ -11,7 +14,15 @@ type AuthedRequest = Request & { authUserId?: string };
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly sessions: SessionsService,
+  ) {}
+
+  /** Where and what the browser is (shown in the list of signed-in devices). */
+  private async meta(req: Request): Promise<{ ip: string; userAgent: string }> {
+    return { ip: await this.clientKey(req), userAgent: String(req.headers['user-agent'] ?? '') };
+  }
 
   private trusted: { at: number; ips: string[] } = { at: 0, ips: [] };
 
@@ -55,7 +66,7 @@ export class AuthController {
   @Post('setup')
   @HttpCode(200)
   async setup(@Body() body: { password?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const r = await this.auth.setup(body?.password);
+    const r = await this.auth.setup(body?.password, await this.meta(req));
     if (!r.ok) {
       res.status(r.status ?? 400);
       return { ok: false, error: r.error };
@@ -67,7 +78,7 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   async login(@Body() body: { user?: unknown; password?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const r = await this.auth.login(body?.user, body?.password, await this.clientKey(req));
+    const r = await this.auth.login(body?.user, body?.password, await this.clientKey(req), await this.meta(req));
     if (!r.ok) {
       res.status(r.status ?? 401);
       return { ok: false, error: r.error };
@@ -92,7 +103,7 @@ export class AuthController {
       res.status(400);
       return { ok: false, error: 'Sign in first.' };
     }
-    const r = await this.auth.changeOwnPassword(req.authUserId, body?.current, body?.next, await this.clientKey(req));
+    const r = await this.auth.changeOwnPassword(req.authUserId, body?.current, body?.next, await this.clientKey(req), await this.meta(req));
     if (!r.ok) {
       res.status(r.status ?? 400);
       return { ok: false, error: r.error };
@@ -103,9 +114,56 @@ export class AuthController {
 
   @Post('sign-out-everywhere')
   @HttpCode(200)
-  signOutEverywhere(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response) {
-    const r = req.authUserId ? this.auth.signOutEverywhere(req.authUserId) : null;
+  async signOutEverywhere(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response) {
+    const r = req.authUserId ? await this.auth.signOutEverywhere(req.authUserId, await this.meta(req)) : null;
     if (r) this.setCookie(req, res, r.token); // keep THIS browser signed in
+    return { ok: true };
+  }
+
+  /** Signed-in browsers / devices: your own; an operator or admin sees everybody's. */
+  @Get('sessions')
+  @UseGuards(RolesGuard)
+  async listSessions(@Req() req: Request, @CurrentUser() user: UserRow) {
+    return this.sessions.list({ id: user.id, role: user.role }, this.auth.sessionIdOf(req.headers));
+  }
+
+  /** Sign out all your OTHER devices (this browser stays signed in). */
+  @Post('sessions/revoke-others')
+  @HttpCode(200)
+  @UseGuards(RolesGuard)
+  async revokeOthers(@Req() req: Request, @CurrentUser() user: UserRow, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.revokeUserSessions(user.id, await this.meta(req));
+    if (!r.ok) {
+      res.status(r.status ?? 400);
+      return { ok: false, error: r.error };
+    }
+    if (r.token) this.setCookie(req, res, r.token);
+    return { ok: true };
+  }
+
+  /** Managers: end ALL of someone's sessions (their password stays). If it is you, this browser stays signed in. */
+  @Delete('users/:id/sessions')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  async revokeUser(@Param('id') id: string, @Req() req: Request, @CurrentUser() user: UserRow, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.revokeUserSessions(id, id === user.id ? await this.meta(req) : undefined);
+    if (!r.ok) {
+      res.status(r.status ?? 400);
+      return { ok: false, error: r.error };
+    }
+    if (r.token) this.setCookie(req, res, r.token);
+    return { ok: true };
+  }
+
+  /** End one session (yours, or — operator/admin — anyone's). */
+  @Delete('sessions/:id')
+  @UseGuards(RolesGuard)
+  async endSession(@Param('id') id: string, @CurrentUser() user: UserRow, @Res({ passthrough: true }) res: Response) {
+    const r = await this.sessions.revoke(id, { id: user.id, role: user.role });
+    if (!r.ok) {
+      res.status(r.status);
+      return { ok: false, error: r.error };
+    }
     return { ok: true };
   }
 

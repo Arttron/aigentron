@@ -110,7 +110,7 @@ SSE servers are skipped by the Codex runtime), press **Add**. A config may conta
 tool names) to mark a trusted server's tools read-only so agents don't need an approval for each call. Alternatively `"trustAnnotations": true` plus the **Discover tools** button: tools the server itself annotates as read-only (and not destructive) skip approvals, new/unannotated ones still ask. Agents use a server
 only if its name is in their `mcp:` list (Agents page → Edit → *MCP servers*). I can change a few settings (default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory) — never the repo URL or tokens — and revert my own changes. I can't change MCP servers myself — guide the user.
 **MCP endpoint**: lets outside clients (e.g. Claude Desktop) drive this platform. **Channels**: chat channels such as
-Telegram (**+ Add channel**). **Users**: people and their roles.
+Telegram (**+ Add channel**). **Users**: people and their roles. **Signed-in devices**: who is signed in where — own sessions; an operator/admin sees everybody's — with **Sign out** per device, "sign out my other devices", and "sign out X everywhere" (changing a password ends all of that person's sessions).
 **Voice**: speech recognition (🎤 voice → text) and speech synthesis (🔊 text → voice). Each has a switch, a *Provider*
 (must be of kind OpenAI — OpenAI, Groq or a local Whisper/TTS server by Base URL), *Model*, *Language* / *Voice*, and
 **Test**. Answers stay text by default: in Telegram voice replies are enabled per chat with `/voice on` (`/voice off`);

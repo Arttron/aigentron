@@ -39,6 +39,8 @@ export interface SessionPayload {
   uid: string;
   /** That user's own epoch — bumped when THEIR password changes or is removed. */
   ue: number;
+  /** This session's id (listed in Settings, individually revocable). Absent on cookies issued before sessions were listed. */
+  sid?: string;
 }
 
 const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
@@ -60,7 +62,7 @@ export function verifySession(secret: string, token: string | undefined, now = D
   try {
     const p = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as Partial<SessionPayload>;
     if (typeof p.exp !== 'number' || typeof p.epoch !== 'number' || typeof p.uid !== 'string' || typeof p.ue !== 'number') return null;
-    return p.exp > now ? { exp: p.exp, epoch: p.epoch, uid: p.uid, ue: p.ue } : null;
+    return p.exp > now ? { exp: p.exp, epoch: p.epoch, uid: p.uid, ue: p.ue, ...(typeof p.sid === 'string' && /^[0-9a-f]{16,64}$/.test(p.sid) ? { sid: p.sid } : {}) } : null;
   } catch {
     return null;
   }
@@ -172,4 +174,16 @@ export const MANAGER_ROLES = ['operator', 'admin'] as const;
  */
 export function canRemovePassword(users: { id: string; role: string }[], withPassword: ReadonlySet<string>, targetId: string): boolean {
   return users.some((u) => u.id !== targetId && withPassword.has(u.id) && (MANAGER_ROLES as readonly string[]).includes(u.role));
+}
+
+/** A readable name for a browser's User-Agent, e.g. "Chrome on macOS" — only for the sign-in list, never for decisions. */
+export function describeAgent(ua: string | undefined | null): string {
+  const s = ua ?? '';
+  if (!s) return 'Unknown device';
+  if (/^curl\//i.test(s)) return 'curl';
+  if (/^node|undici|node-fetch/i.test(s)) return 'Terminal (aigentron)';
+  const browser = /Edg\//.test(s) ? 'Edge' : /OPR\/|Opera/.test(s) ? 'Opera' : /Firefox\//.test(s) ? 'Firefox' : /(Chrome|CriOS)\//.test(s) ? 'Chrome' : /Safari\//.test(s) ? 'Safari' : null;
+  const os = /Windows/.test(s) ? 'Windows' : /(iPhone|iPad|iPod)/.test(s) ? 'iOS' : /Android/.test(s) ? 'Android' : /Mac OS X|Macintosh/.test(s) ? 'macOS' : /Linux|X11/.test(s) ? 'Linux' : null;
+  if (browser && os) return `${browser} on ${os}`;
+  return browser ?? os ?? s.slice(0, 40);
 }

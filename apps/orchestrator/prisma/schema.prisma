@@ -280,6 +280,22 @@ model ChannelChatState {
   @@unique([channelId, chatId])
 }
 
+// A signed-in browser / device: one row per session cookie (the cookie itself is stateless and signed; this is the list shown in Settings).
+model AuthSession {
+  id         String    @id
+  userId     String
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  expiresAt  DateTime
+  ip         String?
+  userAgent  String?
+  // set when the session was ended from the list; the signed cookie stops working at once
+  revokedAt  DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 // Which task sent a message into a chat — so that replying to (quoting) it addresses that task / agent.
 model ChannelMessageLink {
   id        String   @id @default(cuid())

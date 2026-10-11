@@ -1,18 +1,14 @@
-Aigentron v0.1.48
+Aigentron v0.1.49
 
-For people who are not programmers: update the server from the dashboard, quieter and smarter Telegram chats, and a tidier Agents page.
+For people who are not programmers: see and end who is signed in, and the ChatGPT (Codex) provider works properly.
 
-Updating the server (Settings → General → Version & updates)
-- The dashboard shows the installed version, the newest release and what is new. "Update to X" (an operator confirms) installs it: the server restarts for a minute or two and the page reconnects by itself. Your data and settings are kept, and the previous version stays for a rollback (`sudo aigentron rollback` on the server).
-- The admin assistant can do it too — it tells you what is new, then shows an approval card; nothing happens until you approve. It will not update while tasks are running unless you accept that they are interrupted.
-- Works for a normal (bare-metal) install. A Docker install cannot replace itself: the page says a newer version exists and to run `aigentron update` on the server. The installer now also keeps the running release, so a failed build no longer leaves the server without code.
+Signed-in devices (Settings → Signed-in devices)
+- A new tab lists every browser or device that is signed in: which one (for example "Chrome on macOS"), from which address, when it signed in and when it was last active. Each has a "Sign out" button and the device is signed out at once.
+- You see your own devices; an operator or admin sees everybody's and can sign a person out everywhere (their password stays). "Sign out my other devices" ends all your other sessions and keeps this one.
+- Changing or resetting someone's password now signs that person out on every device.
 
-Telegram
-- Chats are quiet by default: only the agent's answers (and anything that needs you) arrive. The live "what the agent is doing" line, "queued" notes and title headers are off; `/progress on` brings them back for a chat.
-- Reply to (quote) a message and it goes to the task and agent that wrote it, with your quote passed along as context.
-- Talk to a specific agent: `/pm text` or `@pm text`. Small typos in the name are forgiven, `/agents` lists the agents as tappable names, and each agent appears in the bot's `/` menu with autocomplete.
+ChatGPT (Codex) provider
+- The model picker lists the models Codex itself offers for your account, instead of a single fixed name.
+- Fixed: testing the provider before signing in showed an error about a missing CODEX_HOME folder. The folder is now created, the CLI's warning noise is gone, and the message tells you how to sign in (`aigentron providers` → Edit → sign in again).
 
-Agents page
-- Starter packs have their own tab, and "+ New agent" / "Edit" open in a dialog like adding a provider.
-
-Update note: this release adds a small table and a column for chats (created automatically when the server starts).
+Update note: this release adds a small table for the device list; it is created automatically when the server starts. Sessions that were already signed in keep working but appear in the list only after the next sign-in.

@@ -227,7 +227,13 @@ export class ProvidersService implements OnModuleInit {
           : { ok: false, error: 'no API key set for this Codex provider' };
       }
       const st = await this.codex.status();
-      return st.loggedIn ? { ok: true, model: p.model } : { ok: false, error: st.message };
+      if (st.loggedIn) return { ok: true, model: p.model };
+      return {
+        ok: false,
+        error: st.installed
+          ? `Not signed in to ChatGPT yet (${st.message}). Sign in: \`aigentron providers\` → Edit this provider → sign in again (device code), or in the dashboard's provider settings.`
+          : st.message,
+      };
     }
     if (p.authMode === 'oauth-token') {
       // The Claude Agent SDK handles this token's auth internally; we don't
@@ -362,7 +368,7 @@ export class ProvidersService implements OnModuleInit {
   /** Models the provider's endpoint advertises (for the agent's model picker). */
   async listModels(name: string): Promise<ProviderModelsResult> {
     const p = toProvider(await this.getRow(name));
-    if (p.kind === 'codex') return { ok: true, models: CODEX_MODELS };
+    if (p.kind === 'codex') return { ok: true, models: await this.codex.models() };
     if (p.authMode === 'oauth-token') {
       // Same reasoning as test(): don't guess at the OAuth token's request shape.
       return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
@@ -377,7 +383,7 @@ export class ProvidersService implements OnModuleInit {
     authMode?: 'api-key' | 'auth-token' | 'oauth-token' | 'codex-login';
     secret?: string | null;
   }): Promise<ProviderModelsResult> {
-    if (input.kind === 'codex') return { ok: true, models: CODEX_MODELS };
+    if (input.kind === 'codex') return { ok: true, models: await this.codex.models() };
     if (input.authMode === 'oauth-token') {
       return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
     }
@@ -576,9 +582,6 @@ export interface ProviderModelsResult {
 }
 
 const KNOWN_AUTH_MODES = ['api-key', 'auth-token', 'oauth-token', 'codex-login'] as const;
-
-/** Codex model names offered in the picker (any other name can be typed in). */
-const CODEX_MODELS = ['gpt-6.1-sol'];
 
 function toProvider(row: ProviderRow): Provider {
   return {

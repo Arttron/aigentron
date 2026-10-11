@@ -43,6 +43,17 @@ Wrong passwords are rate-limited (5 misses, then a growing wait up to 15 minutes
 Asks who you are (a numbered list, skipped when only one user has a password) and the password (hidden), then keeps a session token
 in `~/.local/state/aigentron/admin-session.json` (mode 0600). For scripts set `LDS_ADMIN_USER` (name) and `LDS_ADMIN_PASSWORD`.
 
+## Signed-in devices (sessions)
+
+Settings → **Signed-in devices** tab lists every browser or device that is signed in: which one (e.g. "Chrome on macOS"), from which address, when it signed in and when it was last
+active, with **Sign out** for each. You see your own; an **operator or admin sees everybody's** and can sign anyone out. Ending a session signs that device out at once.
+- **Sign out my other devices** — ends all your other sessions, this browser stays signed in.
+- Operators/admins: **Sign … out everywhere** ends all sessions of one person (their password stays).
+- **Changing or resetting a password ends all of that person's sessions** (when you change your own, this browser stays signed in). Removing a password does too.
+- "Sign out other browsers" under Security (everyone's) still exists; it ends every session of everyone.
+The addresses shown are the real client addresses (behind a tunnel the connecting proxy is trusted for `cf-connecting-ip`, see `TRUSTED_PROXY`). Sessions signed in before this feature
+keep working until they expire, but are not listed.
+
 ## Forgot the password
 
 Someone else (an operator/admin) can reset it in Settings → Users. If it is the only operator, `make reset-password` (or delete

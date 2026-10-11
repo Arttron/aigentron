@@ -5,6 +5,7 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { publicOrigin } from '../config/cors';
 import { UsersService } from '../users/users.service';
+import { SessionsService, type SessionMeta } from './sessions.service';
 import {
   LoginLimiter,
   canRemovePassword,
@@ -55,6 +56,7 @@ export class AuthService implements OnModuleInit {
   constructor(
     private readonly config: AppConfigService,
     private readonly users: UsersService,
+    private readonly sessions: SessionsService,
   ) {}
 
   private get file(): string {
@@ -137,6 +139,7 @@ export class AuthService implements OnModuleInit {
     if (!s) return null;
     const p = verifySession(s.secret, tokenFromRequest(headers));
     if (!p || p.epoch !== s.epoch) return null;
+    if (this.sessions.isRevoked(p.sid)) return null;
     return s.users[p.uid]?.epoch === p.ue ? p.uid : null;
   }
 
@@ -154,8 +157,17 @@ export class AuthService implements OnModuleInit {
     return Number.isFinite(d) && d > 0 ? Math.min(d, 365) : 30;
   }
 
-  private issue(s: AuthState, uid: string): string {
-    return signSession(s.secret, { exp: Date.now() + this.sessionDays() * 86_400_000, epoch: s.epoch, uid, ue: s.users[uid]!.epoch });
+  /** The session id carried by this request's cookie (for "this device" in the list and for noting activity). */
+  sessionIdOf(headers: Record<string, string | string[] | undefined>): string | undefined {
+    const s = this.state();
+    return s ? verifySession(s.secret, tokenFromRequest(headers))?.sid : undefined;
+  }
+
+  private issue(s: AuthState, uid: string, meta?: SessionMeta): string {
+    const exp = Date.now() + this.sessionDays() * 86_400_000;
+    const sid = this.sessions.newId();
+    this.sessions.record(sid, uid, new Date(exp), meta);
+    return signSession(s.secret, { exp, epoch: s.epoch, uid, ue: s.users[uid]!.epoch, sid });
   }
 
   /** Users who can sign in (have a password) — what the login screen lists. */
@@ -178,7 +190,7 @@ export class AuthService implements OnModuleInit {
   }
 
   /** First password ever: belongs to the default operator. Only while sign-in is off. */
-  async setup(password: unknown): Promise<Result<{ token: string; uid: string }>> {
+  async setup(password: unknown, meta?: SessionMeta): Promise<Result<{ token: string; uid: string }>> {
     if (this.isConfigured()) return { ok: false, error: 'A password is already set.' };
     const bad = validatePassword(password);
     if (bad) return { ok: false, error: bad };
@@ -186,11 +198,11 @@ export class AuthService implements OnModuleInit {
     const s = this.fresh();
     s.users[op.id] = { hash: hashPassword(password as string), epoch: 1 };
     this.write(s);
-    return { ok: true, token: this.issue(s, op.id), uid: op.id };
+    return { ok: true, token: this.issue(s, op.id, meta), uid: op.id };
   }
 
   /** `user` is an id or (for scripts) a display name; omitted = the only user who has a password. */
-  async login(user: unknown, password: unknown, key: string): Promise<Result<{ token: string; uid: string }>> {
+  async login(user: unknown, password: unknown, key: string, meta?: SessionMeta): Promise<Result<{ token: string; uid: string }>> {
     const s = this.state();
     if (!s) return { ok: false, error: 'No password is set.' };
     const wait = this.limiter.wait(key);
@@ -211,11 +223,11 @@ export class AuthService implements OnModuleInit {
       return { ok: false, error: 'Wrong password.', status: 401 };
     }
     this.limiter.ok(key);
-    return { ok: true, token: this.issue(s, u.id), uid: u.id };
+    return { ok: true, token: this.issue(s, u.id, meta), uid: u.id };
   }
 
   /** Change your own password (needs the current one). Signs your other browsers out. */
-  async changeOwnPassword(uid: string, current: unknown, next: unknown, key: string): Promise<Result<{ token: string }>> {
+  async changeOwnPassword(uid: string, current: unknown, next: unknown, key: string, meta?: SessionMeta): Promise<Result<{ token: string }>> {
     const s = this.state();
     const cred = s?.users[uid];
     if (!s || !cred) return { ok: false, error: 'No password is set for you.' };
@@ -229,7 +241,8 @@ export class AuthService implements OnModuleInit {
     if (bad) return { ok: false, error: bad };
     s.users[uid] = { hash: hashPassword(next as string), epoch: cred.epoch + 1 };
     this.write(s);
-    return { ok: true, token: this.issue(s, uid) };
+    await this.sessions.purge(uid); // every other cookie of this user just stopped working
+    return { ok: true, token: this.issue(s, uid, meta) };
   }
 
   /** A manager sets (or resets) someone's password. That user is signed out everywhere. */
@@ -241,6 +254,7 @@ export class AuthService implements OnModuleInit {
     if (bad) return { ok: false, error: bad };
     s.users[targetId] = { hash: hashPassword(password as string), epoch: (s.users[targetId]?.epoch ?? 0) + 1 };
     this.write(s);
+    await this.sessions.purge(targetId);
     return { ok: true };
   }
 
@@ -254,16 +268,32 @@ export class AuthService implements OnModuleInit {
     }
     delete s.users[targetId];
     this.write(s);
+    await this.sessions.purge(targetId);
     return { ok: true };
   }
 
+  /**
+   * End ALL of one person's sessions (without touching their password): bumps their epoch. With `keepMeta` the caller is that person and
+   * stays signed in here — a fresh session is issued and its token returned.
+   */
+  async revokeUserSessions(targetId: string, keepMeta?: SessionMeta): Promise<Result<{ token?: string }>> {
+    const s = this.state();
+    const cred = s?.users[targetId];
+    if (!s || !cred) return { ok: false, error: 'That user has no sessions (no password).', status: 404 };
+    s.users[targetId] = { hash: cred.hash, epoch: cred.epoch + 1 };
+    this.write(s);
+    await this.sessions.purge(targetId);
+    return { ok: true, ...(keepMeta ? { token: this.issue(s, targetId, keepMeta) } : {}) };
+  }
+
   /** Sign everyone else out; keep the caller signed in. */
-  signOutEverywhere(uid: string): { token: string } | null {
+  async signOutEverywhere(uid: string, meta?: SessionMeta): Promise<{ token: string } | null> {
     const s = this.state();
     if (!s?.users[uid]) return null;
     s.secret = randomBytes(32).toString('base64url');
     s.epoch += 1;
     this.write(s);
-    return { token: this.issue(s, uid) };
+    await this.sessions.purge(); // the signing key changed: every session ended
+    return { token: this.issue(s, uid, meta) };
   }
 }
