@@ -1,6 +1,11 @@
 # Plan: agent store (catalog of agents + skills, editable by hand or by an admin agent)
 
-> Status: DRAFT (2026-10-07). Distribution layer for the domain packs in docs/plan-domain-packs.md.
+> Status (checked against the code 2026-10-12): PARTIALLY implemented. DONE: local file agents, built-in `admin` + bundled template catalog (`agent/catalog/agents/`,
+> 9 templates incl. `researcher`; template picker under "+ New agent"), admin in-process tools with approval cards, starter packs (`agent/packs/*`, see docs/plan-domain-packs.md).
+> OPEN (not built): `package.yaml` manifests, `InstalledPackage` table, install/update/reset/fork lifecycle and Store page (S1), requirements check (S3),
+> remote registry (S4), skill namespacing `<id>/<name>`. The text below is the original design; §0/§0.1 describe what shipped (it is committed now, commit d6defcc).
+>
+> Original status: DRAFT (2026-10-07). Distribution layer for the domain packs in docs/plan-domain-packs.md.
 > Today agents are files (`agent/agents/*.md`) and skills are files (`agent/skills/{core,learned}/*.md`);
 > shipped ones are three-way-merged on update by `AgentFilesSyncService`, which deliberately skips
 > `agents/*.md` (user-owned). The store makes agents installable, updatable and customizable units.
@@ -16,7 +21,7 @@
   unless we add update tracking later (so "S1 merge-based updates" below is optional/deferred).
 - Existing installs keep the agents they already have; only fresh installs get the reduced list.
 
-## 0.1 Implemented so far (uncommitted, 2026-10-07)
+## 0.1 Implemented (committed since 2026-10-07)
 
 - Templates moved to `agent/catalog/agents/`; built-in admin shipped as `agent/builtin/admin.md`.
 - `AdminAgentSeedService`: seeds `agents/admin.md` once (marker `.sync/admin-seeded`); existing installs keep
@@ -109,16 +114,16 @@ A package is executable policy: its prompt, `allowedTools` and `mcp` config deci
 
 ## 7. Phases
 
-- **S0 — format + bundled catalog.** Define `package.yaml`; convert the 8 shipped agents + their skills into
+- **S0 — format + bundled catalog.** *(PARTLY: bundled catalog of plain agent files exists; no `package.yaml`, no `dev` pack format, skills not bundled per agent)* Define `package.yaml`; convert the 8 shipped agents + their skills into
   the `dev` pack; `catalog` service lists them; no behavior change for existing installs.
-- **S1 — install/update/reset API + Store UI.** `InstalledPackage` table (Postgres + SQLite migrations),
+- **S1 — install/update/reset API + Store UI.** *(OPEN; instantiating a template = admin `propose_agent`, or the template picker)* `InstalledPackage` table (Postgres + SQLite migrations),
   merge-based update, snapshots, source/modified badges on the Agents page.
-- **S2 — admin agent.** `agent-admin` + `propose_agent*`/`propose_skill`/`install_package` tools, approval
+- **S2 — admin agent.** *(DONE as built-in `admin`, tools `propose_agent` / `propose_skill` / `catalog_*`; `install_package` not needed; approval card shows full content, not a diff)* `agent-admin` + `propose_agent*`/`propose_skill`/`install_package` tools, approval
   with diff view, skills editor in the dashboard.
-- **S3 — requirements check.** Verify MCP/binaries/provider capabilities at install and before a run
+- **S3 — requirements check.** *(OPEN)* Verify MCP/binaries/provider capabilities at install and before a run
   (fails early instead of at run time).
-- **S4 — remote registry.** GitHub-hosted index, signing, version pinning.
-- **S5 — first domain packs** (language learning first), per docs/plan-domain-packs.md.
+- **S4 — remote registry.** *(OPEN)* GitHub-hosted index, signing, version pinning.
+- **S5 — first domain packs** *(DONE in another form: English, Home renovation, Software team starter packs via `PacksService`)* (language learning first), per docs/plan-domain-packs.md.
 
 ## 8. Open decisions
 

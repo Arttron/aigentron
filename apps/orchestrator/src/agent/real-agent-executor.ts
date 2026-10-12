@@ -547,6 +547,7 @@ export class RealAgentExecutor extends AgentExecutor {
       onHeartbeat,
       onCreateSubtask: ctx.onCreateSubtask,
       onCheckSubtasks: ctx.onCheckSubtasks,
+      onCompleteSubtask: ctx.onCompleteSubtask,
       onScheduleCheck: ctx.onScheduleCheck,
       kb: {
         list: () => this.knowledge.listReport(agentDef?.name ?? null),

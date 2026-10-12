@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { readCollapsed, statusSummary, writeCollapsed } from '@/lib/collapsed';
 import { cn } from '@/lib/cn';
 import type { TaskListItem } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -12,6 +14,16 @@ export function TaskList({
   tasks?: TaskListItem[];
   onDelete: (id: string) => void;
 }) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed);
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      writeCollapsed(next);
+      return next;
+    });
+
   if (tasks.length === 0) {
     return <Muted>No tasks yet. Create one above.</Muted>;
   }
@@ -42,9 +54,15 @@ export function TaskList({
             {t.title}
           </Link>
           {!isChild && kids.length > 0 && (
-            <span className={styles.count} title="subtasks">
-              ⋔ {kids.length}
-            </span>
+            <button
+              type="button"
+              className={styles.count}
+              aria-expanded={!collapsed.has(t.id)}
+              title={collapsed.has(t.id) ? `Show ${kids.length} subtask(s) — ${statusSummary(kids.map((k) => k.status))}` : 'Hide the subtasks'}
+              onClick={() => toggle(t.id)}
+            >
+              {collapsed.has(t.id) ? '▸' : '▾'} {kids.length} subtask{kids.length === 1 ? '' : 's'}
+            </button>
           )}
           {(t._count?.approvals ?? 0) > 0 && <span className={styles.pill}>{t._count?.approvals} ⚠</span>}
           {t.agentName && <Badge tone="neutral">{t.agentName}</Badge>}
@@ -53,7 +71,8 @@ export function TaskList({
             ✕
           </Button>
         </div>
-        {kids.length > 0 && <ul className={styles.children}>{kids.map((k) => row(k, true))}</ul>}
+        {kids.length > 0 && collapsed.has(t.id) && <div className={styles.summary}>{statusSummary(kids.map((k) => k.status))}</div>}
+        {kids.length > 0 && !collapsed.has(t.id) && <ul className={styles.children}>{kids.map((k) => row(k, true))}</ul>}
       </li>
     );
   };

@@ -8,7 +8,7 @@ Answers are **text by default**. Voice is opt-in and works in two directions:
 ## Setup (Settings → Voice)
 
 1. Add a provider of kind **OpenAI** (Settings → Providers) with its API key. OpenAI itself, Groq, or any local OpenAI-compatible server (Whisper / Piper / Kokoro…) via the provider's Base URL.
-2. In **Settings → Voice** switch on recognition and/or synthesis, choose provider, model, language, voice. Press **Test** — it synthesises a phrase and recognises it back.
+2. In **Settings → Voice** switch on recognition and/or synthesis, choose provider, model, language (automatic by default; 50 languages can be picked), voice. Recognition models with timestamps (`whisper-1`, Groq Whisper) also let video frames be taken at spoken moments — see `docs/media.md`. Press **Test** — it synthesises a phrase and recognises it back.
 
 The configuration lives in `secrets/voice.json` (not in the database). Keys are never stored there: the provider registry holds them.
 

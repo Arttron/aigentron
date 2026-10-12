@@ -301,9 +301,10 @@
 
 /* On the pinned phone task screen the assistant moves up so it never covers the message box. */
 :global(html[data-pinned]) .float {
-  bottom: 84px;
-  width: 52px;
-  height: 52px;
+  bottom: 92px;
+  /* 52 px turned the animation into a speck — "thinking" must still be readable on a phone */
+  width: 68px;
+  height: 68px;
 }
 :global(html[data-pinned]) .edgeTab {
   bottom: max(var(--tab-bottom, 24px), 96px);
@@ -314,7 +315,7 @@
   display: none;
 }
 
-/* The mascot fills whatever size the floating bubble has (72px on phones, 52px on the pinned task screen). */
+/* The mascot fills whatever size the floating bubble has (72px on phones, 68px on the pinned task screen). */
 .bubbleRing > * {
   width: 100% !important;
   height: 100% !important;

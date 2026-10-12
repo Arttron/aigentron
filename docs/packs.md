@@ -10,18 +10,18 @@ Shipped with the release in `agent/packs/<name>/`.
 | `development` 💻 | software work on a repository | pm, architect, backend, frontend, designer, reviewer (from the shared catalog) |
 
 ## Installing
-- **Dashboard → Agents → Starter packs → Install** (uses your browser's time zone for the schedules), or
+- **Dashboard → Agents → Starter packs → Install** (the button reads *Install again (fills gaps)* once everything is there; uses your browser's time zone for the schedules), or
 - **ask the admin** ("set me up for learning English") — it shows one approval card listing the contents.
 
 Installing **never overwrites** anything that already exists (agents, skills, library notes, schedules are matched by name/title), so you can press it again
 to fill gaps and your own edits stay. **Schedules are created switched OFF** and without a chat: open Settings → Schedules, pick the chat and turn them on.
-They start tasks, so they use model budget.
+They start tasks, so they use model budget. Prepared: English — a daily lesson (19:00) and a weekly review (Sun 18:00); renovation — a weekly check-in (Mon 10:00); development — a weekly repository health check (Mon 09:00, read-only reviewer).
 
 ## After installing (the pack tells you too)
-1. Fill in the starter note in **📚 Resources** — *Learner profile* / *Renovation brief* (+ measurements, budget) / *Project conventions*. Agents read it first.
+1. Fill in the starter note in **📚 Resources** (`docs/resources.md`) — *Learner profile* / *Renovation brief* (+ measurements, budget) / *Project conventions*. Agents read it first.
 2. For renovation: upload room photos to Resources with a one-line description each.
 3. Optional: connect Telegram (ask the admin) so reminders and results reach your phone.
-4. Start with a first task for the pack's lead agent (e.g. `english-tutor`: "assess my level with a short chat").
+4. Start with a first task for the pack's lead agent (e.g. `english-tutor`: "assess my level with a short chat"; the tutor and quizmaster ask quiz items with answer buttons, see `docs/questions.md`). For larger reference material (a textbook, regulations) create a base in **🧠 Knowledge** (`docs/knowledge-base.md`).
 
 Notes
 - English/renovation agents are written for non-code work: they can read the library and the project folder and keep notes there (progress log, plan) but have no shell. Point the project at a

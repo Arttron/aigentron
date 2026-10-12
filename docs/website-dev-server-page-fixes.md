@@ -1,5 +1,12 @@
 # arttron.dev/en/dev-server — recommendations
 
+> Status (2026-10-12): handoff document for an external site repo; its page content cannot be verified from this repo, so nothing here is marked as applied.
+> The repo-side facts below still match the code (`.env.example` ROUTINE_MODEL=qwen3-coder:30b, network `lds-agents`, ports 3000/3001 in the full profile, `install.sh`
+> resolving versions via the GitHub releases API). Changes since this was written: the current release is v0.1.54 (not v0.1.0); `install.sh` now also offers a bare-metal
+> install (systemd, builds from source, asks Docker vs bare-metal on a terminal); the single-container profile serves the dashboard and API on one port (3001) from one Node process;
+> the orchestrator now has login + sessions, so "no authentication" wording for server deployment is outdated; the full compose stack binds published ports to 127.0.0.1 by default (`BIND_ADDRESS`).
+> Still no published container registry image.
+>
 > Reviewed 2026-07-21 against the current repo state (v0.1.0, first public release).
 > This page lives in a separate site repo, not this one — this is a handoff document,
 > not something I can fix directly. Content pulled from the page's own Next.js i18n

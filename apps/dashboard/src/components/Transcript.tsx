@@ -29,9 +29,42 @@ const formatTs = (ts?: string) => {
     : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
+/** No event from the agent for this long while running → show a "no reply" notice. */
+const SILENCE_MS = 30_000;
+
+/** Ambient strip under the chat: a light runs along it while a request is in flight; each event from the agent flashes it at a random spot. */
+const PIXEL_COLORS = ['#ff4d4d', '#ffa500', '#ffee33', '#4dff7c', '#33ffee', '#4d79ff', '#d94dff', '#ff66c4'];
+function AmbientStrip({ running, activityAt, look }: { running: boolean; activityAt?: number; look: string }) {
+  const [flashes, setFlashes] = useState<{ id: number; x: number; w: number; color: string }[]>([]);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (!running) return;
+    const id = Date.now() + Math.random();
+    const color =
+      look === 'terminal'
+        ? PIXEL_COLORS[Math.floor(Math.random() * PIXEL_COLORS.length)]
+        : `hsl(${Math.floor(Math.random() * 360)} 90% 62%)`;
+    setFlashes((f) => [...f.slice(-5), { id, x: 4 + Math.random() * 92, w: look === 'terminal' ? 8 * (2 + Math.floor(Math.random() * 5)) : 40 + Math.random() * 70, color }]);
+    const t = setTimeout(() => setFlashes((f) => f.filter((x) => x.id !== id)), 1100);
+    return () => clearTimeout(t);
+  }, [activityAt, running]);
+  return (
+    <div className={cn(styles.strip, running && styles.stripOn)} data-look={look} aria-hidden>
+      {running && <span className={styles.runner} />}
+      {flashes.map((f) => (
+        <span key={f.id} className={styles.flash} style={{ left: `${f.x}%`, width: f.w, ['--c' as string]: f.color }} />
+      ))}
+    </div>
+  );
+}
+
 const WORKING: Partial<Record<TaskStatus, string>> = {
   queued: 'queued — waiting for a free worker slot',
-  running: 'agent is working (a local model can take a few minutes for the first reply)',
+  running: 'agent is working',
   needs_approval: 'waiting for your approval above',
 };
 
@@ -81,8 +114,14 @@ export function Transcript({
   terminal,
   fill = false,
   onAsk,
+  activityAt,
+  localModel = false,
 }: {
   taskId: string;
+  /** Timestamp (ms) of the last event from the agent. */
+  activityAt?: number;
+  /** The agent runs a local model through the LiteLLM gateway — the first reply can take minutes. */
+  localModel?: boolean;
   /** Lets a photo / video be opened for a conversation (mark a spot, ask). */
   onAsk?: (prompt: string, attachments: string[]) => Promise<void>;
   lines: LogLine[];
@@ -100,6 +139,26 @@ export function Transcript({
       .translate(text, navigator.language || 'English')
       .then((r) => setTranslated((m) => ({ ...m, [id]: r.ok && r.text ? r.text : `⚠ ${r.error ?? 'could not translate'}` })))
       .catch((e) => setTranslated((m) => ({ ...m, [id]: `⚠ ${(e as Error).message}` })));
+  };
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (status !== 'running') return;
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, [status]);
+  const silentSec = status === 'running' && activityAt ? Math.floor((now - activityAt) / 1000) : 0;
+  // Messages that arrive after the chat has been on screen for a moment rise out of the strip.
+  const known = useRef<Set<string>>(new Set());
+  const rising = useRef<Set<string>>(new Set());
+  const liveFrom = useRef<number | null>(null);
+  if (lines.length > 0 && liveFrom.current === null) liveFrom.current = Date.now() + 1500;
+  const isLive = liveFrom.current !== null && Date.now() > liveFrom.current;
+  const rise = (id: string) => {
+    if (!known.current.has(id)) {
+      known.current.add(id);
+      if (isLive) rising.current.add(id);
+    }
+    return rising.current.has(id) ? styles.rise : undefined;
   };
   const [look, setLook] = useLook();
   const [show, setShow] = useShow();
@@ -256,7 +315,7 @@ export function Transcript({
         {items.map((it, n) => {
           if (it.type === 'user') {
             return (
-              <div key={it.line.id} className={styles.userMsg}>
+              <div key={it.line.id} className={cn(styles.userMsg, rise(it.line.id))}>
                 <span className={styles.prompt} aria-label="you">
                   you&gt;
                 </span>
@@ -268,7 +327,7 @@ export function Transcript({
           }
           if (it.type === 'agent') {
             return (
-              <div key={it.line.id} className={cn(styles.agentMsg, it.final && styles.final)}>
+              <div key={it.line.id} className={cn(styles.agentMsg, it.final && styles.final, rise(it.line.id))}>
                 <span className={styles.prompt} aria-label={it.line.speaker ?? 'agent'} style={it.line.speaker ? { color: speakerColor(it.line.speaker) } : undefined}>
                   {it.line.speaker ? `${it.line.speaker}>` : it.final ? 'result>' : 'agent>'}
                 </span>
@@ -320,7 +379,7 @@ export function Transcript({
           }
           const l = it.line;
           return (
-            <div key={l.id} className={cn(styles.line, styles[l.kind])}>
+            <div key={l.id} className={cn(styles.line, styles[l.kind], rise(l.id))}>
               <span className={styles.kind}>{l.kind}</span>
               {ts(l)}
               {l.text}
@@ -333,15 +392,23 @@ export function Transcript({
             ✅ The agent has finished. Happy with the result? Write “done” (or press Mark as done) to close the task — or write what to change.
           </div>
         )}
+        {status === 'running' && silentSec * 1000 >= SILENCE_MS && (
+          <div className={cn(styles.line, styles.working)}>
+            ⏳ No reply from the agent for {silentSec} s — it may still be thinking (the first reply of a slow or local model can take minutes). If this
+            keeps going, check the provider or stop the task.
+          </div>
+        )}
         {WORKING[status] && (
           <div className={cn(styles.line, styles.working)}>
             {WORKING[status]}
+            {status === 'running' && localModel && ' (a local model can take a few minutes for the first reply)'}
             <span className={styles.cursor} aria-hidden>
               █
             </span>
           </div>
         )}
       </div>
+      <AmbientStrip running={status === 'running'} activityAt={activityAt} look={look} />
       {away && (
         <button type="button" className={styles.jump} onClick={toBottom}>
           ↓ latest

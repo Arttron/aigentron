@@ -3,7 +3,7 @@
 A simple knowledge base made of plain files. Everything in it is available to **every agent of the project**.
 
 ## What goes in
-Text notes (Markdown), images (png/jpg/webp/gif), PDFs, **videos** (mp4/mov/webm/mkv, ≤ 300 MB each — see `docs/media.md`) and any other file (≤ 25 MB each, ≤ 500 resources, ≤ 2 GB in total).
+Text notes (Markdown), images (png/jpg/webp/gif), PDFs, **videos** (mp4/mov/webm/mkv, ≤ 300 MB each — see `docs/media.md`) and any other file (≤ 25 MB each, text notes ≤ 1 MB, ≤ 500 resources, ≤ 2 GB in total).
 Typical: house measurements and reference photos, a learner's profile and vocabulary, a style guide, a price list, meeting notes.
 
 ## How to add
@@ -24,4 +24,4 @@ in the minimal image and on bare metal it is `<data dir>/agent/resources/`, so i
 Images and PDFs open inline in the dashboard; everything else downloads (an uploaded `.html` can never run as a page).
 
 ## Not (yet) included
-Semantic search and automatic chunking of large documents — that is the optional *knowledge base* module (`docs/plan-knowledge-base.md`), which can read these same files later.
+Semantic search and automatic chunking of large documents — that is the optional *knowledge base* module (`docs/knowledge-base.md`; resources can be imported into a base there), which does not read these files by itself.

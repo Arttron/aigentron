@@ -5,6 +5,7 @@ import {
   HEARTBEAT_TOOL,
   CREATE_SUBTASK_TOOL,
   CHECK_SUBTASKS_TOOL,
+  COMPLETE_SUBTASK_TOOL,
   SCHEDULE_CHECK_TOOL,
   RESOURCES_SEARCH_TOOL,
   ASK_USER_TOOL,
@@ -168,6 +169,7 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onHeartbeat) names.push(HEARTBEAT_TOOL);
   if (params.onCreateSubtask) names.push(CREATE_SUBTASK_TOOL);
   if (params.onCheckSubtasks) names.push(CHECK_SUBTASKS_TOOL);
+  if (params.onCompleteSubtask) names.push(COMPLETE_SUBTASK_TOOL);
   if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
   if (params.onSearchResources) names.push(RESOURCES_SEARCH_TOOL);
   if (params.onShowImages) names.push(SHOW_IMAGES_TOOL);

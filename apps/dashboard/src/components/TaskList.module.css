@@ -41,8 +41,10 @@
   font-weight: 700;
 }
 
-/* neutral count pill (number of subtasks) */
+/* neutral count pill (number of subtasks) — a button that folds / unfolds them */
 .count {
+  font: inherit;
+  cursor: pointer;
   background: var(--bg-elev-2);
   color: var(--text-dim);
   border: none;
@@ -101,4 +103,11 @@
   .children {
     padding-left: 12px;
   }
+}
+
+/* the one-line status summary shown while the subtasks are folded */
+.summary {
+  margin: 2px 0 4px 44px;
+  font-size: 11.5px;
+  color: var(--text-dim);
 }

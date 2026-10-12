@@ -94,11 +94,13 @@ export interface RunAgentParams {
    * independent child tasks. Each call creates + enqueues a subtask and resolves
    * with the new task's id/title. Wire this only for lead agents.
    */
-  onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{ id: string; title: string }>;
+  onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{ id: string; title: string; /** an equivalent open subtask already existed: nothing new was created */ reused?: boolean }>;
   /**
    * When set, the agent gets a `check_subtasks` tool that returns the current
    * status + latest result of this task's subtasks (so a lead can see progress).
    */
+  /** Mark one of this task's subtasks done (it must have finished its run). Resolves with a message for the model. */
+  onCompleteSubtask?: (id: string) => Promise<string>;
   onCheckSubtasks?: () => Promise<{ id: string; title: string; status: string; summary: string }[]>;
   /**
    * When set, the agent gets a `schedule_check` tool to be re-run after a delay
@@ -230,7 +232,7 @@ export interface AdminToolsWiring {
   /** Several related changes behind one approval — human-approved as a whole. */
   proposeBatch: (input: { items: { kind: string; args: Record<string, unknown> }[]; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Start a task for another agent on the user's behalf — human-approved. */
-  proposeTask: (input: { agentName: string; prompt: string; title?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  proposeTask: (input: { agentName: string; prompt: string; title?: string; standalone?: boolean; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** The admin's own change journal (what it changed, which changes can be reverted). */
   adminHistory: (input: { limit?: number }) => Promise<string>;
   /** Change a few platform settings — human-approved, previous values are journaled for undo. */

@@ -12,9 +12,12 @@ Two pillars:
 - **Dashboard** (`apps/dashboard`) — Vite + React SPA (CSS Modules), served same-origin
   by the orchestrator in production. Human ↔ agent communication, live logs, and approvals.
 
-> **Status:** v1 skeleton — in active construction. See milestones in the build log /
-> commit history. Auth/RBAC, multi-tenant, and production hardening are out of scope for
-> v1 (marked as `TODO`).
+> **Status:** active development (current release: see the `VERSION` file). Shipped: per-user
+> password sign-in with roles ([`docs/authentication.md`](docs/authentication.md)), provider failover,
+> structured task status with a watchdog, Telegram channel, scheduler, Codex runtime, knowledge bases,
+> camera/video/vision, voice, discussions between agents, starter packs, learned skills, in-place
+> updates. Not done: multi-tenancy, OS-level isolation of agents from the orchestrator, Slack/email
+> channels. Plan: [`docs/roadmap.md`](docs/roadmap.md) and [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
 ## Quick start
 
@@ -25,7 +28,7 @@ make up                # build + start the full stack
 
 Dashboard → http://localhost:3000 · Orchestrator API → http://localhost:3001
 
-**One command on the server:** `aigentron` opens the setup menu (providers, channels, agents, repository); `aigentron status | logs | restart | update | admin | reset-password | help` do the rest. The installer puts it on your PATH.
+**One command on the server:** `aigentron` opens the setup menu (providers, channels, agents, repository); `aigentron status | logs | restart | update | rollback | admin | reset-password | help` do the rest. The installer puts it on your PATH.
 
 **First-run setup:** once the stack is up, `pnpm setup` (or `node infra/setup-wizard.mjs`)
 runs a guided CLI wizard for providers, channels, agents, skills, and an optional project
@@ -38,9 +41,9 @@ It can be re-run any time to **edit** what is already set up: provider model / b
 ### Prerequisites
 
 - Docker Desktop (or Docker Engine + Compose v2).
-- [Ollama](https://ollama.com) installed and running **on the host** (not in a
-  container) — it powers the "routine" model tier. The orchestrator container reaches
-  it at `http://host.docker.internal:11434`.
+- Optional: [Ollama](https://ollama.com) installed and running **on the host** (not in a
+  container) — it backs the local "routine" model provider. The orchestrator container reaches
+  it at `http://host.docker.internal:11434`. Without it, use cloud / subscription providers only.
 - A one-time external Docker network, shared with the project's own compose stack so
   agents can reach project databases by service name:
 
@@ -57,8 +60,8 @@ It can be re-run any time to **edit** what is already set up: provider model / b
    ```
 
    Fill in at minimum:
-   - `ANTHROPIC_API_KEY` — required for the "complex" model tier (cloud Claude).
-   - `ROUTINE_MODEL` — a tool-capable model pulled into your host Ollama (default
+   - `ANTHROPIC_API_KEY` — for the cloud Claude provider (or sign in with a subscription token instead — see the minimal-profile section).
+   - `ROUTINE_MODEL` — only if you use local Ollama: a tool-capable model pulled into your host Ollama (default
      `qwen3-coder:30b`; avoid `qwen2.5-coder` — it doesn't emit structured tool calls
      and breaks the agent SDK).
 
@@ -87,6 +90,9 @@ It can be re-run any time to **edit** what is already set up: provider model / b
    docker compose --profile mcp up -d
    ```
 
+   A second, proxied browser (`--profile proxy`, credentials from `.env`) is described in
+   [`docs/browser-proxy.md`](docs/browser-proxy.md).
+
 5. **Open the dashboard** at http://localhost:3000. The orchestrator API is at
    http://localhost:3001.
 
@@ -96,6 +102,8 @@ It can be re-run any time to **edit** what is already set up: provider model / b
 make logs     # tail logs for all services
 make ps       # show service status
 make migrate  # run Prisma migrations inside the orchestrator container
+make admin    # chat with the built-in admin assistant in the terminal
+make test     # unit tests + the admin-skills drift check
 make down     # stop the stack
 make clean    # stop the stack AND remove volumes (destructive — wipes DB data)
 ```
@@ -118,7 +126,7 @@ separate LiteLLM service. SQLite + an in-process queue replace them. Full design
 > Where the project, agent files, secrets and env files live in each mode, and how cleanup works:
 > [`docs/workspace-layout.md`](docs/workspace-layout.md).
 >
-> Features: [media (camera, video, vision, pictures)](docs/media.md) · [questions with buttons](docs/questions.md) · [knowledge bases](docs/knowledge-base.md) · [discussion between agents](docs/discussions.md) · [browser through a proxy](docs/browser-proxy.md) · [voice](docs/voice.md) · [resources](docs/resources.md).
+> Features: [media (camera, video, vision, pictures)](docs/media.md) · [questions with buttons](docs/questions.md) · [knowledge bases](docs/knowledge-base.md) · [discussion between agents](docs/discussions.md) · [browser through a proxy](docs/browser-proxy.md) · [voice](docs/voice.md) · [resources](docs/resources.md) · [starter packs](docs/packs.md) · [sign-in](docs/authentication.md) · [any language / token policy](docs/languages.md) · [updates](docs/updates.md).
 
 **Status:** builds and runs correctly (verified end to end, including a real agent task
 against a real local Ollama through the self-managed LiteLLM). No container registry is

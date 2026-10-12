@@ -1,5 +1,10 @@
 # Plan — modular runtime: deploy profiles (full ↔ minimal/single-container)
 
+> Status: implemented (phases 0-5 plus the bare-metal and Vite-SPA addenda; shipped in the 0.1.x releases, installer `install.sh` builds the minimal image
+> or runs bare-metal under systemd). Open / changed since: the image is still built from source (no published registry image: `install.sh` runs
+> `docker build`); runtime `node_modules` is still not pruned; the dashboard auth gap below is closed (the orchestrator has login + sessions, `apps/orchestrator/src/auth`);
+> the Phase 4 text about Next standalone and `minimal-supervisor.mjs` is historical (see the Vite SPA addendum; the supervisor is gone).
+
 Goal: make the infrastructure pieces **pluggable modules** selected by config,
 so the same codebase runs in two first-class profiles:
 
@@ -63,7 +68,7 @@ one Dockerfile), not code branches.
     `ensureRoute` at agent-spawn must be a no-op (route presence is guaranteed
     by generation) rather than an admin-API call.
 - **Remote exposure (AWS) is a real deployment, not localhost:** the dashboard's
-  user-switcher is not authentication. Minimal-profile docs must front it with
+  user-switcher is not authentication *(historical: login + sessions have since been built)*. Minimal-profile docs must front it with
   something (Tailscale/VPN, an authenticating reverse proxy, or at least
   binding + `MCP_TOKEN` as today). Full auth is out of scope here — flagged,
   not solved.

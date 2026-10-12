@@ -1,6 +1,12 @@
 # Plan: universal project-execution platform (domain packs, knowledge base, tools)
 
-> Status: DRAFT for discussion (2026-10-07). Based on a code + docs review; nothing here is implemented.
+> Status (checked against the code 2026-10-12): PARTIALLY implemented. Original draft (2026-10-07): based on a code + docs review; nothing was implemented then.
+> DONE: starter packs (`agent/packs/{english,renovation,development}/pack.json`, `PacksService`: agents + catalog agents + skills + Resources + switched-off schedules,
+> never overwrites; dashboard Agents → Starter packs; admin tools), knowledge base (docs/plan-knowledge-base.md), shared Resources library, user-defined schedules
+> (cron, time zone, quiet hours), research MCP (§2.5), Telegram voice -> STT / TTS (Settings → Voice), media (video up to 300 MB, vision), `ask_user` drills in the English pack.
+> OPEN: `Project` entity, pack manifest as `pack.yaml` with SOUL overlay / `mcp/` / `knowledge/` / `verify.sh` / `requires` (the real `pack.json` has none of these),
+> pack uninstall/update, human agents, tools profile (Blender/FreeCAD sidecars), plain-dir workspace provider and the Phase 1 de-IT items (not verified one by one),
+> modeling/CAD and construction packs (a `renovation` pack exists instead).
 > Goal: make Aigentron useful beyond software — construction, language learning, 3D/CAD modeling —
 > by extending it with knowledge bases, domain agents and extra tools, without forking the core.
 > Constraints that still hold: cheap + local-first, works in the minimal single-container profile
@@ -26,7 +32,7 @@ learned skills (Phase 6), inbound MCP host, shared-workspace mode without a repo
 | Danger classifier (git push, npm publish; every `mcp__*` gated) | code, not config | `packages/shared/src/classify.ts` |
 | Preview server (`npm run dev`, ports 3200-3203) | hard to web dev, optional | `preview.service.ts` |
 
-**Gaps (nothing exists):** knowledge base / retrieval, `Project` entity (one workspace per instance),
+**Gaps as of the draft (2026-10-07; knowledge base, user-defined recurring tasks, voice input and the larger attachment cap for video have been built since):** knowledge base / retrieval, `Project` entity (one workspace per instance),
 pack/plugin concept, system-binary packaging, voice input, user-defined recurring tasks,
 config-driven classifier policy, MCP/CLI env passthrough (agent env is an allowlist), attachment cap
 (10 MB) too small for CAD/audio.
@@ -110,7 +116,7 @@ checked against the current code:
 
 ## 3. Phases
 
-**Phase 0 — pilot without code (1-2 days).** Shared mode, no repo. Hand-write one pack's files
+**Phase 0 — pilot without code (1-2 days).** *(superseded: English and Renovation starter packs were built directly)* Shared mode, no repo. Hand-write one pack's files
 (agents + skills + project SOUL + verify script) and run real tasks. Output: a list of what actually
 breaks, replacing guesses in this doc. Pick the pilot domain first (see §5).
 
@@ -122,18 +128,18 @@ breaks, replacing guesses in this doc. Pick the pilot domain first (see §5).
 - Classifier: config-driven read-only MCP allowlist per pack; non-dev shell rules stay as the safety net.
 - Env passthrough allowlist for MCP/CLI tools; configurable attachment cap; label strings in dashboard.
 
-**Phase 2 — Project entity + pack manifest.** `Project` model, `projectId` on tasks, per-project
+**Phase 2 — Project entity + pack manifest.** *(OPEN: no `Project`; a lighter pack manifest `pack.json` exists)* `Project` model, `projectId` on tasks, per-project
 settings; `pack.yaml`, install/update/uninstall, namespacing of skills, `requires` check with a clear
 "binary missing" error up front (today a missing MCP binary only fails at run time).
 
-**Phase 3 — knowledge base.** FTS stage, ingest pipeline, `kb_*` tools, dashboard page (browse, upload,
+**Phase 3 — knowledge base.** *(DONE with BM25 + optional embeddings instead of FTS; see docs/plan-knowledge-base.md)* FTS stage, ingest pipeline, `kb_*` tools, dashboard page (browse, upload,
 re-index), per-scope visibility. Embeddings as a later opt-in.
 
-**Phase 4 — tool packs.** MCP/CLI integrations per domain, sidecar compose profile, bare-metal
+**Phase 4 — tool packs.** *(OPEN)* MCP/CLI integrations per domain, sidecar compose profile, bare-metal
 installer hooks, preview-render hook replacing the web dev-server preview (Blender render -> PNG as an
 attachment).
 
-**Phase 5 — human-in-the-loop and rhythm.** Human agents (RFC-001 phase 3: inspector, tutor, CAD
+**Phase 5 — human-in-the-loop and rhythm.** *(PARTLY: voice STT and recurring schedules done; human agents open)* Human agents (RFC-001 phase 3: inspector, tutor, CAD
 reviewer, `waiting_human`), Telegram voice -> STT, user-defined recurring tasks (daily lesson,
 weekly site report) beyond the 1-hour `schedule_check`.
 

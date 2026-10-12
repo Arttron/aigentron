@@ -11,12 +11,17 @@ queued here runs on the same fleet and shows up in the dashboard and Telegram.
 - **create_task** queues work and returns `{ id, status, resource, dashboardUrl }`.
 - Runs are **asynchronous**. Two ways to learn the result:
   - **`wait_for_task(id)`** — a blocking tool that returns once the task settles
-    (done/failed/blocked/…) or times out. This is the reliable path for
+    (`review`/`done`/`failed`/`blocked`/`stalled`/`cancelled`, or `needs_approval`) or times out
+    (`timeoutSec`, 1–600, default 120). This is the reliable path for
     **tool-only clients** (e.g. claude.ai) that don't act on push notifications.
   - **Push** — `notifications/resources/updated` for `task://<id>` over the
     session's SSE stream, for resource-aware clients (e.g. Claude Desktop). You
     are auto-subscribed to any task you create or fetch; on each change, re-read
     `task://<id>` for the new `status` / `summary` / `prUrl`.
+- **`review` vs `done`:** when an agent finishes a task it ends in `review` ("ready — confirm"); `done` is set by a person
+  (dashboard / Telegram). Over MCP, send `follow_up(id, "done")` (a short explicit message such as "done" / "готово") to
+  accept the result — it closes the task and is not sent to the agent; any other text continues the work. Subtasks of a
+  lead agent end `done` on their own.
 - Because the fleet has none of your project's context, **put everything the
   task needs into `prompt`** (paste the relevant docs/discussion). Attaching
   files/rich references is a later iteration.
@@ -31,9 +36,9 @@ queued here runs on the same fleet and shows up in the dashboard and Telegram.
 | `get_agent`   | `name`                                           | one agent's full definition |
 | `create_task` | `prompt`, `title?`, `agentName?`, `references?`  | id + `task://<id>` |
 | `get_task`    | `id`                                             | status, summary, prUrl, subtasks |
-| `list_tasks`  | `q?`, `page?`, `pageSize?`                        | paginated list |
+| `list_tasks`  | `q?`, `page?`, `pageSize?` (≤100)                 | paginated list of `{id, title, status, parentId}` (no status/type filters here — the REST `GET /api/tasks` also takes `status` and `type`) |
 | `wait_for_task` | `id`, `timeoutSec?`                            | blocks until settled → status + `awaitingInput`/`awaitingApproval` |
-| `follow_up`   | `id`, `message`                                  | answer a question / add context (task must be settled) |
+| `follow_up`   | `id`, `message`                                  | answer a question / add context (task must be settled: review/blocked/stalled/failed/done); a bare "done" accepts a `review` task |
 | `approve_task`| `id`                                             | approve the task's pending gate → unblocks the run |
 | `deny_task`   | `id`                                             | deny the pending gate |
 | `cancel_task` | `id`                                             | new status |
@@ -102,10 +107,14 @@ Gotchas:
 - `MCP_ALLOWED_ORIGINS` — optional comma-separated `Origin` allowlist. When set,
   enables DNS-rebinding protection (the MCP-spec-recommended guard for local
   servers). Empty = accept any origin.
-- `MCP_TOKEN` — access token. Empty = open. When set, every request must present
+- `MCP_TOKEN` — access token. Empty = open (unless sign-in passwords are set, see below). When set, every request must present
   it as `Authorization: Bearer <token>` or a `?key=<token>` query param.
+- Settings → **MCP endpoint** shows the state and the connect URL (read-only; the token is never sent to the page).
 
 ## Security
+
+With dashboard passwords on (`docs/authentication.md`) `/api/mcp` without `MCP_TOKEN` needs a session; with a token it is
+checked by the token alone. Behind Cloudflare Access see `docs/remote-access.md` ("Things to know").
 
 Localhost-only: leaving `MCP_TOKEN` empty matches the server's "no-auth v1"
 posture (single operator on a trusted machine). The optional `MCP_ALLOWED_ORIGINS`

@@ -13,6 +13,7 @@ import { TitlesService } from '../titles/titles.service';
 import { fallbackTitle, isWeakPrompt } from '../titles/title-core';
 import { TASK_TYPES, isTaskType, typeWhere } from './task-types';
 import { isDoneMessage } from './done-intent';
+import { REUSABLE_STATUSES, isSameWork } from './subtask-dedupe';
 import { STATUS_FILTERS, isStatusFilter, statusesOf } from './task-status-filter';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { AttachmentsService } from '../attachments/attachments.service';
@@ -206,8 +207,23 @@ export class TasksService {
    * decomposition tool and by the API. Inherits the parent's referenced tasks
    * so a subtask sees the same related context.
    */
-  async createSubtask(parentId: string, input: SubtaskInput, createdById?: string) {
+  async createSubtask(parentId: string, input: SubtaskInput, createdById?: string, opts: { fromAgent?: boolean } = {}) {
     const parent = await this.get(parentId); // 404 if missing
+    // An AGENT must not multiply tasks: a cap per task, and a request for work that already exists (running, waiting for review or done) is
+    // answered with that subtask instead of a new one.
+    if (opts.fromAgent) {
+      const existing = await this.prisma.task.findMany({ where: { parentId }, select: { id: true, title: true, prompt: true, status: true, agentName: true } });
+      const limit = Math.max(1, parseInt(process.env.SUBTASK_LIMIT ?? '25', 10) || 25);
+      if (existing.length >= limit) {
+        throw new ConflictException(`This task already has ${existing.length} subtasks (limit ${limit}). Reuse or finish the existing ones (check_subtasks / complete_subtask) instead of splitting further.`);
+      }
+      const wanted = input.agentName ? await this.resolveAgentName(input.agentName).catch(() => input.agentName) : null;
+      const same = existing.find((e) => (REUSABLE_STATUSES as readonly string[]).includes(e.status) && (e.agentName ?? null) === (wanted ?? null) && isSameWork(e.prompt, input.prompt));
+      if (same) {
+        this.logger.log(`Subtask request for ${parentId} reused ${same.id} (${same.status}) instead of creating a duplicate`);
+        return { ...(await this.get(same.id)), reused: true as const };
+      }
+    }
     const inheritedRefs = parent.linksOut?.map((l) => l.toTaskId) ?? [];
     const child = await this.create(
       {
@@ -222,6 +238,22 @@ export class TasksService {
     // Mark the parent so it's resumed with results once all subtasks finish.
     await this.prisma.task.update({ where: { id: parentId }, data: { awaitingSubtasks: true } });
     return child;
+  }
+
+  /**
+   * A lead marks one of ITS subtasks done. The subtask must have finished its run: an agent's own subtask normally ends `done` by itself;
+   * this accepts one that ended `review`, `blocked`, `stalled` or `failed` (the lead dealt with it, or no longer needs it).
+   */
+  async completeSubtask(parentId: string, subtaskId: string): Promise<string> {
+    const id = subtaskId.trim();
+    const sub = await this.prisma.task.findUnique({ where: { id }, select: { id: true, title: true, status: true, parentId: true } });
+    if (!sub || sub.parentId !== parentId) return `No subtask ${id} of this task. Use check_subtasks to see the ids.`;
+    if (sub.status === 'done') return `Subtask ${id} «${sub.title}» is already done.`;
+    if (sub.status === 'cancelled') return `Subtask ${id} was cancelled — it cannot be marked done.`;
+    if (!isTerminalStatus(sub.status as TaskStatus)) return `Subtask ${id} is still ${sub.status} — wait until it has finished (check_subtasks).`;
+    await this.setStatus(id, 'done');
+    this.logger.log(`Subtask ${id} marked done by its lead ${parentId}`);
+    return `Subtask ${id} «${sub.title}» marked done (it was ${sub.status}).`;
   }
 
   /** Current status + latest result of a task's subtasks (for the check_subtasks tool). */

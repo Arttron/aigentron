@@ -22,6 +22,7 @@ export type InternalToolHandlers = Pick<
   | 'onHeartbeat'
   | 'onCreateSubtask'
   | 'onCheckSubtasks'
+  | 'onCompleteSubtask'
   | 'onScheduleCheck'
   | 'onSearchResources'
   | 'kb'
@@ -85,7 +86,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'create_subtask',
       description:
-        'Decompose this task into an independent subtask. Use it to split work into scoped units — each subtask runs on its own (its own worktree and agent) and starts immediately. Give a clear `prompt` — a full instruction, not a title, in terse English (facts and the next action; no pleasantries, no retelling of what the receiver can read itself) — an optional short `title`, and optionally the specialist `agent` to run it (e.g. backend, frontend, coder). Returns the new subtask id. Prefer this over doing everything yourself when the work has distinct parts.',
+        'Decompose this task into an independent subtask. Use it to split work into scoped units — each subtask runs on its own (its own worktree and agent) and starts immediately. Give a clear `prompt` — a full instruction, not a title, in terse English (facts and the next action; no pleasantries, no retelling of what the receiver can read itself) — an optional short `title`, and optionally the specialist `agent` to run it (e.g. backend, frontend, coder). Returns the new subtask id. Prefer this over doing everything yourself when the work has distinct parts. Before creating one, call check_subtasks: reuse a finished or running subtask that already covers it, and do not split work that one subtask can do — do not multiply tasks.',
       shape: { prompt: z.string(), title: z.string().optional(), agent: z.string().optional() },
       handler: async (args) => {
         const created = await params.onCreateSubtask!({
@@ -93,7 +94,9 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           title: typeof args.title === 'string' ? args.title : undefined,
           agent: typeof args.agent === 'string' ? args.agent : undefined,
         });
-        return `Created and queued subtask ${created.id} — "${created.title}".`;
+        return created.reused
+          ? `NOT created: an equivalent subtask is already open — ${created.id} «${created.title}». Wait for it (check_subtasks) instead of starting a duplicate.`
+          : `Created and queued subtask ${created.id} — "${created.title}".`;
       },
     });
   }
@@ -110,6 +113,16 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           ? subs.map((s) => `- [${s.id}] «${s.title}» → ${s.status}: ${s.summary}`).join('\n')
           : 'No subtasks yet.';
       },
+    });
+  }
+
+  if (params.onCompleteSubtask) {
+    specs.push({
+      name: 'complete_subtask',
+      description:
+        "Mark one of YOUR subtasks as done (`id` from check_subtasks). A subtask whose agent finished is already done; use this to accept one that ended blocked, stalled or failed when you do not need it any more or have dealt with it yourself, or one waiting as 'ready'. It must have finished its run (not still queued/running) and must belong to this task.",
+      shape: { id: z.string() },
+      handler: (args) => params.onCompleteSubtask!(String(args.id ?? '')),
     });
   }
 
@@ -622,11 +635,12 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_task',
         description:
-          "Propose starting a task for another agent on the user's behalf: `agentName` (an existing agent other than yourself), `prompt` (the full instruction — a complete brief, not a title), optional `title`, `reason`. It runs immediately after approval and spends that agent's provider budget. You get the task id back; check progress/results later with task_diagnose. Use it when the user asks you to get something done by an agent (e.g. 'ask the researcher to find…').",
-        shape: { agentName: z.string(), prompt: z.string(), title: z.string().optional(), reason: z.string() },
+          "Propose starting a task for another agent on the user's behalf: `agentName` (an existing agent other than yourself), `prompt` (the full instruction — a complete brief, not a title), optional `title`, `reason`. It runs immediately after approval and spends that agent's provider budget. By default it starts as a SUBTASK of this conversation (it appears nested under this chat, and you are told when it finishes) — do not multiply top-level tasks. Pass `standalone: true` only for an independent, long-running job the person will follow on its own, or when this conversation is not the right owner of it. You get the task id back; check progress/results later with task_diagnose. Use it when the user asks you to get something done by an agent (e.g. 'ask the researcher to find…').",
+        shape: { agentName: z.string(), prompt: z.string(), title: z.string().optional(), standalone: z.boolean().optional(), reason: z.string() },
         handler: async (args) =>
           (
             await admin.proposeTask({
+              standalone: args.standalone === true,
               agentName: String(args.agentName),
               prompt: String(args.prompt),
               title: typeof args.title === 'string' && args.title.trim() ? args.title.trim() : undefined,

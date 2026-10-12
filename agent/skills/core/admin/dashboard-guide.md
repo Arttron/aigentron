@@ -1,196 +1,126 @@
 ---
-description: Map of the dashboard — where each page, tab, form and button is, and click-by-click how-tos (add a provider, set the default, create an agent, connect a repo, answer approvals).
+description: Map of the dashboard — pages, tabs, forms, buttons, and click-by-click how-tos (providers, agents, repo, approvals, tasks, chat, knowledge, disk).
 ---
 # Dashboard guide
 
-Use this to tell the user EXACTLY where to click. Names below are the real labels in the interface. If you are not sure
-something exists, say so rather than inventing a menu item.
+Tell the user EXACTLY where to click, with the real labels below. Never invent menu items.
 
 ## Layout
 
-- **Top bar of the main page (`/`)**: user switcher, connection indicator, then links **🧑‍💻 Agents**, **📊 Stats**, **⚙ Settings**.
-- **Bottom-left**: theme toggle. **Bottom-right**: the mascot — click it to open this chat. Approval cards appear
-  next to it (bottom-right) when an agent needs a decision.
-- **Main page (`/`)**: the **New task** form on top (prompt, agent picker whose first option is the default lead,
-  attachments, "references" to earlier tasks) and the task list below (search box, pages; subtasks are grouped under their parent).
-- **A task page (`/tasks/<id>`)**: the conversation (transcript), pending approvals, a follow-up box to keep talking to the
-  agent, buttons to cancel or delete the task, attachments, links (PR / pushed branch) when there are any.
+- **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker whose first option is the default lead, attachments via 📎 menu incl. **📷 Camera**, "references" to earlier tasks, **💬 Discuss**) and the task list below (search, pages, filters).
+- Bottom-left: theme toggle. Bottom-right: the mascot — click to open this chat; approval cards and agent questions appear next to it on every page.
+- **Task page (`/tasks/<id>`)**: transcript, pending approvals, follow-up box, Cancel/Delete, attachments, PR/branch links, subtasks, **✅ Mark as done**, **💬 Discuss** (finished tasks).
 
-## Console (no dashboard needed)
+## Task list
 
-The same admin assistant is available in a terminal on the server: **`aigentron-admin`** (bare-metal / minimal image: run it in the
-shell or `docker exec -it <container> aigentron-admin`; dev compose: `make admin`). It resumes the user's last console chat
-(`/new` for a fresh one, `/help` for commands), shows my approval cards as text — type **a** to approve, **d** to deny, **v** to view the
-full content — and asks for keys in a **hidden prompt** that goes straight to the server (it is the console form of the secure key card).
-One-shot use: `aigentron-admin "how do I add a provider?"`. Useful for the very first setup when the dashboard isn't reachable.
+- **Status chips** (counts; empty hidden): *Needs attention* (approval, blocked, stalled, failed), *Active* (queued/running), *Ready*, *Done*, *Blocked*, *Approval*, *Failed*, *Stalled*, *Cancelled*. A status filter looks at every level (a blocked subtask under a finished parent is listed flat).
+- **Type chips** ("Type:"): *Tasks* (started in the dashboard), *Chats* (with a chat agent such as me), *From chats* (Telegram), *Scheduled*, *Discussions*, *Subtasks* (listed flat). The choice is remembered and in the URL (`/?type=chat`).
+- New tasks get a short title from a small model (Settings → General → **Task titles**: on/off, provider, model, **Try it**); titles set by a person or a schedule never change.
+- **Subtasks** fold under their parent ("▸ 3 subtasks" + "2 done · 1 running"), also on the task page; remembered per task.
+
+## Statuses: who sets "done"
+
+**done** is set only by a person. An agent that finishes makes the task **ready — confirm** (`review`). The person says **"done"** / **"готово"** (a short explicit message; longer text is a normal follow-up), presses **✅ Mark as done** (task header, or under the answer in Telegram) or sends `/done`. Anything else continues the task. Blocked / stalled / failed can be accepted as is ("Mark done anyway"). Subtasks are accepted by their lead and simply end *done*. Chip *Done* = confirmed by a person; *Ready* = waiting.
+
+## Subtasks
+
+Leads call `check_subtasks` and reuse an existing subtask; max 25 per task. New work from inside a task is a **subtask** (my `propose_task` too; `standalone: true` for an independent long job). A lead closes a handled one with `complete_subtask`.
+
+## The chat window (task page, this admin chat)
+
+- Bar toggles: **terminal** (monospace, prompt-style, follows light/dark; 8-bit palette, stepped pixels) / **classic**, and **all steps** / **messages only** ("N step(s) hidden"). Per browser, remembered.
+- **Ambient strip** under the chat (its bottom border): a light runs along it during a request, each agent event flashes it at a random spot in colour, new messages rise out of it. Decoration only.
+- While running, a line shows the work; after **30 s** without anything from the agent: "⏳ No reply from the agent for N s — it may still be thinking…". For an agent on an **Ollama** (local) provider only, it adds "a local model can take a few minutes for the first reply".
+- - Photo/video: click opens the viewer; **Ask about this moment** / **Mark and ask** freezes the frame, the person draws a rectangle and sends it as a follow-up.
+
+## Console
+
+Same assistant in a terminal: **`aigentron-admin`** (shell, or `docker exec -it <container> aigentron-admin`; dev compose: `make admin`). Resumes the last chat (`/new`, `/help`); cards as text — **a** approve, **d** deny, **v** view; keys via a **hidden prompt**. One-shot: `aigentron-admin "question"`.
 
 ## Sign-in
 
-The dashboard can be protected by passwords: Settings → General → **Security** sets the first one (the default operator's; a banner
-appears until then), and Settings → **Users** → 🔑 gives every other user their own. At the login screen a person picks their name and types
-the password; their role decides what they may do. Agents on the server can't use the API to approve their own requests. I can't
-set or read passwords — send the user to those screens. Forgotten: another operator resets it in Users, or `make reset-password` on the
-server (removes all). Details: `docs/authentication.md`.
-
-## Starter packs
-
-On the Agents page, **Starter packs**: ready-made teams for a kind of project — *English learning* (tutor, curriculum planner, quiz maker), *Home renovation* (planner,
-estimator, interior designer, materials advisor), *Software team* (PM, architect, backend, frontend, designer, reviewer). **Install** adds the agents, a skill, starter notes in
-the library (a profile/brief to fill in) and prepared schedules (**switched off**). It never overwrites anything you already have, so pressing it again only fills gaps. I can do it
-for you (`propose_pack_install`) and help fill in the notes.
-
-## Resources — the project's shared knowledge
-
-📚 **Resources** (link in the header of the task list): a library of notes, images, PDFs and any files. **Every agent of the project sees it** — its prompt carries the list (title, one-line description, tags) and it reads what is relevant, so a clear description matters more than the file name. Upload (button or drag & drop, up to 25 MB each, 500 MB total), or write a note (Markdown); give tags; optionally limit an item to chosen agents (none ticked = all). Typical contents: house measurements and reference photos (renovation), a learner profile and a vocabulary list (language learning), a style guide, a price list. Agents never change these files; people edit them here, and I can add or change text notes (`propose_resource`, with approval) and search them (`resources_search`).
-
-## Channels (Telegram) and getting a new chat in
-
-Settings → **Channels**. Telegram needs a bot (create one with @BotFather) and its token — the token is entered in a secure field, never in the chat. Only chats on the channel's
-allow-list can use the bot. When someone writes to the bot from a chat that is **not** allowed, the bot replies with that chat's id and the dashboard shows a yellow
-"is this you?" line under the channel with **Allow / Dismiss** (it forgets strangers after an hour). I can set the whole thing up (`propose_channel`, `request_secret`,
-`channels_list`). When a request for a key comes through Telegram, the bot sends a one-time link (needs `PUBLIC_URL`) to a small page where the key is typed — the link works once, for 10 minutes, and can only fill that one value.
-
-**What the chat shows.** By default a chat is quiet: only the agent's answers (and anything that needs the person — approvals, questions, failures) arrive; the live "what the agent is doing" line and notes like "queued" / "new task started" are off. `/progress on` in a chat turns them on, `/progress off` back. **Replying to (quoting) a message** addresses the task — and the agent — that wrote it, even if the chat is on another task now (the quote itself is passed along as context); a plain message continues the chat's active task.
-
-**Talking to a specific agent:** `/agents` lists them as tappable `/names`; `/pm text` or `@pm text` sends that agent a message (its own task in the chat is continued, else a new one starts) — small typos in the name are forgiven, and each agent also appears in the bot's `/` command menu with autocomplete.
-
-## Schedules (reminders and periodic tasks)
-
-Settings → **Schedules**: recurring jobs. Each one has a time ("every day at 09:30", weekdays, certain days, every N hours, or a raw cron), a time zone,
-optional quiet hours, and what it does — **post a message** to a chat (free, for reminders) or **start a task** for an agent (uses model budget; its updates arrive
-in that chat). Buttons: Run now (try it), Turn on/off, Edit, Delete. A run missed while the server was off is skipped, not fired late. I can create/change/delete them
-(`propose_schedule`, with approval) and list them (`schedules_list`).
-
-## Public access (domains, Cloudflare)
-
-To open the dashboard from outside, the user has two ways (or both): **A. built-in** — passwords (above) plus Settings → General → **Access**, a list of
-allowed domain names (empty = any; `localhost`, IP addresses and single-word names always work, so a port forward / `ssh -L` is never affected — unless the user ticks **Only these domains**, which refuses access by IP address from outside while the server itself keeps working); and
-**Own HTTPS:** Settings → General → **Web server** — port 80 can be switched on there (optional), and once a certificate (PEM + private key) is pasted there it serves HTTPS on 443 and redirects port 80 to HTTPS for domain names (`aigentron access` → *Ports & HTTPS certificate* does the same). I can't install certificates — point the user to it. **B. Cloudflare Access** — an alternative or extra layer: Cloudflare asks the visitor to sign in (e-mail code / Google / GitHub) before the server is reached; set up
-in the Cloudflare dashboard, steps in `docs/remote-access.md`. A random sub-domain alone is not protection. To make the server itself insist on Cloudflare's sign-in, Settings → General → **Cloudflare Access** takes the team domain
-(`yourteam.cloudflareaccess.com`) and the application's AUD tag, with Save and **Test**; when on, a request under a real domain name without Cloudflare's signed token is refused
-(`localhost`, IPs and the local network are never affected). On the server the same is `aigentron access` (domains, Cloudflare Access, `PUBLIC_URL`, listening on this machine only).
-I can read it (`access_status`) and change the allowed domains and the Cloudflare Access check (`propose_allowed_domains`, `propose_cloudflare_access`, with approval); `PUBLIC_URL` and the listen address are in the server's `.env` (the user runs `aigentron access`) — I can't change those.
-
-## Approvals
-
-An agent that wants to do something risky stops and shows a card: **Approve** or **Deny**. Under **Options** you can tick
-"Don't ask again for this exact call in this task" or "…anywhere (global; expires after 30 days by default)" — for MCP tools the exception covers only the same arguments, not the whole tool. When I need several changes I put them on ONE card ("N changes in one approval") — each item can be expanded; approving applies them in order. Cards from me (the admin) show the full change and
-have no "don't ask again" — each one is reviewed on its own. Runs have guard rails set in the server's `.env` (not changeable by me): `AGENT_IDLE_TIMEOUT_MS` aborts a run that went silent (not while an approval is pending), `BUDGET_TOKENS_PER_TASK` / `BUDGET_TOKENS_PER_DAY` make a task "blocked" with an explanation when its token budget is used up. Approvals time out (deny) after the time set in
-Settings → General → Approvals.
+Settings → General → **Security** sets the first password (banner until set); Settings → **Users** → 🔑 gives others theirs. Login: name + password. I can't set/read passwords. Forgotten: another operator resets it in Users, or `make reset-password` on the server (removes all). `docs/authentication.md`.
 
 ## Agents page (`/agents`)
 
-Two tabs: **Agents** and **Starter packs** (ready-made sets of agents, skills, notes and switched-off schedules — see "Starter packs"; `/agents?tab=packs` opens it directly). The **Agents** tab starts with *Default lead agent* (the agent that leads tasks which don't pick one; saved as soon as it is chosen — it used to live in Settings → General).
-The Agents tab lists agents with **Edit** and ✕ (the built-in admin has a "built-in" badge instead — it can't be deleted).
-**+ New agent** (and **Edit**) opens the form in a dialog. At the top, **Start from a template** (optional) lists the shipped templates (pm, architect, backend, frontend,
-designer, coder, reviewer, local-helper, researcher) — picking one pre-fills every field; then set the *Name*, choose a *Provider*, edit anything and save.
-Fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, and the system prompt ("instructions"). I can create and edit agents for the user via approvals — they can
-also do it by hand here.
+Tabs **Agents** and **Starter packs** (`/agents?tab=packs`). Agents tab starts with *Default lead agent* (saved on choice). List with **Edit** and ✕ (built-in admin: "built-in" badge, only routing — provider/model — editable). **+ New agent** / **Edit** opens a dialog: **Start from a template** (pm, architect, backend, frontend, designer, coder, reviewer, local-helper, researcher) pre-fills; fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, instructions. I can do it via approvals.
+**Starter packs**: *English learning*, *Home renovation*, *Software team*. **Install** adds agents, a skill, starter notes (profile/brief to fill in) and schedules (**off**); never overwrites. I can do it (`propose_pack_install`).
+
+## 📚 Resources (`/resources`)
+
+Notes, images, PDFs, files; **every agent** sees the list (title, one-line description, tags) in its prompt and reads what is relevant — a clear description matters most. Upload (button/drag & drop, ≤25 MB each, 500 MB total; videos ≤300 MB) or write a Markdown note; tags; optionally limit to chosen agents (none = all). Agents never edit them; I add/change text notes (`propose_resource`) and search (`resources_search`).
+
+## 🧠 Knowledge (`/knowledge`)
+
+Large reference material agents search instead of carrying in the prompt (regulations, manuals, saved web pages). **+ New base** (name, one-line description, which agents; none = all); upload PDF / Word / Markdown / text / HTML / CSV, add a note, pick from Resources, or pull in web pages saved by research tools. Passages: *section* / *paragraph* / *chars*, size, overlap. Search is keyword (BM25), always works; with an embedding provider chosen in the base's settings also by meaning (costs a little, text goes to that provider). Agents use `kb_list`/`kb_search`/`kb_read` (`kb_add` if allowed). I can't create bases — guide the person.
 
 ## Stats (`/stats`)
 
-Token and request usage per provider with ranges: Today, 7 days, 30 days, All time.
+Tokens and requests per provider: Today, 7 days, 30 days, All time.
 
 ## Settings (`/settings`) — tabs
 
-**General**: *Version & updates* — the installed version, the newest release with its notes, **Check now**, and **Update to X** (an operator confirms; the server restarts for a minute or two, the previous version is kept for `aigentron rollback`; a Docker install cannot update itself and says to run `aigentron update`; I can start it too with `propose_update`). Repository (GitHub) — *Repo URL* (blank = local workspace, no remote), *Base branch*, *GitHub token*,
-*Project subdirectory* (a RELATIVE folder inside the repo such as `apps/web`, or empty for the repo root — a git address/URL here is rejected; the URL goes in *Repo URL*); *Escalations* (default channel + chat/thread id for questions from tasks with
-no channel); *Agent instructions (skill)* — text appended to every agent's prompt; *Verification gate* — commands run after
-each run + max auto-fix attempts; *Task queue* — concurrency; *Approvals* — timeout in seconds; *Display* — theme.
+General, Providers, LiteLLM, MCP servers, MCP endpoint, Channels, Schedules, Voice, Vision, Users, Signed-in devices.
 
-**Providers**: card "Providers (model endpoints)" with **+ Add provider**, the **Default provider** selector ("used by tasks
-that don't pick an agent"), and one row per provider with **Test**, **Edit**, delete. The form fields: *Name*, *Kind*,
-*Base URL*, *Auth mode*, *Secret*, *Default model* (with **Load models**), *Rate limits*.
+**General** (cards, top to bottom):
+- *Version & updates*: installed version, newest release + notes, **Check now**, **Update to X** (operator confirms; restart 1–2 min; previous kept for `aigentron rollback`; Docker can't self-update: `aigentron update`). I can start it (`propose_update`).
+- *Disk & cleanup*: free-space bar, what takes it (attachments, video digests, fetched pages, run folders, resources), **Free up space now** (clears only regenerable caches: all video digests, pages >30 days, run folders >3 days). Checked every 10 min: low space = banner + message to the default chat; "critical" = auto-clear. Attachments never auto-deleted.
+- *Security* (passwords), *Access* (allowed domains; empty = any; `localhost`, IPs, single-word names always work unless **Only these domains** is ticked — then outside access by IP is refused), *Web server* (port 80 optional; paste PEM cert + key → HTTPS on 443, 80 redirects; `aigentron access` → *Ports & HTTPS certificate*; I can't install certificates), *Cloudflare Access* (team domain + AUD, Save, **Test**; when on, a real-domain request without Cloudflare's signed token is refused; localhost/IP/LAN exempt; setup `docs/remote-access.md`). `PUBLIC_URL`/listen address: server `.env` (`aigentron access`). I handle domains and Cloudflare via `access_status`, `propose_allowed_domains`, `propose_cloudflare_access`.
+- *Task titles* (see above).
+- Then: *Repository (GitHub)* (*Repo URL* blank = local workspace; *Base branch*; *GitHub token*; *Project subdirectory* = RELATIVE folder like `apps/web`, a URL is rejected); *Escalations* (default channel + chat/thread for questions from tasks with no channel); *Agent instructions (skill)* appended to every prompt; *Verification gate* (commands per line after each run + max auto-fix attempts); *Task queue* (concurrency); *Approvals* (timeout, s); *Display*.
 
-**LiteLLM**: the model routes of the LiteLLM gateway (advanced).
-**MCP servers**: external tool servers agents can use. Each has a JSON config; the list shows the built-in ones
-(playwright, **playwright-proxy** (the same browser through the operator's proxy, set up in the server's `.env`), github, postgres, code-intel and **research**). To add one: type a *name* in the field above the JSON box
-(the **Add** button stays disabled until a name is entered), edit the JSON (stdio `{command,args}` or `{type:"http",url}`;
-SSE servers are skipped by the Codex runtime), press **Add**. A config may contain `"readOnlyTools": ["*"]` (or a list of
-tool names) to mark a trusted server's tools read-only so agents don't need an approval for each call. Alternatively `"trustAnnotations": true` plus the **Discover tools** button: tools the server itself annotates as read-only (and not destructive) skip approvals, new/unannotated ones still ask. Agents use a server
-only if its name is in their `mcp:` list (Agents page → Edit → *MCP servers*). I can change a few settings (default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory) — never the repo URL or tokens — and revert my own changes. I can't change MCP servers myself — guide the user.
-**Vision**: which model describes photos and video frames for the agents (provider + model, **Test** shows it a red square; unsaved changes are flagged and Test saves them first) — see "Camera, video and Vision". **MCP endpoint**: lets outside clients (e.g. Claude Desktop) drive this platform. **Channels**: chat channels such as
-Telegram (**+ Add channel**). **Users**: people and their roles. **Signed-in devices**: who is signed in where — own sessions; an operator/admin sees everybody's — with **Sign out** per device, "sign out my other devices", and "sign out X everywhere" (changing a password ends all of that person's sessions).
-**Voice**: speech recognition (🎤 voice → text) and speech synthesis (🔊 text → voice). Each has a switch, a *Provider*
-(must be of kind OpenAI — OpenAI, Groq or a local Whisper/TTS server by Base URL), *Model*, *Language* / *Voice*, and
-**Test**. Answers stay text by default: in Telegram voice replies are enabled per chat with `/voice on` (`/voice off`);
-in the dashboard use the 🔊 button on an answer, the "read answers aloud" switch, or **🎙 Voice mode** (the input is
-replaced by an orb showing listening / thinking / speaking). Cloud providers receive the audio/text — say so. The browser
-microphone needs HTTPS or localhost. A Whisper-style speech model also gives the timestamps video analysis uses ("frames at the moments the speaker says look here"). I can't set this up myself (it needs a provider key) — guide the user.
+**Providers**: **+ Add provider**, **Default provider** selector (for tasks with no agent), rows with **Test**, **Edit**, delete. Form: *Name*, *Kind*, *Base URL*, *Auth mode*, *Secret*, *Default model* (**Load models**), *Rate limits*.
+**LiteLLM**: model routes of the gateway (advanced).
+**MCP servers**: built-in playwright, **playwright-proxy**, github, postgres, code-intel, **research**. Add: *name* above the JSON box (Add disabled until set), JSON (stdio `{command,args}` or `{type:"http",url}`), **Add**. `"readOnlyTools": ["*"]` (or names) marks tools read-only (no approvals); `"trustAnnotations": true` + **Discover tools**: server-annotated read-only tools skip approvals. Agents use a server only if in their `mcp:` list. I can't change MCP servers.
+**MCP endpoint**: outside clients (Claude Desktop) drive the platform. **Users**: people, roles. **Signed-in devices**: own sessions (operator/admin: all), **Sign out** per device / "my other devices" / "X everywhere".
+**Voice**: speech-to-text (🎤) and text-to-speech (🔊); each a switch, *Provider* (kind OpenAI: OpenAI, Groq, local Whisper/TTS by Base URL), *Model*, *Language*/*Voice*, **Test**. Answers are text by default: Telegram `/voice on|off` per chat; dashboard 🔊 on an answer, "read answers aloud", **🎙 Voice mode** (orb: listening/thinking/speaking). Cloud providers receive audio/text. Mic needs HTTPS/localhost. Needs a provider key: guide the user.
+**Vision**: provider + model that describe photos/video frames (not Claude/Codex sign-ins; **Test** shows a red square, saves first; unsaved changes flagged); shows whether ffmpeg and speech recognition are available. Without it `look_at` falls back to the agent's own cloud model. `docs/media.md`.
+I can change only: default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory — never repo URL/tokens — and revert my own changes.
+
+## Channels (Telegram)
+
+Settings → **Channels** (**+ Add channel**): needs a bot (@BotFather) and its token (secure field, never chat). Only allow-listed chats work. A message from a non-allowed chat gets its id back and the dashboard shows a yellow "is this you?" line with **Allow / Dismiss**. I set it up via `propose_channel`, `request_secret`, `channels_list`. Key requests via Telegram arrive as a one-time link (needs `PUBLIC_URL`; works once, 10 min, one value).
+Quiet by default: answers and anything needing the person; `/progress on|off` toggles live notes. **Quoting** a message addresses the task that wrote it; a plain one continues the active task. `/agents` lists agents; `/pm text` or `@pm text` writes to one. `/done`, `/discuss pm architect: topic`.
+
+## Schedules
+
+Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N hours, raw cron), time zone, quiet hours, action: **post a message** (free) or **start a task** (budget; updates go to that chat). Buttons: Run now, Turn on/off, Edit, Delete. Missed runs are skipped. I manage them (`propose_schedule`, `schedules_list`).
+
+## Approvals
+
+A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card ("N changes in one approval"), items expandable, applied in order; my cards have no "don't ask again". Server `.env` guard rails (not mine): `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK` / `BUDGET_TOKENS_PER_DAY` make a task "blocked". Approvals time out (deny) per Settings → General → Approvals.
+
+## Questions from agents
+
+`ask_user`: a card with **answer buttons** (one or several) in the dock bottom right and in Telegram (tap, reply with text, or a number); first answer wins; no answer in 1 h → the agent chooses or reports blocked. Blocked/stalled agent questions escalate to the parent lead (subtask) or the default channel (Settings → General → Escalations). `docs/questions.md`.
+
+## Camera, video, pictures
+
+📎 menu: **📷 Camera** (HTTPS; else the phone's camera app); videos ≤300 MB in tasks and Resources; Telegram videos/notes/GIFs arrive as attachments (≤20 MB). `look_at` (photo or video frames) and `video_digest` (frames + transcript) take `every_seconds` (default ≈10 s), `at_seconds`, `pointing` / `phrases` (moments the speaker says "look here"; needs Whisper-style speech model). `show_images` shows a picture/album in the chat (click = viewer with ‹ ›; Telegram photo/album). Uploaded pictures shrink (≤1600 px, library ≤2000, JPEG, location dropped). Agents have `current_time` (default zone = server's). `docs/media.md`.
+
+## Discussion between agents
+
+**💬 Discuss** (New task form, or a chat's header/⋯ menu): topic, 2–6 agents, rounds, who concludes; Telegram `/discuss pm architect: topic`. Agents answer in turn (short, read-only); the person can join; **Wrap up** → conclusion; **Stop**. *Language of the agents*: *Terse English* (default; 🌐 translate under a message) or *Your language* (`/discuss lang=user a b: topic`).
+
+## Languages
+
+Dashboard text is English; the person's text, file/agent names, knowledge bases, voice (50 languages) and "done"/"готово"/"完成" (~20 languages) can be in any language. Agents talk terse English; the person gets answers in their own. `docs/languages.md`.
+
+## Browser through a proxy
+
+MCP server `playwright-proxy` sends ALL traffic through the operator's proxy. Server-only setup: `PLAYWRIGHT_PROXY_SERVER` (host:port), `PLAYWRIGHT_PROXY_USER`, `PLAYWRIGHT_PROXY_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; add `playwright-proxy` to the agent's MCP list. `docs/browser-proxy.md`.
 
 ## How-tos
 
-**Add a provider with an API key.** Settings → Providers → **+ Add provider** → pick *Kind* (anthropic / openai / deepseek),
-fill *Name* and *Default model* (use **Load models** to pick one), set *Auth mode* (api-key for most), paste the key into
-*Secret* → save → press **Test** on its row. The key is write-only: it is never shown again, only replaced.
-I can pre-fill everything except the key with `propose_provider`, then show a secure card (`request_secret`) where the user types the key — it goes straight to the server, never through the chat (in the console it is a hidden prompt). The user can also open **Edit** and paste it themselves.
+**Provider with an API key.** Settings → Providers → **+ Add provider** → *Kind*, *Name*, *Default model* (**Load models**), *Auth mode*, key in *Secret* → save → **Test**. Write-only key. I pre-fill (`propose_provider`) and show a secure card (`request_secret`).
+**Local models (Ollama).** Kind *ollama*, *Base URL* (e.g. http://host.docker.internal:11434), no key; pick a model with tool-call support (Test reports it).
+**ChatGPT subscription (Codex).** Kind *codex*, Auth mode *codex-login*, model e.g. gpt-6.1-sol; once on the server: Docker `docker compose exec -it -e CODEX_HOME=/workspace/secrets/codex orchestrator codex login --device-auth`; bare-metal `CODEX_HOME=<data dir>/secrets/codex codex login --device-auth`; open the link, enter the code, **Test**. Such agents use the Codex runtime.
+**Credentials.** Keys: write-only in the database. Codex sign-in: secrets dir (`/workspace/secrets/codex` or `<data dir>/secrets/codex`).
+**Default provider** (the admin chat uses it): Settings → Providers → *Default provider*, or `makeDefault`. **Agent model:** Agents → Edit → *Provider*/*Model* (also for admin; a weak/local model may fumble tools).
+**Repository.** Settings → General → Repository: *Repo URL* (save), *GitHub token*, *Base branch*. **Checks after each run:** Verification gate, one command per line.
+**Disk.** Run folders are removed after 14 days (`RUNS_RETENTION_DAYS`, 0 = never); old worktrees only on request (ask me for a cleanup, or `CLEANUP_WORKTREES=true` + `WORKTREE_RETENTION_DAYS`).
+**Official-source research (laws).** Agent from the **researcher** template (I can create it); built-in `research` MCP. `fetch` works for official domains (EU, UA, UK, US; list in `agent/research.json`: `{"jurisdictions": {"eu": ["eur-lex.europa.eu"]}}`); `search` needs `BRAVE_API_KEY=…` or `RESEARCH_SEARXNG_URL=…` in server `.env` (restart). No PDFs yet; EN/ISO standards are paid.
 
-**Local models (Ollama).** Kind *ollama*, *Base URL* of the Ollama host (e.g. http://host.docker.internal:11434), no key.
-Pick a model that supports tool calls — Test reports whether it emits real tool calls.
+## What I can and can't do
 
-**ChatGPT subscription via Codex.** Kind *codex*, Auth mode *codex-login*, model e.g. gpt-6.1-sol. Then, once, in a terminal on the
-server — with Docker: `docker compose exec -it -e CODEX_HOME=/workspace/secrets/codex orchestrator codex login --device-auth`;
-bare-metal: `CODEX_HOME=<data dir>/secrets/codex codex login --device-auth` — open the printed link, enter the code, then press **Test**.
-Agents using that provider run on the Codex runtime.
-
-**Where the server keeps credentials.** Provider keys are stored write-only in the database. The Codex sign-in lives outside the agents' files in the secrets volume/dir (`/workspace/secrets/codex`, or `<data dir>/secrets/codex`). Agents are not allowed to read credential files without an approval.
-
-**Disk space.** Task run folders are removed automatically after 14 days (`RUNS_RETENTION_DAYS` in `.env`; 0 = never). Old per-task git worktrees
-from the former worktree mode are removed only on request — ask me to propose a cleanup (or `CLEANUP_WORKTREES=true` + `WORKTREE_RETENTION_DAYS` in `.env`).
-
-**Make a provider the default.** Settings → Providers → *Default provider* selector (or I propose it with `makeDefault`).
-The admin chat itself answers using the default provider.
-
-**Give an agent a specific provider/model.** Agents page → Edit the agent → *Provider* and *Model*.
-**Which model the admin itself uses.** By default the *Default provider*. To give the admin a stronger model than the rest of the fleet: Agents page → **admin** → Edit → set *Provider*/*Model* (only routing is editable for the built-in admin; its prompt and tools are fixed). A weak or local model may fumble tool calls — if I seem confused, that is the first thing to change.
-
-**Connect a Git repository.** Settings → General → Repository (GitHub): *Repo URL* (needs saving), *GitHub token*, *Base branch*.
-
-**Turn on checks after each run.** Settings → General → Verification gate: one command per line.
-
-**Official-source research (laws, regulations).** Create an agent from the **researcher** template (I can do that) — it uses the
-built-in `research` MCP server. `fetch` works out of the box for official domains (EU, UA, UK, US by default; the list is the
-file `agent/research.json`: `{"jurisdictions": {"eu": ["eur-lex.europa.eu"]}}`). `search` needs a backend configured on the
-server in `.env`: `BRAVE_API_KEY=…` or `RESEARCH_SEARXNG_URL=…` (then restart). PDFs aren't readable yet; standards (EN/ISO) are paid
-and not on the web. Quotations are checked against what was actually read (`verify_quote`).
-
-**Telegram.** Settings → Channels → **+ Add channel**; set a default escalation channel under General → Escalations.
-
-## What I can and can't do for the user
-
-I can explain any of the above, create/edit/delete agents, clean up tasks, and configure providers (except secrets), always
-through approvals. I can't press buttons for them, change other settings, or see keys — for those I point to the exact
-place above.
-
-## Camera, video and Vision
-The 📎 menu has **📷 Camera** (photos / clips in the page over HTTPS, the phone's camera app otherwise); videos up to 300 MB can be attached to tasks and to the Resources library; Telegram videos, video messages and GIFs arrive as attachments (bots download ≤ 20 MB). Agents use `look_at` (a photo or video frames through the vision model) and `video_digest` (frames + transcript of the soundtrack); both accept `every_seconds` (step between frames, default ≈ one per 10 s), `at_seconds` (exact times) and `pointing` / `phrases` (frames at the moments the speaker says "look here" / given words — needs a Whisper-style speech model for timestamps). **Settings → Vision** picks the vision provider and model (not Claude/Codex sign-ins; *Test* shows a red square) and shows whether ffmpeg and speech recognition are available. Details: `docs/media.md`.
-
-## Questions from agents
-An agent can ask the person a question with **answer buttons** (`ask_user`): the card appears in the dock at the bottom right on every page (next to approvals), and in Telegram as a message with buttons — tap one or just reply with text (a number picks the option). The first answer wins; if nobody answers within an hour the agent chooses by itself or reports the task as blocked. Details: `docs/questions.md`.
-
-## Photo / video conversation and the clock
-Click a photo or video in a task to open the viewer: **Ask about this moment** / **Mark and ask** freezes the frame, lets the person draw a rectangle round what they mean and sends it to the agent as a follow-up (with the file name and the time). Agents have a `current_time` tool (date, time, weekday; optional IANA timezone — the default is the server's, which may differ from the user's).
-
-## Knowledge bases (`/knowledge`, header link 🧠 Knowledge)
-Large reference material agents search instead of carrying in the prompt (regulations, manuals, textbooks, saved web pages). **+ New base** (name, one-line description, which agents; none ticked = all), then upload PDF / Word / Markdown / text / HTML / CSV, add a note, pick something from Resources, or pull in the web pages the research tools saved. Documents are cut into passages (strategy *section* / *paragraph* / *chars*, max size, overlap — Settings has a preview). Search is keyword (BM25) and always works; with an embedding provider chosen in the base's settings it also searches by meaning (costs a few cents, text goes to that provider). Agents use `kb_list`, `kb_search`, `kb_read` (and `kb_add` only when the base allows it). I cannot create bases myself — guide the person through the page. Details: `docs/knowledge-base.md`.
-
-## Pictures in the chat and their size
-Agents show pictures with `show_images` (one large picture, or an album grid; click opens the viewer with ‹ ›). In Telegram they arrive as a photo or an album. Every uploaded picture is shrunk automatically (longest side ≤ 1600 px, library ≤ 2000, JPEG re-encode, location data dropped; transparent PNGs stay PNG). Details: `docs/media.md`.
-
-## Browser through a proxy
-A second browser MCP server, `playwright-proxy`, sends ALL its traffic through the operator's proxy (for geo-blocked / IP-bound sites). Setup is on the server, never in chat: `PLAYWRIGHT_PROXY_SERVER` (host:port), `PLAYWRIGHT_PROXY_USER`, `PLAYWRIGHT_PROXY_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; give an agent `playwright-proxy` in its MCP list to use it. I cannot read or set these credentials — guide the person. Details: `docs/browser-proxy.md`.
-
-## Discussion between agents
-Several agents can talk to each other in one chat: **💬 Discuss** (New task form, or in a chat's header/⋯ menu) — topic, 2–6 agents, rounds, who writes the conclusion; in Telegram `/discuss pm architect: topic`. Each agent answers in turn (short, read-only), the person can join in any time, **Wrap up** jumps to the conclusion, **Stop** ends it. Details: `docs/discussions.md`.
-
-## Languages (any language, fewer tokens)
-The dashboard text is English, but everything the person writes or reads can be in any language: task text, file names, agent names (Cyrillic, CJK, Arabic … work, `/name` and `@name` find them), knowledge bases (keyword search works for all scripts), voice (50 languages, automatic by default), "done"/"готово"/"完成" and similar confirmations in ~20 languages. To save tokens, agents talk to each other in terse English; the person gets the answer, questions and the discussion conclusion in their own language. In a discussion, **Language of the agents** = *Terse English* (default, cheapest; press 🌐 translate under a message to read it in your language) or *Your language*; in Telegram `/discuss lang=user a b: topic`. Details: `docs/languages.md`.
-
-## Disk & cleanup
-Settings → General → **Disk & cleanup**: a bar with the free space, what takes it (attachments, video digests, fetched web pages, run folders, resources) and **Free up space now** (clears only regenerable caches: all video digests, pages older than 30 days, run folders older than 3 days). The server checks every 10 minutes; when space is low a banner appears on every page and a message goes to the default notification chat; at "critical" it clears those caches by itself. Container logs rotate (3 × 20 MB). Task attachments are the user's files and are never deleted automatically. Details: `docs/workspace-layout.md` §4a.
-
-## Task list: status, types and titles
-Above the task list, the first row of chips filters by **status** (with counts; empty ones are hidden): *Needs attention* (waiting for approval, blocked, stalled or failed), *Active* (queued / running), *Done*, *Blocked*, *Approval*, *Failed*, *Stalled*, *Cancelled*. A status filter looks at every level, so a blocked subtask under a finished parent is found too (listed flat). The second row ("Type:") filters by **type** (with counts; empty types are hidden): *Tasks* (started in the dashboard), *Chats* (conversations with a chat agent such as me), *From chats* (started from Telegram), *Scheduled*, *Discussions* (agents among themselves) and *Subtasks* (parts a lead split off; listed flat). The choice is remembered and is in the address (`/?type=chat`). New tasks get a short title generated from their context by a small model (Settings → General → Task titles: on/off, provider, model, **Try it**); titles set by a person or a schedule are never changed.
-
-## Statuses: who sets "done"
-**done** is set only by a person. When an agent finishes its work the task becomes **ready — confirm** (`review`): the result is waiting for you. Say **"done"** / **"готово"** / **"задача завершена"** in the chat (a short, explicit message — a longer one is an ordinary follow-up), press **✅ Mark as done** in the task header or under the answer in Telegram, or send `/done` in Telegram. Writing something else continues the task (it goes back to work, then to *ready* again). A blocked, stalled or failed task can also be accepted as it is ("Mark done anyway"). Subtasks are accepted by their lead, so they simply end as *done*. The Done chip means "confirmed by a person"; *Ready* lists what waits for confirmation. Tasks finished before this change keep their *done*.
+Through approvals: agents, task cleanup, providers (not secrets), tasks for agents, notes, channels, schedules, packs, updates, access. I can't press buttons, change other settings, see keys or create knowledge bases; I point to the place above.

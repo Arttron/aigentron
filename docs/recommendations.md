@@ -4,6 +4,19 @@
 > Each section states the problem, the recommendation, and why it matters, ordered
 > roughly by priority. Items reference the current v1 skeleton where relevant.
 
+> **Status (checked against the code 2026-10-12): mostly implemented; federation (§6) not started.**
+> - §1 DONE: `report_task_status` + `heartbeat` tools, runtime marks `stalled`, no-progress watchdog (soft budgets added too).
+>   Since then: `review` status was added (the agent finishes in `review`; `done` is set only by a person, or by a lead for its own subtasks).
+> - §2 DONE: `User` (roles operator / reviewer / task_setter / admin) + `ChannelIdentity`, `ApprovalRequest.resolvedBy` and `Task.createdBy` bound to a user;
+>   beyond the recommendation, login + sessions and API-level `@Roles` guards exist.
+> - §3 DONE (provider/model failover chain, structured tool-use probe on provider Test); not verified: whether routing is *refused* for a model that fails the probe.
+> - §4 DONE with Redis Pub/Sub (full profile) and an in-process bus (minimal profile); Streams not used.
+> - §5 DONE (approval-gated, budgeted, snapshotted learned-skill writes + scheduled consolidation).
+> - §6 NOT STARTED (no `delegatable` flag, no fleet registry; Tailscale Level 1 not verified).
+> - §7 PARTLY: per-session usage persisted, per-provider `/stats` page and `usage_report` admin tool (docs/plan-provider-usage-stats.md); per-task / per-agent
+>   cost rollup in the UI and cache-hit-rate tracking not verified.
+> - §8: the two-DB pre-flight check exists (`preflight`); the `EADDRINUSE` item is handled by the dev entrypoint (not verified as a `predev` step).
+
 ---
 
 ## 0. Priority summary

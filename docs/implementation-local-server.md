@@ -1,6 +1,6 @@
 # Implementation Reference — Local Dev Server
 
-> Snapshot of the current implementation (v1 skeleton). This is a reference for
+> Snapshot of the current implementation (release in the root `VERSION` file). This is a reference for
 > how the system is built today, meant to be read alongside the code. For planned
 > work see [`rfc-001-channels-and-human-agents.md`](./rfc-001-channels-and-human-agents.md)
 > (channels/human-agents) and [`roadmap.md`](./roadmap.md) (staged build-out, in Russian).
@@ -28,8 +28,9 @@ write. Two pillars:
 Shared logic lives in two packages: **`@lds/shared`** (domain types, event names, the danger
 classifier, provider→env resolution) and **`@lds/agent-runner`** (drives the Claude Agent SDK).
 
-> **Status:** v1 skeleton. **No auth/RBAC, no multi-tenancy** — every dashboard user and every
-> hook caller (bar the shared hook secret) is trusted. Production hardening is out of scope for v1.
+> **Status:** in active development. Built-in sign-in (a password per user, sessions, roles —
+> [`authentication.md`](./authentication.md)) is shipped, but **no multi-tenancy**, and agents are not
+> isolated from the orchestrator at OS level (an agent with a shell shares the orchestrator's user).
 
 ---
 
@@ -45,8 +46,12 @@ local-dev-server/
 │   └── agent-runner/        @lds/agent-runner — runAgent() over the Claude Agent SDK
 ├── agent/                   Fleet operational files (bind-mounted at /workspace/agent)
 │   ├── SOUL.md              Global charter, prepended to every run
-│   ├── agents/*.md          Named agent definitions (frontmatter + system prompt)
-│   ├── skills/*.md          Reusable knowledge, folded into the system prompt
+│   ├── agents/*.md          Live named agents (frontmatter + system prompt)
+│   ├── catalog/agents/*.md  Shipped agent templates (pm, architect, backend, … — see §9)
+│   ├── packs/<name>/        Starter packs (english, renovation, development) — docs/packs.md
+│   ├── builtin/admin.md     The built-in admin assistant
+│   ├── skills/core|learned/ Reusable knowledge, folded into the system prompt (§9)
+│   ├── resources/           Shared library for all agents (docs/resources.md)
 │   └── runs/<taskId>/       Generated Claude Code settings.json (gitignored)
 ├── project/                 The workspace repo agents work in (/workspace/repo)
 ├── infra/                   Dockerfile, entrypoints, litellm config, approval hook, pg init
@@ -71,6 +76,8 @@ each `dependsOn: ["^build"]`), TypeScript strict (`tsconfig.base.json`: NodeNext
 | **orchestrator** | built from `infra/dev.Dockerfile` | 3001 | REST + WS + worker |
 | **dashboard** | built from `infra/dev.Dockerfile` | 3000 | Vite dev server, hot-reload (no secrets passed in) |
 | **playwright-mcp** | `mcr.microsoft.com/playwright/mcp` | 8931 | Optional browser MCP, `profiles: [mcp]` |
+| **playwright-mcp-proxy** | same image | 8932 | Optional browser behind a proxy, `profiles: [proxy]` ([`browser-proxy.md`](./browser-proxy.md)) |
+| **cloudflared** | — | — | Optional Cloudflare Tunnel, `profiles: [tunnel]` (`make tunnel-up`, [`remote-access.md`](./remote-access.md)) |
 
 **Ollama runs on the HOST**, not in compose — containers reach it at
 `http://host.docker.internal:11434`.
@@ -100,12 +107,19 @@ no rebuild.
 
 ```
 AppSettings (singleton "singleton")   — runtime config, seeded from env, DB is source of truth
-User        (cuid)                     — an identity that can create/approve/operate (no auth yet)
+User        (cuid)                     — an identity that can create/approve/operate (role + password hash)
+ └─ AuthSession                       — a signed-in device (`docs/authentication.md`)
 McpServer   (name unique, config Json) — an MCP server agents can attach
-Provider    (name unique)              — an AI model endpoint (Anthropic/OpenAI/DeepSeek/Ollama)
+Provider    (name unique)              — an AI model endpoint (Anthropic/OpenAI/DeepSeek/Ollama, or Codex)
 Channel     (name unique, kind, config Json) — a chat transport (Telegram shipped) — §6.8
  └─ ChannelThread                     — binds a (channel, external chat) to a Task
  └─ ChannelChatState                  — per-chat state: active task, chosen agent/model, muted
+Schedule                               — a recurring/one-off task or reminder (Settings → Schedules)
+KnowledgeBase → KnowledgeDoc → KnowledgeChunk — knowledge bases (`docs/knowledge-base.md`)
+AgentQuestion                          — an `ask_user` question awaiting an answer (`docs/questions.md`)
+ChannelMessageLink                     — channel message id → task id (reply addressing)
+ApprovalException                      — a remembered "always allow" for an approval (scope task | global)
+QueueJob / ManagedLitellmRoute         — `minimal` profile only: in-process queue, managed LiteLLM routes (§13)
 Task        (cuid)                     — a unit of work
  └─ AgentSession (per run/attempt)     — provider+model+claudeSessionId for --resume
      └─ AgentEvent (seq, kind, text)   — persisted transcript line (+attachments[])
@@ -114,13 +128,14 @@ Task        (cuid)                     — a unit of work
  └─ TaskLink                           — a reference to another task, folded into context
 ```
 
-Enums: `TaskStatus = queued | running | needs_approval | done | failed | cancelled | blocked |
-stalled`; `AgentSessionStatus = starting | running | completed | errored | cancelled`;
+Enums: `TaskStatus = queued | running | needs_approval | review | done | failed | cancelled |
+blocked | stalled` (`review` = the agent finished, waiting for a person to confirm — see §5); `AgentSessionStatus = starting | running | completed | errored | cancelled`;
 `ApprovalStatus = pending | approved | denied | timeout`.
 
 Notable fields:
 - **Task**: `prompt`, `title`, `status`, `branch`, `worktreePath`, `agentName`, `prUrl`, `error`,
-  `parentId` (subtask decomposition), `createdByChannel`, `providerOverride`.
+  `parentId` (subtask decomposition), `createdByChannel`, `providerOverride`, `kind`
+  (`task | discussion`), `titleState` (`auto | generated | manual`).
 - **AgentSession**: `provider`, `model`, `claudeSessionId` (captured from the SDK init event, used
   to `--resume` on follow-ups).
 - **AgentEvent**: `seq` (monotonic per session), `kind` (`prompt|system|assistant|tool_use|
@@ -133,7 +148,8 @@ Human↔agent conversation is still *not* a generic message table: it's the Task
 follow-up, persisted as `AgentEvent` rows (`kind: 'prompt'`) — `PendingFollowUp` only holds
 messages that haven't been dispatched into that stream yet. `User` exists (identity for
 created-by/resolved-by attribution and role-gating a few endpoints — `identity/roles.guard.ts`)
-but there's still no auth: the acting user is resolved from a request header, not a credential.
+and the acting user is resolved from the signed-in session (`auth/`), not from a header; before a first
+password is set the instance is open and acts as the default operator.
 
 ---
 
@@ -155,7 +171,7 @@ POST /api/tasks ──▶ TasksService.create ──▶ TaskQueueService.enqueue
                                               PreToolUse hook on every tool call ──┐
                                           verify gate: run verifyCommands           │
                                             fail → hand output back, retry ≤ N       │
-                                          status → done | failed | cancelled         │
+                                          status → review | failed | cancelled       │
                                           on done + repo mode: push branch, open PR  │
                                                                                      ▼
                           ApprovalsService.check → classify → dangerous?  create ApprovalRequest,
@@ -163,7 +179,8 @@ POST /api/tasks ──▶ TasksService.create ──▶ TaskQueueService.enqueue
 ```
 
 - **create** (`tasks.service.ts:79`): resolves the agent (explicit `agentName` 404s on a bad name;
-  otherwise the configured `defaultAgent`, default `pm`), derives a title, persists the task,
+  otherwise the configured `defaultAgent`, default `pm`), derives a title (first line at once; a small
+  model names the task when it starts — `titles/`, Settings → Task titles), persists the task,
   publishes `task-upserted`, and enqueues — unless `autostart=false` (client uploads attachments,
   then calls `POST /tasks/:id/start`).
 - **follow-up** (`tasks.service.ts:314`): if the task is terminal, re-queues immediately with
@@ -179,7 +196,11 @@ POST /api/tasks ──▶ TasksService.create ──▶ TaskQueueService.enqueue
 - **verification gate** (`queue/verification.service.ts` + `verifyWithFixes`): after a run,
   runs each line of `verifyCommands` in the worktree; on failure hands the output back to the
   executor for up to `verifyMaxAttempts` fix iterations (default 2; `0` = fail without auto-fix).
-  Only a green run is marked `done`/pushed.
+  Only a green run is marked ready/pushed.
+- **review → done**: an agent that reports `done` ends the task in `review` ("ready — confirm"); a person
+  moves it to `done` (dashboard "Mark as done", Telegram button, `/done`, or a short explicit message).
+  Subtasks still end `done` for their lead; `report_task_status`/`heartbeat` and the `stalled` watchdog
+  (hard timeout) are in `@lds/agent-runner` `internal-tools.ts`.
 
 ---
 
@@ -202,7 +223,14 @@ modules; `ConfigModule` is global.
 | **attachments** | Per-task file upload/serve | `attachments.service.ts` save/list/paths/dir/remove (images+PDF, 10 MB) |
 | **worktrees** | Workspace + per-task git worktrees + PR | `workspace.service.ts` ensure/provision/baseRef; `worktree.service.ts` createForTask/cleanup; `github.service.ts` publishResult |
 | **settings** | Singleton runtime config | `settings.service.ts` accessors; secret-masked API |
-| **bus** | In-process pub/sub | `agent-event-bus.ts` publish/subscribe |
+| **bus** | Event bus (Redis pub/sub; in-process in `minimal`) | `agent-event-bus.ts` publish/subscribe |
+| **auth / access / identity** | Sign-in, sessions, allowed domains, roles | `auth/`, `access/`, `identity/roles.guard.ts` |
+| **channels** | Telegram transport + commands (§6.8) | `channel-manager.service.ts`, `telegram.adapter.ts` |
+| **schedules / packs / resources** | Scheduler, starter packs, shared library | `docs/packs.md`, `docs/resources.md` |
+| **knowledge / media / voice** | Knowledge bases (`kb_*`), camera/video/vision, speech | `docs/knowledge-base.md`, `docs/media.md`, `docs/voice.md` |
+| **questions / discussion** | `ask_user`, round-table between agents | `docs/questions.md`, `docs/discussions.md` |
+| **codex / providers** | Codex runtime (provider `kind: codex`, not via LiteLLM) | `codex/`, `plan-codex-runtime.md` |
+| **maintenance / update / stats / titles** | Disk monitor, in-place updates, usage stats, task titles | `maintenance/`, `update/`, `stats/`, `titles/` |
 | **events** | Socket.IO gateway | `events.gateway.ts` bus → rooms |
 | **config** | Typed env access | `app-config.service.ts` |
 | **health** | `GET /api/health` | container readiness |
@@ -330,7 +358,7 @@ builds the `{name: config}` map and recursively substitutes `${KEY}` (e.g. `${GI
 unknown names are skipped with a warning (non-blocking) — but this only catches "no such server in
 the DB," not "the server's underlying binary (`uvx`/`npx`) isn't actually on `PATH`"; that surfaces
 later as an SDK spawn/connection failure at task-run time, not a clean upfront warning. Seeded
-servers: `playwright` (sse), `github` (http, needs token), `postgres` (npx stdio), `code-intel` =
+servers: `playwright` (sse), `playwright-proxy` (sse, profile `proxy`), `github` (http, needs token), `postgres` (npx stdio), `code-intel` =
 Serena (uvx stdio). Of the 11 bundled skills, only `code-intel` and `playwright` actually call an
 `mcp__` tool (everything else is pure Bash/knowledge — `git`'s GitHub-operations subsection
 degrades gracefully by design if `github` isn't in an agent's `mcp:` list). `uv`/`uvx` is installed
@@ -338,7 +366,7 @@ to `/usr/local/bin` in the full dev image, the minimal Docker image, and (best-e
 non-fatal) bare-metal installs (`install.sh`'s `ensure_uv`) — so `code-intel` works in all three.
 `playwright` still needs a running browser MCP service, which only the full profile's
 `--profile mcp` compose service provides; bare-metal/minimal have no equivalent yet (tracked in
-`docs/BACKLOG.md`). Attachments are per-task files (`png/jpg/jpeg/webp/gif/pdf`, ≤10 MB) streamed
+`docs/BACKLOG.md`). Attachments are per-task files (images/PDF ≤10 MB, video ≤300 MB; pictures are shrunk to ≤1600 px on upload, `docs/media.md`) streamed
 to `<attachmentsDir>/<taskId>/`, surfaced to the agent as prompt paths (read via the Read tool) and
 to the UI as inline thumbnails.
 
@@ -347,7 +375,7 @@ to the UI as inline thumbnails.
 Singleton row `id="singleton"`, seeded from env on first load, DB authoritative thereafter (no
 restart needed). Accessors: `approvalTimeoutSeconds`, `verifyCommands` (split per line),
 `verifyMaxAttempts`, `concurrency`, `agentInstructions`, `defaultProvider`, `defaultAgent` (default
-`pm`, used by `tasks.create`), `workspaceConfig` (`{repoUrl, repoBranch, githubToken}`).
+`pm`, used by `tasks.create`; set on the Agents page), `workspaceConfig` (`{repoUrl, repoBranch, githubToken}`).
 `githubToken` is masked in the API (set-flag + last-4). Empty-string in the update DTO clears a
 nullable field; `undefined` leaves it.
 
@@ -507,18 +535,25 @@ shipped content as the baseline WITHOUT touching live that boot, so introducing 
 surprise anyone — reconciliation resumes normally from the next shipped change.
 
 **Agents** (`agent/agents/<name>.md`, frontmatter + body = system prompt; read on demand, no
-restart):
+restart). A fresh instance ships no live agents except the built-in `admin`
+(`agent/builtin/admin.md`); the rest are **templates** in `agent/catalog/agents/` copied into
+`agent/agents/` by a starter pack (`docs/packs.md`) or by the admin (`propose_agent`), with the
+provider/model chosen at install (not fixed in the template):
 
-| Agent | Provider (default) | Notable frontmatter | Role |
-|---|---|---|---|
-| **pm** | claude-cloud | `skills: translation`, `disallowedTools: Write,Edit,NotebookEdit` | Default lead: clarify, plan, delegate. Read-only. |
-| **architect** | claude-cloud | `model: claude-sonnet-4-5` | System design, trade-offs, plans. |
-| **backend** | DeepSeek | `mcp: postgres,github,code-intel` | Server/API/DB implementation. |
-| **frontend** | DeepSeek | `mcp: playwright,code-intel,github` | Client/UI implementation. |
-| **designer** | GPT | — | UX/visual design, image analysis. |
-| **coder** | DeepSeek | `mcp: github,postgres,code-intel` | General implementation fallback. |
-| **reviewer** | claude-cloud | `model: claude-haiku-4-5`, read-only | Code review / audit. |
-| **local-helper** | ollama-local | — | Tiny low-risk edits on the local model. |
+| Template | Notable frontmatter | Role |
+|---|---|---|
+| **pm** | `skills: translation, playwright`, `disallowedTools: Write,Edit,NotebookEdit` | Default lead: clarify, plan, delegate. Read-only. |
+| **architect** | `mcp: code-intel` | System design, trade-offs, plans. |
+| **backend** | `mcp: postgres,github,code-intel` | Server/API/DB implementation. |
+| **frontend** | `mcp: playwright,code-intel,github` | Client/UI implementation. |
+| **designer** | `mcp: playwright`, read-only | UX/visual design, image analysis. |
+| **coder** | `mcp: github,postgres,code-intel` | General implementation fallback. |
+| **reviewer** | read-only | Code review / QA. |
+| **local-helper** | — | Tiny low-risk edits on a local model. |
+| **researcher** | `mcp: research`, no shell/files | Official-source legal/regulatory research with verified quotes. |
+
+The `english` and `renovation` packs bring their own agents (English tutor/curriculum/quizmaster;
+renovation planner/estimator/interior designer/materials advisor).
 
 The task's agent is the **lead**; all *other* agents are offered as delegatable subagents. A task
 with no agent falls back to `defaultAgent` (`pm`).
@@ -548,13 +583,16 @@ Vite + React SPA (`react-router-dom`), CSS Modules (no Tailwind) — neumorphic 
 `globals.css`. No external state library — React hooks + a Socket.IO singleton.
 
 **Routes** (`src/pages`):
-- `/` — task fleet: create form, task list, pending approvals, connection status.
+- `/` — task fleet: create form, task list (status and type filters, subtasks folded), pending approvals, connection status.
 - `/tasks/:id` — chat-style detail: live transcript, attachments gallery, approval cards,
   follow-up composer (server-side queue, shared with channels — §6.8). De-dups live vs fetched
   lines by `sessionId:seq`.
-- `/agents` — agent CRUD with provider/model/skills/MCP pickers and model preview.
-- `/settings` — tabbed: General (repo/token/timeouts/verify/concurrency/defaults/theme),
-  Providers (CRUD + test), LiteLLM (read-only routes), MCP servers (CRUD).
+- `/agents` — agent CRUD (dialog) with provider/model/skills/MCP pickers, default lead agent, Starter packs tab.
+- `/settings` — tabbed: General (repo/token/timeouts/verify/concurrency/defaults/theme, security, access,
+  task titles, disk & cleanup, version & updates), Providers (CRUD + test), LiteLLM (read-only routes),
+  MCP servers, MCP endpoint, Channels, Schedules, Voice, Vision, Users, Signed-in devices.
+- `/stats` — token/cost usage by provider. `/resources` — shared library. `/knowledge` — knowledge bases.
+  `/secret/:token` — one-time page for entering a key from a phone. A floating admin-assistant chat is on every page.
 
 **Client libs** (`src/lib`): `config.ts` (relative `/api` + same-origin socket by default;
 `VITE_ORCHESTRATOR_URL`/`_WS_URL` are a dev-only escape hatch for the separate hot-reload
@@ -592,16 +630,19 @@ Env is grouped in `.env.example` and allowlisted in `turbo.json` `globalEnv`. No
 `verifyMaxAttempts` default 2 (schema), skills caps 16 KB/file & 64 KB total, attachments ≤10 MB.
 
 **Makefile**: `up` (build+start), `down`, `logs`, `ps`, `build`, `migrate`, `pull-models`,
-`clean` (destructive: `down -v`).
+`clean` (destructive: `down -v`), `admin`, `test` (unit tests + admin-skills drift check), `tunnel-up`,
+`reset-password`.
 
 ---
 
 ## 12. Known limitations (v1)
 
-- **No auth / RBAC / multi-tenant.** The dashboard and hook callers are trusted (bar the hook
-  secret). This is the biggest gap before exposing the system beyond a single operator.
-- **No model/provider failover.** A missing/misconfigured provider or a runtime model error just
-  fails the task — no fallback chain, no retry on another provider.
+- **No multi-tenancy; agents are not isolated from the orchestrator at OS level.** Sign-in and roles
+  exist (`authentication.md`), but several management routes (settings/agents/providers/MCP) are open to
+  any signed-in user, and an agent with a shell runs as the orchestrator's user (see `BACKLOG.md`).
+- **Provider failover is a chain, not a health policy.** An agent's `fallbackProviders` are tried in order
+  on provider-level errors (`↻ failing over` line in the transcript); there is no no-progress-timeout
+  failover and no retry of the same provider, and the tool-use smoke test is not enforced at routing.
 - **No task retries** at the queue level (`attempts: 1`) — agent runs aren't idempotent.
 - **Event bus has no replay** — Redis Pub/Sub, not Streams; a latecomer subscriber misses whatever
   fired before it connected (Postgres is still the durable transcript, this is just the live push).

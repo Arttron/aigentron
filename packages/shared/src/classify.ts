@@ -24,6 +24,8 @@ export const HEARTBEAT_TOOL = `${INTERNAL_TOOL_PREFIX}heartbeat`;
 /** Lead-only decomposition tool: create + enqueue a subtask under this task. */
 export const CREATE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}create_subtask`;
 /** Lead-only: check the status + latest result of this task's subtasks. */
+/** A lead marks one of ITS subtasks done (accepts a finished / blocked / failed one as it is). */
+export const COMPLETE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}complete_subtask`;
 export const CHECK_SUBTASKS_TOOL = `${INTERNAL_TOOL_PREFIX}check_subtasks`;
 /** Sentinel toolName for a "run out of steps — continue?" approval (not a real tool). */
 export const CONTINUE_RUN_TOOL = '__continue_run__';

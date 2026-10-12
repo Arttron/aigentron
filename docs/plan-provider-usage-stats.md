@@ -1,5 +1,9 @@
 # Plan — per-provider usage statistics (tokens / requests)
 
+> Status: implemented (phases 1-3 shipped, in releases since v0.1.0); Phase 4 (LiteLLM authoritative cost) not built, optional.
+> Dashboard note: the dashboard is now a Vite/React SPA, so the page lives at `apps/dashboard/src/pages/StatsPage.tsx`
+> (not `src/app/stats/page.tsx` as written in Phase 3). Codex runs record tokens too, with `costUsd` = 0.
+
 Implements roadmap **Phase 5 (cost/usage observability)**. Goal: see, per provider,
 how many tokens and API requests the fleet has spent over a time range.
 
@@ -72,7 +76,7 @@ Not currently captured: `agent-runner` only reads `total_cost_usd` and `num_turn
   is a small local CSS module (matches the project's CSS-module convention).
 - Risk: medium (new page). Typecheck + lint clean; runtime needs the stack up.
 
-## Phase 4 — (optional) LiteLLM authoritative cost
+## Phase 4 — (optional) LiteLLM authoritative cost — NOT BUILT
 
 - For LiteLLM-routed providers, optionally pull `/global/spend/report` for authoritative cost as
   a secondary column. Only if the SDK estimate proves insufficient.

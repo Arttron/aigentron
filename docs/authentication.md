@@ -7,7 +7,7 @@ what they may do; the session — not any header — decides who is acting.
 ## Turning it on
 
 - **First password (normal way):** a banner asks "Set password" while none exists (also Settings → General → **Security**).
-  It becomes the **default operator's** password (at least 8 characters). You stay signed in on that browser for 30 days (`AUTH_SESSION_DAYS`).
+  It becomes the **default operator's** password (8–200 characters). You stay signed in on that browser for 30 days (`AUTH_SESSION_DAYS`).
 - **More people:** Settings → **Users** → 🔑 *Set password* for each user (operator/admin only). They are listed on the login screen
   from then on. A user without a password cannot sign in. Resetting someone's password signs them out everywhere.
 - **Your own password:** Settings → General → Security → *Change my password*. At least one operator/admin must always keep a password.
@@ -34,7 +34,8 @@ which is an alternative to the built-in passwords and also works as an extra lay
 | Approval verdicts, settings, agents, providers, MCP servers, secrets entry | same session — **an agent can no longer approve itself over HTTP** |
 | Agent-facing routes (`/api/approvals/check`, `/api/approvals/:id/wait`, `/api/internal-mcp`, `/api/research-mcp`) | no session, but each has its own credential (hook secret / per-run token) **and only answers calls from this machine** (loopback), so a public tunnel cannot reach them |
 | `/api/mcp` (outside MCP clients) | its own `MCP_TOKEN`; without one it needs a session |
-| `/api/health`, `/api/auth/*` | open (health check, sign-in) |
+| `/api/secret-links/<token>` | open on purpose: the one-time token **is** the credential — it can only set the single value a pending secret request asked for (write-only, works once, expires in 10 minutes, kept in memory) |
+| `/api/health`, `/api/auth/status`, `/login`, `/setup`, `/logout` | open (health check, sign-in); the other `/api/auth/*` routes (password, sessions) need a session |
 
 Wrong passwords are rate-limited (5 misses, then a growing wait up to 15 minutes, per client address).
 
@@ -73,6 +74,6 @@ credentials directory that the approval gate already guards, outside the agent t
   read `secrets/auth.json` (the approval gate asks you first) or to reach the database directly could still tamper with state.
   Real isolation = running agents as a separate OS user / container — see `docs/BACKLOG.md`.
 - The login screen shows the users' names and roles to anyone who can open the page. If that matters, keep the page behind Cloudflare Access (`docs/remote-access.md`).
-- Roles are enforced on the routes that declare them (tasks, approvals, users, channels, maintenance, stats). Settings, agents, providers and MCP servers are open to every signed-in user for now.
+- Roles are enforced on the routes that declare them: tasks, approvals, questions, discussions, users, channels, maintenance, stats, providers, resources, schedules, packs, knowledge bases, voice, media, updates, task titles, domains / web server / Cloudflare Access (mostly operator/admin; creating tasks and answering questions also task setter / reviewer). General settings, agents and MCP servers are open to every signed-in user for now.
 - The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` when served over HTTPS (also behind a tunnel). Use HTTPS for any non-local access
   (see `docs/remote-access.md`); over plain HTTP on an open network the password travels in clear text.

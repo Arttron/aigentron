@@ -1167,7 +1167,7 @@ export class PlatformAdminService {
   }
 
   /** Start a task for another agent on the user's behalf. */
-  async proposeTask(currentTaskId: string, sessionId: string, input: { agentName: string; prompt: string; title?: string; reason: string }): Promise<ProposalResult> {
+  async proposeTask(currentTaskId: string, sessionId: string, input: { agentName: string; prompt: string; title?: string; standalone?: boolean; reason: string }): Promise<ProposalResult> {
     const why = await this.precheck(PROPOSE_TASK_TOOL, input as unknown as Record<string, unknown>, currentTaskId);
     if (why) return { ok: false, message: why };
     const denied = await this.proposals.requireApproval(
@@ -1178,10 +1178,16 @@ export class PlatformAdminService {
       (i) => i.agentName === input.agentName && i.prompt === input.prompt,
     );
     if (denied) return denied;
-    const task = await this.tasks.create({ prompt: input.prompt, title: input.title, agentName: input.agentName, autostart: true } as never);
-    await this.audit.record({ taskId: currentTaskId, tool: 'propose_task', summary: `Started task ${task.id} for agent "${input.agentName}" — ${(input.title ?? input.prompt).replace(/\s+/g, ' ').slice(0, 70)}` });
+    // Within a conversation the work is a SUBTASK of it (no multiplying of top-level tasks) unless the admin says it stands alone.
+    const here = await this.prisma.task.findUnique({ where: { id: currentTaskId }, select: { parentId: true } });
+    const asSub = !input.standalone && here && !here.parentId;
+    const task = asSub
+      ? await this.tasks.createSubtask(currentTaskId, { prompt: input.prompt, title: input.title, agentName: input.agentName }, undefined, { fromAgent: true })
+      : await this.tasks.create({ prompt: input.prompt, title: input.title, agentName: input.agentName, autostart: true } as never);
+    if ((task as { reused?: boolean }).reused) return { ok: true, message: `An equivalent subtask already exists: ${task.id} «${task.title}» (${task.status}). Not started again — check on it with task_diagnose.` };
+    await this.audit.record({ taskId: currentTaskId, tool: 'propose_task', summary: `Started ${asSub ? 'subtask' : 'task'} ${task.id} for agent "${input.agentName}" — ${(input.title ?? input.prompt).replace(/\s+/g, ' ').slice(0, 70)}` });
     this.logger.log(`Admin started task ${task.id} for agent ${input.agentName}`);
-    return { ok: true, message: `Task ${task.id} started for agent "${input.agentName}". Check on it later with task_diagnose; the user can also open it in the dashboard.` };
+    return { ok: true, message: `${asSub ? 'Subtask' : 'Task'} ${task.id} started for agent "${input.agentName}"${asSub ? ' (nested under this conversation; you are told when it finishes)' : ''}. Check on it later with task_diagnose; the user can also open it in the dashboard.` };
   }
 
   /** All-or-nothing validation of a batch BEFORE any card is shown. Later items may use agents created by earlier ones. */

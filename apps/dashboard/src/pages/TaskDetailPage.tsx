@@ -50,8 +50,27 @@ export function TaskDetailPage() {
   // mid-run (agents share screenshots while the status stays 'running').
   const [assetTick, setAssetTick] = useState(0);
   const seen = useRef<Set<string>>(new Set());
+  // Last time anything arrived from the agent (any event), for the "no reply" notice.
+  const [activityAt, setActivityAt] = useState(() => Date.now());
+  // Does the agent's provider run through the LiteLLM gateway with a local model (Ollama)?
+  const [localModel, setLocalModel] = useState(false);
   // Current task mirror, for WS handlers to read without a stale closure.
   const taskRef = useRef<TaskDetail | null>(null);
+
+  const agentName = task?.agentName ?? null;
+  useEffect(() => {
+    let active = true;
+    Promise.all([api.listAgents(), api.listProviders()])
+      .then(([agents, providers]) => {
+        const prov = agents.find((a) => a.name === agentName)?.provider;
+        const kind = providers.find((p) => p.name === prov)?.kind;
+        if (active) setLocalModel(kind === 'ollama');
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [agentName]);
 
   const refreshTask = useCallback(() => {
     api
@@ -61,6 +80,7 @@ export function TaskDetailPage() {
   }, [id]);
 
   const addLine = useCallback((key: string, line: LogLine) => {
+    setActivityAt(Date.now());
     if (seen.current.has(key)) return;
     seen.current.add(key);
     setLines((prev) => [...prev, line]);
@@ -317,6 +337,8 @@ export function TaskDetailPage() {
               lines={visibleLines}
               status={task.status}
               terminal={terminal}
+              activityAt={activityAt}
+              localModel={localModel}
               fill
               onAsk={(p, a) => sendFollowUp(p, a, [])}
             />
@@ -330,6 +352,8 @@ export function TaskDetailPage() {
         {tab === 'chat' && (
           <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact />
         )}
+        {/* the phone layout returns early: the discussion window has to be here as well */}
+        {discussing && <DiscussionModal taskId={id} initialTopic={task.prompt} onClose={() => setDiscussing(false)} onStarted={() => refreshTask()} />}
       </div>
     );
   }
@@ -406,7 +430,7 @@ export function TaskDetailPage() {
           <Card>
             <SectionTitle>Conversation</SectionTitle>
             <DiscussionBar taskId={id} running={!terminal} />
-            <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} onAsk={(p, a) => sendFollowUp(p, a, [])} />
+            <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           </Card>
           <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} />
 

@@ -1,25 +1,18 @@
-Aigentron v0.1.54
+Aigentron v0.1.55
 
-For people who are not programmers: "done" is now yours to set, tasks get meaningful names and filters, the server watches its disk, attaching files works on phones, and the service handles any language while spending fewer tokens.
+For people who are not programmers: the chat shows that something is happening, agents stop piling up tasks, subtasks fold away, and the documentation is brought up to date.
 
-"Done" is set by you
-- When an agent finishes, the task becomes "ready — confirm". It becomes "done" only when you say so: press "✅ Mark as done" (in the task, or under the answer in Telegram), send /done in Telegram, or write a short explicit "done" / "готово" / "完成" (about 20 languages). Anything else you write continues the task. A blocked or failed task can also be accepted as it is. Subtasks still finish by themselves for their lead. Tasks that were already done stay done.
+Chat
+- A thin strip is now the bottom edge of the chat window. While a request is in flight a light runs along it; every thinking step or action from the agent makes it flash in a random spot, and new messages rise out of it. Classic look: multicoloured flashes and a light that changes colour as it goes. Terminal look: 8-bit pixels and palette.
+- "agent is working" is shown plainly; the note about a slow first reply appears only for local (Ollama) models. If nothing arrives from the agent for 30 seconds you see a "no reply" notice (the task is not stopped).
 
-Task list
-- New tasks get a short title made from their context (what you wrote, attached files, and — for a vague request — the first answer) by a small model, in the language of the request. Titles you or a schedule set are never changed. Settings → General → Task titles (on/off, provider, "Try it").
-- Filters above the list: by status (Needs attention, Active, Ready, Done, Blocked, Approval, Failed, Stalled, Cancelled) and by type (Tasks, Chats, From chats, Scheduled, Discussions, Subtasks), with counts. Your choice is remembered.
-
-Disk and cleanup
-- The server checks free disk space every 10 minutes. When it gets low you see a banner on every page and get a message in your chat; when it is critical it clears regenerable caches by itself (video frames, old fetched web pages, old run folders) — never your files. Settings → General → Disk & cleanup shows what takes the space and has "Free up space now". Container logs now rotate.
+Subtasks
+- Agents no longer multiply tasks: before creating one they check whether the work fits an existing subtask (limit 25 per task). A lead can close its own subtasks itself ("done"). Subtasks fold in the task list and on the task page and show a count and a status summary.
 
 Phones
-- Attaching images and files in "New task" and in messages did not open on phones; fixed (the 📎 is a small menu now, and the camera option is in it).
+- The Discuss window opens on phones; the assistant is larger and keeps its animation while thinking.
 
-Any language, fewer tokens
-- File names and agent names in any script work; agents are found by /name or @name, typos forgiven. Knowledge-base search handles Cyrillic, Greek, Arabic, Hebrew, Hindi, Thai, Vietnamese, Chinese, Japanese, Korean. Right-to-left text displays correctly; voice recognition lists 50 languages; long Telegram messages are cut without breaking emoji.
-- To save tokens, agents talk to each other in terse English; only what you read (answers, questions, discussion conclusions) is in your language. In a discussion the agents use English by default, each message has a "🌐 translate" link, and you can choose "Your language" instead (or /discuss lang=user in Telegram).
+Docs
+- Plans and RFCs now start with a status (done / partial / open); README, roadmap, backlog, feature docs and the admin's own knowledge match the code. New: docs/request-flow (how requests to agents and providers are built, what goes into context, how subtask results come back, how agents gain experience).
 
-Other
-- A discussion or a chat ends as "ready — confirm" like any task.
-
-Update note: this release adds a new task status ("review"), a task kind and a title flag; the database changes apply automatically when the server starts. If you have agents with long instructions in a non-English language, ask the admin to rewrite them in concise English — instructions are paid for on every run.
+Update note: no database changes.

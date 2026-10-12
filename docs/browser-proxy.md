@@ -6,7 +6,7 @@ The normal `playwright` browser connects directly. For pages that are geo-blocke
 1. Put the proxy in the server's **`.env`** (the secrets file next to `docker-compose.yml`; agents never see it):
 ```
 PLAYWRIGHT_PROXY_SERVER=proxy.example.com:3128     # endpoint:port  (or a full URL: http://…, socks5://…)
-PLAYWRIGHT_PROXY_USER=your-login
+PLAYWRIGHT_PROXY_USER=your-login                    # optional, with the password
 PLAYWRIGHT_PROXY_PASS=your-password
 # PLAYWRIGHT_PROXY_BYPASS=localhost,my-internal-host   # optional: hosts that skip the proxy
 ```
@@ -19,7 +19,7 @@ It listens on `playwright-mcp-proxy:8932` (also `127.0.0.1:8932` on the host) an
 After changing the `.env` values: `docker compose --profile proxy up -d --force-recreate playwright-mcp-proxy`.
 
 ## How it works
-`infra/playwright-proxy-config.cjs` turns the three variables into a Playwright MCP config (`browser.launchOptions.proxy` with `server`, `username`, `password`) when the container starts, so the credentials are only in `.env` and in the container's temp file (mode 600). A missing `PLAYWRIGHT_PROXY_SERVER` stops the container with a clear message.
+`infra/playwright-proxy-config.cjs` turns these variables (login and password are optional) into a Playwright MCP config (`browser.launchOptions.proxy` with `server`, `username`, `password`, `bypass`) when the container starts, so the credentials are only in `.env` and in the container's temp file (mode 600). A missing `PLAYWRIGHT_PROXY_SERVER` stops the container with a clear message.
 
 ## Safety
 - The browser is refused `file:`, `chrome:` and other non-http(s) addresses outright (not even an approval card), and the container's environment no longer holds the proxy login after start — a page cannot read it from `/proc/self/environ` or from a local file.

@@ -12,7 +12,7 @@ Tokens cost money, and other languages cost more: the same sentence takes roughl
 - **Agent files** (instructions, descriptions) should be in concise English even for non-English users, with one line "answer the person in their language" (the admin does this when it creates agents).
 
 ## Discussions between agents
-By default the agents talk terse English to each other (~80 words per message) and the **conclusion** is written in the language of the topic. Each message has a **🌐 translate** link (on demand, a few tokens, uses the small model of Settings → Task titles). Choose **Language of the agents → Your language** (or `/discuss lang=user …` in Telegram) to have them talk in your language throughout.
+By default the agents talk terse English to each other (~80 words per message) and the **conclusion** is written in the language of the topic. Each message has a **🌐 translate** link (on demand, a few tokens, uses the small model of Settings → General → Task titles). Choose **Language of the agents → Your language** (or `/discuss lang=user …` in Telegram) to have them talk in your language throughout.
 
 ## What works in every language (checked by tests, `src/languages.test.ts`)
 - Task text, titles (generated in the request's language), file names (Cyrillic, CJK, Arabic … keep their letters), agent names and knowledge-base names in any script; `/name` and `@name` find agents with non-Latin names, tolerating case and typos.

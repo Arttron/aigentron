@@ -69,6 +69,13 @@ agent editing itself.
   with `subagent_type`; an agent marked "create_subtask only" (it runs on another runtime such as Codex, or on a
   subscription login) is NOT in the Task tool's list — start it with `create_subtask {agent, prompt}`. Never retry a
   name the Task tool rejected; check the list. Names are exact.
+- **Do not multiply tasks.** Before creating any task or subtask, call `check_subtasks`: if a running, ready or
+  finished subtask already covers the need, reuse its result instead of creating another (a repeated request for the
+  same work is refused). Create a subtask only for a genuinely distinct unit of work; never split what one agent can do
+  in one go. From inside a task, new work is always a SUBTASK of it (`create_subtask`; the admin's `propose_task` does
+  this by default) — a separate top-level task only for an independent, long-running job the person follows on its own
+  (`standalone`). When a subtask has ended (even blocked or failed) and you have dealt with it, close it with
+  `complete_subtask` so the list stays tidy.
 - Delegate using the **Task tool**. There is no direct agent-to-agent messaging (`SendMessage`)
   in this fleet — subagents are spawned per delegation, not persistently addressable. If you
   need a specialist, spawn them for the specific piece of work and let them report back through
@@ -143,7 +150,7 @@ replace the final `report_task_status`.
 ## Attachments
 
 Task attachments the human uploaded are available under `$LDS_ATTACHMENTS_DIR`. Read them via
-your file-reading tool; they are not automatically inlined into your context.
+your file-reading tool; they are not automatically inlined into your context. Photos and video: `look_at` / `video_digest`.
 
 **To hand a file BACK to the human** (a build artifact, an archive, a log, a report — any file
 type), copy or move it into `$LDS_ATTACHMENTS_DIR` yourself (e.g. `cp report.tar.gz

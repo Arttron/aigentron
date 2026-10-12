@@ -1,6 +1,8 @@
 # Plan: Codex as an agent runtime (alongside Claude Code)
 
-> Status: DRAFT (2026-10-07). Goal: agents can run on **OpenAI Codex** exactly like they run on Claude Code,
+> Status: partially implemented — R0 (spike), R1, R2, R3 DONE (shipped, since v0.1.27); R4 (dashboard sign-in) deferred and to be generalized to all
+> subscription/OAuth providers (docs/BACKLOG.md); R5 partly (Codex in dev/minimal images; bare-metal install, parity table, `maxTurns` open). See §7.
+> Original draft (2026-10-07). Goal: agents can run on **OpenAI Codex** exactly like they run on Claude Code,
 > including with a **ChatGPT subscription login**. LiteLLM stays the universal *model* layer; this is a second
 > *agent runtime*, not another LiteLLM route.
 > Facts about Codex below come from OpenAI's docs (non-interactive mode, SDK, MCP, hooks pages) and are marked
@@ -86,17 +88,17 @@ installer (Node 22 is already there); version pinned. Optional: skip when no cod
 
 ## 4. Phases
 
-- **R0 — spike (1–2 days, needs your ChatGPT sign-in).** In the orchestrator container: install Codex,
+- **R0 — spike *(DONE, §6)* (1–2 days, needs your ChatGPT sign-in).** In the orchestrator container: install Codex,
   `codex login --device-auth`, run `codex exec --json` with a per-run `CODEX_HOME`; confirm event shapes,
   hook payload/response, HTTP MCP tool call, AGENTS.md/instructions injection, sandbox behavior in Docker,
   resume. Output: a short verified-facts appendix replacing every **[verify]**.
-- **R1 — runtime abstraction.** Extract `AgentRuntime`, move the Claude code behind it, no behavior change.
-- **R2 — internal MCP over HTTP.** Orchestrator endpoint exposing the internal tools with per-run tokens
+- **R1 — runtime abstraction.** *(DONE)* Extract `AgentRuntime`, move the Claude code behind it, no behavior change.
+- **R2 — internal MCP over HTTP.** *(DONE)* Orchestrator endpoint exposing the internal tools with per-run tokens
   (reused by Codex now, optionally by Claude later).
-- **R3 — Codex runtime + provider kind `codex`.** Event mapper, hooks adapter, per-run `CODEX_HOME`,
+- **R3 — Codex runtime + provider kind `codex`.** *(DONE)* Event mapper, hooks adapter, per-run `CODEX_HOME`,
   failover classification, usage.
-- **R4 — auth UX.** Device-code login in the provider form, signed-in status, sign-out; API-key mode.
-- **R5 — packaging and docs.** Install in all profiles, parity table in the docs, release.
+- **R4 — auth UX.** *(OPEN, deferred: generalized sign-in for all providers; the setup wizard offers the "ChatGPT/Codex login" mode but the login itself is still a CLI step on the server)* Device-code login in the provider form, signed-in status, sign-out; API-key mode.
+- **R5 — packaging and docs.** *(PARTLY: dev/minimal images done)* Install in all profiles, parity table in the docs, release.
 
 ## 5. Open decisions
 
@@ -151,7 +153,7 @@ installer (Node 22 is already there); version pinned. Optional: skip when no cod
 token refresh with parallel runs, `PermissionRequest` hook (not needed when bypassing approvals), reasoning/web-search item
 shapes, SSE MCP servers (docs list only stdio/HTTP), long-prompt limits for `AGENTS.md`.
 
-## 7. Implementation status (2026-10-07) — R1–R3 done, R4–R5 pending
+## 7. Implementation status (2026-10-07; re-checked 2026-10-12) — R1–R3 done, R4–R5 pending
 
 Implemented and verified end-to-end against the live stack (ChatGPT subscription, codex-cli 0.160.1):
 - **R1 runtime abstraction:** `packages/agent-runner` — `AgentRuntime` (`runtime.ts`), `runtimeForProviderKind()`;
@@ -168,7 +170,7 @@ Implemented and verified end-to-end against the live stack (ChatGPT subscription
   `blocked` and the command does not run; provider "Test" checks `codex login status`.
 
 Known gaps / next:
-- **R4 auth UX (deferred 2026-10-08 — to be built once for ALL subscription/OAuth providers, see docs/BACKLOG.md):** the ChatGPT login is still a manual `codex login --device-auth` on the server (CODEX_HOME = `agent/.codex-home`);
+- **R4 auth UX (deferred 2026-10-08 — to be built once for ALL subscription/OAuth providers, see docs/BACKLOG.md):** the ChatGPT login is still a manual `codex login --device-auth` on the server (shared login home now `secrets/codex` or `CODEX_AUTH_HOME`, outside the agent tree; `agent/.codex-home` and `~/.codex` are still read as legacy locations);
   the dashboard flow (show URL + code, poll, signed-in status, sign out) is not built.
 - **R5:** bare-metal `install.sh` does not install Codex yet; parity table in README; MCP servers over SSE (e.g. playwright-mcp)
   are skipped with a warning on Codex; no `maxTurns` equivalent (only the run timeout); `-i` image input and parallel-run

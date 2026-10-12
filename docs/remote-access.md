@@ -127,7 +127,8 @@ The setting is stored in `secrets/cloudflare-access.json`.
 - **Two layers (A and B above):** Cloudflare Access (who may reach the hostname) and the built-in passwords + domain list (who may use the app). The agent-facing
   routes only answer from the same machine, so the tunnel never exposes them.
 - Postgres, Redis, LiteLLM and the research/playwright services are **not** exposed by the tunnel; keep their ports on `127.0.0.1`.
-- The "acting user" switcher in the dashboard only labels who did something; it is not authentication.
+- Once sign-in passwords are set, the **session** decides who is acting (the "acting user" switcher is ignored); before that the switcher only labels who did something and is not authentication.
+- The one-time **secret links** the admin sends when it needs a password or key from you (`/api/secret-links/<token>`) are open without a session by design — a hostname behind Cloudflare Access still asks for Access first.
 - Using something else (Tailscale, your own reverse proxy with SSO)? Point it at `orchestrator:3001`, forward WebSocket upgrades for
   `/socket.io`, and set `PUBLIC_URL`. Nothing else in the app depends on Cloudflare.
 

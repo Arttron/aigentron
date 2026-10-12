@@ -57,7 +57,7 @@
 
   background: var(--t-bg);
   color: var(--t-text);
-  border-radius: var(--radius);
+  border-radius: var(--radius) var(--radius) 0 0;
   box-shadow: var(--inset);
   padding: 14px;
   max-height: 60vh;
@@ -402,4 +402,154 @@
   font-size: 12.5px;
   white-space: pre-wrap;
   opacity: 0.92;
+}
+
+/* Ambient strip: sits under the chat; messages rise out of it. */
+.strip {
+  position: relative;
+  height: 4px;
+  margin-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  overflow: hidden;
+  transition: background 0.4s;
+}
+.stripOn {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.runner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 70px;
+  left: -70px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent, hsl(200 95% 60%), transparent);
+  box-shadow: 0 0 8px hsl(200 95% 60%);
+  animation: run 1.8s ease-in-out infinite, hue 1.8s linear infinite;
+}
+@keyframes run {
+  to {
+    left: 100%;
+  }
+}
+/* The light changes colour as it travels. */
+@keyframes hue {
+  to {
+    filter: hue-rotate(360deg);
+  }
+}
+.flash {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  --c: var(--accent);
+  background: radial-gradient(ellipse at center, #fff 0%, var(--c) 45%, transparent 75%);
+  box-shadow: 0 0 12px 2px var(--c);
+  opacity: 0;
+  animation: flash 1s ease-out forwards;
+}
+@keyframes flash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+/* Terminal look: 8-bit — hard pixels, stepped movement, a fixed palette. */
+.strip[data-look='terminal'] {
+  height: 6px;
+  background: repeating-linear-gradient(90deg, #1b2a1f 0 6px, #101a13 6px 12px);
+}
+.strip[data-look='terminal'] .runner {
+  width: 36px;
+  left: -36px;
+  border-radius: 0;
+  background: #4dff7c;
+  box-shadow: none;
+  animation: run8 1.8s steps(24) infinite, pal8 1.8s steps(1) infinite;
+}
+@keyframes run8 {
+  to {
+    left: 100%;
+  }
+}
+@keyframes pal8 {
+  0% {
+    background: #ff4d4d;
+  }
+  14% {
+    background: #ffa500;
+  }
+  28% {
+    background: #ffee33;
+  }
+  42% {
+    background: #4dff7c;
+  }
+  57% {
+    background: #33ffee;
+  }
+  71% {
+    background: #4d79ff;
+  }
+  85% {
+    background: #d94dff;
+  }
+}
+.strip[data-look='terminal'] .flash {
+  top: 0;
+  bottom: 0;
+  border-radius: 0;
+  background: var(--c);
+  box-shadow: none;
+  animation: flash8 0.9s steps(1) forwards;
+}
+@keyframes flash8 {
+  0% {
+    opacity: 1;
+  }
+  25% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.4;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.rise {
+  animation: rise 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .runner,
+  .flash,
+  .strip[data-look='terminal'] .runner,
+  .strip[data-look='terminal'] .flash,
+  .rise {
+    animation: none;
+  }
+  .flash {
+    opacity: 0.8;
+  }
 }

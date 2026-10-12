@@ -1,25 +1,37 @@
 # Plan: knowledge base with pluggable storage
 
-> Status: **K1 + K4 + part of K5 BUILT (2026-10-12)** — see `docs/knowledge-base.md` (in-app BM25, optional embeddings with hybrid ranking, chunking strategies + preview, PDF/docx ingest, `kb_*` tools, dashboard page). Still open: K2/K3 (external databases, attached mode), OCR, admin `propose_kb` tools, `verify_quote` over KB. Original draft (2026-10-07): Refines §2.3 of docs/plan-domain-packs.md after the owner's requirement:
+> Status: **partially implemented — K1 + K4 + part of K5 BUILT (2026-10-12)** — see `docs/knowledge-base.md` (in-app BM25, optional embeddings with hybrid ranking, chunking strategies + preview, PDF/docx ingest, `kb_*` tools, dashboard page). Still open: K2/K3 (external databases, attached mode), OCR, admin `propose_kb` tools, `verify_quote` over KB. Original draft (2026-10-07): Refines §2.3 of docs/plan-domain-packs.md after the owner's requirement:
 > **the user must be able to connect any database as a knowledge store — local or remote.**
 > Storage is a connection, like Providers and MCP servers; nothing about it is hard-wired.
 
-## 0. Status and module boundary (2026-10-08)
+## 0. Status and module boundary (2026-10-08; updated 2026-10-12)
 
-**Deferred — to be built later as an optional module (`knowledge`).** Nothing of it exists yet; today's pieces are shaped so
-it can be added without reworking them:
+**Built (2026-10-12) as `apps/orchestrator/src/knowledge`, differently from the sketch below** (user docs: `docs/knowledge-base.md`):
+- **Not a flag-gated optional module:** always on, no `KNOWLEDGE_ENABLED`. Tables `KnowledgeBase` / `KnowledgeDoc` / `KnowledgeChunk`
+  exist in both the Postgres and SQLite migration trees.
+- **Search is in-app BM25** over an in-memory per-base index (not SQLite FTS5 / Postgres FTS), limit 20 000 passages per base;
+  optional embeddings (OpenAI-compatible or Ollama) fuse with BM25 by reciprocal-rank fusion; vectors are stored in the chunk row (no pgvector / sqlite-vec).
+- **Binding is on the base, not in agent frontmatter:** `KnowledgeBase.agents` (empty = all agents); there is no `kb:` key in agent files.
+- **Writes:** `kb_add` works only for bases with "agents may add notes" (`agentWrite`); no approval card.
+- **Ingest:** md/txt/html/csv, PDF (text layer), docx, notes, Resources, and the research cache (`agent/research-cache`).
+  xlsx and OCR are not there. Raw files are not kept (only passages), so `rawStorage` does not exist; chunking strategies + preview are built.
+- Tools: `kb_list`, `kb_search`, `kb_read`, `kb_add`; dashboard page /knowledge; operator and admin manage bases.
+- **Still open:** external databases (K2/K3: `postgres`/`sqlite` drivers, attached mode), OCR, xlsx, admin `propose_kb` tools,
+  `verify_quote` over KB documents, `rawStorage`, cleaning steps (§4.4).
+
+Original (deferred) module-boundary notes, kept for history:
 
 - **Optional by design.** Own Nest module + own migrations (both the Postgres and SQLite trees), enabled by a flag
   (`KNOWLEDGE_ENABLED`); when off, no tables are created, no `kb_*` tools exist, `kb:` in an agent file is ignored with a
-  warning. The minimal profile ships without it unless enabled.
+  warning. The minimal profile ships without it unless enabled. *(Not done: the module is always on.)*
 - **Existing seams it will plug into** (already in the code, no changes needed in them):
   - the `research` cache (`agent/research-cache/*.json`: `url, finalUrl, title, fetchedAt, lastModified, contentType,
     hash, text`) is the ingest contract — the module scans/watches it and indexes pages as documents with their
-    source URL, fetch time and edition date;
+    source URL, fetch time and edition date *(built as an import action: `…/import/research`)*;
   - `verify_quote` checks against the cache today and can check against KB documents later (same output);
   - MCP read-only declaration (`readOnlyTools`) lets a KB MCP/HTTP server be trusted without per-call approvals;
   - admin tools pattern (`propose_*` + approval card) for creating/binding bases;
-  - reserved names: tools `kb_list`, `kb_search`, `kb_read`, `kb_add`; agent frontmatter key `kb:`.
+  - reserved names: tools `kb_list`, `kb_search`, `kb_read`, `kb_add`; agent frontmatter key `kb:` *(the key was not used)*.
 - **Build order when taken into work:** K1 (builtin driver, FTS, md/txt ingest, `kb_search`/`kb_read`, chunking +
   raw-retention settings, research-cache ingest) → K2 (connect an external DB, UI) → K3 (PDF/docx) → K4 (embeddings).
 
@@ -133,13 +145,13 @@ dimension and refuses mixed vectors.
 
 ## 6. Phases
 
-- **K1 — builtin + driver interface.** Schema (docs/chunks + FTS) for Postgres and SQLite, `kb_search`/`kb_read`,
+- **K1 — builtin + driver interface.** *(DONE, without a driver interface and with in-app BM25 instead of FTS)* Schema (docs/chunks + FTS) for Postgres and SQLite, `kb_search`/`kb_read`,
   ingest from md/txt, `KnowledgeBase` registry with `builtin` only.
-- **K2 — connect a database.** `postgres` and `sqlite` drivers (managed mode), connection test + capability
+- **K2 — connect a database.** *(OPEN)* `postgres` and `sqlite` drivers (managed mode), connection test + capability
   detection, Settings → Knowledge UI, `kb:` frontmatter binding.
-- **K3 — attached mode** with column mapping, read-only enforcement.
-- **K4 — embeddings** (pgvector / sqlite-vec) and hybrid search; model/dimension tracking.
-- **K5 — converters** (PDF/docx/xlsx), dashboard upload page, admin-agent tools to create/bind bases.
+- **K3 — attached mode** *(OPEN)* with column mapping, read-only enforcement.
+- **K4 — embeddings** (pgvector / sqlite-vec) and hybrid search; model/dimension tracking. *(DONE with vectors in the chunk row and hybrid RRF; no pgvector / sqlite-vec)*
+- **K5 — converters** (PDF/docx/xlsx), dashboard upload page, admin-agent tools to create/bind bases. *(PARTLY: PDF, docx and the dashboard page done; xlsx, OCR and admin tools open)*
 
 ## 7. Open decisions
 

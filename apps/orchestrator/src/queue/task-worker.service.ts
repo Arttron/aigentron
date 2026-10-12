@@ -106,10 +106,11 @@ export class TaskWorkerService implements OnModuleInit {
         ? undefined
         : (input: { prompt: string; title?: string; agent?: string }) =>
             this.tasks
-              .createSubtask(taskId, { prompt: input.prompt, title: input.title, agentName: input.agent })
-              .then((t) => ({ id: t.id, title: t.title }));
+              .createSubtask(taskId, { prompt: input.prompt, title: input.title, agentName: input.agent }, undefined, { fromAgent: true })
+              .then((t) => ({ id: t.id, title: t.title, reused: (t as { reused?: boolean }).reused }));
       // Same gating: only a decomposing lead can inspect its subtasks.
       const onCheckSubtasks = task.parentId ? undefined : () => this.tasks.subtaskStatuses(taskId);
+      const onCompleteSubtask = task.parentId ? undefined : (id: string) => this.tasks.completeSubtask(taskId, id);
       // Any agent may schedule a delayed re-run of its own task ("check back later").
       const onScheduleCheck = async (input: { delaySeconds: number; note?: string }) => {
         const prompt =
@@ -127,6 +128,7 @@ export class TaskWorkerService implements OnModuleInit {
         attachments,
         onCreateSubtask,
         onCheckSubtasks,
+        onCompleteSubtask,
         onScheduleCheck,
       });
 

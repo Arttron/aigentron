@@ -12,13 +12,16 @@ The run waits (the task shows *needs approval*). The agent gets back "The user a
 
 ## Where you answer
 - **Dashboard** — the card in the bottom-right dock (with the approvals), on every page. Tap a button, or type your own answer.
-- **Telegram** — the question arrives as a message with a button per option. Tap one, **or simply reply with text** (a number picks that option). It goes to the task's own chat; for a dashboard task nobody is watching, to the allowed chats after a short grace period.
+- **Telegram** — the question arrives as a message with a button per option. Tap one, **or simply reply with text** (a number picks that option). It goes to the task's own chat; for a dashboard task nobody is watching (no dashboard window in focus), to the allowed chats after a short grace period.
 - The first answer wins; the other places update at once (buttons disappear, the message shows the answer). A cancelled or finished task withdraws its questions.
 
 ## Notes
 - Who may answer in the dashboard: reviewer, operator, admin and task setter. A chat may answer only questions sent to it.
-- `GET /api/questions?status=pending`, `POST /api/questions/:id/answer {index|text}`; events `question:created` / `question:resolved`.
+- `GET /api/questions?status=pending` (also `taskId=`), `GET /api/questions/:id` and `…/:id/image`, `POST /api/questions/:id/answer {index|text}`; events `question:created` / `question:resolved`.
 - The table is `AgentQuestion` (both Postgres and SQLite migrations).
+
+## When the agent stops instead of asking
+A task that ends `blocked` (the agent needs input) is a different path from `ask_user`: a **subtask's** question goes straight to the lead that created it (the lead is woken at once, even while its other subtasks run); a top-level dashboard task with no channel of its own posts it to the default channel and chat set in Settings → General → **Escalations**, and you answer by replying there (it arrives as a follow-up). `ask_user` is preferable: the run waits and continues with your answer. See also `docs/request-flow.md` (§4, §8).
 
 ## For learning and quizzes
 `ask_user` suits drills: a multiple-choice item with 2–4 button options, or an open "translate this" question. The English starter pack's tutor and quizmaster use it (quiz one item at a time, instant feedback in the next message). Each answer is one model turn, so a 10-item quiz is 10 short turns; a long pause ends in a timeout, not a lost run. (Packs already installed keep their old agent files — reinstall the pack or ask the admin to update the agents to get the new behaviour.)

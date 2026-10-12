@@ -9,7 +9,7 @@ Large reference material that agents **search** instead of carrying in the promp
 4. Agents get the tools `kb_list`, `kb_search {query, kb?, limit?}`, `kb_read {doc, chunk?}` and, if the base allows it, `kb_add {kb, title, text, source?}`. The prompt names the bases an agent may use, never their content. Results carry the document, passage number and **source** so the agent can cite.
 
 ## Search
-- **Keyword (BM25)** always works — offline, no key. Words are lower-cased and lightly stemmed (English and Russian), headings count double.
+- **Keyword (BM25)** always works — offline, no key. Words are lower-cased and lightly stemmed (English endings; Cyrillic and Greek by a fixed-length stem), headings count double. Any script works (`docs/languages.md`); write the query in the language of the documents. A passage in a result is shown up to 700 characters (`kb_read` gives the whole).
 - **By meaning (optional):** give the base an embedding provider (OpenAI-compatible or local Ollama; default model `text-embedding-3-small` / `nomic-embed-text`). Passages get vectors in the background and every search fuses the keyword and meaning rankings (reciprocal-rank fusion) — "floor base" finds "screed". It costs a few cents per million words and the text goes to that provider. Changing the model drops the old vectors and re-indexes. If the provider is down, search falls back to keywords with a note.
 - The Knowledge page has a search box that behaves like an agent's `kb_search`.
 
@@ -25,7 +25,7 @@ Settings: max size (default 3000 characters), overlap (200), merge pieces shorte
 - 20 MB per file, 5 M characters per document, 20 000 passages per base (the index lives in memory — a bigger corpus needs an external store, see the plan); scans (PDF without text) need OCR, which is not available yet.
 - Who manages bases: operator and admin; agents only search/read (and add notes to bases where "agents may add notes" is on).
 - The index lives in memory per base and is rebuilt after a change; it is built page by page without freezing the server (a few seconds for ~10 000 passages) and patched in place while embeddings are being made.
-- API: `GET/POST /api/knowledge`, `PATCH/DELETE /api/knowledge/:name`, `…/docs`, `…/docs/upload` (raw body + `x-filename`), `…/docs/note`, `…/import/resource`, `…/import/research`, `…/search`, `POST /api/knowledge/preview`.
+- API: `GET/POST /api/knowledge`, `GET/PATCH/DELETE /api/knowledge/:name`, `…/docs`, `…/docs/upload` (raw body + `x-filename`), `…/docs/note`, `DELETE /api/knowledge/docs/:docId`, `…/import/resource`, `…/import/research`, `…/search`, `…/reembed`, `POST /api/knowledge/preview`. Managing routes need operator/admin; search also reviewer and task setter.
 
 ## Notes on safety and limits
 - Passages returned to agents are fenced as quoted data (`<passage>`), with a one-line reminder that they are not instructions. An agent with no known identity sees only bases open to everyone.

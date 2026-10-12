@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, type AgentInfo, type TaskDetail } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, Field, Muted, ErrorText } from '@/components/ui';
 import { StatusBadge } from '@/components/StatusBadge';
+import { readCollapsed, statusSummary, writeCollapsed } from '@/lib/collapsed';
 import styles from './TaskRelations.module.css';
 
 /**
@@ -18,6 +19,15 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
   const [agentName, setAgentName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [folded, setFolded] = useState(() => readCollapsed().has(`detail:${task.id}`));
+  const toggleFold = () => {
+    const set = readCollapsed();
+    const key = `detail:${task.id}`;
+    if (folded) set.delete(key);
+    else set.add(key);
+    writeCollapsed(set);
+    setFolded(!folded);
+  };
 
   useEffect(() => {
     api.listAgents().then(setAgents).catch(() => undefined);
@@ -60,7 +70,11 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
 
       <Card>
         <Row spaceBetween>
-          <SectionTitle className={styles.flush}>Subtasks ({task.subtasks.length})</SectionTitle>
+          <button type="button" className={styles.fold} aria-expanded={!folded} onClick={toggleFold} disabled={task.subtasks.length === 0}>
+            <SectionTitle className={styles.flush}>
+              {task.subtasks.length > 0 ? (folded ? '▸ ' : '▾ ') : ''}Subtasks ({task.subtasks.length})
+            </SectionTitle>
+          </button>
           <Button size="sm" onClick={() => setAdding((v) => !v)}>
             {adding ? 'Cancel' : '+ Subtask'}
           </Button>
@@ -70,7 +84,9 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
           <Muted className={styles.empty}>No subtasks. Decompose this task into independent units.</Muted>
         )}
 
-        {task.subtasks.map((s) => (
+        {folded && task.subtasks.length > 0 && <Muted className={styles.empty}>{statusSummary(task.subtasks.map((s) => s.status))}</Muted>}
+
+        {!folded && task.subtasks.map((s) => (
           <div key={s.id} className={styles.item}>
             <Link to={`/tasks/${s.id}`} className={styles.itemTitle}>
               {s.title}
