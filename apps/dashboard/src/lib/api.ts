@@ -95,6 +95,24 @@ export type TaskDetail = Task & {
   linksOut: TaskLinkOut[];
 };
 
+/** The shared workspace (memory / work / deliverables). */
+export interface WorkspaceSummary {
+  root: string;
+  bytes: number;
+  folders: Record<string, { files: number; bytes: number }>;
+}
+export interface WorkspaceEntry {
+  name: string;
+  dir: boolean;
+  size: number;
+  mtime: string;
+}
+export interface WorkspaceListing {
+  path: string;
+  entries: WorkspaceEntry[];
+  writable: boolean;
+}
+
 /** An AI model endpoint (from GET /api/providers; secret masked). */
 export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'codex';
 // oauth-token: a CLI-minted subscription token (e.g. `claude setup-token`) —
@@ -797,6 +815,19 @@ export const api = {
       body: file,
     }).then(unwrap<AttachmentMeta>),
 
+  workspaceSummary: () => fetch(`${API_BASE}/workspace`, { cache: 'no-store' }).then(unwrap<WorkspaceSummary>),
+  workspaceList: (path: string) =>
+    fetch(`${API_BASE}/workspace/files?${new URLSearchParams({ path })}`, { cache: 'no-store' }).then(unwrap<WorkspaceListing>),
+  workspaceFileUrl: (path: string, download = false) => `${API_BASE}/workspace/file?${new URLSearchParams({ path, ...(download ? { download: '1' } : {}) })}`,
+  workspaceText: async (path: string): Promise<string> => {
+    const r = await fetch(`${API_BASE}/workspace/file?${new URLSearchParams({ path })}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`${r.status} — could not read the file`);
+    return r.text();
+  },
+  workspaceUpload: (path: string, body: Blob | string) =>
+    fetch(`${API_BASE}/workspace/file?${new URLSearchParams({ path })}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body }).then(unwrap<{ path: string; size: number }>),
+  workspaceDelete: (path: string) => fetch(`${API_BASE}/workspace/file?${new URLSearchParams({ path })}`, { method: 'DELETE' }).then(unwrap<{ ok: boolean }>),
+
   listQuestions: (status?: QuestionStatus, taskId?: string) =>
     fetch(`${API_BASE}/questions?${new URLSearchParams({ ...(status ? { status } : {}), ...(taskId ? { taskId } : {}) })}`, { cache: 'no-store' }).then(unwrap<AgentQuestion[]>),
   answerQuestion: (id: string, answer: { index?: number; indexes?: number[]; text?: string }) =>
@@ -818,6 +849,7 @@ export const api = {
         attachments: { bytes: number; oldTasksBytes: number };
         caches: { digests: { count: number; bytes: number; stale: number; staleBytes: number }; research: { count: number; bytes: number; stale: number; staleBytes: number }; digestRetentionDays: number; researchRetentionDays: number };
         resources: { bytes: number };
+        workspace?: { bytes: number };
         retentionDays: number;
       }>,
     ),

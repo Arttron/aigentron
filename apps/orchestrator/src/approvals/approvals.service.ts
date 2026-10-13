@@ -117,6 +117,7 @@ export class ApprovalsService {
       : undefined;
     const verdict = classifyToolCall(input.toolName, input.toolInput, {
       workspaceRoot: input.workspaceRoot,
+      extraWriteRoots: input.extraWriteRoots,
       readOnlyMcp,
     });
     if (!verdict.dangerous) {

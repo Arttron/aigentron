@@ -194,6 +194,7 @@ export function TaskListPage() {
             <Link to="/agents">🧑‍💻 Agents</Link>
             <Link to="/resources">📚 Resources</Link>
             <Link to="/knowledge">🧠 Knowledge</Link>
+            <Link to="/workspace">📁 Workspace</Link>
             <Link to="/stats">📊 Stats</Link>
             <Link to="/settings">⚙ Settings</Link>
           </>

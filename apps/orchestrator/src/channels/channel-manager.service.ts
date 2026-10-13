@@ -400,9 +400,9 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // Post the agent's actual final answer (the `result` event) — not just a
     // status line. Fall back to the reported summary / title when there is none.
     // a discussion between agents has no single answer: its messages were already posted one by one
-    const acceptButton = status === 'review' ? [[{ label: '✅ Mark done', data: `md:${taskId}` }]] : undefined;
+    // No "done" button in chats: the person confirms by writing "done" (or /done) — see isDoneMessage. (Old messages' md: buttons still work.)
     if (answered && (await this.endedWithDiscussion(taskId))) {
-      await this.send(dest.channel.id, dest.externalThreadId, '✅ The discussion is over. Write here to continue it — or tap Mark done.', acceptButton, taskId);
+      await this.send(dest.channel.id, dest.externalThreadId, '✅ The discussion is over. Write here to continue it — or write “done” to close it.', undefined, taskId);
       return;
     }
     const body = answered ? (await this.latestResult(taskId)) || (await this.channels.summarize(taskId)) : task.error?.slice(0, 800) || (await this.channels.summarize(taskId));
@@ -412,9 +412,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const header = answered ? `${prefix}${icon} «${task.title}»` : `${prefix}${icon} «${task.title}» — ${status}`;
     let text = answered && !chatState?.progress ? (prefix ? `↳ ${task.title}\n\n${body}` : body) : `${header}\n\n${body}`;
     if (answered && task.prUrl) text += `\n\n${task.prUrl}`;
-    // A task that failed / stalled / is blocked can also be accepted as it is — the button is offered for those too.
-    const buttons = acceptButton ?? (!prefix && ['blocked', 'stalled', 'failed'].includes(status) ? [[{ label: '✅ Mark done anyway', data: `md:${taskId}` }]] : undefined);
-    await this.send(dest.channel.id, dest.externalThreadId, text, buttons, taskId);
+    await this.send(dest.channel.id, dest.externalThreadId, text, undefined, taskId);
     if (answered && chatState?.voice) await this.speakReply(dest.channel.id, dest.externalThreadId, body);
     // Also deliver any new attachments the agent produced (screenshots as
     // photos, everything else — reports, archives, etc. — as documents).

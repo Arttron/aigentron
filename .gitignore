@@ -34,6 +34,8 @@ coverage/
 
 # host-mounted agent workspace (bind-mounted to /workspace/repo)
 /project/
+# the shared workspace (bind-mounted to /workspace/workspace)
+/workspace/
 
 # agent runtime artifacts (generated per-run settings + task attachments)
 /agent/runs/

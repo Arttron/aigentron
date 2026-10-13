@@ -141,3 +141,23 @@ describe('classifyToolCall — internal tools', () => {
     expect(t1).not.toBe(t2);
   });
 });
+
+describe('classifyToolCall — extra write roots (shared workspace)', () => {
+  const opts = { workspaceRoot: '/work', extraWriteRoots: ['/data/workspace'] };
+  it('allows writes inside the task root or an extra root, not elsewhere', () => {
+    expect(classifyToolCall('Write', { file_path: '/work/a.ts' }, opts).dangerous).toBe(false);
+    expect(classifyToolCall('Write', { file_path: '/data/workspace/work/a.md' }, opts).dangerous).toBe(false);
+    expect(classifyToolCall('Edit', { file_path: '/data/workspace/../secrets/auth.json' }, opts).dangerous).toBe(true);
+    expect(classifyToolCall('Write', { file_path: '/data/workspace-evil/x' }, opts).dangerous).toBe(true);
+    expect(classifyToolCall('Write', { file_path: '/etc/passwd' }, opts).dangerous).toBe(true);
+  });
+  it('without extra roots the old behaviour stays', () => {
+    expect(classifyToolCall('Write', { file_path: '/data/workspace/work/a.md' }, { workspaceRoot: '/work' }).dangerous).toBe(true);
+  });
+  it('apply_patch follows the same boundary', () => {
+    const ok = '*** Begin Patch\n*** Add File: /data/workspace/work/n.md\n+x\n*** End Patch';
+    const bad = '*** Begin Patch\n*** Add File: /data/other/n.md\n+x\n*** End Patch';
+    expect(classifyToolCall('apply_patch', { input: ok }, opts).dangerous).toBe(false);
+    expect(classifyToolCall('apply_patch', { input: bad }, opts).dangerous).toBe(true);
+  });
+});

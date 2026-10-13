@@ -116,6 +116,8 @@ export class AppConfigService {
   /** Per-task image/PDF attachments live here (under the agent dir, readable
    *  by agents as $LDS_ATTACHMENTS_DIR/<taskId>). */
   readonly attachmentsDir: string;
+  /** The shared workspace (memory / work / deliverables) the agents write non-code results to. */
+  readonly workspaceDir: string;
 
   /** Host the MCP entry point (POST/GET /api/mcp) for external clients. */
   readonly mcpHostEnabled: boolean;
@@ -189,6 +191,7 @@ export class AppConfigService {
     this.litellmManagedArgs = (process.env.LITELLM_MANAGED_ARGS ?? '').split(' ').filter(Boolean);
     this.dashboardBaseUrl = (process.env.DASHBOARD_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
     this.attachmentsDir = process.env.ATTACHMENTS_DIR ?? join(this.agentDir, 'attachments');
+    this.workspaceDir = process.env.WORKSPACE_DIR ?? join(this.agentDir, '..', 'workspace');
     this.mcpHostEnabled = !/^(0|false|no)$/i.test(process.env.MCP_HOST_ENABLED ?? 'true');
     this.mcpAllowedOrigins = (process.env.MCP_ALLOWED_ORIGINS ?? '')
       .split(',')

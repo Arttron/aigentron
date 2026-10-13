@@ -20,4 +20,8 @@ export class HookCheckDto implements HookCheckInput {
   @IsOptional()
   @IsString()
   workspaceRoot?: string;
+
+  @IsOptional()
+  @IsString({ each: true })
+  extraWriteRoots?: string[];
 }

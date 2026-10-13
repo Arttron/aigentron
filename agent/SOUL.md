@@ -160,6 +160,11 @@ the human has no way to reach; only `$LDS_ATTACHMENTS_DIR` is actually exposed t
 under 10MB (uploads/writes past that are rejected). Mention the filename in your final
 `report_task_status` summary so the human knows it's there.
 
+A result that should outlive the task (reports, tables, drafts the team will reuse) goes through
+`workspace_save` instead: it stores the file in the shared workspace `deliverables/` (versioned, no
+size limit) AND lists it in this task's attachments as a link — no copy, same gallery/chat/channel
+delivery. Do not do both.
+
 This is implementation work (producing/placing the file) — a lead agent delegates it to a
 specialist rather than doing it directly, same as any other file operation.
 

@@ -198,7 +198,7 @@ POST /api/tasks ──▶ TasksService.create ──▶ TaskQueueService.enqueue
   executor for up to `verifyMaxAttempts` fix iterations (default 2; `0` = fail without auto-fix).
   Only a green run is marked ready/pushed.
 - **review → done**: an agent that reports `done` ends the task in `review` ("ready — confirm"); a person
-  moves it to `done` (dashboard "Mark as done", Telegram button, `/done`, or a short explicit message).
+  moves it to `done` (dashboard "Mark as done", `/done`, or a short explicit message — in Telegram there is no button).
   Subtasks still end `done` for their lead; `report_task_status`/`heartbeat` and the `stalled` watchdog
   (hard timeout) are in `@lds/agent-runner` `internal-tools.ts`.
 

@@ -55,8 +55,8 @@ export function TitleSettings() {
         A new task is named from its context — what you wrote, the files you attached and, for a vague request, the first answer — by a small, cheap model, in the language of the request. Until then it
         shows the first line of your message. Titles you or a schedule set yourself are never changed. Costs a fraction of a cent per task; the request text goes to the chosen provider.
       </Muted>
-      <label style={{ display: 'block', margin: '10px 0' }}>
-        <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} /> Name tasks automatically
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
+        <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} style={{ width: 'auto', margin: 0 }} /> Name tasks automatically
       </label>
       {cfg.enabled && (
         <>

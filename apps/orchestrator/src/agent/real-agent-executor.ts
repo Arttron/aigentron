@@ -28,6 +28,7 @@ import { SkillsLearnedService } from '../agent-registry/skills-learned.service';
 import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
 import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
+import { WorkspaceService } from '../workspace/workspace.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { stripMark } from '../discussion/discussion-core';
@@ -120,6 +121,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly internalMcp: InternalMcpService,
     private readonly codex: CodexService,
     private readonly resources: ResourcesService,
+    private readonly workspace: WorkspaceService,
     private readonly media: MediaService,
     private readonly questions: QuestionsService,
     private readonly knowledge: KnowledgeService,
@@ -156,9 +158,10 @@ export class RealAgentExecutor extends AgentExecutor {
     // IS the project (a per-task worktree checkout), so none of them hunt for a
     // "main project" elsewhere or hedge about the location.
     const projectMap = chat ? '' : await buildProjectMap(workDir);
-    const orientation = chat
-      ? buildChatOrientation(workDir)
-      : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared, projectMap);
+    const workspaceOn = !chat; // chat agents and discussion participants get the tools, not the prompt block
+    const orientation =
+      (chat ? buildChatOrientation(workDir) : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared, projectMap)) +
+      (workspaceOn ? `\n\n${this.workspace.orientation()}` : '');
     // Other registered agents become delegatable subagents (each on its own provider);
     // a chat agent talks to the user directly and delegates to no one.
     const leadProvider = task.providerOverride ?? agentDef?.provider ?? defaultProvider;
@@ -166,7 +169,9 @@ export class RealAgentExecutor extends AgentExecutor {
     if (Object.keys(agents).length) {
       this.logger.log(`Task ${task.id} subagents: [${Object.keys(agents).join(', ')}]`);
     }
-    const appendSystemPrompt = (await this.buildInstructions(agentDef)) + roster;
+    // The workspace memory goes LAST so the static part of the prompt stays cacheable.
+    const memory = workspaceOn ? await this.workspace.digest().catch(() => '') : '';
+    const appendSystemPrompt = (await this.buildInstructions(agentDef)) + roster + (memory ? `\n\n${memory}` : '');
 
     // Resume the most recent session with a Claude session id on a follow-up
     // (first attempt only) — including one that ended `errored` by hitting the
@@ -555,6 +560,22 @@ export class RealAgentExecutor extends AgentExecutor {
         read: (input) => this.knowledge.readReport(input, agentDef?.name ?? null),
         ...(ctx.discussion ? {} : { add: (input: { kb: string; title: string; text: string; source?: string }) => this.knowledge.addReport(input, agentDef?.name ?? null) }),
       },
+      workspace: {
+        info: () => this.workspace.info(),
+        files: (input) => this.workspace.files(input),
+        ...(ctx.discussion
+          ? {}
+          : {
+              note: (input: { kind: string; text: string; resolves?: string }) => this.workspace.note(input, agentDef?.name),
+              save: (input: { path: string; content?: string; from?: string; note?: string }) =>
+                this.workspace.save(input, [ctx.worktreePath], async (dest) => {
+                  // the result shows up in THIS task's attachments (gallery, chat, channels) as a link to the workspace file — no copy
+                  const name = await this.attachments.link(ctx.taskId, dest);
+                  if (/\.(png|jpe?g|webp|gif)$/i.test(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
+                  return `It is listed in the task's attachments as "${name}" (the person sees it there — no need to copy it).`;
+                }),
+            }),
+      },
       onCurrentTime: (input) => describeNow(new Date(), input.timezone),
       onShowImages: async (input) => {
         const paths = [...new Set(input.paths)].slice(0, 10);
@@ -576,12 +597,16 @@ export class RealAgentExecutor extends AgentExecutor {
         onEvent({ kind: 'assistant', text: (input.caption ?? '').trim(), attachments: names });
         return `Shown ${names.length} picture(s) to the user${names.length > 1 ? ' as an album' : ''}.${skipped.length ? ` Skipped: ${skipped.join('; ')}` : ''}`;
       },
-      onAskUser: ctx.discussion ? undefined : async (input) =>
-        this.questions.ask(ctx.taskId, session.id, {
+      onAskUser: ctx.discussion ? undefined : async (input) => {
+        const answer = await this.questions.ask(ctx.taskId, session.id, {
           ...input,
           // the picture shown with the question must be a real file of this task (never an arbitrary path)
           image: input.image ? await this.media.safePath(input.image, ctx.worktreePath).catch(() => undefined) : undefined,
-        }),
+        });
+        // what the person decided is team knowledge: it goes to workspace memory (decisions.md) by itself
+        if (!opts.chat) void this.workspace.recordAnswer(input.question, answer);
+        return answer;
+      },
       onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
       onLookAt: (input) => this.media.lookAt(input.path, input.question, ctx.worktreePath, input, { provider: provider.name, model }),
       onVideoDigest: (input) => this.media.videoDigest(input.path, ctx.worktreePath, input),
@@ -607,6 +632,7 @@ export class RealAgentExecutor extends AgentExecutor {
           prompt: withAttachments(prompt, opts.attachmentPaths),
           cwd: opts.workDir,
           workspaceRoot: ctx.worktreePath,
+          extraWriteRoots: ctx.discussion ? undefined : this.workspace.writeRoots,
           modelEnv,
           providerLabel: provider.name,
           modelLabel: model,
@@ -829,6 +855,7 @@ export class RealAgentExecutor extends AgentExecutor {
           prompt: REPORTING_RESUME_PROMPT,
           cwd: opts.workDir,
           workspaceRoot: opts.worktreePath,
+          extraWriteRoots: this.workspace.writeRoots,
           modelEnv: opts.modelEnv,
           providerLabel: opts.provider.name,
           modelLabel: opts.model,

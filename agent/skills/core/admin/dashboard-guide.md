@@ -7,7 +7,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Layout
 
-- **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker whose first option is the default lead, attachments via 📎 menu incl. **📷 Camera**, "references" to earlier tasks, **💬 Discuss**) and the task list below (search, pages, filters).
+- **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📁 Workspace**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker whose first option is the default lead, attachments via 📎 menu incl. **📷 Camera**, "references" to earlier tasks, **💬 Discuss**) and the task list below (search, pages, filters).
 - Bottom-left: theme toggle. Bottom-right: the mascot — click to open this chat; approval cards and agent questions appear next to it on every page.
 - **Task page (`/tasks/<id>`)**: transcript, pending approvals, follow-up box, Cancel/Delete, attachments, PR/branch links, subtasks, **✅ Mark as done**, **💬 Discuss** (finished tasks).
 
@@ -20,7 +20,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Statuses: who sets "done"
 
-**done** is set only by a person. An agent that finishes makes the task **ready — confirm** (`review`). The person says **"done"** / **"готово"** (a short explicit message; longer text is a normal follow-up), presses **✅ Mark as done** (task header, or under the answer in Telegram) or sends `/done`. Anything else continues the task. Blocked / stalled / failed can be accepted as is ("Mark done anyway"). Subtasks are accepted by their lead and simply end *done*. Chip *Done* = confirmed by a person; *Ready* = waiting.
+**done** is set only by a person. An agent that finishes makes the task **ready — confirm** (`review`). The person says **"done"** / **"готово"** (a short explicit message; longer text is a normal follow-up), presses **✅ Mark as done** (task header; no button in Telegram — write "done") or sends `/done`. Anything else continues the task. Blocked / stalled / failed can be accepted as is (write "done"). Subtasks are accepted by their lead and simply end *done*. Chip *Done* = confirmed by a person; *Ready* = waiting.
 
 ## Subtasks
 
@@ -43,7 +43,7 @@ Settings → General → **Security** sets the first password (banner until set)
 
 ## Agents page (`/agents`)
 
-Tabs **Agents** and **Starter packs** (`/agents?tab=packs`). Agents tab starts with *Default lead agent* (saved on choice). List with **Edit** and ✕ (built-in admin: "built-in" badge, only routing — provider/model — editable). **+ New agent** / **Edit** opens a dialog: **Start from a template** (pm, architect, backend, frontend, designer, coder, reviewer, local-helper, researcher) pre-fills; fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, instructions. I can do it via approvals.
+Tabs **Agents** and **Starter packs** (`/agents?tab=packs`). Agents tab starts with *Default lead agent* (saved on choice). List with **Edit** and ✕ (built-in admin: "built-in" badge, only routing — provider/model — editable). **+ New agent** / **Edit** dialog: **Start from a template** pre-fills; fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, instructions. I can do it via approvals.
 **Starter packs**: *English learning*, *Home renovation*, *Software team*. **Install** adds agents, a skill, starter notes (profile/brief to fill in) and schedules (**off**); never overwrites. I can do it (`propose_pack_install`).
 
 ## 📚 Resources (`/resources`)
@@ -52,7 +52,11 @@ Notes, images, PDFs, files; **every agent** sees the list (title, one-line descr
 
 ## 🧠 Knowledge (`/knowledge`)
 
-Large reference material agents search instead of carrying in the prompt (regulations, manuals, saved web pages). **+ New base** (name, one-line description, which agents; none = all); upload PDF / Word / Markdown / text / HTML / CSV, add a note, pick from Resources, or pull in web pages saved by research tools. Passages: *section* / *paragraph* / *chars*, size, overlap. Search is keyword (BM25), always works; with an embedding provider chosen in the base's settings also by meaning (costs a little, text goes to that provider). Agents use `kb_list`/`kb_search`/`kb_read` (`kb_add` if allowed). I can't create bases — guide the person.
+Large reference material agents search instead of carrying in the prompt (regulations, manuals, saved web pages). **+ New base** (name, one-line description, which agents; none = all); upload PDF / Word / Markdown / text / HTML / CSV, add a note, pick from Resources, or pull in web pages saved by research tools. Passages: *section* / *paragraph* / *chars*. Search is keyword (BM25); an embedding provider in the base's settings adds meaning search (text goes to that provider). Agents use `kb_list`/`kb_search`/`kb_read` (`kb_add` if allowed). I can't create bases — guide the person.
+
+## 📁 Workspace (`/workspace`)
+
+Shared folder for non-code work: `WORKSPACE.md` (the brief — the person edits it with ✎; every agent reads it), `memory/` (decisions, open questions, facts, plan, status — agents write with `workspace_note`), `work/` (drafts, data; upload here), `deliverables/` (results from `workspace_save`, versions kept). Browse, preview, download, delete. Size: Settings → Disk & cleanup; never cleaned automatically.
 
 ## Stats (`/stats`)
 
@@ -65,7 +69,7 @@ General, Providers, LiteLLM, MCP servers, MCP endpoint, Channels, Schedules, Voi
 **General** (cards, top to bottom):
 - *Version & updates*: installed version, newest release + notes, **Check now**, **Update to X** (operator confirms; restart 1–2 min; previous kept for `aigentron rollback`; Docker can't self-update: `aigentron update`). I can start it (`propose_update`).
 - *Disk & cleanup*: free-space bar, what takes it (attachments, video digests, fetched pages, run folders, resources), **Free up space now** (clears only regenerable caches: all video digests, pages >30 days, run folders >3 days). Checked every 10 min: low space = banner + message to the default chat; "critical" = auto-clear. Attachments never auto-deleted.
-- *Security* (passwords), *Access* (allowed domains; empty = any; `localhost`, IPs, single-word names always work unless **Only these domains** is ticked — then outside access by IP is refused), *Web server* (port 80 optional; paste PEM cert + key → HTTPS on 443, 80 redirects; `aigentron access` → *Ports & HTTPS certificate*; I can't install certificates), *Cloudflare Access* (team domain + AUD, Save, **Test**; when on, a real-domain request without Cloudflare's signed token is refused; localhost/IP/LAN exempt; setup `docs/remote-access.md`). `PUBLIC_URL`/listen address: server `.env` (`aigentron access`). I handle domains and Cloudflare via `access_status`, `propose_allowed_domains`, `propose_cloudflare_access`.
+- *Security* (passwords), *Access* (allowed domains; empty = any; `localhost`/IPs always work unless **Only these domains** is ticked), *Web server* (port 80 optional; paste PEM cert + key → HTTPS on 443, 80 redirects; `aigentron access`; I can't install certificates), *Cloudflare Access* (team domain + AUD, Save, **Test**; when on, real-domain requests without Cloudflare's token are refused; localhost/IP/LAN exempt; `docs/remote-access.md`). `PUBLIC_URL`/listen address: server `.env` (`aigentron access`). I handle domains and Cloudflare via `access_status`, `propose_allowed_domains`, `propose_cloudflare_access`.
 - *Task titles* (see above).
 - Then: *Repository (GitHub)* (*Repo URL* blank = local workspace; *Base branch*; *GitHub token*; *Project subdirectory* = RELATIVE folder like `apps/web`, a URL is rejected); *Escalations* (default channel + chat/thread for questions from tasks with no channel); *Agent instructions (skill)* appended to every prompt; *Verification gate* (commands per line after each run + max auto-fix attempts); *Task queue* (concurrency); *Approvals* (timeout, s); *Display*.
 
@@ -88,7 +92,7 @@ Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N 
 
 ## Approvals
 
-A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card ("N changes in one approval"), items expandable, applied in order; my cards have no "don't ask again". Server `.env` guard rails (not mine): `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK` / `BUDGET_TOKENS_PER_DAY` make a task "blocked". Approvals time out (deny) per Settings → General → Approvals.
+A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails (not mine): `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` block a task. Approvals time out (deny) per Settings → General → Approvals.
 
 ## Questions from agents
 
@@ -96,7 +100,7 @@ A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't as
 
 ## Camera, video, pictures
 
-📎 menu: **📷 Camera** (HTTPS; else the phone's camera app); videos ≤300 MB in tasks and Resources; Telegram videos/notes/GIFs arrive as attachments (≤20 MB). `look_at` (photo or video frames) and `video_digest` (frames + transcript) take `every_seconds` (default ≈10 s), `at_seconds`, `pointing` / `phrases` (moments the speaker says "look here"; needs Whisper-style speech model). `show_images` shows a picture/album in the chat (click = viewer with ‹ ›; Telegram photo/album). Uploaded pictures shrink (≤1600 px, library ≤2000, JPEG, location dropped). Agents have `current_time` (default zone = server's). `docs/media.md`.
+📎 menu: **📷 Camera** (HTTPS; else the phone's camera app); videos ≤300 MB in tasks and Resources; Telegram videos/notes/GIFs arrive as attachments (≤20 MB). `look_at` (photo or video frames) and `video_digest` (frames + transcript) take `every_seconds` (default ≈10 s), `at_seconds`, `pointing` / `phrases` (moments the speaker says "look here"; needs Whisper-style speech model). `show_images` shows a picture/album in the chat (click = viewer with ‹ ›; Telegram photo/album). Pictures shrink to ≤1600 px (JPEG, location dropped). `docs/media.md`.
 
 ## Discussion between agents
 

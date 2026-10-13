@@ -18,6 +18,7 @@ dist
 # live/runtime agent state must not be baked into images (templates live in agent/catalog)
 agent/agents
 agent/runs
+workspace
 agent/attachments
 agent/.sync
 agent/.snapshots

@@ -39,6 +39,7 @@ import { UpdateModule } from './update/update.module';
 import { MediaModule } from './media/media.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { ResourcesModule } from './resources/resources.module';
+import { WorkspaceModule } from './workspace/workspace.module';
 import { PacksModule } from './packs/packs.module';
 import { VoiceModule } from './voice/voice.module';
 import { StatsModule } from './stats/stats.module';
@@ -63,6 +64,7 @@ import { HealthController } from './health/health.controller';
     MediaModule,
     SchedulesModule,
     ResourcesModule,
+    WorkspaceModule,
     PacksModule,
     VoiceModule,
     PreflightModule,

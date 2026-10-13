@@ -59,7 +59,7 @@ export type IncomingEvent =
       index: number;
     }
   | {
-      /** "✅ Mark done" under a finished task: the person accepts the result. */
+      /** The person accepts a result (a "✅ Mark done" button on messages sent by older versions). */
       type: 'mark-done';
       chatId: string;
       userId: string;

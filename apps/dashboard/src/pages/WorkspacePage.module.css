@@ -1,0 +1,155 @@
+.crumbs {
+  margin: 12px 0 6px;
+  font-size: 14px;
+}
+.crumb {
+  all: unset;
+  cursor: pointer;
+  color: var(--accent);
+}
+.crumb:hover,
+.crumb:focus-visible {
+  text-decoration: underline;
+}
+.list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: var(--inset-sm);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.row:last-child {
+  border-bottom: none;
+}
+.sel {
+  background: var(--bg-elev-2);
+}
+.name {
+  all: unset;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.name:hover,
+.name:focus-visible {
+  color: var(--accent);
+}
+.meta {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.act {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.act:hover,
+.act:focus-visible {
+  background: var(--bg-elev-2);
+}
+.empty {
+  padding: 12px;
+  color: var(--text-dim);
+}
+.editor {
+  width: 100%;
+  margin: 10px 0;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.pre {
+  margin: 10px 0 0;
+  padding: 12px;
+  max-height: 60vh;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: var(--inset-sm);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.md {
+  margin-top: 10px;
+  max-height: 70vh;
+  overflow: auto;
+}
+.img {
+  max-width: 100%;
+  max-height: 70vh;
+  margin-top: 10px;
+  border-radius: var(--radius);
+}
+.pdf {
+  width: 100%;
+  height: 70vh;
+  margin-top: 10px;
+  border: none;
+  border-radius: var(--radius);
+}
+@media (max-width: 640px) {
+  .row {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .name {
+    flex-basis: 100%;
+  }
+  .meta {
+    flex: 1;
+  }
+}
+
+/* the row's actions: a quiet text button, same height as a file row */
+.upload {
+  all: unset;
+  cursor: pointer;
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  color: var(--accent);
+  white-space: nowrap;
+  font-size: 13px;
+}
+.upload:hover,
+.upload:focus-visible {
+  background: var(--bg-elev-2);
+}
+.upload[disabled],
+.name[disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+/* two lines reserved: the hint text differs per folder, the list below must not move */
+.folderHint {
+  display: block;
+  min-height: 2.8em;
+}
+@media (max-width: 640px) {
+  .folderHint {
+    min-height: 4.6em;
+  }
+}
+/* the first row stays one line on phones too, with or without the upload action */
+@media (max-width: 640px) {
+  .first {
+    flex-wrap: nowrap;
+  }
+  .first .name {
+    flex: 1;
+    flex-basis: 0;
+  }
+}

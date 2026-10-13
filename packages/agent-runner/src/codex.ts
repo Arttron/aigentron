@@ -200,7 +200,7 @@ export async function runCodex(params: RunAgentParams, onEvent: AgentEventHandle
   await writeFile(join(opts.home, 'hooks.json'), renderHooks(params));
   await writeFile(join(opts.home, 'AGENTS.md'), params.appendSystemPrompt ?? '');
 
-  const env = buildAgentEnv({ ANTHROPIC_MODEL: '' }, process.env, params.workspaceRoot ?? params.cwd, params.hook);
+  const env = buildAgentEnv({ ANTHROPIC_MODEL: '' }, process.env, params.workspaceRoot ?? params.cwd, params.hook, params.extraWriteRoots);
   delete env.ANTHROPIC_MODEL; // Anthropic vars mean nothing to Codex
   env.CODEX_HOME = opts.home;
   if (opts.apiKey) env.CODEX_API_KEY = opts.apiKey;

@@ -1,6 +1,6 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, rm, stat, access, writeFile, copyFile } from 'node:fs/promises';
-import { join, basename, extname } from 'node:path';
+import { mkdir, readdir, readFile, realpath, rm, stat, access, writeFile, copyFile } from 'node:fs/promises';
+import { join, basename, extname, resolve, sep } from 'node:path';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
@@ -174,9 +174,70 @@ export class AttachmentsService {
     this.logger.log(`Saved screenshot ${taskId}/${name} (${buf.length}B)`);
   }
 
-  /** List a task's attachments (newest first). */
+  // ---- linked attachments: a task's attachment list may point at files that live elsewhere (no copy) ----
+
+  /** Folders a link may point into: the shared workspace and the resource library. */
+  private linkRoots(): string[] {
+    return [this.config.workspaceDir, join(this.config.agentDir, 'resources')].filter(Boolean);
+  }
+
+  private linksFile(taskId: string): string {
+    return join(this.dir(taskId), '.links.json');
+  }
+
+  private async readLinks(taskId: string): Promise<Record<string, string>> {
+    try {
+      const raw = JSON.parse(await readFile(this.linksFile(taskId), 'utf8')) as unknown;
+      if (!raw || typeof raw !== 'object') return {};
+      return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  /** The real path of a link target, only while it still is a file inside an allowed folder (checked again on every use). */
+  private async resolveLink(src: string): Promise<string | null> {
+    const real = await realpath(src).catch(() => null);
+    if (!real) return null;
+    const roots = await Promise.all(this.linkRoots().map((r) => realpath(r).catch(() => resolve(r))));
+    if (!roots.some((r) => real === r || real.startsWith(r.endsWith(sep) ? r : r + sep))) return null;
+    const st = await stat(real).catch(() => null);
+    return st?.isFile() ? real : null;
+  }
+
+  private linkChain = new Map<string, Promise<unknown>>();
+
+  /**
+   * Show a file that lives elsewhere (a workspace result, a library file) in this task's attachments WITHOUT copying it.
+   * The list, the gallery, the viewer and the channels treat it like any attachment; it always shows the file's current content,
+   * and disappears from the list if the source is deleted. Returns the name it is listed under.
+   */
+  async link(taskId: string, src: string): Promise<string> {
+    if (!src.startsWith('/')) throw new BadRequestException('a link needs a full path');
+    const real = await this.resolveLink(src);
+    if (!real) throw new BadRequestException('that file cannot be attached (it must be a file of the workspace or the library)');
+    const run = (this.linkChain.get(taskId) ?? Promise.resolve()).then(async () => {
+      const dir = this.dir(taskId);
+      await mkdir(dir, { recursive: true });
+      const links = await this.readLinks(taskId);
+      const existing = Object.entries(links).find(([, p]) => p === real);
+      if (existing) return existing[0];
+      let name = sanitize(basename(real));
+      for (let n = 1; (await access(join(dir, name)).then(() => true, () => false)) || name in links; n++) {
+        const ext = extname(basename(real));
+        name = `${sanitize(basename(real, ext))}-${n}${ext}`;
+      }
+      links[name] = real;
+      await writeFile(this.linksFile(taskId), JSON.stringify(links));
+      return name;
+    });
+    this.linkChain.set(taskId, run.catch(() => undefined));
+    return run;
+  }
+
+  /** List a task's attachments (newest first): its own files plus linked ones (a link whose source is gone is skipped). */
   async list(taskId: string): Promise<AttachmentMeta[]> {
-    let files: string[];
+    let files: string[] = [];
     try {
       files = await readdir(this.dir(taskId));
     } catch {
@@ -189,7 +250,15 @@ export class AttachmentsService {
         return s && s.isFile() ? { name, size: s.size, mime: mimeFor(ext), mtime: s.mtimeMs } : null;
       }),
     );
-    return metas
+    const linked = await Promise.all(
+      Object.entries(await this.readLinks(taskId)).map(async ([name, src]) => {
+        const real = await this.resolveLink(src);
+        const s = real ? await stat(real).catch(() => null) : null;
+        return s ? { name, size: s.size, mime: mimeFor(extname(name).slice(1).toLowerCase()), mtime: s.mtimeMs } : null;
+      }),
+    );
+    const own = new Set(metas.filter((m): m is NonNullable<typeof m> => m !== null).map((m) => m.name));
+    return [...metas, ...linked.filter((m) => m && !own.has(m.name))]
       .filter((m): m is AttachmentMeta & { mtime: number } => m !== null)
       .sort((a, b) => b.mtime - a.mtime)
       .map(({ mtime: _mtime, ...m }) => m);
@@ -206,11 +275,15 @@ export class AttachmentsService {
   ): Promise<{ path: string; mime: string; inline: boolean; name: string }> {
     const name = sanitize(rawName);
     const ext = extname(name).slice(1).toLowerCase();
-    const path = join(this.dir(taskId), name);
+    let path = join(this.dir(taskId), name);
     try {
       await access(path);
     } catch {
-      throw new BadRequestException('attachment not found');
+      // not one of its own files: a linked one?
+      const src = (await this.readLinks(taskId))[name];
+      const real = src ? await this.resolveLink(src) : null;
+      if (!real) throw new BadRequestException('attachment not found');
+      path = real;
     }
     return { path, mime: mimeFor(ext), inline: isInlineSafe(ext), name };
   }
@@ -224,7 +297,9 @@ export class AttachmentsService {
   /** Absolute paths of a task's attachments, for prompting the agent. */
   async paths(taskId: string): Promise<string[]> {
     const dir = this.dir(taskId);
-    return (await this.list(taskId)).map((m) => join(dir, m.name));
+    const links = await this.readLinks(taskId);
+    const own = (name: string) => access(join(dir, name)).then(() => true, () => false);
+    return Promise.all((await this.list(taskId)).map(async (m) => (links[m.name] && !(await own(m.name)) ? links[m.name]! : join(dir, m.name))));
   }
 
   private async uniqueName(dir: string, name: string): Promise<string> {

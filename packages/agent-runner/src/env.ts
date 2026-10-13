@@ -46,6 +46,7 @@ export function buildAgentEnv(
   base: Record<string, string | undefined>,
   workspaceRoot: string,
   hook?: HookWiring,
+  extraWriteRoots: readonly string[] = [],
 ): Record<string, string> {
   const env: Record<string, string> = {
     // Hide Claude Code's built-in subagents (general-purpose, Explore, Plan, …)
@@ -67,6 +68,7 @@ export function buildAgentEnv(
     env.LDS_APPROVALS_URL = hook.approvalsUrl;
     env.LDS_APPROVAL_TIMEOUT_SECONDS = String(hook.approvalTimeoutSeconds);
     env.LDS_WORKSPACE_ROOT = workspaceRoot;
+    if (extraWriteRoots.length) env.LDS_EXTRA_WRITE_ROOTS = extraWriteRoots.join(':');
     env.LDS_SHARED_DIST = hook.sharedDistPath;
     env.LDS_HOOK_SECRET = hook.secret;
   }

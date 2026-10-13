@@ -69,6 +69,7 @@ export function DiskSettings() {
             Agent run folders: {report.runs.count} · {formatBytes(report.runs.bytes)} — removed automatically after {report.retentionDays} days
           </li>
           <li>Resource library: {formatBytes(report.resources.bytes)}</li>
+          <li>Shared workspace (memory, work, deliverables): {formatBytes(report.workspace?.bytes ?? 0)} — never cleaned automatically</li>
           {report.worktrees.count > 0 && (
             <li>
               Old git worktrees: {report.worktrees.count} · {formatBytes(report.worktrees.bytes)} (cleaned only on request — ask the admin)

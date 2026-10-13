@@ -22,6 +22,8 @@ export interface MaintenanceReport {
   attachments: { bytes: number; oldTasksBytes: number };
   caches: CacheReport & { digestRetentionDays: number; researchRetentionDays: number };
   resources: { bytes: number };
+  /** The shared workspace (memory / work / deliverables): people's and agents' results — never cleaned automatically. */
+  workspace: { bytes: number };
   note: string;
 }
 
@@ -326,6 +328,7 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
       attachments: { bytes: await this.dirBytes(this.config.attachmentsDir), oldTasksBytes: await this.oldTaskAttachmentBytes(90) },
       caches: { ...(await this.cacheReport()), digestRetentionDays: this.digestRetentionDays, researchRetentionDays: this.researchRetentionDays },
       resources: { bytes: await this.dirBytes(join(this.config.agentDir, 'resources')) },
+      workspace: { bytes: this.config.workspaceDir ? await this.dirBytes(this.config.workspaceDir) : 0 },
       note: 'Run folders hold per-task working files; worktrees/branches are leftovers of the old per-task worktree mode inside the project repository. Branches may contain commits that were never pushed.',
     };
   }

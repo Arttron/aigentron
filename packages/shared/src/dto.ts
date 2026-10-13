@@ -44,6 +44,7 @@ export interface HookCheckInput {
   toolInput: Record<string, unknown>;
   /** Worktree root, so the orchestrator classifies writes consistently. */
   workspaceRoot?: string;
+  extraWriteRoots?: string[];
 }
 
 /** Synchronous response telling the hook whether to allow without blocking. */

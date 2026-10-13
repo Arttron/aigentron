@@ -44,6 +44,8 @@ export interface RunAgentParams {
    * so the agent may still write anywhere within the worktree, not just the subdir.
    */
   workspaceRoot?: string;
+  /** More folders the agent may write to besides `workspaceRoot` (the shared workspace). */
+  extraWriteRoots?: string[];
   /** Resolved Anthropic env for the chosen provider (model/baseUrl/auth). */
   modelEnv: AgentModelEnv;
   /** Display labels for the transcript's "agent started" line. */
@@ -122,6 +124,13 @@ export interface RunAgentParams {
     search: (input: { query: string; kb?: string; limit?: number }) => Promise<string>;
     read: (input: { doc: string; chunk?: number }) => Promise<string>;
     add?: (input: { kb: string; title: string; text: string; source?: string }) => Promise<string>;
+  };
+  /** The shared workspace tools: `info`/`files` always, `note`/`save` unless the agent may only read it. */
+  workspace?: {
+    info: () => Promise<string>;
+    files: (input: { dir?: string; glob?: string; limit?: number }) => Promise<string>;
+    note?: (input: { kind: string; text: string; resolves?: string }) => Promise<string>;
+    save?: (input: { path: string; content?: string; from?: string; note?: string }) => Promise<string>;
   };
   /** Show pictures in the chat (single or an album); resolves with the text the model reads. */
   onShowImages?: (input: { paths: string[]; caption?: string }) => Promise<string>;

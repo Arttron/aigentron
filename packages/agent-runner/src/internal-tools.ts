@@ -26,6 +26,7 @@ export type InternalToolHandlers = Pick<
   | 'onScheduleCheck'
   | 'onSearchResources'
   | 'kb'
+  | 'workspace'
   | 'onShowImages'
   | 'onCurrentTime'
   | 'onAskUser'
@@ -186,6 +187,44 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         description: 'Add a note to a knowledge base so it can be found later (only bases that allow agents to add notes — kb_list says which). `kb`: its name; `title`; `text` (Markdown); `source` (where the facts came from — a URL or file). Add facts worth keeping, not chatter.',
         shape: { kb: z.string(), title: z.string(), text: z.string(), source: z.string().optional() },
         handler: (args) => add({ kb: String(args.kb ?? ''), title: String(args.title ?? ''), text: String(args.text ?? ''), source: typeof args.source === 'string' ? args.source : undefined }),
+      });
+    }
+  }
+
+  if (params.workspace) {
+    const ws = params.workspace;
+    specs.push(
+      {
+        name: 'workspace_info',
+        description: 'The shared workspace: where the folders are (memory, work, deliverables), the rules for writing to them, and the current memory digest. Call it when you are unsure where something belongs.',
+        shape: {},
+        handler: () => ws.info(),
+      },
+      {
+        name: 'workspace_files',
+        description: 'List files of the shared workspace with sizes and dates. `dir`: memory | work | deliverables (default: all); `glob` (optional, e.g. "*.md"); `limit` (default 100).',
+        shape: { dir: z.enum(['memory', 'work', 'deliverables']).optional(), glob: z.string().optional(), limit: z.number().optional() },
+        handler: (args) => ws.files({ dir: typeof args.dir === 'string' ? args.dir : undefined, glob: typeof args.glob === 'string' ? args.glob : undefined, limit: typeof args.limit === 'number' ? args.limit : undefined }),
+      },
+    );
+    if (ws.note) {
+      const note = ws.note;
+      specs.push({
+        name: 'workspace_note',
+        description:
+          "Record something the whole team should remember, in the shared workspace memory. `kind`: decision (what was decided and why), question (an open question), fact (a verified fact or requirement), status (REPLACES the one-screen status), plan. `text`: short and specific (≤2 KB), in the language of the person; for a decision include who decided and why. `resolves` (optional, with kind=question): the beginning of the question it answers. Use it instead of editing memory files by hand.",
+        shape: { kind: z.enum(['decision', 'question', 'fact', 'status', 'plan']), text: z.string(), resolves: z.string().optional() },
+        handler: (args) => note({ kind: String(args.kind ?? ''), text: String(args.text ?? ''), resolves: typeof args.resolves === 'string' ? args.resolves : undefined }),
+      });
+    }
+    if (ws.save) {
+      const save = ws.save;
+      specs.push({
+        name: 'workspace_save',
+        description:
+          "Save a finished result for the person into the workspace `deliverables/` folder (reports, BOMs, tables, drafts they will take). `path`: relative, e.g. reports/summary.md (no `..`); `content`: the text, OR `from`: the full path of an existing file (an attachment or a file you produced) to copy; `note` (optional): one line on what it is. An existing file is kept as a previous version. Returns the full path to mention to the person.",
+        shape: { path: z.string(), content: z.string().optional(), from: z.string().optional(), note: z.string().optional() },
+        handler: (args) => save({ path: String(args.path ?? ''), content: typeof args.content === 'string' ? args.content : undefined, from: typeof args.from === 'string' ? args.from : undefined, note: typeof args.note === 'string' ? args.note : undefined }),
       });
     }
   }

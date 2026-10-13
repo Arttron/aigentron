@@ -30,7 +30,7 @@ export class MediaService {
 
   /** A path an agent gave us, checked: it must really be inside this task's attachments, the resource library or its worktree. */
   async safePath(path: string, worktree?: string): Promise<string> {
-    const roots = [this.config.attachmentsDir, join(this.config.agentDir, 'resources'), ...(worktree ? [worktree] : [])];
+    const roots = [this.config.attachmentsDir, join(this.config.agentDir, 'resources'), this.config.workspaceDir, ...(worktree ? [worktree] : [])];
     if (!path.startsWith('/') || !insideRoot(path, roots)) throw new Error('That path is not available: give the full path of a photo or video from the task\'s attachments, the resource library, or the workspace.');
     const real = await realpath(path).catch(() => '');
     const realRoots = await Promise.all(roots.map((r) => realpath(r).catch(() => r)));

@@ -38,6 +38,11 @@ export const SCHEDULE_CHECK_TOOL = `${INTERNAL_TOOL_PREFIX}schedule_check`;
 /** The current date and time (agents have no clock of their own). Read-only. */
 /** Show pictures (single / album) in the chat. Read-only. */
 export const SHOW_IMAGES_TOOL = `${INTERNAL_TOOL_PREFIX}show_images`;
+/** The shared workspace (memory / work / deliverables): notes, saving results, listing files. Not gated. */
+export const WORKSPACE_INFO_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_info`;
+export const WORKSPACE_NOTE_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_note`;
+export const WORKSPACE_SAVE_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_save`;
+export const WORKSPACE_FILES_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_files`;
 export const CURRENT_TIME_TOOL = `${INTERNAL_TOOL_PREFIX}current_time`;
 /** Knowledge bases: search / read passages, list what exists, add a note (only to bases that allow it). Not gated. */
 export const KB_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}kb_list`;
@@ -154,6 +159,11 @@ export interface ClassifyOptions {
    * file writes resolving outside it are flagged as dangerous.
    */
   workspaceRoot?: string;
+  /**
+   * More absolute folders the agent may write to besides `workspaceRoot` (the shared workspace:
+   * memory / work / deliverables). A write is "outside" only if it is inside none of them.
+   */
+  extraWriteRoots?: readonly string[];
   /**
    * Operator-declared read-only MCP tools, per server name: `{ research: ['*'] }` or
    * `{ docs: ['search', 'fetch'] }` (`'*'` = every tool of that server). Extends the built-in
@@ -384,6 +394,12 @@ function isInside(child: string, parent: string): boolean {
   const c = normalize(child);
   const p = normalize(parent);
   return c === p || c.startsWith(p.endsWith('/') ? p : `${p}/`);
+}
+
+/** Inside the write boundary: the task root or any extra write root. */
+function insideWriteRoots(absolute: string, opts: ClassifyOptions): boolean {
+  if (!opts.workspaceRoot) return true;
+  return isInside(absolute, opts.workspaceRoot) || (opts.extraWriteRoots ?? []).some((r) => r && isInside(absolute, r));
 }
 
 /**
@@ -628,7 +644,7 @@ export function classifyToolCall(
       }
       if (opts.workspaceRoot) {
         const absolute = filePath.startsWith('/') ? filePath : `${opts.workspaceRoot.replace(/\/$/, '')}/${filePath}`;
-        if (!isInside(absolute, opts.workspaceRoot)) {
+        if (!insideWriteRoots(absolute, opts)) {
           return { dangerous: true, summary, reason: `write outside the task worktree (${opts.workspaceRoot})` };
         }
       }
@@ -652,7 +668,7 @@ export function classifyToolCall(
       const absolute = filePath.startsWith('/')
         ? filePath
         : `${opts.workspaceRoot.replace(/\/$/, '')}/${filePath}`;
-      if (!isInside(absolute, opts.workspaceRoot)) {
+      if (!insideWriteRoots(absolute, opts)) {
         return {
           dangerous: true,
           summary,

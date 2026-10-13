@@ -218,6 +218,8 @@ services:
       # Agent operational files (skills + generated per-run settings), kept out
       # of the project. Add skills as markdown under ./agent/skills/.
       - ${AGENT_HOST_PATH:-./agent}:/workspace/agent
+      # The shared workspace (memory / work / deliverables) agents write non-code results to; visible on the host at ./workspace.
+      - ${WORKSPACE_HOST_PATH:-./workspace}:/workspace/workspace
       # Credentials (shared Codex sign-in…) live in a named volume, NOT in ./agent: agent runs can see their own
       # file tree, and ./agent sits inside the repo checkout.
       - secrets:/workspace/secrets

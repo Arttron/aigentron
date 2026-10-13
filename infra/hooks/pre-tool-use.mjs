@@ -15,7 +15,7 @@
  *
  * Per-run context arrives via env (set by @lds/agent-runner):
  *   LDS_APPROVALS_URL, LDS_TASK_ID, LDS_AGENT_SESSION_ID,
- *   LDS_APPROVAL_TIMEOUT_SECONDS, LDS_WORKSPACE_ROOT, LDS_SHARED_DIST
+ *   LDS_APPROVAL_TIMEOUT_SECONDS, LDS_WORKSPACE_ROOT, LDS_EXTRA_WRITE_ROOTS, LDS_SHARED_DIST
  */
 import { pathToFileURL } from 'node:url';
 
@@ -108,6 +108,7 @@ async function main() {
   const toolInput =
     input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
   const workspaceRoot = process.env.LDS_WORKSPACE_ROOT || input.cwd || undefined;
+  const extraWriteRoots = (process.env.LDS_EXTRA_WRITE_ROOTS || '').split(':').filter(Boolean);
 
   const denial = policyDenial(toolName);
   if (denial) return decide('deny', denial);
@@ -122,7 +123,7 @@ async function main() {
   if (classify) {
     let verdict = null;
     try {
-      verdict = classify(toolName, toolInput, { workspaceRoot });
+      verdict = classify(toolName, toolInput, { workspaceRoot, extraWriteRoots });
     } catch {
       verdict = null; // fall through to the orchestrator on classifier error
     }
@@ -149,7 +150,7 @@ async function main() {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-lds-hook-secret': hookSecret },
-        body: JSON.stringify({ taskId, agentSessionId, toolName, toolInput, workspaceRoot }),
+        body: JSON.stringify({ taskId, agentSessionId, toolName, toolInput, workspaceRoot, extraWriteRoots }),
       },
       10_000,
     );

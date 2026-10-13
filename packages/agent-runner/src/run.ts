@@ -15,6 +15,10 @@ import {
   KB_SEARCH_TOOL,
   CURRENT_TIME_TOOL,
   SHOW_IMAGES_TOOL,
+  WORKSPACE_INFO_TOOL,
+  WORKSPACE_FILES_TOOL,
+  WORKSPACE_NOTE_TOOL,
+  WORKSPACE_SAVE_TOOL,
   LOOK_AT_TOOL,
   VIDEO_DIGEST_TOOL,
   PREVIEW_TOOL,
@@ -173,6 +177,7 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
   if (params.onSearchResources) names.push(RESOURCES_SEARCH_TOOL);
   if (params.onShowImages) names.push(SHOW_IMAGES_TOOL);
+  if (params.workspace) names.push(WORKSPACE_INFO_TOOL, WORKSPACE_FILES_TOOL, ...(params.workspace.note ? [WORKSPACE_NOTE_TOOL] : []), ...(params.workspace.save ? [WORKSPACE_SAVE_TOOL] : []));
   if (params.onCurrentTime) names.push(CURRENT_TIME_TOOL);
   if (params.kb) names.push(KB_LIST_TOOL, KB_SEARCH_TOOL, KB_READ_TOOL, ...(params.kb.add ? [KB_ADD_TOOL] : []));
   if (params.onAskUser) names.push(ASK_USER_TOOL);
@@ -318,7 +323,7 @@ export async function runAgent(
   params: RunAgentParams,
   onEvent: AgentEventHandler,
 ): Promise<AgentRunResult> {
-  const env = buildAgentEnv(params.modelEnv, process.env, params.workspaceRoot ?? params.cwd, params.hook);
+  const env = buildAgentEnv(params.modelEnv, process.env, params.workspaceRoot ?? params.cwd, params.hook, params.extraWriteRoots);
   if (params.skillsDir) env.LDS_SKILLS_DIR = params.skillsDir;
   if (params.attachmentsDir) env.LDS_ATTACHMENTS_DIR = params.attachmentsDir;
   const settingsDir = params.settingsDir ?? join(params.cwd, '.lds');
@@ -352,6 +357,7 @@ export async function runAgent(
     prompt: params.prompt,
     options: {
       cwd: params.cwd,
+      ...(params.extraWriteRoots?.length ? { additionalDirectories: [...params.extraWriteRoots] } : {}),
       env,
       maxTurns: params.maxTurns,
       resume: params.resumeSessionId,
