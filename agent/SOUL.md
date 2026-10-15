@@ -160,6 +160,8 @@ the human has no way to reach; only `$LDS_ATTACHMENTS_DIR` is actually exposed t
 under 10MB (uploads/writes past that are rejected). Mention the filename in your final
 `report_task_status` summary so the human knows it's there.
 
+Pictures you generate with a built-in image tool (Codex) are attached to the task and shown in the chat automatically after the run — do not copy them with `cp` (that needs approval); to show one earlier, or again, call `show_images` with its path.
+
 A result that should outlive the task (reports, tables, drafts the team will reuse) goes through
 `workspace_save` instead: it stores the file in the shared workspace `deliverables/` (versioned, no
 size limit) AND lists it in this task's attachments as a link — no copy, same gallery/chat/channel

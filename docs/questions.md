@@ -25,3 +25,7 @@ A task that ends `blocked` (the agent needs input) is a different path from `ask
 
 ## For learning and quizzes
 `ask_user` suits drills: a multiple-choice item with 2–4 button options, or an open "translate this" question. The English starter pack's tutor and quizmaster use it (quiz one item at a time, instant feedback in the next message). Each answer is one model turn, so a 10-item quiz is 10 short turns; a long pause ends in a timeout, not a lost run. (Packs already installed keep their old agent files — reinstall the pack or ask the admin to update the agents to get the new behaviour.)
+
+## Which task a plain Telegram reply answers
+
+A plain message continues the chat's *active* task. The active task changes when: you start one, you quote (reply to) a message of another task, a command picks one — and when a top-level task becomes **blocked** and tells you so in the chat (its question is what you will answer next; the last ask wins). Several lessons or monitors waiting at once? Quote-reply to the one you answer, or give each its own chat/channel.

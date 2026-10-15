@@ -120,6 +120,19 @@
   background: rgba(127, 127, 127, 0.18);
   border-bottom-left-radius: 3px;
 }
+.copyRow {
+  line-height: 0;
+  white-space: normal;
+}
+/* inside a bubble the icon takes the bubble's own text colour (the accent bubble is not the page background) */
+.copyRow > button {
+  color: inherit;
+  margin-top: 2px;
+}
+.copyRow > button:hover,
+.copyRow > button:focus-visible {
+  background: rgba(127, 127, 127, 0.25);
+}
 .hint,
 .typing {
   font-size: 13px;

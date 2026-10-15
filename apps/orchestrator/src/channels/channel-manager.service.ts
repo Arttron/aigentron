@@ -394,6 +394,13 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     });
     if (chatState?.muted) return;
 
+    // A top-level task that is blocked on the person has just asked them something in this chat: their next plain message
+    // answers IT (the last ask wins the chat), not whatever task happened to be active before — the same rule the default-channel
+    // escalation uses. Replying (quoting) to any message still addresses that message's task.
+    if (status === 'blocked' && !prefix) {
+      await this.channels.setChatState(dest.channel.id, dest.externalThreadId, { activeTaskId: taskId }).catch(() => undefined);
+    }
+
     const icon = reactionIcon(status);
     // The agent's work is finished (a top-level task: waiting for the person to accept it; a subtask: done for its lead).
     const answered = status === 'review' || status === 'done';

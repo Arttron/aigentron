@@ -8,6 +8,7 @@ import { useLook, useShow } from '@/lib/transcript-look';
 import { Muted } from '@/components/ui';
 import { Markdown } from './Markdown';
 import { SpeakButton } from './SpeakButton';
+import { CopyButton } from './CopyButton';
 import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
 import styles from './Transcript.module.css';
 
@@ -322,6 +323,7 @@ export function Transcript({
                 {ts(it.line)}
                 {it.line.text && <span className={styles.userText} dir="auto">{it.line.text}</span>}
                 {thumbs(it.line.attachments)}
+                {it.line.text && <CopyButton text={it.line.text} label="Copy your message" />}
               </div>
             );
           }
@@ -351,6 +353,9 @@ export function Transcript({
                     <SpeakButton text={it.line.text} abs />
                   )}
                   {thumbs(it.line.attachments, true)}
+                  <div>
+                    <CopyButton text={it.line.text} />
+                  </div>
                 </div>
               </div>
             );

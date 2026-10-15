@@ -1,17 +1,17 @@
-Aigentron v0.1.56
+Aigentron v0.1.57
 
-For people who are not programmers: the team now has a shared workspace for its non-code work, with a page where you can see and use the files.
+For people who are not programmers: pictures made by Codex reach you by themselves, every message can be copied, and a reply in Telegram goes to the task that just asked you something, and the admin can read the text files you send it.
 
-Shared workspace
-- A folder with a fixed structure that every agent knows: WORKSPACE.md (a short brief — you write it), memory/ (decisions, open questions, facts, plan, status — agents write there and read it at the start of every task), work/ (drafts and data), deliverables/ (finished results for you; older versions are kept). Your answers to an agent's questions are written to the decisions automatically.
-- New page "📁 Workspace" (top menu): browse the folders, preview Markdown/text/images/PDF, download, upload into work/, delete in work/ and deliverables/, edit the brief. The first row ".." goes up one level and carries the folder's Upload action. Its size is shown in Settings → General → Disk & cleanup and it is never cleaned automatically.
-- A result an agent saves to deliverables/ also appears in that task's attachments (gallery, chat, Telegram) as a link — the file is not copied, so you always see its current version.
-- Nothing to set up: the folder appears by itself (in the dev setup run "docker compose up -d" once to mount ./workspace). Existing data is untouched.
+Pictures from Codex
+- Codex generates images into its own sandbox, where you could not see them (and copying them needed an approval that sometimes timed out). Now the new pictures are attached to the task and shown in the chat (and Telegram) right after the run — nothing to approve. You can also ask the agent to "show" such a picture again.
+
+Copy a message
+- A small copy icon under every message in the task chat (yours and the agent's) and in the chat with the admin. It works on plain HTTP addresses too.
+
+Files for the admin
+- You can attach a text file (Markdown, txt, csv, json …) to a message for the admin, in the dashboard or in Telegram: it now reads it (before it answered that it could not open attachments). Pictures are looked at, other formats (PDF, Word) are reported as unreadable so it asks for the text.
 
 Telegram
-- No "Mark done" button under answers any more: write "done" (or /done) to close a task. Buttons in old messages still work.
-
-Small things
-- The "Name tasks automatically" checkbox in Settings no longer stretches across the card.
+- When a task becomes blocked and asks you something in a chat, your next plain message answers THAT task (before, it could go to whichever task was active earlier, so lesson answers landed in the wrong place). Replying (quoting) to a specific message still addresses that message's task; with several tasks waiting at once, quote the one you answer.
 
 Update note: no database changes.

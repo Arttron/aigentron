@@ -15,6 +15,7 @@ import {
 import { MascotView } from './MascotView';
 import { MicButton } from './MicButton';
 import { VoiceToggles } from './VoiceToggles';
+import { CopyButton } from './CopyButton';
 import { SpeakButton } from './SpeakButton';
 import { VoiceMode } from './VoiceMode';
 import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
@@ -389,6 +390,9 @@ export function AdminChat() {
               <div key={m.id} className={m.from === 'me' ? styles.me : styles.admin}>
                 {m.text}
                 {m.id === lastAdmin?.id && autoSpeak && <SpeakButton text={m.text} abs />}
+                <div className={styles.copyRow}>
+                  <CopyButton text={m.text} label={m.from === 'me' ? 'Copy your message' : 'Copy message'} />
+                </div>
               </div>
             ))}
             {working && <div className={styles.typing}>Admin is typing…</div>}

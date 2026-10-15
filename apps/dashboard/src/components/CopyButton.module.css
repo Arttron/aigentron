@@ -1,0 +1,31 @@
+.btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  margin-top: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--t-dim, var(--text-dim));
+  opacity: 0.55;
+  cursor: pointer;
+  user-select: none;
+}
+.btn:hover,
+.btn:focus-visible {
+  opacity: 1;
+  background: var(--t-code-bg, var(--bg-elev-2));
+}
+.btn:focus-visible {
+  outline: 2px solid var(--t-accent, var(--accent));
+}
+.btn[data-state='done'] {
+  opacity: 1;
+  color: var(--t-ok, var(--green));
+}
+.btn[data-state='failed'] {
+  opacity: 1;
+  color: var(--t-err, var(--red));
+}

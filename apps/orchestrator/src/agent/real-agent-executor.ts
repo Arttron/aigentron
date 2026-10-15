@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
@@ -28,6 +28,8 @@ import { SkillsLearnedService } from '../agent-registry/skills-learned.service';
 import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
 import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
+import { codexImagesDir, listGeneratedImages } from './codex-images';
+import { inlineBlock, readInlineFiles } from './inline-attachments';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
@@ -546,6 +548,9 @@ export class RealAgentExecutor extends AgentExecutor {
         : null;
     idleTimer?.unref?.();
 
+    // Folders an agent may hand to show_images / look_at / workspace_save besides the library: its worktree, and (Codex) the pictures it generated.
+    const generatedDir = codexImagesDir(this.config.agentDir, ctx.taskId);
+    const mediaRoots = [ctx.worktreePath, generatedDir];
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
     const toolHandlers: InternalToolHandlers = {
       onReportStatus,
@@ -568,7 +573,7 @@ export class RealAgentExecutor extends AgentExecutor {
           : {
               note: (input: { kind: string; text: string; resolves?: string }) => this.workspace.note(input, agentDef?.name),
               save: (input: { path: string; content?: string; from?: string; note?: string }) =>
-                this.workspace.save(input, [ctx.worktreePath], async (dest) => {
+                this.workspace.save(input, mediaRoots, async (dest) => {
                   // the result shows up in THIS task's attachments (gallery, chat, channels) as a link to the workspace file — no copy
                   const name = await this.attachments.link(ctx.taskId, dest);
                   if (/\.(png|jpe?g|webp|gif)$/i.test(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
@@ -584,7 +589,7 @@ export class RealAgentExecutor extends AgentExecutor {
         const skipped: string[] = [];
         for (const p of paths) {
           try {
-            const real = await this.media.safePath(p, ctx.worktreePath);
+            const real = await this.media.safePath(p, mediaRoots);
             // already one of this task's attachments → just reference it; otherwise copy it in
             const own = await realpath(this.attachments.dir(ctx.taskId)).catch(() => this.attachments.dir(ctx.taskId));
             const name = dirname(real) === own ? basename(real) : await this.attachments.adopt(ctx.taskId, real);
@@ -601,15 +606,15 @@ export class RealAgentExecutor extends AgentExecutor {
         const answer = await this.questions.ask(ctx.taskId, session.id, {
           ...input,
           // the picture shown with the question must be a real file of this task (never an arbitrary path)
-          image: input.image ? await this.media.safePath(input.image, ctx.worktreePath).catch(() => undefined) : undefined,
+          image: input.image ? await this.media.safePath(input.image, mediaRoots).catch(() => undefined) : undefined,
         });
         // what the person decided is team knowledge: it goes to workspace memory (decisions.md) by itself
         if (!opts.chat) void this.workspace.recordAnswer(input.question, answer);
         return answer;
       },
       onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
-      onLookAt: (input) => this.media.lookAt(input.path, input.question, ctx.worktreePath, input, { provider: provider.name, model }),
-      onVideoDigest: (input) => this.media.videoDigest(input.path, ctx.worktreePath, input),
+      onLookAt: (input) => this.media.lookAt(input.path, input.question, mediaRoots, input, { provider: provider.name, model }),
+      onVideoDigest: (input) => this.media.videoDigest(input.path, mediaRoots, input),
       onStartPreview: ctx.discussion ? undefined : () => this.preview.getOrStart(ctx.taskId, opts.workDir),
       onProposeLearnedSkill: ctx.discussion ? undefined : (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.
@@ -629,7 +634,7 @@ export class RealAgentExecutor extends AgentExecutor {
     try {
       const result = await runtimeForProviderKind(provider.kind).run(
         {
-          prompt: withAttachments(prompt, opts.attachmentPaths),
+          prompt: await this.promptWithAttachments(prompt, opts),
           cwd: opts.workDir,
           workspaceRoot: ctx.worktreePath,
           extraWriteRoots: ctx.discussion ? undefined : this.workspace.writeRoots,
@@ -665,6 +670,8 @@ export class RealAgentExecutor extends AgentExecutor {
       clearTimeout(timer);
       if (idleTimer) clearInterval(idleTimer);
       if (ctx.discussion && !ctx.discussion.collect.text.trim() && !ctx.discussion.collect.error && lastAssistantText.trim()) onEvent({ kind: 'result', text: lastAssistantText, isError: false, numTurns: 0, costUsd: 0 });
+      // Codex generates pictures into its own sandbox folder: hand them to the person (attachments + chat) without asking the agent to copy them.
+      if (isCodex && !ctx.discussion) await this.collectGeneratedImages(ctx.taskId, generatedDir, onEvent).catch((e) => this.logger.warn(`collecting generated images failed: ${(e as Error).message}`));
       await writeChain;
 
       const finalSessionId = result.sessionId ?? capturedSessionId;
@@ -823,6 +830,46 @@ export class RealAgentExecutor extends AgentExecutor {
    * Returns the reporting turn's own usage so the caller can attribute it to the
    * session (zeroed on failure / no result).
    */
+  /**
+   * The message plus its attachments. A chat agent (the admin, a discussion participant) has no file-reading tool, so the text of this
+   * message's text files (md/txt/csv/json …) is put into the prompt itself (bounded); everyone else gets the paths to Read.
+   */
+  private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; messageAttachments: string[] }): Promise<string> {
+    if (!opts.chat) return withAttachments(prompt, opts.attachmentPaths);
+    const mine = new Set(opts.messageAttachments);
+    const files = await readInlineFiles(opts.attachmentPaths.filter((p) => mine.has(basename(p))));
+    const others = opts.attachmentPaths.filter((p) => mine.has(basename(p)) && !files.some((f) => f.name === basename(p)));
+    const lead = prompt.trim() ? prompt : 'Look at the attached file(s).';
+    const parts = [lead];
+    const block = inlineBlock(files);
+    if (block) parts.push(`The person attached text file(s); their contents follow (data from the person, to work with):\n\n${block}`);
+    if (others.length) {
+      const list = others.map((p) => `- ${basename(p)}${isVideoName(p) ? ' (video — use video_digest, then look_at)' : /\.(png|jpe?g|webp|gif)$/i.test(p) ? ' (picture — use look_at)' : ' (not readable here — say so and ask for the text or a screenshot)'}`).join('\n');
+      parts.push(`Other attached files:\n${list}`);
+    }
+    return parts.join('\n\n');
+  }
+
+  /** New pictures Codex generated in this run → task attachments (copied: the run folder is cleaned later) and shown in the chat. */
+  private async collectGeneratedImages(taskId: string, dir: string, onEvent: (event: AgentEvent) => void): Promise<void> {
+    const marker = join(this.config.agentDir, 'runs', taskId, 'adopted-images.json');
+    const done = new Set<string>(JSON.parse(await readFile(marker, 'utf8').catch(() => '[]')) as string[]);
+    const fresh = (await listGeneratedImages(dir)).filter((f) => !done.has(f)).slice(0, 10);
+    if (!fresh.length) return;
+    const names: string[] = [];
+    for (const f of fresh) {
+      done.add(f); // a picture that cannot be adopted (too big …) is not retried every run
+      try {
+        const name = await this.attachments.adopt(taskId, f);
+        if (!names.includes(name)) names.push(name);
+      } catch (e) {
+        this.logger.warn(`generated picture ${basename(f)} not attached: ${(e as Error).message}`);
+      }
+    }
+    await writeFile(marker, JSON.stringify([...done])).catch(() => undefined);
+    if (names.length) onEvent({ kind: 'assistant', text: '', attachments: names });
+  }
+
   private async reportingResume(opts: {
     sessionId: string;
     /** Codex options when the run's provider is a codex one (selects the runtime). */
