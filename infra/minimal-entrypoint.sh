@@ -58,5 +58,13 @@ if ! node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts; t
 fi
 cd "$APP_DIR"
 
+# S-01: agents on their own OS user. Re-applied on EVERY start (the data volume outlives image versions and a
+# restore/backup leaves root-owned files behind): user, modes on secrets/db/.env, ownership of what agents write,
+# and a self-check as that user. A failed self-check stops the start — the orchestrator would refuse every run anyway.
+if [ -n "${AGENT_RUN_AS_UID:-}" ]; then
+  echo "[entrypoint] agent isolation: AGENT_RUN_AS_UID=$AGENT_RUN_AS_UID — applying infra/harden.sh"
+  DATA_DIR="$DATA_DIR" APP_DIR="$APP_DIR" sh "$APP_DIR/infra/harden.sh" || exit 1
+fi
+
 echo "[entrypoint] starting orchestrator (also serves the dashboard, same-origin)…"
 exec node "$APP_DIR/apps/orchestrator/dist/main.js"

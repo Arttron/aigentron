@@ -188,7 +188,8 @@ place (`FORCE=1` to reinstall the same version). Never pin production to `latest
 that's an unpinned, unpredictable deploy.
 
 The installer verifies the release archive against its `SHA256SUMS`, generates random `LITELLM_MASTER_KEY` / `LDS_HOOK_SECRET` on a fresh install, and (fresh install only) sets a random
-operator password through the local API and prints it once (also `<data>/secrets/initial-password.txt`, 0600; `NO_INITIAL_PASSWORD=1` skips). A bare-metal update stops the service, snapshots the database, migrates, starts the new
+operator password through the local API and prints it once (also `<data>/secrets/initial-password.txt`, 0600; `NO_INITIAL_PASSWORD=1` skips). **Agents can run as their own
+unprivileged OS user** (`AGENT_RUN_AS_UID=1500`; `secrets/`, the database and `.env` are then unreadable to agents — `docs/authentication.md`, "Agents on their own OS user"). It is OFF by default for now: switch it on with `sudo aigentron harden` (or `AGENT_ISOLATION=1` at install time) after trying it on a test server. A bare-metal update stops the service, snapshots the database, migrates, starts the new
 release and waits for `/api/health` - if it does not come up it rolls back by itself (release and database). `aigentron backup` / `aigentron restore` back up and restore everything (`docs/updates.md`). Behind Cloudflare on 80/443:
 open those ports only to Cloudflare's ranges and keep 3001 closed (`docs/remote-access.md`).
 
@@ -226,6 +227,8 @@ running `version` alongside DB/LiteLLM status.
 - `LITELLM_MASTER_KEY` — the image ships a fixed dev default; set your own.
 - `ROUTINE_MODEL` / `OLLAMA_NATIVE_URL` — which local model to route to, and where Ollama
   actually is (defaults assume it's on the same host as the container).
+- `AGENT_RUN_AS_UID=1500` (+ `AGENT_RUN_AS_GID`) — run agents as the image's unprivileged `agent`
+  user instead of root (the installer sets it; for a hand-run `docker run` add `-e AGENT_RUN_AS_UID=1500`).
 
 **Ollama is optional.** It only backs one seeded provider (`ollama-local`) for the
 "routine" local-model tier — if you only run tasks against cloud Claude (including the

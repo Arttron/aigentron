@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
 import { chmod, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildAgentEnv } from './env';
+import { assertIsolationReady, chownTree, spawnAsAgent } from './isolation';
 import { hooksConfig } from './settings';
 import { emptyUsage } from './usage';
 import type { AgentEvent, AgentEventHandler, AgentRunResult, RunAgentParams } from './types';
@@ -216,12 +216,20 @@ export async function runCodex(params: RunAgentParams, onEvent: AgentEventHandle
   if (params.resumeSessionId) args.push(params.resumeSessionId);
   args.push('-'); // prompt from stdin (no argv size limit)
 
-  const child = spawn(opts.bin ?? 'codex', args, {
+  // S-01: the per-run home (auth.json copy, config, sessions) was written by the orchestrator;
+  // it must belong to the agent user before Codex runs as that user. Fails closed on a broken setup.
+  if (params.isolation) {
+    await assertIsolationReady(params.isolation);
+    await chownTree(opts.home, params.isolation);
+  }
+  const child = spawnAsAgent(opts.bin ?? 'codex', args, {
     cwd: params.cwd,
     env,
+    isolation: params.isolation,
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: true, // own process group so abort can kill hook/tool children too
   });
+  if (!child.stdin || !child.stdout || !child.stderr) throw new Error('codex: child process has no stdio pipes');
   child.stdin.on('error', () => undefined);
   child.stdin.end(params.prompt);
 

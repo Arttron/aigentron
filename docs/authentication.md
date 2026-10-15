@@ -68,7 +68,7 @@ Changing your password signs your other browsers out; "Sign out other browsers" 
 ## Where it lives
 
 `<secrets dir>/auth.json` (mode 0600; read through a ~2 s cache, so a manual edit or `make reset-password` takes effect within a couple of seconds, a change made by the server itself at once): a scrypt hash per user and the key that signs session cookies. It sits in the
-credentials directory that the approval gate already guards, outside the agent tree. No database change.
+credentials directory that the approval gate guards and that agent isolation (below) closes to agents by OS permissions, outside the agent tree. No database change.
 
 ## Routes and roles
 
@@ -81,11 +81,45 @@ credentials directory that the approval gate already guards, outside the agent t
 Without a sign-in password the request is attributed to the default operator (or to the user in the `x-lds-user` header), so the owner's own setup is unaffected.
 A reviewer or task setter who tries a route above gets 403. `apps/orchestrator/src/identity/roles-coverage.test.ts` fails when a mutating handler of these controllers has no `@Roles`.
 
+## Agents on their own OS user (agent isolation)
+
+Agents (the Claude CLI, Codex and everything they start — shells, MCP servers, the approval hook) can run as a separate,
+unprivileged OS user while the orchestrator keeps running as root. It is switched on by `AGENT_RUN_AS_UID` (+ `AGENT_RUN_AS_GID`,
+default = uid) in the environment: **it is OFF by default; `AGENT_ISOLATION=1` at install time or `sudo aigentron harden` turns it on** (user `agent`, uid/gid 1500);
+an existing install turns it on with **`sudo aigentron harden`** (Docker: re-creates the container with the new env; bare-metal:
+in place + restart); the dev Compose stack leaves it off unless you set the variable yourself. Unset = today's behaviour, agents
+run as the orchestrator's user.
+
+What it changes:
+- The orchestrator starts the runtime through `infra/agent-exec.sh`, which drops to the agent uid with
+  `setpriv --reuid --regid --clear-groups --no-new-privs` (the SDK's `pathToClaudeCodeExecutable` points at the wrapper; Codex is
+  spawned through it). The agent's `HOME`/`TMPDIR` are `<agent dir>/runs/<task>/home` (its session files live there, so a follow-up
+  of a task started BEFORE the switch begins a fresh conversation).
+- `infra/harden.sh` (run by the container entrypoint on **every** start, by the installer and by `aigentron harden`) creates the user,
+  sets `secrets/` 0700, the SQLite database (+wal/shm) 0600, `litellm-config.generated.yaml` 0600, `backups/` 0700 and the `.env`
+  0600, hands `repo/`, `worktrees/*`, `workspace/`, `agent/attachments/`, `runs/*/{home,codex-home}` to the agent user, whitelists
+  agent-owned checkouts for root's git (`safe.directory=*`), and finally **checks, as the agent user, that the secrets dir and the
+  database cannot be read** and that the hook, `packages/shared/dist` and the Claude binary can. Before each run the orchestrator
+  re-applies ownership of the task's own directories (the checkout — in worktree mode the worktree plus the main repo's `.git` —, the
+  workspace, this task's attachments, its home), so files the verification gate or a `git fetch` created as root never block the agent.
+- **Fail closed:** when the variable is set but the wrapper, `setpriv`, the user or the permissions are wrong, the orchestrator logs
+  the reason at start and every agent run ends with that error — it never silently falls back to running as root.
+
+What the approval gate does and does not protect: with agent isolation **on**, `secrets/` (session-signing key, password hashes,
+the Codex sign-in, TLS keys), the database and `.env` are protected by OS permissions — a shell command that evades the classifier
+gets "permission denied". The classifier/approval gate stays as a guard rail against risky actions inside what the agent CAN reach
+(the project, the workspace, the network). With isolation **off**, the gate is the only thing between an agent and those files, and
+it is a deny-list of patterns, not a boundary.
+
+Still shared with isolation on: the agent user is one for all tasks (a run can read another run's `codex-home`), the hook secret and
+the orchestrator's local HTTP port are in the agent's reach (the sign-in cookie is not — it only grants `approvals/check|wait`), and the
+project checkout's `.git/config` holds the GitHub token so the agent can push (as before).
+
 ## Honest limits
 
-- Agents run on the same machine as the orchestrator. The sign-in stops them using the HTTP API, but an agent that is allowed to
-  read `secrets/auth.json` (the approval gate asks you first) or to reach the database directly could still tamper with state.
-  Real isolation = running agents as a separate OS user / container — see `docs/BACKLOG.md`.
+- Agents run on the same machine as the orchestrator. The sign-in stops them using the HTTP API. **Without agent isolation** (see
+  above) an agent that is allowed to read `secrets/auth.json` (the approval gate asks you first) or to reach the database directly
+  could still tamper with state; with it on, those files are closed to the agent by the OS.
 - The login screen shows the users' names and roles to anyone who can open the page. If that matters, keep the page behind Cloudflare Access (`docs/remote-access.md`).
 - Roles are enforced on the routes that declare them (see "Routes and roles" below). Roles apply to HTTP routes only; Telegram and other channel users act through the services and are not affected.
 - The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` when served over HTTPS (also behind a tunnel). Use HTTPS for any non-local access

@@ -44,7 +44,7 @@ completion() {
 _aigentron() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update backup restore backup-timer reset-password rollback logout version completion help -h --help -v --version" -- "$cur") )
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update harden backup restore backup-timer reset-password rollback logout version completion help -h --help -v --version" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   fi
@@ -74,6 +74,7 @@ _aigentron() {
     'logs:follow the server log'
     'doctor:check the common problems'
     'update:install the latest release'
+    'harden:run agents as their own OS user (secrets and database closed to them)'
     'backup:one archive of the database, secrets, agents, files'
     'restore:restore from a backup archive'
     'backup-timer:daily automatic backup on|off'
@@ -126,6 +127,8 @@ $(say "${B}Run${N}")
 
 $(say "${B}Maintain${N}")
   aigentron update            install the latest release (keeps your data and settings)
+  aigentron harden            run agents as their own OS user (uid 1500): secrets, the database and .env become
+                              unreadable to them; new installs have this on already (docs/authentication.md)
   aigentron rollback          go back to the previous release (bare-metal; the last one is kept)
   aigentron backup [file]     one archive: database, secrets, agents/skills/resources/attachments, workspace (not runs/ or caches)
   aigentron restore <file>    put a backup back (stops the server, keeps what it replaces in backups/before-restore-*)
@@ -247,6 +250,43 @@ UNIT
   esac
 }
 
+# ---- harden: agents on their own OS user (S-01) ----------------------------------------------------------------------
+# Writes AGENT_RUN_AS_UID/GID into the install's .env and applies infra/harden.sh (user, modes on secrets/db/.env,
+# ownership of repo/workspace/attachments, self-check). Bare-metal: in place + restart. Docker: the container must be
+# re-created with the new env, so the installer is re-run at the current version (data volume kept) — its entrypoint
+# applies harden.sh on every start from then on.
+do_harden() {
+  env_file="$INSTALL_DIR/.env"
+  [ -f "$env_file" ] || die "$env_file not found"
+  uid="${AGENT_RUN_AS_UID:-1500}"; gid="${AGENT_RUN_AS_GID:-$uid}"
+  say "${B}Agent isolation${N}: agents (Claude CLI, Codex) will run as uid $uid / gid $gid; the orchestrator stays root."
+  say "After this, ${Y}secrets/, the database and .env are unreadable to agents${N}, and files agents create belong to that user."
+  say "${D}Follow-ups of tasks started before this change begin a fresh agent conversation (the old session files are root's).${N}"
+  printf 'Type yes to continue: '; read -r ans || ans=
+  [ "$ans" = yes ] || { say "cancelled"; exit 1; }
+  if grep -q '^AGENT_RUN_AS_UID=' "$env_file"; then
+    sed -i.bak -e "s/^AGENT_RUN_AS_UID=.*/AGENT_RUN_AS_UID=$uid/" -e "s/^AGENT_RUN_AS_GID=.*/AGENT_RUN_AS_GID=$gid/" "$env_file" && rm -f "$env_file.bak"
+    grep -q '^AGENT_RUN_AS_GID=' "$env_file" || printf 'AGENT_RUN_AS_GID=%s\n' "$gid" >> "$env_file"
+  else
+    printf '\n# agents run as this OS user (aigentron harden / docs/authentication.md)\nAGENT_RUN_AS_UID=%s\nAGENT_RUN_AS_GID=%s\n' "$uid" "$gid" >> "$env_file"
+  fi
+  chmod 600 "$env_file" 2>/dev/null || true
+  if [ "$MODE" = docker ]; then
+    command -v curl >/dev/null 2>&1 || die "curl is required"
+    v=$(version); [ "$v" != unknown ] || die "cannot tell the installed version (is the container there?)"
+    say "Re-creating the container at $v with the new environment (your data volume is kept)…"
+    inst="https://raw.githubusercontent.com/Arttron/aigentron/v$v/install.sh"
+    curl -fsSL "$inst" | VERSION="$v" FORCE=1 INSTALL_MODE=docker INSTALL_DIR="$INSTALL_DIR" CONTAINER_NAME="$CONTAINER" sh
+    say "${G}✔${N} agents run as uid $uid now. Check: docker logs $CONTAINER | grep harden"
+  else
+    need_root harden
+    AGENT_RUN_AS_UID="$uid" AGENT_RUN_AS_GID="$gid" DATA_DIR="$DATA_DIR" APP_DIR="$CURRENT" ENV_FILE="$env_file" DATABASE_URL="file:$DATA_DIR/orchestrator.db" \
+      sh "$CURRENT/infra/harden.sh" || die "hardening failed — nothing was restarted. Remove the AGENT_RUN_AS_* lines from $env_file to go back."
+    systemctl restart "$SERVICE"
+    say "${G}✔${N} agents run as uid $uid now (the service was restarted). Check: aigentron logs"
+  fi
+}
+
 # The newest release number (the installer is then fetched at THAT tag, not from the moving main branch).
 latest_version() { curl -fsSL --max-time 15 https://api.github.com/repos/Arttron/aigentron/releases/latest 2>/dev/null | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1; }
 
@@ -289,6 +329,7 @@ case "${1:-}" in
       need_root update
       curl -fsSL "$inst" | VERSION="$latest" INSTALL_MODE=bare INSTALL_DIR="$INSTALL_DIR" DATA_DIR="$DATA_DIR" sh
     fi ;;
+  harden) shift; do_harden "$@" ;;
   backup) shift; do_backup "$@" ;;
   restore) shift; do_restore "$@" ;;
   backup-timer) shift; backup_timer "$@" ;;

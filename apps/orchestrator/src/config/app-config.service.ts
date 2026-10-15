@@ -1,4 +1,5 @@
 import { parseBudgetLimit } from '../agent/run-guards';
+import { parseAgentRunAs, type AgentRunAs } from '../agent/agent-user';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
@@ -78,6 +79,16 @@ export class AppConfigService {
   readonly sharedDistPath: string;
   /** Shared secret the PreToolUse hook presents to the approvals API. */
   readonly hookSecret: string;
+
+  /**
+   * S-01: run agents (the Claude CLI, Codex) as this unprivileged OS user while the
+   * orchestrator stays root — `AGENT_RUN_AS_UID` / `AGENT_RUN_AS_GID`. Unset = the
+   * agent runs as the orchestrator's own user (the dev compose, older installs).
+   * See agent/agent-user.ts and infra/harden.sh.
+   */
+  readonly agentRunAs: AgentRunAs | null;
+  /** The wrapper that drops privileges before exec-ing the agent binary (infra/agent-exec.sh). */
+  readonly agentExecWrapper: string;
 
   /** Queue driver, by REDIS_URL presence: 'bullmq' (full) | 'embedded' (minimal). */
   readonly queueDriver: 'bullmq' | 'embedded';
@@ -181,6 +192,8 @@ export class AppConfigService {
     this.sharedDistPath = process.env.SHARED_DIST_PATH ?? safeResolveShared();
     // Stable across this process so all spawned agents share it; random if unset.
     this.hookSecret = process.env.LDS_HOOK_SECRET || randomUUID();
+    this.agentRunAs = parseAgentRunAs(process.env);
+    this.agentExecWrapper = process.env.AGENT_EXEC_WRAPPER ?? join(__dirname, '..', '..', '..', '..', 'infra', 'agent-exec.sh');
     this.litellmBaseUrl = process.env.LITELLM_BASE_URL ?? 'http://litellm:4000';
     this.litellmMasterKey = process.env.LITELLM_MASTER_KEY ?? '';
     this.ollamaNativeUrl = (process.env.OLLAMA_NATIVE_URL ?? 'http://host.docker.internal:11434').replace(/\/$/, '');

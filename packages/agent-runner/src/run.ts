@@ -60,6 +60,7 @@ import {
   PROPOSE_BATCH_TOOL,
 } from '@lds/shared';
 import { buildAgentEnv } from './env';
+import { assertIsolationReady, isolationEnv, resolveClaudeExecutable } from './isolation';
 import { writeAgentSettings } from './settings';
 import { emptyUsage } from './usage';
 import { buildInternalToolSpecs } from './internal-tools';
@@ -142,6 +143,12 @@ interface SdkQueryOptions {
   permissionMode?: string;
   abortController?: AbortController;
   stderr?: (data: string) => void;
+  /**
+   * Executable the SDK spawns instead of its bundled native CLI. A path that is
+   * not a .js/.ts file is spawned DIRECTLY (command = path, args = the CLI
+   * args), which is what lets a shell wrapper stand in for the binary.
+   */
+  pathToClaudeCodeExecutable?: string;
 }
 type QueryFn = (params: {
   prompt: string;
@@ -373,6 +380,18 @@ export async function runAgent(
   const settingsDir = params.settingsDir ?? join(params.cwd, '.lds');
   const settingsPath = await writeAgentSettings(settingsDir, params.hook);
 
+  // S-01: run the CLI as the agent user. The SDK spawns `pathToClaudeCodeExecutable`
+  // directly (it is not a .js file), so the wrapper receives the CLI's own args and
+  // execs the real binary — found next to the SDK, as the SDK itself would — via
+  // setpriv. Checked up front so a broken setup fails with a clear error (never a
+  // silent run as root).
+  let claudeExecutable: string | undefined;
+  if (params.isolation) {
+    await assertIsolationReady(params.isolation);
+    Object.assign(env, isolationEnv(params.isolation, resolveClaudeExecutable()));
+    claudeExecutable = params.isolation.wrapper;
+  }
+
   const { query, tool, createSdkMcpServer } = await esmImport('@anthropic-ai/claude-agent-sdk');
 
   // Merge the agent's declared MCP servers with our in-process status server.
@@ -423,6 +442,7 @@ export async function runAgent(
       ...(Object.keys(mcpServers).length ? { mcpServers } : {}),
       ...(params.agents && Object.keys(params.agents).length ? { agents: params.agents } : {}),
       settings: settingsPath,
+      ...(claudeExecutable ? { pathToClaudeCodeExecutable: claudeExecutable } : {}),
       // Isolate from the host's user/project settings; we provide everything.
       settingSources: [],
       // The PreToolUse hook is authoritative; default mode defers to it.

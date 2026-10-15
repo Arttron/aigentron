@@ -26,6 +26,14 @@ wait up to `HEALTH_TIMEOUT` (120 s) for `/api/health`. If the new release does n
 are removed only after the new one proved healthy (before the build only when less than 3 GB is free). The dashboard/`aigentron update` fetch the installer at the release **tag** (not `main`) and, when SHA256SUMS lists `install.sh`, check it too.
 The updater uses `DATA_DIR` (not "parent of the secrets dir") for its state.
 
+**Agent isolation on an existing install.** Updating never changes whether agents run as their own OS user: that is decided by
+`AGENT_RUN_AS_UID` in the install's `.env` (fresh installs since this version have it; older ones do not). To switch an existing
+install over run `sudo aigentron harden` — it writes `AGENT_RUN_AS_UID/GID=1500` into the `.env`, creates the `agent` user, sets the
+modes on `secrets/`, the database and `.env`, hands the repo/workspace/attachments to that user and restarts (Docker: re-creates the
+container; the entrypoint then re-applies `infra/harden.sh` on every start, so a restore or a volume copied from elsewhere is fixed
+up automatically). Follow-ups of tasks started before the switch begin a fresh agent conversation. To go back: remove the two
+lines from the `.env` and restart / re-run the installer with `FORCE=1`. Details: `docs/authentication.md`.
+
 On every start the server reconciles what the previous process left behind: pending approvals and questions become `timeout`, tasks parked in `needs_approval` become `stalled` (resumable by a follow-up), so nothing waits forever and a late "Approve" cannot revive a task with no agent.
 
 **Publishing a release (maintainers):** the release workflow must attach `SHA256SUMS` to the GitHub release with lines `<sha256>  v<version>.tar.gz` (the tag archive) and `<sha256>  install.sh`, and (S3) `releases/<version>/SHA256SUMS` with `<sha256>  archive.tar.gz`. `release.yml` does this (step "Publish SHA256SUMS"): it hashes the public repo's tag archive exactly as `install.sh` downloads it.
@@ -36,7 +44,7 @@ On every start the server reconciles what the previous process left behind: pend
 `secrets/`, `agent/{agents,skills,learned,resources,attachments}` + `agent/research.json`, `workspace/`, and (bare-metal) a copy of the `.env` with your API keys. **Not included:** `runs/` and the caches (rebuilt), the project checkout `repo/` (a git clone - push your work), `backups/` itself.
 Docker: `aigentron backup [file]` runs it in the container and copies the archive to the host (the host `.env` is not included - keep it yourself). Copy archives off the server; a backup on the same disk does not survive losing the disk.
 
-`sudo aigentron restore <file>` stops the server, puts everything back (what it replaces is moved to `<data>/backups/before-restore-<time>/`, the old `.env` is saved as `backups/env-from-backup.txt`, never overwritten) and starts it. To restore onto a clean instance: install, then `aigentron restore`.
+`sudo aigentron restore <file>` stops the server, puts everything back (what it replaces is moved to `<data>/backups/before-restore-<time>/`, the old `.env` is saved as `backups/env-from-backup.txt`, never overwritten) and starts it. To restore onto a clean instance: install, then `aigentron restore`. Restored files are root's; with agent isolation on, the next start's `harden.sh` hands them back to the agent user.
 
 Daily timer (off by default): `sudo aigentron backup-timer on` (03:30, `systemd`), `... off` removes it. Without systemd or on Docker use cron, e.g. `30 3 * * * /usr/local/bin/aigentron backup /backups/aigentron-$(date +\%F).tar.gz`.
 

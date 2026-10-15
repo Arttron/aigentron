@@ -8,3 +8,4 @@ export type { InternalToolSpec, InternalToolHandlers } from './internal-tools';
 export { claudeCodeRuntime, codexRuntime, runtimeForProviderKind } from './runtime';
 export type { AgentRuntime } from './runtime';
 export { runCodex, mapCodexEvent, renderCodexConfig, scrubRunHome, INTERNAL_MCP_TOKEN_ENV } from './codex';
+export { agentCommand, assertIsolationReady, chownTree, isolationEnv, resolveClaudeExecutable, runAsAgent, spawnAsAgent, AGENT_EXEC_ENV, AGENT_UID_ENV, AGENT_GID_ENV } from './isolation';

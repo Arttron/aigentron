@@ -56,6 +56,10 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
   inside the repo**, validated; empty = root). Chat agents (the admin) run in the agent dir instead and have no file tools.
 - Approvals gate risky actions; reads of credential files (`.env*`, `auth.json`, `.git/config`, `/proc/*/environ`, `secrets/`, ssh/cloud keys)
   need approval. Note the project itself may contain such files (`.env.local`, `.env.production`…) — they are gated, not hidden.
+- With agent isolation on (`AGENT_RUN_AS_UID`, `docs/authentication.md`) the agent is a separate OS user: `secrets/`, the database,
+  `.env`, `backups/` and the LiteLLM routes file are closed to it by permissions; `repo/`, `worktrees/*`, `workspace/`,
+  `agent/attachments/` and `agent/runs/<task>/{home,codex-home}` belong to that user (the orchestrator re-applies this before every
+  run; `infra/harden.sh` on every start). Files an agent creates are owned by uid 1500 — root reads them as usual.
 
 ## 4. Environment files — who reads what
 

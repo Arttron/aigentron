@@ -58,6 +58,13 @@ RUN npm install -g @openai/codex@${CODEX_VERSION} || echo "WARN: codex CLI not i
 # Console access to the built-in admin agent: `docker exec -it <container> aigentron-admin`
 RUN printf '#!/bin/sh\nexec node /app/infra/admin-cli.mjs "$@"\n' > /usr/local/bin/aigentron-admin && chmod +x /usr/local/bin/aigentron-admin
 
+# S-01: the unprivileged user agents run as when AGENT_RUN_AS_UID=1500 is set
+# (the installer sets it; the entrypoint re-applies infra/harden.sh on every
+# start). `setpriv` comes from util-linux, part of the base image — asserted so
+# a slimmer base can never silently lose the privilege drop.
+RUN groupadd -g 1500 agent && useradd -r -u 1500 -g 1500 -d /nonexistent -s /usr/sbin/nologin -M agent \
+  && test -x /usr/bin/setpriv
+
 
 WORKDIR /app
 
@@ -94,14 +101,14 @@ COPY --from=build /app/apps/dashboard/dist /app/apps/dashboard/dist
 # Agent operational files (skills, agent defs) — read at runtime, not compiled.
 COPY agent /app/agent
 
-COPY infra/minimal-entrypoint.sh infra/db-snapshot.sh infra/minimal-healthcheck.sh infra/setup-wizard.mjs /app/infra/
+COPY infra/minimal-entrypoint.sh infra/db-snapshot.sh infra/minimal-healthcheck.sh infra/setup-wizard.mjs infra/agent-exec.sh infra/harden.sh /app/infra/
 # The PreToolUse approval hook (apps/orchestrator's AppConfigService resolves
 # it relative to its own compiled location, expecting it here) — previously
 # missing from this COPY list entirely, so the hook script never existed in
 # this image and every tool call silently fell through to the SDK's own
 # interactive permission prompt instead of our auto-allow/human-approval gate.
 COPY infra/hooks /app/infra/hooks
-RUN chmod +x /app/infra/minimal-entrypoint.sh /app/infra/minimal-healthcheck.sh
+RUN chmod +x /app/infra/minimal-entrypoint.sh /app/infra/minimal-healthcheck.sh /app/infra/agent-exec.sh /app/infra/harden.sh
 
 ENV NODE_ENV=production \
     APP_VERSION=$VERSION \

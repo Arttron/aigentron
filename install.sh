@@ -574,8 +574,13 @@ if [ ! -f "$ENV_FILE" ]; then
   sed -i.bak "s#^LITELLM_MASTER_KEY=.*#LITELLM_MASTER_KEY=sk-lds-$(rand_alnum 40)#" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
   grep -q '^LITELLM_MASTER_KEY=' "$ENV_FILE" || printf 'LITELLM_MASTER_KEY=sk-lds-%s\n' "$(rand_alnum 40)" >> "$ENV_FILE"
   grep -q '^LDS_HOOK_SECRET=' "$ENV_FILE" || printf 'LDS_HOOK_SECRET=%s\n' "$(rand_alnum 40)" >> "$ENV_FILE"
+  # S-01: fresh installs run agents as a separate OS user (uid/gid 1500, created by the image / below for bare-metal);
+  # the orchestrator stays root. Existing installs are untouched — `aigentron harden` switches them over.
+  if [ "${AGENT_ISOLATION:-0}" = 1 ]; then
+    grep -q '^AGENT_RUN_AS_UID=' "$ENV_FILE" || printf 'AGENT_RUN_AS_UID=%s\nAGENT_RUN_AS_GID=%s\n' "${AGENT_RUN_AS_UID:-1500}" "${AGENT_RUN_AS_GID:-${AGENT_RUN_AS_UID:-1500}}" >> "$ENV_FILE"
+  fi
   chmod 600 "$ENV_FILE" 2>/dev/null || true
-  log "First install: wrote a starter .env to $ENV_FILE (random LITELLM_MASTER_KEY and LDS_HOOK_SECRET)"
+  log "First install: wrote a starter .env to $ENV_FILE (random LITELLM_MASTER_KEY and LDS_HOOK_SECRET; agent isolation is OFF until you run `aigentron harden` — see docs/authentication.md)"
   log "Fill in ANTHROPIC_API_KEY (and anything else you need) before relying on the cloud tier."
   if [ "$INSTALL_MODE" = bare ]; then
     log "Ollama is optional — leave OLLAMA_NATIVE_URL unreachable if you only use cloud Claude."
@@ -738,6 +743,7 @@ Environment=LITELLM_MANAGED_COMMAND=$LITELLM_VENV/bin/litellm
 Environment=LITELLM_MANAGED_CONFIG_PATH=$DATA_DIR/litellm-config.generated.yaml
 Environment=LITELLM_BASE_URL=http://127.0.0.1:4000
 Environment=DASHBOARD_BASE_URL=http://localhost:3001
+Environment=ENV_FILE=$ENV_FILE
 ExecStart=$CURRENT_LINK/infra/minimal-entrypoint.sh
 Restart=on-failure
 RestartSec=5
@@ -782,6 +788,17 @@ EOF
   ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
   log "Writing $SERVICE_FILE"
   write_unit "$VERSION"
+
+  # S-01 (when the .env enables it — fresh installs, or after `aigentron harden`): the agent user, the modes on
+  # secrets/db/.env, ownership of what agents write, and a self-check through the same wrapper the server uses.
+  # The entrypoint repeats this on every service start; running it here surfaces a problem in the installer's log.
+  if grep -q '^AGENT_RUN_AS_UID=' "$ENV_FILE"; then
+    chmod +x "$RELEASE_DIR/infra/agent-exec.sh" "$RELEASE_DIR/infra/harden.sh" 2>/dev/null || true
+    log "Agent isolation: creating the agent user and applying file permissions (infra/harden.sh)"
+    # shellcheck disable=SC2046
+    env $(grep -E '^AGENT_RUN_AS_(U|G)ID=' "$ENV_FILE" | tr '\n' ' ') DATA_DIR="$DATA_DIR" APP_DIR="$RELEASE_DIR" ENV_FILE="$ENV_FILE" DATABASE_URL="file:$DB_FILE" \
+      sh "$RELEASE_DIR/infra/harden.sh" </dev/null || die "agent isolation could not be set up (see above). Remove AGENT_RUN_AS_UID/GID from $ENV_FILE to run agents as root instead, then re-run."
+  fi
 
   # Console access to the admin agent from any shell on this server. Points at the `current` symlink, so updates apply.
   install_cli bare

@@ -30,7 +30,9 @@ export class WorkspaceService {
   ) {}
 
   private async git(cwd: string, args: string[], cfg?: WorkspaceConfig): Promise<string> {
-    const { stdout } = await exec('git', args, {
+    // With agents on their own OS user (S-01) the repo belongs to that user; root's git must not refuse it.
+    const safe = this.config.agentRunAs ? ['-c', 'safe.directory=*'] : [];
+    const { stdout } = await exec('git', [...safe, ...args], {
       cwd,
       maxBuffer: 64 * 1024 * 1024,
       env: gitAuthEnv(cfg?.githubToken),

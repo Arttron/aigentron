@@ -8,6 +8,7 @@ import {
   addUsage,
   emptyUsage,
   type AdminToolsWiring,
+  type AgentIsolation,
   type CodexRunOptions,
   type InternalToolHandlers,
   type AgentEvent,
@@ -55,6 +56,7 @@ import { resolveProviderChain } from './provider-chain';
 import { accountRunUsage, addTotals, budgetTokens, emptyTotals, reportingResumeUsage, startOfLocalDay, totalsAfter } from './usage-accounting';
 import { RunDeadline } from './run-watchdogs';
 import { getTaskLiteOrThrow } from './task-lite';
+import { AgentUserService } from './agent-user.service';
 
 /** Per-skill and total caps (chars) on skill content folded into the prompt. */
 const SKILL_FILE_CAP = 16_000;
@@ -124,6 +126,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly media: MediaService,
     private readonly questions: QuestionsService,
     private readonly knowledge: KnowledgeService,
+    private readonly agentUser: AgentUserService,
   ) {
     super();
   }
@@ -233,6 +236,10 @@ export class RealAgentExecutor extends AgentExecutor {
     // already has the earlier references in its context: only the ones added
     // since the last run are repeated (E-05).
     const refContext = await this.buildReferencesContext(ctx.taskId, resumeSessionId ? resumedFrom : undefined);
+    // S-01: when AGENT_RUN_AS_UID is set, hand the agent user what it writes (its home, the checkout, the
+    // workspace, this task's attachments) and run the runtime as that user. Off = unchanged. Throws (→ the
+    // task fails with the reason) when it is on but broken — never a silent run as root.
+    const isolation = await this.agentUser.prepareRun({ taskId: ctx.taskId, worktreePath: chat ? null : ctx.worktreePath, attachmentsDir: this.attachments.dir(ctx.taskId) });
     const common = {
       ctx,
       workDir,
@@ -243,6 +250,7 @@ export class RealAgentExecutor extends AgentExecutor {
       chat,
       attachmentPaths,
       messageAttachments,
+      isolation,
     };
     const overBudget = await this.checkBudget(ctx.taskId);
     if (overBudget) {
@@ -415,6 +423,8 @@ export class RealAgentExecutor extends AgentExecutor {
     runContext: string;
     /** Conversational agent: no forced status-report resume. */
     chat?: boolean;
+    /** Run the runtime as the separate agent OS user (S-01); null = as this process. */
+    isolation: AgentIsolation | null;
     /** Every file of the task (chat agents read some of them inline). */
     attachmentPaths: string[];
     /** The ones the prompt lists for a working agent: all on a fresh run, only this message's on a resume (E-06). */
@@ -751,6 +761,7 @@ export class RealAgentExecutor extends AgentExecutor {
           abortController,
           hook,
           codex: codexOpts,
+          isolation: opts.isolation ?? undefined,
           onProgress: () => {
             lastEventAt = Date.now();
           },
@@ -810,6 +821,7 @@ export class RealAgentExecutor extends AgentExecutor {
           disallowedTools: opts.agentDef?.disallowedTools,
           mcpServers: opts.mcpServers,
           hook,
+          isolation: opts.isolation,
           onReportStatus,
           onHeartbeat,
           onEvent,
@@ -999,6 +1011,7 @@ export class RealAgentExecutor extends AgentExecutor {
     disallowedTools?: string[];
     mcpServers: Record<string, Record<string, unknown>>;
     hook: HookWiring;
+    isolation: AgentIsolation | null;
     onReportStatus: (report: ReportedStatus) => void;
     onHeartbeat: () => void;
     onEvent: (event: AgentEvent) => void;
@@ -1030,6 +1043,7 @@ export class RealAgentExecutor extends AgentExecutor {
           settingsDir: opts.settingsDir,
           abortController,
           hook: opts.hook,
+          isolation: opts.isolation ?? undefined,
           onReportStatus: opts.onReportStatus,
           onHeartbeat: opts.onHeartbeat,
         },

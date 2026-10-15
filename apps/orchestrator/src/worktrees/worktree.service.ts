@@ -28,7 +28,9 @@ export class WorktreeService {
   ) {}
 
   private async git(cwd: string, args: string[]): Promise<string> {
-    const { stdout } = await exec('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 });
+    // With agents on their own OS user (S-01) the checkouts belong to that user; root's git must not refuse them.
+    const safe = this.config.agentRunAs ? ['-c', 'safe.directory=*'] : [];
+    const { stdout } = await exec('git', [...safe, ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
     return stdout.trim();
   }
 

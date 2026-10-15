@@ -34,8 +34,27 @@ export interface CodexRunOptions {
   internalMcp?: { url: string; token: string };
 }
 
+/**
+ * Run the agent process as a separate, unprivileged OS user (S-01). The runtime
+ * binary (Claude CLI / Codex) is started through `wrapper` (infra/agent-exec.sh),
+ * which drops to `uid`/`gid` with `setpriv` before exec-ing the real binary; the
+ * agent's HOME/TMPDIR move to `home` (a directory the caller created and chowned
+ * to `uid`). When the wrapper or setpriv is missing the run FAILS — never a
+ * silent fallback to the orchestrator's own user.
+ */
+export interface AgentIsolation {
+  uid: number;
+  gid: number;
+  /** Absolute path to the executable wrapper script. */
+  wrapper: string;
+  /** Writable HOME for the agent process, owned by `uid` (e.g. <runs>/<task>/home). */
+  home: string;
+}
+
 export interface RunAgentParams {
   prompt: string;
+  /** Run the agent binary as a separate OS user; omitted = the orchestrator's own user (today's behaviour). */
+  isolation?: AgentIsolation;
   /** Working directory the agent runs in — the worktree root, or a subdir of it. */
   cwd: string;
   /**
