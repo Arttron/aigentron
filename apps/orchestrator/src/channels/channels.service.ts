@@ -3,11 +3,38 @@ import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import type { ChannelAdapter } from './channel-adapter';
 import { CHANNEL_KINDS, getKind, kindMeta, type ChannelFieldDef } from './channel-kinds';
+import { ChatDestinationService } from './chat-destination.service';
 
 type ChannelRow = NonNullable<Awaited<ReturnType<PrismaService['channel']['findUnique']>>>;
 
 /** Raw config object (kind-specific keys). Secrets are masked on the wire. */
 export type ChannelConfig = Record<string, unknown>;
+
+/**
+ * Config keys the runtime writes (not declared fields, never on the wire, kept across edits): the transport's inbound
+ * cursor, so a restart / reload does not replay already-handled updates.
+ */
+export const RUNTIME_CONFIG_KEYS = ['lastUpdateId'] as const;
+
+/** What a chat message we sent stands for (ChannelMessageLink.kind). */
+export type MessageLinkKind = 'approval' | 'question' | 'ack' | 'attachment';
+
+/** A message we sent (or the person's own message we acked), with what it stands for. */
+export interface LinkedMessage {
+  channelId: string;
+  chatId: string;
+  messageId: string;
+  taskId: string;
+  kind: MessageLinkKind | null;
+  refId: string | null;
+}
+
+/** The part of a channel row that decides whether its adapter must be rebuilt (runtime keys excluded). */
+export function adapterSignature(row: { kind: string; name: string; enabled: boolean; config: unknown }): string {
+  const config = { ...((row.config ?? {}) as ChannelConfig) };
+  for (const k of RUNTIME_CONFIG_KEYS) delete config[k];
+  return JSON.stringify({ kind: row.kind, name: row.name, enabled: row.enabled, config });
+}
 
 export interface ChannelPatch {
   name?: string;
@@ -26,7 +53,10 @@ export interface ChannelPatch {
 export class ChannelsService {
   private readonly logger = new Logger(ChannelsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly dest: ChatDestinationService,
+  ) {}
 
   /** Browser-safe kind metadata (for the add/edit picker + dynamic form). */
   kinds() {
@@ -110,6 +140,14 @@ export class ChannelsService {
     });
   }
 
+  /** Write runtime keys (the inbound cursor) into the config without touching the declared fields. Not a user edit: no reload. */
+  async setRuntimeConfig(id: string, patch: Partial<Record<(typeof RUNTIME_CONFIG_KEYS)[number], number>>): Promise<void> {
+    const row = await this.prisma.channel.findUnique({ where: { id }, select: { config: true } });
+    if (!row) return;
+    const config = { ...((row.config ?? {}) as ChannelConfig), ...patch };
+    await this.prisma.channel.update({ where: { id }, data: { config: config as Prisma.InputJsonValue } });
+  }
+
   /** Add (or remove) one chat id on the allow-list, leaving the rest of the config untouched. */
   async setChatAllowed(id: string, chatId: string, allowed: boolean): Promise<ChannelRow> {
     const row = await this.getRow(id);
@@ -175,24 +213,7 @@ export class ChannelsService {
       .catch(() => undefined); // unique — ignore a duplicate binding
   }
 
-  async latestTaskForThread(channelId: string, externalThreadId: string): Promise<string | null> {
-    const t = await this.prisma.channelThread.findFirst({
-      where: { channelId, externalThreadId },
-      orderBy: { createdAt: 'desc' },
-      select: { taskId: true },
-    });
-    return t?.taskId ?? null;
-  }
-
-  async threadForTask(taskId: string): Promise<{ channel: ChannelRow; externalThreadId: string } | null> {
-    const thread = await this.prisma.channelThread.findFirst({
-      where: { taskId },
-      orderBy: { createdAt: 'desc' },
-      include: { channel: true },
-    });
-    if (!thread) return null;
-    return { channel: thread.channel, externalThreadId: thread.externalThreadId };
-  }
+  // (which chat a task speaks in — own thread or the parent's — is ChatDestinationService.destForTask)
 
   // ---- Per-conversation session state (active task + agent/model) ----------
 
@@ -209,6 +230,7 @@ export class ChannelsService {
     chatId: string,
     patch: { activeTaskId?: string | null; agent?: string | null; model?: string | null; muted?: boolean; voice?: boolean; progress?: boolean },
   ) {
+    this.dest.invalidate(channelId, chatId);
     return this.prisma.channelChatState.upsert({
       where: { channelId_chatId: { channelId, chatId } },
       update: patch,
@@ -216,15 +238,19 @@ export class ChannelsService {
     });
   }
 
-  // ---- which task sent which message (for quote-replies) ----
+  // ---- which task sent which message (for quote-replies), and what the message stands for ----
 
-  /** Remember that `taskId` sent this message into the chat; replying to it later addresses that task. */
-  async linkMessage(channelId: string, chatId: string, messageId: string, taskId: string): Promise<void> {
+  /**
+   * Remember that `taskId` sent this message into the chat; replying to it later addresses that task. `ref` says what the
+   * message stands for (an approval, a question, the person's own message we acked, a delivered attachment), so button
+   * taps and reactions on it still work after a restart and attachments are not delivered twice.
+   */
+  async linkMessage(channelId: string, chatId: string, messageId: string, taskId: string, ref?: { kind: MessageLinkKind; refId: string }): Promise<void> {
     await this.prisma.channelMessageLink
       .upsert({
         where: { channelId_chatId_messageId: { channelId, chatId, messageId } },
-        update: { taskId },
-        create: { channelId, chatId, messageId, taskId },
+        update: { taskId, ...(ref ?? {}) },
+        create: { channelId, chatId, messageId, taskId, ...(ref ?? {}) },
       })
       .catch(() => undefined);
   }
@@ -235,9 +261,44 @@ export class ChannelsService {
     return row?.taskId ?? null;
   }
 
-  /** Old links are of no use (nobody quotes a message from months ago). */
+  /** What a message stands for (null when it is not one of ours). */
+  async linkedMessage(channelId: string, chatId: string, messageId: string): Promise<LinkedMessage | null> {
+    const row = await this.prisma.channelMessageLink.findUnique({ where: { channelId_chatId_messageId: { channelId, chatId, messageId } } });
+    return row ? { channelId: row.channelId, chatId: row.chatId, messageId: row.messageId, taskId: row.taskId, kind: row.kind as MessageLinkKind | null, refId: row.refId } : null;
+  }
+
+  /** Every chat message that stands for this approval / question / ack (oldest first). */
+  async messagesFor(kind: MessageLinkKind, refId: string): Promise<LinkedMessage[]> {
+    const rows = await this.prisma.channelMessageLink.findMany({ where: { kind, refId }, orderBy: { createdAt: 'asc' } });
+    return rows.map((row) => ({ channelId: row.channelId, chatId: row.chatId, messageId: row.messageId, taskId: row.taskId, kind: row.kind as MessageLinkKind | null, refId: row.refId }));
+  }
+
+  /** Whether this chat received the message for an approval / question (it may then decide / answer it). */
+  async chatHasMessageFor(channelId: string, chatId: string, kind: MessageLinkKind, refId: string): Promise<boolean> {
+    return Boolean(await this.prisma.channelMessageLink.findFirst({ where: { channelId, chatId, kind, refId }, select: { id: true } }));
+  }
+
+  /** Forget the messages that stood for something (an ack that has been reacted to). The quote-link to the task stays. */
+  async unlinkRef(kind: MessageLinkKind, refId: string): Promise<void> {
+    await this.prisma.channelMessageLink.updateMany({ where: { kind, refId }, data: { kind: null, refId: null } }).catch(() => undefined);
+  }
+
+  /** Attachments of a task already delivered to a chat (by filename), so a later settle does not send them again. */
+  async sentAttachments(taskId: string): Promise<Set<string>> {
+    const rows = await this.prisma.channelMessageLink.findMany({ where: { taskId, kind: 'attachment' }, select: { refId: true } });
+    return new Set(rows.map((r) => r.refId).filter((x): x is string => Boolean(x)));
+  }
+
+  /** Remember that an attachment went out (files have no message id of their own: a synthetic one keeps the row unique per chat). */
+  async markAttachmentSent(channelId: string, chatId: string, taskId: string, name: string): Promise<void> {
+    await this.linkMessage(channelId, chatId, `attachment:${name}`, taskId, { kind: 'attachment', refId: name });
+  }
+
+  /** Old links are of no use (nobody quotes a message from months ago). Delivered-attachment marks stay (they prevent re-sending). */
   async pruneMessageLinks(days = 60): Promise<void> {
-    await this.prisma.channelMessageLink.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - days * 86_400_000) } } }).catch(() => undefined);
+    await this.prisma.channelMessageLink
+      .deleteMany({ where: { createdAt: { lt: new Date(Date.now() - days * 86_400_000) }, OR: [{ kind: null }, { kind: { not: 'attachment' } }] } })
+      .catch(() => undefined);
   }
 
   /** A readable one-liner for a task: latest reported summary, else title+status. */
@@ -259,14 +320,16 @@ export class ChannelsService {
 /**
  * Coerce an incoming config to its kind's declared fields, merged over the
  * current stored config. `list` fields become trimmed string[]; a blank secret
- * keeps the stored value (so a masked form never wipes it); unknown keys drop.
+ * keeps the stored value (so a masked form never wipes it); unknown keys drop —
+ * except the runtime keys (RUNTIME_CONFIG_KEYS), which are carried over from the stored config.
  */
-function normalizeConfig(
+export function normalizeConfig(
   fields: ChannelFieldDef[],
   incoming: ChannelConfig = {},
   current: ChannelConfig = {},
 ): ChannelConfig {
   const out: ChannelConfig = {};
+  for (const k of RUNTIME_CONFIG_KEYS) if (current[k] !== undefined) out[k] = current[k];
   for (const f of fields) {
     const raw = incoming[f.key];
     if (f.type === 'list') {

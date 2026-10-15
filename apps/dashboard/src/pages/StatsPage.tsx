@@ -181,7 +181,9 @@ export function StatsPage() {
           A few notes: <strong>Requests</strong> counts each agentic turn the fleet took.{' '}
           <strong>Est. cost</strong> is a best-effort estimate — right on the money for Anthropic,
           rough or zero for models routed through LiteLLM. And runs from before usage tracking was
-          switched on simply show as 0 here — nothing&apos;s missing.
+          switched on simply show as 0 here — nothing&apos;s missing. Cost and token totals from before
+          0.1.60 are overstated for tasks with follow-ups; sessions that began before that update are
+          counted from it on.
         </Muted>
       </Card>
     </>

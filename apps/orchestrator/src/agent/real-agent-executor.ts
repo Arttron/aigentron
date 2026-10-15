@@ -33,6 +33,7 @@ import { codexImagesDir, listGeneratedImages } from './codex-images';
 import { inlineBlock, readInlineFiles } from './inline-attachments';
 import { readDocumentText } from '../knowledge/extract';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { ResearchMcpService } from '../research/research-mcp.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { stripMark } from '../discussion/discussion-core';
@@ -119,6 +120,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly codex: CodexService,
     private readonly resources: ResourcesService,
     private readonly workspace: WorkspaceService,
+    private readonly researchMcp: ResearchMcpService,
     private readonly media: MediaService,
     private readonly questions: QuestionsService,
     private readonly knowledge: KnowledgeService,
@@ -139,6 +141,9 @@ export class RealAgentExecutor extends AgentExecutor {
     const { githubToken } = await this.settings.workspaceConfig();
     // A discussion participant only talks: none of the agent's own MCP servers (their tools could write somewhere).
     const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(agentDef?.mcp ?? [], { GITHUB_TOKEN: githubToken });
+    // The built-in research server lives in this process and only serves runs that carry a bearer (S-04): give this run its own.
+    const researchCfg = mcpServers['research'] as { url?: string; headers?: Record<string, string> } | undefined;
+    if (researchCfg?.url) researchCfg.headers = { ...(researchCfg.headers ?? {}), Authorization: `Bearer ${this.researchMcp.register().token}` };
     const attachmentPaths = await this.attachments.paths(ctx.taskId).catch(() => []);
     // Which attachments belong to THIS message (inline thumbnails): the ones
     // explicitly sent, else — on the first run — all (uploaded with the opener).

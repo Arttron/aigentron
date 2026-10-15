@@ -55,6 +55,10 @@ function make(o: Opts = {}) {
         if (gone) throw new Error('Task T not found');
         return row;
       },
+      getLite: async () => {
+        if (gone) throw new Error('Task T not found');
+        return row;
+      },
       attachWorktree: async () => undefined,
       attachPr: async () => undefined,
       scheduleFollowUp: async () => undefined,

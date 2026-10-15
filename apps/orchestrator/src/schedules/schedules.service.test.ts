@@ -30,7 +30,7 @@ function fakeEnv(rows: Row[]) {
     get: vi.fn(async (id: string) => ({ id, createdAt: new Date() })),
     followUp: vi.fn(async () => ({})),
   };
-  const channels = { linkThread: vi.fn(async () => undefined), setChatState: vi.fn(async () => undefined) };
+  const channels = { linkThread: vi.fn(async () => undefined), setChatState: vi.fn(async () => undefined), chatState: vi.fn(async () => ({ activeTaskId: null as string | null })) };
   const svc = new SchedulesService(prisma as never, tasks as never, channels as never, manager as never, {} as never);
   return { svc, prisma, manager, tasks, channels, sent, rows };
 }
@@ -109,7 +109,25 @@ describe('SchedulesService.tick', () => {
     await env.svc.tick(new Date('2026-10-08T09:30:20Z'));
     expect(env.tasks.create).toHaveBeenCalledWith(expect.objectContaining({ prompt: "Prepare today's lesson", agentName: 'tutor', createdByChannel: 'schedule:English' }));
     expect(env.channels.linkThread).toHaveBeenCalledWith('c1', 't1', '42');
+    expect(env.channels.setChatState).toHaveBeenCalledWith('c1', '42', { activeTaskId: 't1' });
     expect(env.sent[0]!.text).toContain('started');
+  });
+
+  it('a task schedule does not take over a chat where a person is in the middle of a conversation (C-16)', async () => {
+    const env = fakeEnv([base({ kind: 'task', agentName: 'tutor', text: 'Lesson' })]);
+    env.channels.chatState.mockResolvedValue({ activeTaskId: 'mine' });
+    env.tasks.get.mockImplementation(async (id: string) => ({ id, createdAt: new Date(), status: id === 'mine' ? 'running' : 'review', updatedAt: new Date() }));
+    await env.svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(env.channels.linkThread).toHaveBeenCalledWith('c1', 't1', '42'); // updates still flow to the chat
+    expect(env.channels.setChatState).not.toHaveBeenCalled();
+    expect(env.sent[0]!.text).toContain('started');
+
+    // a conversation that ended long ago is not "in progress": the chat follows the scheduled task
+    const idle = fakeEnv([base({ kind: 'task', agentName: 'tutor', text: 'Lesson' })]);
+    idle.channels.chatState.mockResolvedValue({ activeTaskId: 'old' });
+    idle.tasks.get.mockImplementation(async (id: string) => ({ id, createdAt: new Date(), status: 'review', updatedAt: new Date(Date.now() - 3 * 3600_000) }));
+    await idle.svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(idle.channels.setChatState).toHaveBeenCalledWith('c1', '42', { activeTaskId: 't1' });
   });
 
   it('a broken cron disables the schedule instead of looping on errors', async () => {
@@ -166,5 +184,33 @@ describe('task schedules — one ongoing task (taskMode "same")', () => {
     await old.svc.tick(due);
     expect(old.tasks.create).toHaveBeenCalledTimes(1);
     expect(old.tasks.followUp).not.toHaveBeenCalled();
+  });
+});
+
+describe('SchedulesService.update — moving a "same" schedule to another chat (C-17)', () => {
+  function env() {
+    const row: Row = base({ kind: 'task', agentName: 'tutor', taskMode: 'same', taskId: 't-old', channelId: 'c1', chatId: '42', createdAt: new Date() });
+    const prisma = {
+      schedule: {
+        findUnique: vi.fn(async () => row),
+        update: vi.fn(async ({ data }: { data: Row }) => ({ ...row, ...data })),
+      },
+    };
+    const channels = { getRow: vi.fn(async () => ({ id: 'c1' })), allowedChatIds: vi.fn(() => ['42', '43']) };
+    const agents = { get: vi.fn(async () => ({ name: 'tutor' })) };
+    const svc = new SchedulesService(prisma as never, {} as never, channels as never, {} as never, agents as never);
+    return { svc, prisma };
+  }
+
+  it('a new chat id drops the old task (its thread was bound to the old chat)', async () => {
+    const { svc, prisma } = env();
+    await svc.update('s1', { chatId: '43' });
+    expect(prisma.schedule.update.mock.calls[0]![0]).toMatchObject({ data: { chatId: '43', taskId: null } });
+  });
+
+  it('editing only the text keeps the task', async () => {
+    const { svc, prisma } = env();
+    await svc.update('s1', { text: 'Practise 15 minutes' });
+    expect(prisma.schedule.update.mock.calls[0]![0].data).not.toHaveProperty('taskId');
   });
 });

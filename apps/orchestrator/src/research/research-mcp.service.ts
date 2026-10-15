@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
@@ -8,7 +9,39 @@ import { ResearchService } from './research.service';
 /** Stateless Streamable-HTTP MCP endpoint exposing the research tools (all read-only). */
 @Injectable()
 export class ResearchMcpService {
+  /** Bearer tokens of agent runs (S-04) with their expiry: issued when a run starts, they expire on their own (a run waits for a person at most an hour). */
+  private readonly tokens = new Map<string, number>();
+
   constructor(private readonly research: ResearchService) {}
+
+  /** Issue a bearer for a run (valid `ttlMs`, default 3 h); `dispose()` revokes it earlier. Send it as `Authorization: Bearer <token>`. */
+  register(ttlMs = 3 * 60 * 60 * 1000): { token: string; dispose: () => void } {
+    const token = randomBytes(24).toString('hex');
+    this.tokens.set(token, Date.now() + ttlMs);
+    return { token, dispose: () => void this.tokens.delete(token) };
+  }
+
+  /**
+   * Only requests carrying a live run token are served (the agent runs get one from the executor). Set
+   * `LDS_RESEARCH_MCP_REQUIRE_TOKEN=0` to fall back to the old machine-route-only (loopback) behaviour.
+   */
+  authorized(authHeader: string | undefined): boolean {
+    if (/^(0|false|no)$/i.test(process.env.LDS_RESEARCH_MCP_REQUIRE_TOKEN ?? '')) return true;
+    const provided = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (!provided) return false;
+    const a = Buffer.from(provided);
+    const now = Date.now();
+    let ok = false;
+    for (const [t, exp] of this.tokens) {
+      if (exp <= now) {
+        this.tokens.delete(t);
+        continue;
+      }
+      const b = Buffer.from(t);
+      if (a.length === b.length && timingSafeEqual(a, b)) ok = true;
+    }
+    return ok;
+  }
 
   private build(): McpServer {
     const server = new McpServer({ name: 'research', version: '1.0.0' });
@@ -52,6 +85,10 @@ export class ResearchMcpService {
   }
 
   async handle(req: Request, res: Response): Promise<void> {
+    if (!this.authorized(req.headers.authorization)) {
+      res.status(401).json({ jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null });
+      return;
+    }
     if (req.method !== 'POST') {
       res.status(405).set('Allow', 'POST').send('Method Not Allowed');
       return;

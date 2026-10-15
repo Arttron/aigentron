@@ -34,7 +34,7 @@ which is an alternative to the built-in passwords and also works as an extra lay
 | Dashboard and every `/api/*` route | needs a valid session (cookie, or `Authorization: Bearer <token>`) |
 | Live updates (Socket.IO) | only a signed-in browser may connect |
 | Approval verdicts, settings, agents, providers, MCP servers, secrets entry | same session — **an agent can no longer approve itself over HTTP** |
-| Agent-facing routes (`/api/approvals/check`, `/api/approvals/:id/wait`, `/api/internal-mcp`, `/api/research-mcp`) | no session, but each has its own credential (hook secret / per-run token) **and only answers calls from this machine** (loopback), so a public tunnel cannot reach them |
+| Agent-facing routes (`/api/approvals/check`, `/api/approvals/:id/wait`, `/api/internal-mcp`, `/api/research-mcp`) | no session, but each has its own credential (hook secret / per-run token; for `/api/research-mcp` the per-run token is enforced once `LDS_RESEARCH_MCP_REQUIRE_TOKEN=1`) **and only answers calls from this machine** (loopback), so a public tunnel cannot reach them |
 | `/api/mcp` (outside MCP clients) | its own `MCP_TOKEN`; without one it needs a session |
 | `/api/secret-links/<token>` | open on purpose: the one-time token **is** the credential — it can only set the single value a pending secret request asked for (write-only, works once, expires in 10 minutes, kept in memory) |
 | `/api/health`, `/api/auth/status`, `/login`, `/setup`, `/logout` | open (health check, sign-in); the other `/api/auth/*` routes (password, sessions) need a session |
@@ -67,7 +67,7 @@ Changing your password signs your other browsers out; "Sign out other browsers" 
 
 ## Where it lives
 
-`<secrets dir>/auth.json` (mode 0600): a scrypt hash per user and the key that signs session cookies. It sits in the
+`<secrets dir>/auth.json` (mode 0600; read through a ~2 s cache, so a manual edit or `make reset-password` takes effect within a couple of seconds, a change made by the server itself at once): a scrypt hash per user and the key that signs session cookies. It sits in the
 credentials directory that the approval gate already guards, outside the agent tree. No database change.
 
 ## Routes and roles

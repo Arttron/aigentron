@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { SecretJsonFile } from '../security/secret-json-file';
 import { Injectable } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { publicOrigin } from '../config/cors';
@@ -14,32 +14,26 @@ import { hostAllowed, isAlwaysAllowed, normalizeHost, parseDomainList, requestAl
  */
 @Injectable()
 export class AccessService {
-  private cache: { mtime: number; hosts: string[]; strict: boolean } = { mtime: -1, hosts: [], strict: false };
-
   constructor(private readonly config: AppConfigService) {}
 
   private get file(): string {
     return join(this.config.secretsDir, 'access.json');
   }
 
+  private store?: SecretJsonFile<{ hosts: string[]; strict: boolean }>;
+  private get json(): SecretJsonFile<{ hosts: string[]; strict: boolean }> {
+    return (this.store ??= new SecretJsonFile(this.file, {
+      missing: { hosts: [], strict: false },
+      parse: (raw) => {
+        const j = raw as { allowedHosts?: unknown; strict?: unknown };
+        return { hosts: parseDomainList(j.allowedHosts).list, strict: j.strict === true };
+      },
+    }));
+  }
+
   /** Domains set in Settings. */
   configured(): string[] {
-    let mtime = 0;
-    try {
-      mtime = statSync(this.file).mtimeMs;
-    } catch {
-      this.cache = { mtime: 0, hosts: [], strict: false };
-      return [];
-    }
-    if (mtime !== this.cache.mtime) {
-      try {
-        const j = JSON.parse(readFileSync(this.file, 'utf8')) as { allowedHosts?: unknown; strict?: unknown };
-        this.cache = { mtime, hosts: parseDomainList(j.allowedHosts).list, strict: j.strict === true };
-      } catch {
-        this.cache = { mtime, hosts: [], strict: false };
-      }
-    }
-    return this.cache.hosts;
+    return this.json.read().hosts;
   }
 
   /** The host of PUBLIC_URL (always allowed once set). */
@@ -57,8 +51,7 @@ export class AccessService {
 
   /** Strict mode (Settings → Access): refuse IP addresses and bare server names from outside — only the allowed domains. */
   strict(): boolean {
-    this.configured();
-    return this.cache.strict && this.effective().length > 0;
+    return this.json.read().strict && this.effective().length > 0;
   }
 
   allows(hostHeader: string | undefined): boolean {
@@ -82,16 +75,11 @@ export class AccessService {
     if (next.length && me && !isAlwaysAllowed(me) && !hostAllowed(callerHost, next)) {
       return { ok: false, error: `That list would lock out the address you are using right now (${me}). Add it, or make this change from localhost / the server's IP.` };
     }
-    const strict = opts.strict ?? this.cache.strict;
+    const strict = opts.strict ?? this.json.read().strict;
     if (strict && next.length && me && !opts.callerLocal && isAlwaysAllowed(me)) {
       return { ok: false, error: `Strict mode refuses IP addresses and bare names from outside — you are connected through ${me}. Open the dashboard through one of your allowed domains (or from the server itself / an SSH tunnel) to switch it on.` };
     }
-    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ allowedHosts: list, strict }), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
-    this.cache = { mtime: -1, hosts: [], strict: false };
+    this.json.write({ allowedHosts: list, strict });
     return { ok: true, hosts: list, strict };
   }
 }

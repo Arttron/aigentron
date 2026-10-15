@@ -282,19 +282,28 @@ AI-агент выполняется синхронно через `runAgent`; �
 
 ---
 
-## 9. Новые файлы (ориентир)
+## 9. Файлы (как сделано для Telegram, 2026-10)
 
 ```
 apps/orchestrator/src/channels/
 ├── channels.module.ts              # регистрируется в app.module.ts
-├── channels.service.ts             # CRUD каналов + форматирование/отправка
-├── channels.controller.ts          # CRUD API (секреты маскируются)
-├── channel-notifier.service.ts     # подписка на AgentEventBus → outbound (Фаза 1)
-├── channel-thread.service.ts       # маппинг task ↔ тред
-├── slack/
-│   ├── slack.adapter.ts            # формат сообщений/кнопок, вызовы Slack API
-│   └── slack.controller.ts         # входящие вебхуки (Фаза 2): events, actions
-└── telegram/
-    ├── telegram.adapter.ts
-    └── telegram.controller.ts      # входящий webhook (Фаза 2)
+├── channels.service.ts             # CRUD каналов, allowlist, ChannelThread/ChannelChatState, ChannelMessageLink (kind/refId)
+├── channels.controller.ts          # CRUD API (секреты маскируются), pairing
+├── channel-manager.service.ts      # шина → чат (статусы, вопросы, аппрувы, вложения), чат → задачи; reload() по diff; sweeper эскалаций
+├── channel-gateway.service.ts      # реестр работающих адаптеров + исходящие примитивы: adapterFor(), send() с разбиением >maxTextLength, react/edit
+├── chat-destination.service.ts     # destForTask(): свой тред или тред родителя (подзадача); кэш /mute /progress /voice
+├── inbound-routing.ts              # чистый resolveTarget(): адрес → команда → открытый вопрос → цитата → активная → новая (таблица тестов)
+├── chat-format.ts                  # чистое форматирование: итог задачи, вопрос + кнопки, исходы (тесты)
+├── split-text.ts                   # разбиение длинного текста по абзацам/строкам без разрыва суррогатных пар
+├── channel-commands.service.ts     # slash-команды и адресация /agent, @agent
+├── channel-kinds.ts, channel-adapter.ts   # реестр видов и контракт адаптера (maxTextLength, startPolling(hooks), stop(): Promise)
+├── pairing.service.ts
+└── telegram.adapter.ts             # long-polling; таймауты на все запросы, ретрай 429 по retry_after; курсор update_id в Channel.config.lastUpdateId
 ```
+
+Что хранится в БД, а не в памяти: какое сообщение чата стоит за каким аппрувом / вопросом (`ChannelMessageLink.kind='approval'|'question'`,
+`refId`), сообщение человека, на которое поставили реакцию-подтверждение (`kind='ack'`), и уже отправленные вложения
+(`kind='attachment'`, `refId=имя`). После рестарта кнопки и 👍/👎 на старых сообщениях работают, вложения не шлются повторно.
+Курсор входящих (`update_id`) тоже в БД: рестарт или правка канала (`reload()` пересоздаёт только изменённые адаптеры) не
+проигрывает старую пачку заново. Таймеры эскалации «никто не смотрит дашборд» живут в памяти, но раз в 30 с sweeper
+находит pending-аппрувы/вопросы старше 10 с, которые не дошли ни до одного чата, и отправляет их.

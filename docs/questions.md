@@ -14,6 +14,8 @@ The run waits (the task shows *needs approval*). The agent gets back "The user a
 - **Dashboard** — the card in the bottom-right dock (with the approvals), on every page. Tap a button, or type your own answer.
 - **Telegram** — the question arrives as a message with a button per option. Tap one, **or simply reply with text** (a number picks that option). It goes to the task's own chat; for a dashboard task nobody is watching (no dashboard window in focus), to the allowed chats after a short grace period.
 - The first answer wins; the other places update at once (buttons disappear, the message shows the answer). A cancelled or finished task withdraws its questions.
+- A subtask's question goes to the chat of the task that created it (a subtask has no chat of its own). A question that reached no chat (the send failed, nobody was watching the dashboard at the time) is retried every 30 s while it is still open.
+- The buttons under a question keep working after the server restarts (which chat message stands for which question is stored, not kept in memory). Note that a restart itself times out the questions that were open at that moment.
 
 ## Notes
 - Who may answer in the dashboard: reviewer, operator, admin and task setter. A chat may answer only questions sent to it.

@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
-import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { SecretJsonFile } from '../security/secret-json-file';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -71,7 +71,6 @@ function apiError(status: number, text: string): string {
  */
 @Injectable()
 export class VisionService {
-  private cache: { mtime: number; config: VisionConfig | null } = { mtime: -1, config: null };
 
   constructor(
     private readonly config: AppConfigService,
@@ -82,22 +81,19 @@ export class VisionService {
     return join(this.config.secretsDir, 'vision.json');
   }
 
+  private store?: SecretJsonFile<VisionConfig | null>;
+  private get json(): SecretJsonFile<VisionConfig | null> {
+    return (this.store ??= new SecretJsonFile<VisionConfig | null>(this.file, {
+      missing: null,
+      parse: (raw) => {
+        const j = raw as Partial<VisionConfig>;
+        return typeof j.provider === 'string' && j.provider ? { provider: j.provider, model: typeof j.model === 'string' ? j.model : '' } : null;
+      },
+    }));
+  }
+
   get(): VisionConfig | null {
-    let mtime = 0;
-    try {
-      mtime = statSync(this.file).mtimeMs;
-    } catch {
-      return (this.cache = { mtime: 0, config: null }).config;
-    }
-    if (mtime !== this.cache.mtime) {
-      try {
-        const j = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<VisionConfig>;
-        this.cache = { mtime, config: typeof j.provider === 'string' && j.provider ? { provider: j.provider, model: typeof j.model === 'string' ? j.model : '' } : null };
-      } catch {
-        this.cache = { mtime, config: null };
-      }
-    }
-    return this.cache.config;
+    return this.json.read();
   }
 
   ready(): boolean {
@@ -122,12 +118,7 @@ export class VisionService {
   }
 
   private write(cfg: VisionConfig | null): void {
-    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(cfg ?? {}), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
-    this.cache = { mtime: -1, config: null };
+    this.json.write(cfg ?? {});
   }
 
   /** Ask the vision model about up to a few images. Returns its answer. */

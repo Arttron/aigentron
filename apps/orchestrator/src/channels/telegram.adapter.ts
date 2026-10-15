@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { Logger } from '@nestjs/common';
-import type { ChannelAdapter, ChatActivity, IncomingHandler, MessageButton, OutgoingApproval } from './channel-adapter';
+import type { ChannelAdapter, ChatActivity, IncomingHandler, MessageButton, OutgoingApproval, PollingHooks } from './channel-adapter';
 import { COMMAND_MENU } from './command-menu';
 
 /** Telegram bot config stored in Channel.config. */
@@ -10,6 +10,8 @@ export interface TelegramConfig {
   allowedChatIds?: string[];
   /** Agent used for tasks created from this channel (else the default lead). */
   defaultAgent?: string;
+  /** Runtime, written by the manager: the last `update_id` handled, so a restart/reload does not replay the batch. */
+  lastUpdateId?: number;
 }
 
 const API = 'https://api.telegram.org';
@@ -22,11 +24,20 @@ const CALLBACK_ANSWER = 'qa:'; // qa:<questionId>:<option index>
 const CALLBACK_TOGGLE = 'qt:'; // qt:<questionId>:<option index> — tick/untick (multiple choice)
 const CALLBACK_DONE = 'qd:'; // qd:<questionId> — send the ticked options
 
-/**
- * Telegram transport over the Bot API using long-polling (getUpdates) — no
- * public URL needed, so it works on a local/self-hosted server. Sends plain
- * messages and approval prompts with inline Approve/Deny buttons.
- */
+/** Telegram's limit for one text message (UTF-16 units). */
+export const TELEGRAM_MAX_TEXT = 4096;
+/** A plain API call (sendMessage, answerCallbackQuery…) must answer within this. */
+const CALL_TIMEOUT_MS = 20_000;
+/** Uploads and downloads (up to 20–50 MB) get longer. */
+const TRANSFER_TIMEOUT_MS = 120_000;
+/** The long poll asks Telegram to hold for this many seconds… */
+const POLL_HOLD_S = 30;
+/** …and is abandoned a little later if the socket hangs. */
+const POLL_TIMEOUT_MS = (POLL_HOLD_S + 15) * 1000;
+/** Retries after HTTP 429 (Telegram says how long to wait in `parameters.retry_after`). */
+const MAX_RETRIES = 2;
+const MAX_RETRY_AFTER_S = 30;
+
 /** Cut to `max` UTF-16 units (Telegram's limit) without splitting an emoji / rare CJK character in two, adding an ellipsis. */
 export function clip(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -36,29 +47,90 @@ export function clip(text: string, max: number): string {
   return `${text.slice(0, end)}…`;
 }
 
+/** A Bot API error with what Telegram said; `retryAfter` (seconds) when it was a rate limit. */
+export class TelegramApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfter?: number,
+  ) {
+    super(message);
+  }
+}
+
+/** How long to wait before retrying this attempt, or null when the error is not a rate limit / retries are spent. */
+export function retryDelayMs(err: unknown, attempt: number, maxRetries = MAX_RETRIES): number | null {
+  if (attempt >= maxRetries) return null;
+  if (!(err instanceof TelegramApiError) || err.status !== 429) return null;
+  const s = Math.min(Math.max(err.retryAfter ?? 1, 1), MAX_RETRY_AFTER_S);
+  return s * 1000;
+}
+
+/**
+ * Telegram transport over the Bot API using long-polling (getUpdates) — no
+ * public URL needed, so it works on a local/self-hosted server. Sends plain
+ * messages and approval prompts with inline Approve/Deny buttons.
+ * Every outgoing request has a timeout; HTTP 429 is retried after `retry_after`.
+ */
 export class TelegramAdapter implements ChannelAdapter {
   readonly kind = 'telegram';
+  readonly maxTextLength = TELEGRAM_MAX_TEXT;
   private readonly logger: Logger;
   private readonly token: string;
   private polling = false;
-  private offset = 0;
+  /** The next update_id to ask for: one past the last one handled (persisted across restarts via config.lastUpdateId). */
+  private offset: number;
   private abort?: AbortController;
+  private loopDone?: Promise<void>;
 
   constructor(channelName: string, config: TelegramConfig) {
     this.logger = new Logger(`Telegram(${channelName})`);
     this.token = config.botToken;
+    const last = Number(config.lastUpdateId);
+    this.offset = Number.isFinite(last) && last >= 0 ? last + 1 : 0;
   }
 
-  private async call<T = unknown>(method: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-    const res = await fetch(`${API}/bot${this.token}/${method}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-      signal,
-    });
-    const data = (await res.json()) as { ok: boolean; result?: T; description?: string };
-    if (!data.ok) throw new Error(data.description || `Telegram ${method} failed (${res.status})`);
+  /** Parse a Bot API response; throw a TelegramApiError (with retry_after) when it is not ok. */
+  private async parse<T>(res: Response, method: string): Promise<T> {
+    const data = (await res.json().catch(() => null)) as { ok: boolean; result?: T; description?: string; parameters?: { retry_after?: number } } | null;
+    if (!data?.ok) throw new TelegramApiError(data?.description || `Telegram ${method} failed (${res.status})`, res.status, data?.parameters?.retry_after);
     return data.result as T;
+  }
+
+  /** A JSON call with a timeout and 429 retries. `signal` (polling) aborts it early. */
+  private async call<T = unknown>(method: string, body?: unknown, opts: { signal?: AbortSignal; timeoutMs?: number; retries?: number } = {}): Promise<T> {
+    const timeoutMs = opts.timeoutMs ?? CALL_TIMEOUT_MS;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await fetch(`${API}/bot${this.token}/${method}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: withTimeout(opts.signal, timeoutMs),
+        });
+        return await this.parse<T>(res, method);
+      } catch (e) {
+        const wait = retryDelayMs(e, attempt, opts.retries);
+        if (wait === null || opts.signal?.aborted) throw e;
+        this.logger.warn(`${method}: rate limited, retrying in ${wait / 1000}s`);
+        await delay(wait);
+      }
+    }
+  }
+
+  /** A multipart upload (photo, document, voice) with a longer timeout and 429 retries. */
+  private async postForm<T = unknown>(method: string, form: FormData): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await fetch(`${API}/bot${this.token}/${method}`, { method: 'POST', body: form, signal: withTimeout(undefined, TRANSFER_TIMEOUT_MS) });
+        return await this.parse<T>(res, method);
+      } catch (e) {
+        const wait = retryDelayMs(e, attempt);
+        if (wait === null) throw e;
+        this.logger.warn(`${method}: rate limited, retrying in ${wait / 1000}s`);
+        await delay(wait);
+      }
+    }
   }
 
   async verify(): Promise<{ ok: boolean; info?: string; error?: string }> {
@@ -70,24 +142,19 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
+  private inlineKeyboard(buttons: MessageButton[][]) {
+    // Telegram caps callback_data at 64 bytes and button label length isn't formally bounded but long labels get truncated by clients.
+    return { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.label.slice(0, 64), callback_data: b.data.slice(0, 64) }))) };
+  }
+
   async sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<{ messageId: string }> {
-    // Telegram caps a message at 4096 chars — truncate defensively.
-    const body = clip(text, 4096);
+    // Telegram caps a message at 4096 chars — the gateway splits long texts; this is the last line of defence.
+    const body = clip(text, TELEGRAM_MAX_TEXT);
     const msg = await this.call<{ message_id: number }>('sendMessage', {
       chat_id: chatId,
       text: body,
       disable_web_page_preview: true,
-      ...(buttons?.length
-        ? {
-            reply_markup: {
-              inline_keyboard: buttons.map((row) =>
-                // Telegram caps callback_data at 64 bytes and button label length
-                // isn't formally bounded but long labels get truncated by clients.
-                row.map((b) => ({ text: b.label.slice(0, 64), callback_data: b.data.slice(0, 64) })),
-              ),
-            },
-          }
-        : {}),
+      ...(buttons?.length ? { reply_markup: this.inlineKeyboard(buttons) } : {}),
     });
     return { messageId: String(msg.message_id) };
   }
@@ -95,7 +162,7 @@ export class TelegramAdapter implements ChannelAdapter {
   /** Replace a message's text in place — omitting reply_markup leaves any
    *  existing inline keyboard (e.g. the "⏹ Cancel" button) untouched. */
   async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
-    const body = clip(text, 4096);
+    const body = clip(text, TELEGRAM_MAX_TEXT);
     await this.call('editMessageText', {
       chat_id: chatId,
       message_id: Number(messageId),
@@ -108,10 +175,8 @@ export class TelegramAdapter implements ChannelAdapter {
     const form = new FormData();
     form.append('chat_id', chatId);
     if (caption) form.append('caption', caption.slice(0, 1024));
-    form.append('photo', new Blob([image.data]), image.filename);
-    const res = await fetch(`${API}/bot${this.token}/sendPhoto`, { method: 'POST', body: form });
-    const data = (await res.json()) as { ok: boolean; description?: string };
-    if (!data.ok) throw new Error(data.description || `Telegram sendPhoto failed (${res.status})`);
+    form.append('photo', new Blob([new Uint8Array(image.data)]), image.filename);
+    await this.postForm('sendPhoto', form);
   }
 
   async sendVoice(chatId: string, audio: { data: Buffer; mime: string }, caption?: string): Promise<void> {
@@ -121,9 +186,7 @@ export class TelegramAdapter implements ChannelAdapter {
     form.append('chat_id', chatId);
     if (caption) form.append('caption', caption);
     form.append(voice ? 'voice' : 'audio', new Blob([new Uint8Array(audio.data)], { type: audio.mime }), voice ? 'reply.ogg' : 'reply.mp3');
-    const res = await fetch(`${API}/bot${this.token}/${voice ? 'sendVoice' : 'sendAudio'}`, { method: 'POST', body: form });
-    const data = (await res.json()) as { ok: boolean; description?: string };
-    if (!data.ok) throw new Error(data.description || `Telegram ${voice ? 'sendVoice' : 'sendAudio'} failed (${res.status})`);
+    await this.postForm(voice ? 'sendVoice' : 'sendAudio', form);
   }
 
   async sendImages(chatId: string, images: { data: Buffer; filename: string }[], caption?: string): Promise<void> {
@@ -135,9 +198,7 @@ export class TelegramAdapter implements ChannelAdapter {
       JSON.stringify(list.map((img, i) => ({ type: 'photo', media: `attach://p${i}`, ...(i === 0 && caption ? { caption: caption.slice(0, 1024) } : {}) }))),
     );
     list.forEach((img, i) => form.append(`p${i}`, new Blob([new Uint8Array(img.data)]), img.filename));
-    const res = await fetch(`${API}/bot${this.token}/sendMediaGroup`, { method: 'POST', body: form });
-    const data = (await res.json()) as { ok: boolean; description?: string };
-    if (!data.ok) throw new Error(data.description || `Telegram sendMediaGroup failed (${res.status})`);
+    await this.postForm('sendMediaGroup', form);
   }
 
   async sendDocument(
@@ -150,14 +211,12 @@ export class TelegramAdapter implements ChannelAdapter {
     const form = new FormData();
     form.append('chat_id', chatId);
     if (caption) form.append('caption', caption.slice(0, 1024));
-    form.append('document', new Blob([file.data], file.mime ? { type: file.mime } : undefined), file.filename);
-    const res = await fetch(`${API}/bot${this.token}/sendDocument`, { method: 'POST', body: form });
-    const data = (await res.json()) as { ok: boolean; description?: string };
-    if (!data.ok) throw new Error(data.description || `Telegram sendDocument failed (${res.status})`);
+    form.append('document', new Blob([new Uint8Array(file.data)], file.mime ? { type: file.mime } : undefined), file.filename);
+    await this.postForm('sendDocument', form);
   }
 
   async sendApproval(chatId: string, approval: OutgoingApproval): Promise<{ messageId: string }> {
-    const text = clip(`⚠️ Approval needed for task ${approval.taskId}\n\n${approval.summary}\n${approval.reason}`, 4096); // the full text is in the dashboard
+    const text = clip(`⚠️ Approval needed for task ${approval.taskId}\n\n${approval.summary}\n${approval.reason}`, TELEGRAM_MAX_TEXT); // the full text is in the dashboard
     const msg = await this.call<{ message_id: number }>('sendMessage', {
       chat_id: chatId,
       text,
@@ -178,7 +237,7 @@ export class TelegramAdapter implements ChannelAdapter {
     await this.call('editMessageReplyMarkup', {
       chat_id: chatId,
       message_id: Number(messageId),
-      reply_markup: { inline_keyboard: buttons.map((row) => row.map((b) => ({ text: b.label.slice(0, 64), callback_data: b.data.slice(0, 64) }))) },
+      reply_markup: this.inlineKeyboard(buttons),
     }).catch(() => undefined); // unchanged / gone — best effort
   }
 
@@ -187,7 +246,7 @@ export class TelegramAdapter implements ChannelAdapter {
     await this.call('editMessageText', {
       chat_id: chatId,
       message_id: Number(messageId),
-      text: outcome,
+      text: clip(outcome, TELEGRAM_MAX_TEXT),
       reply_markup: { inline_keyboard: [] },
     }).catch(() => undefined); // message may be gone/unchanged — best effort
   }
@@ -203,11 +262,11 @@ export class TelegramAdapter implements ChannelAdapter {
     }).catch(() => undefined);
   }
 
-  startPolling(onEvent: IncomingHandler): void {
+  startPolling(onEvent: IncomingHandler, hooks: PollingHooks = {}): void {
     if (this.polling) return;
     this.polling = true;
     void this.registerCommands();
-    void this.loop(onEvent);
+    this.loopDone = this.loop(onEvent, hooks);
   }
 
   /** Publish the command menu to Telegram (the `/` button next to the input). */
@@ -219,7 +278,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
   /** "typing…" / "recording a voice message…" etc. — Telegram shows it for ~5 s, so callers repeat it while busy. */
   async setActivity(chatId: string, activity: ChatActivity): Promise<void> {
-    await this.call('sendChatAction', { chat_id: chatId, action: activity }).catch(() => undefined);
+    await this.call('sendChatAction', { chat_id: chatId, action: activity }, { retries: 0 }).catch(() => undefined);
   }
 
   /** Replace the command menu (built-in commands + one per agent). */
@@ -233,23 +292,26 @@ export class TelegramAdapter implements ChannelAdapter {
     this.logger.log(`Telegram command menu set: ${commands.length} commands (${shown.length} visible in private chats)`);
   }
 
-  stop(): void {
+  /** Stop polling; resolves once the loop has handed over its last update (so a replacement can start without overlap). */
+  async stop(): Promise<void> {
     this.polling = false;
     this.abort?.abort();
+    await this.loopDone?.catch(() => undefined);
+    this.loopDone = undefined;
   }
 
   /** Resolve a Telegram file_id to its bytes (base64) + a filename. */
   private async downloadFile(fileId: string, name?: string): Promise<{ data: string; fileName: string }> {
     const file = await this.call<{ file_path?: string }>('getFile', { file_id: fileId });
     if (!file.file_path) throw new Error('no file_path from getFile');
-    const res = await fetch(`${API}/file/bot${this.token}/${file.file_path}`);
+    const res = await fetch(`${API}/file/bot${this.token}/${file.file_path}`, { signal: withTimeout(undefined, TRANSFER_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`file download failed (${res.status})`);
     const buf = Buffer.from(await res.arrayBuffer());
     return { data: buf.toString('base64'), fileName: name || basename(file.file_path) };
   }
 
-  private async loop(onEvent: IncomingHandler): Promise<void> {
-    this.logger.log('Telegram polling started');
+  private async loop(onEvent: IncomingHandler, hooks: PollingHooks): Promise<void> {
+    this.logger.log(`Telegram polling started (from update ${this.offset})`);
     while (this.polling) {
       this.abort = new AbortController();
       try {
@@ -257,23 +319,26 @@ export class TelegramAdapter implements ChannelAdapter {
           'getUpdates',
           {
             offset: this.offset,
-            timeout: 30,
+            timeout: POLL_HOLD_S,
             // message_reaction isn't delivered unless explicitly requested, even
             // on a bot's very first getUpdates call (unlike message/callback_query).
             allowed_updates: ['message', 'callback_query', 'message_reaction'],
           },
-          this.abort.signal,
+          { signal: this.abort.signal, timeoutMs: POLL_TIMEOUT_MS, retries: 0 },
         );
         for (const u of updates) {
-          this.offset = Math.max(this.offset, u.update_id + 1);
+          if (!this.polling) break; // stopped mid-batch: the rest is re-fetched by whoever polls next (the offset was not moved past it)
+          if (u.update_id < this.offset) continue; // already handled (a replayed batch after a reload)
+          this.offset = u.update_id + 1;
           await this.dispatch(u, onEvent).catch((e) =>
             this.logger.warn(`handler error: ${(e as Error).message}`),
           );
+          hooks.onOffset?.(u.update_id);
         }
       } catch (e) {
         if (!this.polling) break; // aborted by stop()
         this.logger.warn(`getUpdates failed: ${(e as Error).message}`);
-        await delay(3000); // back off transient errors / rate limits
+        await delay(retryDelayMs(e, 0) ?? 3000); // back off transient errors / rate limits
       }
     }
     this.logger.log('Telegram polling stopped');
@@ -501,4 +566,10 @@ export function replyInfo(m: { reply_to_message?: { message_id: number; text?: s
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** A signal that fires on `outer` or after `ms`, whichever comes first. */
+function withTimeout(outer: AbortSignal | undefined, ms: number): AbortSignal {
+  const timeout = AbortSignal.timeout(ms);
+  return outer ? AbortSignal.any([outer, timeout]) : timeout;
 }

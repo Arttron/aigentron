@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withQuote } from './channel-manager.service';
+import { withQuote } from './chat-format';
 import { replyInfo } from './telegram.adapter';
 
 describe('quote-replies', () => {

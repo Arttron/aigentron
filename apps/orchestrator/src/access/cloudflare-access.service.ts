@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { SecretJsonFile } from '../security/secret-json-file';
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { isAlwaysAllowed, normalizeHost } from './access-core';
@@ -26,7 +26,6 @@ const REFETCH_MIN_MS = 60_000;
 @Injectable()
 export class CloudflareAccessService {
   private readonly logger = new Logger('CloudflareAccess');
-  private cfg: { mtime: number; value: AccessConfig | null } = { mtime: -1, value: null };
   private keys = new Map<string, { at: number; fetchedAt: number; keys: AccessJwk[] }>();
 
   constructor(private readonly config: AppConfigService) {}
@@ -35,27 +34,21 @@ export class CloudflareAccessService {
     return join(this.config.secretsDir, 'cloudflare-access.json');
   }
 
-  get(): AccessConfig | null {
-    let mtime = 0;
-    try {
-      mtime = statSync(this.file).mtimeMs;
-    } catch {
-      this.cfg = { mtime: 0, value: null };
-      return null;
-    }
-    if (mtime !== this.cfg.mtime) {
-      let value: AccessConfig | null = null;
-      try {
-        const j = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<AccessConfig>;
+  private store?: SecretJsonFile<AccessConfig | null>;
+  private get json(): SecretJsonFile<AccessConfig | null> {
+    return (this.store ??= new SecretJsonFile<AccessConfig | null>(this.file, {
+      missing: null,
+      parse: (raw) => {
+        const j = raw as Partial<AccessConfig>;
         const teamDomain = parseTeamDomain(j.teamDomain);
         const aud = parseAud(j.aud);
-        if (teamDomain && aud) value = { enabled: j.enabled === true, teamDomain, aud };
-      } catch {
-        value = null;
-      }
-      this.cfg = { mtime, value };
-    }
-    return this.cfg.value;
+        return teamDomain && aud ? { enabled: j.enabled === true, teamDomain, aud } : null;
+      },
+    }));
+  }
+
+  get(): AccessConfig | null {
+    return this.json.read();
   }
 
   /** Does a request for this Host have to carry a valid Access token? */
@@ -114,16 +107,11 @@ export class CloudflareAccessService {
     const next: AccessConfig = { enabled, teamDomain, aud };
     // callerHost is empty for a change made on the server's behalf (the admin agent, after a human approved it)
     if (enabled && callerHost && !isAlwaysAllowed(normalizeHost(callerHost))) {
-      this.cfg = { mtime: -1, value: null };
+      this.json.invalidate();
       const probe = await this.checkWith(next, callerHeaders);
       if (!probe.ok) return { ok: false, error: `You are connected through ${normalizeHost(callerHost)} without a valid Cloudflare Access sign-in (${probe.error}) — turning this on would lock you out. Make this change from localhost / the server's IP, or fix the Access policy first.` };
     }
-    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(next), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
-    this.cfg = { mtime: -1, value: null };
+    this.json.write(next);
     this.keys.delete(teamDomain);
     return { ok: true, config: next };
   }

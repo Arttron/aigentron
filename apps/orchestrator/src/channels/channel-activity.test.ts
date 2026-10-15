@@ -1,17 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelManagerService } from './channel-manager.service';
+import { ChannelGateway } from './channel-gateway.service';
 
 function make(opts: { muted?: boolean; hasThread?: boolean } = {}) {
   const setActivity = vi.fn(async () => undefined);
-  const channels = {
-    threadForTask: vi.fn(async () => (opts.hasThread === false ? null : { channel: { id: 'c1' }, externalThreadId: '42' })),
+  const dest = {
+    destForTask: vi.fn(async () => (opts.hasThread === false ? null : { channelId: 'c1', chatId: '42', own: true })),
+    prefs: vi.fn(async () => ({ muted: opts.muted ?? false, progress: false, voice: false })),
   };
-  const prisma = {
-    task: { findUnique: vi.fn(async () => ({ parentId: null })) },
-    channelChatState: { findUnique: vi.fn(async () => ({ muted: opts.muted ?? false })) },
-  };
-  const svc = new ChannelManagerService(prisma as never, {} as never, channels as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
-  (svc as unknown as { adapters: Map<string, unknown> }).adapters.set('c1', { setActivity, stop: () => undefined });
+  const gateway = new ChannelGateway({} as never);
+  gateway.adapters.set('c1', { setActivity, stop: async () => undefined } as never);
+  const svc = new ChannelManagerService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, gateway, dest as never);
   const call = (taskId: string, status: string) => (svc as unknown as { onTaskActivity: (t: string, s: string) => Promise<void> }).onTaskActivity(taskId, status);
   return { svc, setActivity, call };
 }

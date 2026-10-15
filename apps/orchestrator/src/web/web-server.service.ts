@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpAdapterHost, ModuleRef } from '@nestjs/core';
 import { AccessService } from '../access/access.service';
+import { SecretJsonFile } from '../security/secret-json-file';
 import { AppConfigService } from '../config/app-config.service';
 import { EventsGateway } from '../events/events.gateway';
 import {
@@ -70,14 +71,20 @@ export class WebServerService {
     return local ? { ...DEFAULT_WEB_CONFIG, httpsPort: 0 } : DEFAULT_WEB_CONFIG;
   }
 
+  private store?: SecretJsonFile<WebServerConfig>;
+  private get json(): SecretJsonFile<WebServerConfig> {
+    return (this.store ??= new SecretJsonFile<WebServerConfig>(this.configFile, {
+      missing: this.defaults(),
+      parse: (raw) => {
+        const r = parseWebConfig(raw, this.config.port, this.defaults());
+        if (!r.ok) throw new Error('invalid web config');
+        return r.config;
+      },
+    }));
+  }
+
   getConfig(): WebServerConfig {
-    try {
-      const r = parseWebConfig(JSON.parse(readFileSync(this.configFile, 'utf8')), this.config.port, this.defaults());
-      if (r.ok) return r.config;
-    } catch {
-      /* no file yet */
-    }
-    return this.defaults();
+    return this.json.read();
   }
 
   /** The installed certificate, if any (and valid). */
@@ -192,7 +199,7 @@ export class WebServerService {
   async setConfig(input: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
     const r = parseWebConfig(input, this.config.port, this.getConfig());
     if (!r.ok) return r;
-    this.write(this.configFile, JSON.stringify(r.config));
+    this.json.write(r.config);
     await this.apply();
     return { ok: true };
   }

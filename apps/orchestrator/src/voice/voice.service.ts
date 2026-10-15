@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { SecretJsonFile } from '../security/secret-json-file';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -35,7 +35,6 @@ export interface TimedSegment {
 @Injectable()
 export class VoiceService {
   private readonly logger = new Logger(VoiceService.name);
-  private cache: { mtime: number; config: VoiceConfig } = { mtime: -1, config: EMPTY_VOICE };
 
   constructor(
     private readonly config: AppConfigService,
@@ -46,22 +45,17 @@ export class VoiceService {
     return join(this.config.secretsDir, 'voice.json');
   }
 
+  private store?: SecretJsonFile<VoiceConfig>;
+  private get json(): SecretJsonFile<VoiceConfig> {
+    return (this.store ??= new SecretJsonFile<VoiceConfig>(this.file, {
+      missing: EMPTY_VOICE,
+      pretty: true,
+      parse: (raw) => parseVoiceConfig(raw).config ?? EMPTY_VOICE,
+    }));
+  }
+
   get(): VoiceConfig {
-    let mtime = 0;
-    try {
-      mtime = statSync(this.file).mtimeMs;
-    } catch {
-      this.cache = { mtime: 0, config: EMPTY_VOICE };
-      return EMPTY_VOICE;
-    }
-    if (mtime !== this.cache.mtime) {
-      try {
-        this.cache = { mtime, config: parseVoiceConfig(JSON.parse(readFileSync(this.file, 'utf8'))).config ?? EMPTY_VOICE };
-      } catch {
-        this.cache = { mtime, config: EMPTY_VOICE };
-      }
-    }
-    return this.cache.config;
+    return this.json.read();
   }
 
   sttReady(): boolean {
@@ -84,12 +78,7 @@ export class VoiceService {
         throw new BadRequestException(`${label}: ${(e as Error).message}`);
       }
     }
-    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(c, null, 2), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
-    this.cache = { mtime: -1, config: EMPTY_VOICE };
+    this.json.write(c);
     return c;
   }
 

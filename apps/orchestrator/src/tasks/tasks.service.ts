@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException } from '@nestj
 import { TERMINAL_TASK_STATUSES, isTerminalStatus, type PendingFollowUp, type Task, type TaskStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getTaskLite, type TaskLite } from '../agent/task-lite';
 import { decodeAttachments } from '../prisma/agent-event-attachments';
 import { TaskQueue } from '../queue/queue.constants';
 import { AgentEventBus } from '../bus/agent-event-bus';
@@ -110,8 +111,8 @@ export class TasksService {
    * agents' runs end in `review`. Subtasks are finished by their lead, not here.
    */
   async markDone(id: string): Promise<Task> {
-    const task = await this.get(id);
-    if (task.status === 'done') return serializeTask(task);
+    const task = await this.getLite(id);
+    if (task.status === 'done') return serializeTask(await this.get(id));
     if (!TasksService.ACCEPTABLE.includes(task.status as TaskStatus)) {
       throw new ConflictException(
         isTerminalStatus(task.status as TaskStatus) ? `A ${task.status} task cannot be marked done — start it again with a message first.` : `The task is still ${task.status} — wait until the agent has finished.`,
@@ -446,7 +447,7 @@ export class TasksService {
    * that doesn't care can still treat the result as a plain task.
    */
   async followUp(id: string, prompt: string, attachments?: string[], references?: string[]) {
-    const task = await this.get(id);
+    const task = await this.getLite(id);
     // "Done" / "готово" / "задача завершена" — the person closes the task; nothing is sent to the agent.
     if (isDoneMessage(prompt) && !attachments?.length && TasksService.ACCEPTABLE.includes(task.status as TaskStatus)) {
       await this.markDone(id);
@@ -707,6 +708,13 @@ export class TasksService {
     return { items, total, page, pageSize };
   }
 
+  /** Narrow read for code that only needs status / ids / worktree (E-09): no sessions, approvals, links. 404 like `get`. */
+  async getLite(id: string): Promise<Omit<TaskLite, 'status'> & { status: TaskStatus }> {
+    const task = await getTaskLite(this.prisma, id);
+    if (!task) throw new NotFoundException(`Task ${id} not found`);
+    return task as Omit<TaskLite, 'status'> & { status: TaskStatus };
+  }
+
   async get(id: string) {
     const task = await this.prisma.task.findUnique({
       where: { id },
@@ -788,9 +796,9 @@ export class TasksService {
    *     leaves the status alone instead of writing `stalled` over it.
    */
   async cancel(id: string) {
-    const task = await this.get(id);
+    const task = await this.getLite(id);
     if (isTerminalStatus(task.status)) {
-      return task; // already finished — nothing to cancel
+      return this.get(id); // already finished — nothing to cancel
     }
     const dropped = await this.prisma.pendingFollowUp.deleteMany({ where: { taskId: id } });
     if (dropped.count) {

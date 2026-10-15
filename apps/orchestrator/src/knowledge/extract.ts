@@ -6,7 +6,9 @@ import { extractText } from './kb-core';
 
 /** Hostile / huge documents: bounded pages, bounded time, bounded unpacked size. */
 const MAX_PDF_PAGES = 600;
-const PARSE_TIMEOUT_MS = 60_000;
+// One budget for the WHOLE parse of a document (X-CF-6): it used to be 60 s per step, i.e. up to 2×60 s inside the upload request —
+// longer than Cloudflare waits (100 s → 524) once the upload itself is counted.
+const PARSE_TIMEOUT_MS = 45_000;
 const MAX_UNPACKED_BYTES = 120 * 1024 * 1024;
 
 /** Sum of the uncompressed sizes a ZIP (.docx) declares in its central directory — read BEFORE anything is inflated. */
@@ -16,7 +18,8 @@ export function zipUnpackedSize(buf: Buffer): number {
   return total;
 }
 
-const withTimeout = <T>(p: Promise<T>, what: string): Promise<T> => Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Reading the ${what} took too long (over ${PARSE_TIMEOUT_MS / 1000} s) — it may be damaged or very complex.`)), PARSE_TIMEOUT_MS).unref())]);
+const withTimeout = <T>(p: Promise<T>, what: string, deadline: number = Date.now() + PARSE_TIMEOUT_MS): Promise<T> =>
+  Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Reading the ${what} took too long (over ${PARSE_TIMEOUT_MS / 1000} s) — it may be damaged or very complex.`)), Math.max(1, deadline - Date.now())).unref())]);
 
 export const BINARY_DOC_EXTS = ['pdf', 'docx'] as const;
 const ext = (name: string): string => (name.split('.').pop() ?? '').toLowerCase();
@@ -26,9 +29,10 @@ export const isReadableDoc = (name: string): boolean => (BINARY_DOC_EXTS as read
 export async function extractDocument(name: string, data: Buffer): Promise<string> {
   const e = ext(name);
   if (e === 'pdf') {
-    const pdf = await withTimeout(getDocumentProxy(new Uint8Array(data)), 'PDF');
+    const deadline = Date.now() + PARSE_TIMEOUT_MS; // shared by both steps below
+    const pdf = await withTimeout(getDocumentProxy(new Uint8Array(data)), 'PDF', deadline);
     if (pdf.numPages > MAX_PDF_PAGES) throw new Error(`This PDF has ${pdf.numPages} pages; the limit is ${MAX_PDF_PAGES}. Split it into parts.`);
-    const { text } = await withTimeout(pdfText(pdf, { mergePages: false }), 'PDF');
+    const { text } = await withTimeout(pdfText(pdf, { mergePages: false }), 'PDF', deadline);
     const pages = (Array.isArray(text) ? text : [String(text)]).map((t, i) => ({ n: i + 1, t: t.replace(/[ \t]+\n/g, '\n').trim() }));
     const body = pages.filter((p) => p.t).map((p) => `[p. ${p.n}]\n${p.t}`).join('\n\n');
     if (body.replace(/\[p\. \d+\]/g, '').trim().length < 20) throw new Error('This PDF has no text layer (it is a scan). Text recognition (OCR) is not available yet — use a text version.');

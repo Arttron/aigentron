@@ -145,12 +145,20 @@ export type IncomingEvent =
 
 export type IncomingHandler = (event: IncomingEvent) => void | Promise<void>;
 
+/** Hooks a transport calls while polling. */
+export interface PollingHooks {
+  /** The transport's cursor moved past an inbound update (Telegram `update_id`); persisted so a restart/reload does not replay it. */
+  onOffset?: (lastUpdateId: number) => void;
+}
+
 /** What the bot appears to be doing (Telegram's sendChatAction actions). */
 export type ChatActivity = 'typing' | 'upload_photo' | 'upload_video' | 'upload_document' | 'record_voice' | 'upload_voice' | 'record_video_note';
 
 /** The base functions a channel transport implements. */
 export interface ChannelAdapter {
   readonly kind: string;
+  /** Longest text one message may carry (UTF-16 units); longer texts are split by the gateway. Unset = unlimited. */
+  readonly maxTextLength?: number;
   /** Connectivity/credentials check (e.g. Telegram getMe). */
   verify(): Promise<{ ok: boolean; info?: string; error?: string }>;
   /** Post a plain text message to a conversation. `buttons` is a grid of rows
@@ -195,7 +203,7 @@ export interface ChannelAdapter {
    *  optional — not every transport supports message reactions. */
   reactToMessage?(chatId: string, messageId: string, emoji: string): Promise<void>;
   /** Begin receiving inbound events (long-polling). Idempotent. */
-  startPolling(onEvent: IncomingHandler): void;
-  /** Stop receiving and release resources. Idempotent. */
-  stop(): void;
+  startPolling(onEvent: IncomingHandler, hooks?: PollingHooks): void;
+  /** Stop receiving and release resources. Idempotent; resolves once the polling loop has really ended. */
+  stop(): Promise<void>;
 }

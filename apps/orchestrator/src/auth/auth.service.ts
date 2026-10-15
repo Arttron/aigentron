@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { SecretJsonFile } from '../security/secret-json-file';
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { publicOrigin } from '../config/cors';
@@ -53,7 +53,6 @@ export class AuthService implements OnModuleInit {
   private readonly limiter = new LoginLimiter();
   /** Per ACCOUNT (X-CF-1): many addresses guessing one password still hit a wall; more generous than the per-address limit so one attacker cannot lock the owner out cheaply. */
   private readonly accountLimiter = new LoginLimiter(15);
-  private cache: { mtime: number; state: AuthState | null } = { mtime: -1, state: null };
 
   constructor(
     private readonly config: AppConfigService,
@@ -65,39 +64,26 @@ export class AuthService implements OnModuleInit {
     return join(this.config.secretsDir, 'auth.json');
   }
 
-  /** Current state, re-read when the file changed (e.g. removed by `make reset-password`). */
+  private store?: SecretJsonFile<AuthState | null>;
+  private get json(): SecretJsonFile<AuthState | null> {
+    return (this.store ??= new SecretJsonFile<AuthState | null>(this.file, {
+      missing: null,
+      parse: (raw) => {
+        const s = raw as Partial<AuthState>;
+        return s.secret && Number.isFinite(s.epoch)
+          ? { secret: s.secret, epoch: s.epoch!, users: s.users && typeof s.users === 'object' ? s.users : {}, passwordHash: s.passwordHash }
+          : null;
+      },
+    }));
+  }
+
+  /** Current state, cached for a couple of seconds (re-read when the file changed, e.g. removed by `make reset-password`). */
   private state(): AuthState | null {
-    let mtime = 0;
-    try {
-      mtime = statSync(this.file).mtimeMs;
-    } catch {
-      this.cache = { mtime: 0, state: null };
-      return null;
-    }
-    if (mtime !== this.cache.mtime) {
-      try {
-        const s = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<AuthState>;
-        this.cache = {
-          mtime,
-          state:
-            s.secret && Number.isFinite(s.epoch)
-              ? { secret: s.secret, epoch: s.epoch!, users: s.users && typeof s.users === 'object' ? s.users : {}, passwordHash: s.passwordHash }
-              : null,
-        };
-      } catch {
-        this.cache = { mtime, state: null };
-      }
-    }
-    return this.cache.state;
+    return this.json.read();
   }
 
   private write(s: AuthState): void {
-    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(s), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
-    this.cache = { mtime: -1, state: null }; // force a re-read
+    this.json.write(s);
   }
 
   private fresh(): AuthState {

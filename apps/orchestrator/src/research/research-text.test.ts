@@ -25,3 +25,17 @@ describe('normalizeForQuote', () => {
     expect(normalizeForQuote('  Hello,\n “World” ')).toBe(normalizeForQuote('Hello, "World"'));
   });
 });
+
+describe('isPrivateAddress (SSRF, IPv6 forms that embed IPv4)', () => {
+  it.each(['::ffff:7f00:1', '::ffff:a9fe:a9fe', '64:ff9b::7f00:1', '2002:7f00:1::1', '::127.0.0.1', 'fec0::1', 'fe80::1%lo0', '192.0.2.1', 'not-an-ip'])('blocks %s', (a) => {
+    expect(isPrivateAddress(a)).toBe(true);
+  });
+});
+
+describe('safeLookup (DNS-rebinding guard at connect time)', () => {
+  it('refuses a host that resolves to loopback', async () => {
+    const { safeLookup } = await import('./research-text');
+    const err = await new Promise<NodeJS.ErrnoException | null>((res) => safeLookup('localhost', {}, (e) => res(e)));
+    expect(err?.code).toBe('EACCES');
+  });
+});

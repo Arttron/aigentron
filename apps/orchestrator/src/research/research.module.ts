@@ -6,6 +6,6 @@ import { ResearchService } from './research.service';
 @Module({
   controllers: [ResearchController],
   providers: [ResearchService, ResearchMcpService],
-  exports: [ResearchService],
+  exports: [ResearchService, ResearchMcpService],
 })
 export class ResearchModule {}

@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { SecretJsonFile } from '../security/secret-json-file';
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -37,22 +37,24 @@ export class TitlesService {
     return join(this.config.secretsDir, 'titles.json');
   }
 
+  private store?: SecretJsonFile<TitleConfig>;
+  private get json(): SecretJsonFile<TitleConfig> {
+    return (this.store ??= new SecretJsonFile<TitleConfig>(this.file, {
+      missing: { enabled: true, provider: '', model: '' },
+      parse: (raw) => {
+        const j = raw as Partial<TitleConfig>;
+        return { enabled: j.enabled !== false, provider: typeof j.provider === 'string' ? j.provider : '', model: typeof j.model === 'string' ? j.model : '' };
+      },
+    }));
+  }
+
   get(): TitleConfig {
-    try {
-      const j = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<TitleConfig>;
-      return { enabled: j.enabled !== false, provider: typeof j.provider === 'string' ? j.provider : '', model: typeof j.model === 'string' ? j.model : '' };
-    } catch {
-      return { enabled: true, provider: '', model: '' };
-    }
+    return this.json.read();
   }
 
   save(input: Partial<TitleConfig>): TitleConfig {
     const cfg: TitleConfig = { enabled: input.enabled !== false, provider: String(input.provider ?? '').trim(), model: String(input.model ?? '').trim().slice(0, 120) };
-    mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(cfg), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
-    renameSync(tmp, this.file);
+    this.json.write(cfg);
     return cfg;
   }
 

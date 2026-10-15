@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { request as httpsRequest } from 'node:https';
+import { isIP } from 'node:net';
 import { join } from 'node:path';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'node:zlib';
 import { Injectable, Logger } from '@nestjs/common';
@@ -221,6 +222,7 @@ export class ResearchService {
     const requested = url.toString();
     if (url.protocol !== 'https:') return 'Only https:// URLs are allowed.';
     if (url.username || url.password) return 'URLs with credentials are not allowed.';
+    if (isIP(url.hostname.replace(/^\[|\]$/g, ''))) return 'IP-address URLs are not allowed — use the official host name.';
     if (!this.hostAllowed(url.hostname, domains)) {
       return `"${url.hostname}" is not an allowed official source. Allowed: ${domains.join(', ')}. Use the sources tool to see them by jurisdiction.`;
     }
@@ -236,7 +238,7 @@ export class ResearchService {
           const loc = res.headers.location;
           if (!loc || Array.isArray(loc)) break;
           current = new URL(loc, current);
-          if (current.protocol !== 'https:' || !this.hostAllowed(current.hostname, domains)) {
+          if (current.protocol !== 'https:' || isIP(current.hostname.replace(/^\[|\]$/g, '')) || !this.hostAllowed(current.hostname, domains)) {
             return `Redirected to ${current.hostname}, which is not an allowed official source — refusing to follow.`;
           }
           res = await this.httpGet(current);

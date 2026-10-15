@@ -28,7 +28,7 @@ The updater uses `DATA_DIR` (not "parent of the secrets dir") for its state.
 
 On every start the server reconciles what the previous process left behind: pending approvals and questions become `timeout`, tasks parked in `needs_approval` become `stalled` (resumable by a follow-up), so nothing waits forever and a late "Approve" cannot revive a task with no agent.
 
-**Publishing a release (maintainers):** the release workflow must attach `SHA256SUMS` to the GitHub release with lines `<sha256>  v<version>.tar.gz` (the tag archive) and `<sha256>  install.sh`, and (S3) `releases/<version>/SHA256SUMS` with `<sha256>  archive.tar.gz`.
+**Publishing a release (maintainers):** the release workflow must attach `SHA256SUMS` to the GitHub release with lines `<sha256>  v<version>.tar.gz` (the tag archive) and `<sha256>  install.sh`, and (S3) `releases/<version>/SHA256SUMS` with `<sha256>  archive.tar.gz`. `release.yml` does this (step "Publish SHA256SUMS"): it hashes the public repo's tag archive exactly as `install.sh` downloads it.
 
 ## Backup and restore
 

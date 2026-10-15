@@ -94,7 +94,7 @@ export class TaskWorkerService implements OnModuleInit {
     this.logger.log(`Processing task ${taskId}`);
 
     try {
-      const task = await this.tasks.get(taskId);
+      const task = await this.tasks.getLite(taskId);
       // Chat agents (e.g. the built-in admin) have no repo/worktree/verify/publish
       // lifecycle: every turn just runs and settles as done.
       const chatAgent = task.agentName ? await this.agents.get(task.agentName).catch(() => null) : null;
@@ -148,7 +148,7 @@ export class TaskWorkerService implements OnModuleInit {
       // unless it already reached a terminal state (e.g. cancelled mid-run). A
       // lingering `needs_approval` here is stale (a killed run whose approval
       // hasn't timed out yet) — treat it as finishable so the task can't orphan.
-      const after = await this.tasks.get(taskId);
+      const after = await this.tasks.getLite(taskId);
       if (!isTerminalStatus(after.status)) {
         // Structured completion contract (decideStatus): the terminal status comes from
         // what the agent explicitly reported (report_task_status), never from parsing prose.
@@ -204,7 +204,7 @@ export class TaskWorkerService implements OnModuleInit {
         // failures (bounded) before we mark done / push.
         const gate = await this.verifyWithFixes({ taskId, ...wt });
         // The verify loop may have been cancelled while iterating.
-        if (isTerminalStatus((await this.tasks.get(taskId)).status)) {
+        if (isTerminalStatus((await this.tasks.getLite(taskId)).status)) {
           this.logger.log(`Task ${taskId} settled during verification — not finalizing`);
           return;
         }
@@ -247,7 +247,7 @@ export class TaskWorkerService implements OnModuleInit {
       const message = err instanceof Error ? err.message : String(err);
       // If the task was cancelled mid-run, leave it cancelled (don't fail it); if it
       // was deleted mid-run, there is no row to fail and nothing to report (E-23).
-      const current = await this.tasks.get(taskId).catch(() => null);
+      const current = await this.tasks.getLite(taskId).catch(() => null);
       if (!current) {
         this.logger.log(`Task ${taskId} was deleted during its run`);
         return;
@@ -283,7 +283,7 @@ export class TaskWorkerService implements OnModuleInit {
       followUpPrompt,
       attachments,
     });
-    const after = await this.tasks.get(taskId);
+    const after = await this.tasks.getLite(taskId);
     if (isTerminalStatus(after.status)) return; // cancelled mid-turn — leave it
     const decision = decideStatus(outcome, { chat: true, parentId: after.parentId, requireStatusReport: this.config.requireStatusReport });
     if (decision.kind === 'settle') {
@@ -311,7 +311,7 @@ export class TaskWorkerService implements OnModuleInit {
     const maxAttempts = await this.settings.verifyMaxAttempts();
     for (let attempt = 1; attempt <= maxAttempts && !result.ok; attempt++) {
       // Stop launching fix runs if the task was cancelled/deleted between rounds.
-      if (isTerminalStatus((await this.tasks.get(ctx.taskId)).status)) break;
+      if (isTerminalStatus((await this.tasks.getLite(ctx.taskId)).status)) break;
       this.logger.log(`Task ${ctx.taskId}: verification failed — auto-fix ${attempt}/${maxAttempts}`);
       await this.executor.run({
         taskId: ctx.taskId,

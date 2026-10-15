@@ -1,26 +1,22 @@
-Aigentron v0.1.60
+Aigentron v0.1.61
 
-For people who are not programmers: a reliability release — safer updates with backups, fewer ways for a task to get stuck, more honest cost numbers, and smoother handling of files.
+For people who are not programmers: Telegram and the chat channels were reworked to survive restarts and long messages, and known security advisories in the libraries were fixed.
 
-Updates and backups
-- "aigentron backup" / "aigentron restore": one archive with the database, secrets, your agents, skills, library, attachments and workspace (a timer for daily backups is available, off by default). Before every update the database is snapshotted; if the new version does not come up healthy the update rolls itself back, snapshot included.
-- A fresh install now sets a random operator password and shows it once (also saved in secrets/initial-password.txt). Existing installs are untouched.
-- Release archives are checked against SHA256SUMS when the release provides them.
-- Approvals and questions left over from a previous run are closed when the server starts, so nothing waits forever.
+Telegram and channels
+- Long answers are split into several messages (at paragraph or line boundaries) instead of being cut at Telegram's 4096-character limit.
+- Buttons on approval and question messages keep working after a restart of the server; attachments are not sent a second time after a restart; the bot remembers where it stopped reading updates, so restarting or editing a channel no longer replays old messages (no duplicate tasks).
+- Questions and approvals of a subtask go straight to the chat of the task that created it. If nobody answers in the chat, an escalation check now delivers them to the default chat (every 30 seconds), also when the dashboard was in focus at that moment and was closed later.
+- A scheduled run no longer takes over a chat where you are talking to another task right now.
+- Telegram requests have time limits, and a "too many requests" answer is retried automatically.
 
-Tasks that get stuck less
-- Two follow-ups sent at the same time run one after the other, never twice at once; cancelling or deleting a running task waits for the run to stop; a cancelled task never comes back.
-- A task waiting for your answer (ask_user or an approval) no longer runs out of time while you think.
-- If the provider fails on a follow-up, the task ends "stalled" with the provider's own error message instead of silently switching models.
-- The administrator instructions from Settings now really are added for every agent, as the screen says.
+Security
+- Libraries with published vulnerabilities were updated or pinned to patched versions (the audit of runtime dependencies went from 1 critical and 17 high findings to 0 and 3; the remaining ones are in Prisma's own tooling, not in the running server).
+- The built-in research tool now needs a per-run key (agents get it automatically; it expires after 3 hours) and refuses more kinds of internal addresses, including tricks with IPv6 and DNS.
+- Secret settings files are read through a short cache (2 seconds) and written atomically.
+- Release archives are published together with a SHA256SUMS file, which the installer verifies.
 
-Cost
-- Token and cost statistics no longer add the same session's totals again on every follow-up (they were overstated). Daily/per-task token budgets now count cache tokens too, so existing limits are effectively stricter (roughly 5–10 times); raise BUDGET_TOKENS_PER_TASK / BUDGET_TOKENS_PER_DAY if tasks get blocked. Sessions started before this update are counted once from the update on.
+Other
+- The Stats page says that totals before 0.1.60 are overstated.
+- Lighter database reads for task actions; one PDF reading budget (45 s) instead of two.
 
-Files
-- Clips recorded by the browser camera (Chrome/Android) can be looked at by the agents; videos over 95 MB are refused with a clear message (the limit behind Cloudflare); an attachment can only be added to an existing task (1 GB per task); the assistant can read only the attachments of its own task; old versions in the workspace's deliverables are rotated.
-
-Dashboard
-- Live lines are no longer lost while a conversation loads and are re-synced after a lost connection; long conversations re-render less; background refreshes pause in hidden tabs.
-
-Update note: the database gets a migration (foreign keys, indexes; orphaned rows are cleaned) — a snapshot is taken first.
+Update note: no database changes.

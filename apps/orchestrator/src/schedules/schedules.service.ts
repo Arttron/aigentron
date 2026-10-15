@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { isTerminalStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { ChannelsService } from '../channels/channels.service';
@@ -29,6 +30,8 @@ const TICK_MS = 30_000;
 const ROLLOVER_MS = 30 * 24 * 3600_000;
 /** A run that is overdue by more than this (the server was off) is skipped rather than fired late. */
 const GRACE_MS = 2 * 3600_000;
+/** A chat whose active task was touched this recently is "in a conversation": a scheduled task does not take it over. */
+const ACTIVE_CHAT_MS = 30 * 60_000;
 
 /** Wire shape: the row plus a human description of when it runs. */
 export function serializeSchedule(r: ScheduleRow) {
@@ -164,8 +167,10 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         text: next.text.trim(),
         agentName: next.kind === 'task' ? next.agentName : null,
         taskMode: next.kind === 'task' && next.taskMode === 'new' ? 'new' : 'same',
-        // a different agent (or switching to "new") must not keep feeding the old conversation
-        ...(next.agentName !== cur.agentName || next.kind !== cur.kind || next.taskMode === 'new' ? { taskId: null } : {}),
+        // a different agent, chat or channel (or switching to "new") must not keep feeding the old conversation: its thread is bound to the old chat
+        ...(next.agentName !== cur.agentName || next.kind !== cur.kind || next.taskMode === 'new' || (next.channelId ?? null) !== cur.channelId || (next.chatId ? String(next.chatId) : null) !== cur.chatId
+          ? { taskId: null }
+          : {}),
         channelId: next.channelId,
         chatId: next.chatId ? String(next.chatId) : null,
         quietStart: next.quietStart || null,
@@ -217,6 +222,18 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     return ran;
   }
 
+  /** The chat's active task is still being worked on, or the person touched it recently (a conversation in progress). */
+  private async chatBusy(channelId: string, chatId: string): Promise<boolean> {
+    try {
+      const state = await this.channels.chatState(channelId, chatId);
+      if (!state?.activeTaskId) return false;
+      const task = await this.tasks.get(state.activeTaskId);
+      return !isTerminalStatus(task.status) || Date.now() - new Date(task.updatedAt).getTime() < ACTIVE_CHAT_MS;
+    } catch {
+      return false; // no state / the task is gone: nothing to protect
+    }
+  }
+
   private async execute(row: ScheduleRow, now: Date, respectQuiet: boolean): Promise<{ status: string; error?: string }> {
     const record = async (status: string, error?: string) => {
       await this.prisma.schedule
@@ -248,7 +265,9 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       if (row.taskMode !== 'new') await this.prisma.schedule.update({ where: { id: row.id }, data: { taskId: task.id } }).catch(() => undefined);
       if (row.channelId && row.chatId) {
         await this.channels.linkThread(row.channelId, task.id, row.chatId);
-        await this.channels.setChatState(row.channelId, row.chatId, { activeTaskId: task.id }).catch(() => undefined);
+        // The chat follows the scheduled task only when nobody is in the middle of something there: a person talking to an
+        // agent must not have their next message hijacked by a schedule that happened to fire (C-16).
+        if (!(await this.chatBusy(row.channelId, row.chatId))) await this.channels.setChatState(row.channelId, row.chatId, { activeTaskId: task.id }).catch(() => undefined);
         await this.manager.sendText(row.channelId, row.chatId, `⏰ ${row.name}: started «${task.title}». Updates will appear here.`);
       }
       return record('ok');

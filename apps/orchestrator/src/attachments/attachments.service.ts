@@ -154,7 +154,11 @@ export class AttachmentsService {
       out.end();
       await once(out, 'finish');
     } catch (e) {
-      out.destroy();
+      // wait for the stream to close first: destroying it before it has opened would create the file right after the rm
+      await new Promise<void>((resolve) => {
+        out.once('close', () => resolve());
+        out.destroy();
+      });
       await rm(tmp, { force: true }).catch(() => undefined);
       throw e;
     }
