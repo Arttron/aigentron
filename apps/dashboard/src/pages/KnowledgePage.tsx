@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type AgentInfo, type KbChunking, type KbDoc, type KbHit, type KbInfo, type ProviderInfo, type ResourceInfo } from '@/lib/api';
+import { usePolling } from '@/lib/use-polling';
 import { AppHeader, BackLink, Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
 import { ModelSelect } from '@/components/ModelSelect';
 import styles from './KnowledgePage.module.css';
@@ -67,12 +68,8 @@ export function KnowledgePage() {
   // vectors are made in the background: keep the counters moving until they are all there
   const open = bases.find((b) => b.name === current) ?? null;
   const pending = open && open.embedProvider && open.embedded < open.chunks;
-  useEffect(() => {
-    if (!pending) return;
-    // only the counters move: re-read the bases, not the agents / providers as well
-    const t = setInterval(() => void api.listKb().then(setBases).catch(() => undefined), 4000);
-    return () => clearInterval(t);
-  }, [pending]);
+  // only the counters move: re-read the bases, not the agents / providers as well
+  usePolling(() => void api.listKb().then(setBases).catch(() => undefined), 4000, Boolean(pending));
 
   const run = async (fn: () => Promise<string | void>) => {
     setBusy(true);

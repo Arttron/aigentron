@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, type McpHostStatus } from '@/lib/api';
+import { usePolling } from '@/lib/use-polling';
 import { ORCHESTRATOR_URL } from '@/lib/config';
 import { Card, SectionTitle, Badge, Button, ErrorText } from '@/components/ui';
 import styles from './McpEndpointManager.module.css';
@@ -44,10 +45,9 @@ export function McpEndpointManager() {
       .catch((e) => setError((e as Error).message));
 
   useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 5000); // keep the live session count fresh
-    return () => clearInterval(t);
+    void refresh();
   }, []);
+  usePolling(() => void refresh(), 5000); // keep the live session count fresh
 
   const copy = (id: string, text: string) => {
     void navigator.clipboard?.writeText(text).then(

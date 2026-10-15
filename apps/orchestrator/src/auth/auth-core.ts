@@ -3,6 +3,7 @@
  * No Nest, no I/O — everything here is unit-tested.
  */
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { BlockList, isIP } from 'node:net';
 
 export const SESSION_COOKIE = 'lds_session';
 export const MIN_PASSWORD = 8;
@@ -152,17 +153,65 @@ export function normalizeIp(ip: string): string {
   return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }
 
+/** Cloudflare's published edge ranges (https://www.cloudflare.com/ips/). A TCP peer inside them is Cloudflare itself, so its `cf-connecting-ip` is genuine. */
+export const CLOUDFLARE_RANGES: readonly string[] = [
+  '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20',
+  '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+  '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
+];
+
+/** Does `ip` match one entry of `list` — an exact address or a CIDR (`10.0.0.0/8`, `2606:4700::/32`)? Malformed entries never match. */
+export function ipMatches(ip: string, list: readonly string[]): boolean {
+  const a = normalizeIp(ip.trim());
+  const family = isIP(a);
+  if (!family) return false;
+  const type = family === 6 ? 'ipv6' : 'ipv4';
+  for (const raw of list) {
+    const entry = normalizeIp(raw.trim());
+    if (!entry) continue;
+    try {
+      const bl = new BlockList();
+      const slash = entry.indexOf('/');
+      if (slash === -1) {
+        const f = isIP(entry);
+        if (!f) continue;
+        bl.addAddress(entry, f === 6 ? 'ipv6' : 'ipv4');
+      } else {
+        const base = entry.slice(0, slash);
+        const bits = Number(entry.slice(slash + 1));
+        const f = isIP(base);
+        if (!f || !Number.isInteger(bits) || bits < 0 || bits > (f === 6 ? 128 : 32)) continue;
+        bl.addSubnet(base, bits, f === 6 ? 'ipv6' : 'ipv4');
+      }
+      if (bl.check(a, type)) return true;
+    } catch {
+      /* skip a malformed entry */
+    }
+  }
+  return false;
+}
+
 /**
- * The address to rate-limit a sign-in by. Behind a Cloudflare tunnel every request arrives from the connector and the real client
- * is in `cf-connecting-ip` — but anyone connecting DIRECTLY could forge that header to get a fresh counter on every try. So the
- * header is believed only when the TCP peer is a proxy we trust (loopback, the `cloudflared` container, or TRUSTED_PROXY);
- * otherwise the peer address itself is the key.
+ * The address to rate-limit a sign-in by. Behind Cloudflare the real client is in `cf-connecting-ip` — but anyone connecting
+ * DIRECTLY could forge that header to get a fresh counter on every try. So the header is believed only when the TCP peer is a proxy
+ * we trust: loopback, the `cloudflared` container, TRUSTED_PROXY (exact IPs or CIDRs), or - unless `trustCloudflare` is off - a
+ * Cloudflare edge address (orange cloud straight to the host: the peer is always a Cloudflare IP). Otherwise the peer address is the key.
  */
-export function clientAddress(cfConnectingIp: string | undefined, peer: string, trustedPeers: readonly string[]): string {
+export function clientAddress(cfConnectingIp: string | undefined, peer: string, trustedPeers: readonly string[], trustCloudflare = true): string {
   const p = normalizeIp(peer || 'unknown');
-  const trusted = isLoopback(p) || trustedPeers.some((t) => normalizeIp(t) === p);
+  const trusted = isLoopback(p) || ipMatches(p, trustedPeers) || (trustCloudflare && ipMatches(p, CLOUDFLARE_RANGES));
   const cf = (cfConnectingIp ?? '').trim();
-  return trusted && cf ? cf : p;
+  return trusted && cf && isIP(cf) ? cf : p;
+}
+
+/**
+ * "This request comes from the machine itself" for the machine-only routes (hook secret, per-run tokens): the socket must be local
+ * AND the request must not have been forwarded - with `cloudflared` on the same host every proxied request arrives from loopback,
+ * but it carries `cf-connecting-ip` / `x-forwarded-for`, which a local agent process never sets.
+ */
+export function isDirectLocalRequest(addr: string | undefined, own: readonly string[], headers: Record<string, string | string[] | undefined>): boolean {
+  if (!isThisMachine(addr, own)) return false;
+  return !headers['cf-connecting-ip'] && !headers['x-forwarded-for'] && !headers['cf-ray'];
 }
 
 /** Roles that may manage other people's passwords and settings. */

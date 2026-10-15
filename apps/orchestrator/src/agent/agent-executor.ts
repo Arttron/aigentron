@@ -12,6 +12,13 @@ export interface TaskRunContext {
   branch: string;
   /** Follow-up prompt that continues an existing agent session, if any. */
   followUpPrompt?: string;
+  /**
+   * Do not resume the session once more to force a report_task_status when the
+   * run ends without one (E-07): for a verify-fix or schedule-check run the
+   * caller decides the outcome itself (it re-verifies), so the extra full pass
+   * over the context would only cost tokens.
+   */
+  skipReportingResume?: boolean;
   /** Attachment filenames sent with this message (recorded on the prompt event). */
   attachments?: string[];
   /**
@@ -56,6 +63,13 @@ export interface AgentRunOutcome {
   /** The agent's last assistant message when it ended WITHOUT a report — the
    *  implicit question/handoff to escalate (parent lead or the user). */
   finalText?: string;
+  /**
+   * The provider's/runtime's own error when `errored` (one paragraph, ≤500
+   * chars; never set for a cancel/timeout) — what `task.error` should say
+   * instead of "run ended abnormally" when every provider failed (X-FO-6) or a
+   * follow-up's provider failed (X-FO-1).
+   */
+  errorText?: string;
 }
 
 export abstract class AgentExecutor {

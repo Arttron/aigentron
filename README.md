@@ -28,7 +28,7 @@ make up                # build + start the full stack
 
 Dashboard → http://localhost:3000 · Orchestrator API → http://localhost:3001
 
-**One command on the server:** `aigentron` opens the setup menu (providers, channels, agents, repository); `aigentron status | logs | restart | update | rollback | admin | reset-password | help` do the rest. The installer puts it on your PATH.
+**One command on the server:** `aigentron` opens the setup menu (providers, channels, agents, repository); `aigentron status | logs | restart | update | rollback | backup | restore | admin | reset-password | help` do the rest. The installer puts it on your PATH.
 
 **First-run setup:** once the stack is up, `pnpm setup` (or `node infra/setup-wizard.mjs`)
 runs a guided CLI wizard for providers, channels, agents, skills, and an optional project
@@ -186,6 +186,11 @@ Re-running the same command later checks the installed version (via `docker insp
 Docker mode, or the `/opt/aigentron/current` symlink in bare-metal mode) and upgrades in
 place (`FORCE=1` to reinstall the same version). Never pin production to `latest`/unset —
 that's an unpinned, unpredictable deploy.
+
+The installer verifies the release archive against its `SHA256SUMS`, generates random `LITELLM_MASTER_KEY` / `LDS_HOOK_SECRET` on a fresh install, and (fresh install only) sets a random
+operator password through the local API and prints it once (also `<data>/secrets/initial-password.txt`, 0600; `NO_INITIAL_PASSWORD=1` skips). A bare-metal update stops the service, snapshots the database, migrates, starts the new
+release and waits for `/api/health` - if it does not come up it rolls back by itself (release and database). `aigentron backup` / `aigentron restore` back up and restore everything (`docs/updates.md`). Behind Cloudflare on 80/443:
+open those ports only to Cloudflare's ranges and keep 3001 closed (`docs/remote-access.md`).
 
 **Option B — docker compose**, for building straight from a local checkout of this repo.
 Uses `.env.minimal`, **not** the root `.env` — the latter is the multi-service `full`

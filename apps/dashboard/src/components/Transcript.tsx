@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { TaskStatus } from '@lds/shared';
 import { isVideo } from '@/lib/capture';
 import { MediaViewer } from './MediaViewer';
@@ -62,6 +62,24 @@ function AmbientStrip({ running, activityAt, look }: { running: boolean; activit
     </div>
   );
 }
+
+/** The "no reply" notice owns the 5 s ticker, so the whole transcript does not re-render with it. */
+const SilenceNotice = memo(function SilenceNotice({ running, activityAt }: { running: boolean; activityAt?: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, [running]);
+  const silentSec = running && activityAt ? Math.floor((now - activityAt) / 1000) : 0;
+  if (!running || silentSec * 1000 < SILENCE_MS) return null;
+  return (
+    <div className={cn(styles.line, styles.working)}>
+      ⏳ No reply from the agent for {silentSec} s — it may still be thinking (the first reply of a slow or local model can take minutes). If this
+      keeps going, check the provider or stop the task.
+    </div>
+  );
+});
 
 const WORKING: Partial<Record<TaskStatus, string>> = {
   queued: 'queued — waiting for a free worker slot',
@@ -141,13 +159,6 @@ export function Transcript({
       .then((r) => setTranslated((m) => ({ ...m, [id]: r.ok && r.text ? r.text : `⚠ ${r.error ?? 'could not translate'}` })))
       .catch((e) => setTranslated((m) => ({ ...m, [id]: `⚠ ${(e as Error).message}` })));
   };
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (status !== 'running') return;
-    const t = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(t);
-  }, [status]);
-  const silentSec = status === 'running' && activityAt ? Math.floor((now - activityAt) / 1000) : 0;
   // Messages that arrive after the chat has been on screen for a moment rise out of the strip.
   const known = useRef<Set<string>>(new Set());
   const rising = useRef<Set<string>>(new Set());
@@ -174,7 +185,13 @@ export function Transcript({
   const [voiceOnly] = useVoiceOnly();
   const spoken = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    const last = [...lines].reverse().find((l) => l.kind === 'result');
+    let last: LogLine | undefined;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i]!.kind === 'result') {
+        last = lines[i];
+        break;
+      }
+    }
     if (spoken.current === undefined) {
       spoken.current = last?.id ?? null; // what was already there when the page opened is not "new"
       return;
@@ -205,6 +222,13 @@ export function Transcript({
     stick.current = true;
     setAway(false);
   };
+
+  const all = useMemo(() => buildItems(lines), [lines]);
+  // one read-aloud button only: on the latest answer
+  const lastFinalId = useMemo(() => {
+    for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.kind === 'result') return lines[i]!.id;
+    return undefined;
+  }, [lines]);
 
   if (lines.length === 0 && terminal) {
     return <Muted>No output.</Muted>;
@@ -264,9 +288,6 @@ export function Transcript({
   const ts = (l: LogLine) =>
     formatTs(l.ts) ? <span className={styles.ts}>{formatTs(l.ts)}</span> : null;
 
-  const all = buildItems(lines);
-  // one read-aloud button only: on the latest answer
-  const lastFinalId = [...lines].reverse().find((l) => l.kind === 'result')?.id;
   const items =
     show === 'messages'
       ? all.filter((it) => it.type !== 'tool' && !(it.type === 'note' && it.line.kind === 'system'))
@@ -310,7 +331,7 @@ export function Transcript({
         ref={ref}
         onScroll={onScroll}
         role="log"
-        aria-live="polite"
+        aria-relevant="additions"
         data-look={look}
       >
         {items.map((it, n) => {
@@ -397,12 +418,7 @@ export function Transcript({
             ✅ The agent has finished. Happy with the result? Write “done” (or press Mark as done) to close the task — or write what to change.
           </div>
         )}
-        {status === 'running' && silentSec * 1000 >= SILENCE_MS && (
-          <div className={cn(styles.line, styles.working)}>
-            ⏳ No reply from the agent for {silentSec} s — it may still be thinking (the first reply of a slow or local model can take minutes). If this
-            keeps going, check the provider or stop the task.
-          </div>
-        )}
+        <SilenceNotice running={status === 'running'} activityAt={activityAt} />
         {WORKING[status] && (
           <div className={cn(styles.line, styles.working)}>
             {WORKING[status]}

@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildRunnerScript, cleanVersion, compareVersions, parseRelease, parseVersion, resolveStaleStatus, shq } from './update-core';
 
@@ -30,6 +34,14 @@ describe('buildRunnerScript', () => {
     expect(s).toContain('INSTALL_MODE=bare');
     expect(s).toContain(`DATA_DIR='/opt/aigentron/da'\\''ta'`);
     expect(s).toContain('status.json');
+  });
+  it('verifies install.sh against SHA256SUMS and is valid sh', () => {
+    const s = buildRunnerScript(o);
+    expect(s).toContain('releases/download/v$VERSION/SHA256SUMS');
+    expect(s).toContain('&& verify_installer');
+    const dir = mkdtempSync(join(tmpdir(), 'runner-'));
+    writeFileSync(join(dir, 'r.sh'), s);
+    expect(() => execFileSync('sh', ['-n', join(dir, 'r.sh')])).not.toThrow();
   });
   it('refuses a bad version or repository (no shell injection through them)', () => {
     expect(() => buildRunnerScript({ ...o, version: '0.1.48; reboot' })).toThrow();

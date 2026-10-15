@@ -58,12 +58,18 @@
 #                              $INSTALL_DIR/data). Also skips the interactive prompt.
 #   MIN_FREE_DISK_MB=<n>       preflight disk-space floor per checked location, in MB (default 5120)
 #   AUTO_INSTALL_DEPS=0        don't auto-install missing prerequisites — just check and die (default: 1)
+#   REQUIRE_CHECKSUM=1         refuse to install when the release has no SHA256SUMS to verify the archive against
+#   ARCHIVE_SHA256=<hex>       expected SHA-256 of the archive (use with ARCHIVE_URL, which has no SHA256SUMS next to it)
+#   NO_INITIAL_PASSWORD=1      fresh install: do NOT set a random operator password (the dashboard then stays open until you set one)
+#   HEALTH_TIMEOUT=<s>         bare-metal: how long to wait for /api/health after the restart before rolling back (default 120)
 set -eu
 
 REPO="${REPO:-Arttron/aigentron}"
 S3_PREFIX="${S3_PREFIX:-}"
 FORCE="${FORCE:-0}"
 ARCHIVE_URL="${ARCHIVE_URL:-}"
+ARCHIVE_URL_WAS_SET="${ARCHIVE_URL:+1}"
+REQUIRE_CHECKSUM="${REQUIRE_CHECKSUM:-0}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 
 log() { printf '==> %s\n' "$1"; }
@@ -92,6 +98,98 @@ warn_if_deprecated() {  # $1=version
     dep=$(curl -fsSL "https://raw.githubusercontent.com/$REPO/main/DEPRECATED" 2>/dev/null | grep -x "$1:.*" || true)
   fi
   [ -z "$dep" ] || log "⚠ WARNING: $dep"
+}
+
+
+sha256_of() {  # $1=file -> hex digest
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 "$1" | sed 's/.*= *//'
+  else return 1; fi
+}
+
+# A random alphanumeric string (JSON/shell-safe) of $1 characters.
+rand_alnum() {
+  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"
+}
+
+# Verify the downloaded release archive against the release's SHA256SUMS (GitHub release asset / S3 object next to the archive).
+# No SHA256SUMS (older releases, a custom ARCHIVE_URL) = a warning, unless REQUIRE_CHECKSUM=1. A mismatch always stops the install -
+# before anything from the archive is extracted or run.
+verify_archive() {  # $1=archive file
+  expected="${ARCHIVE_SHA256:-}"
+  if [ -z "$expected" ] && [ -z "$ARCHIVE_URL_WAS_SET" ]; then
+    sums="$1.SHA256SUMS"
+    if [ -n "$S3_PREFIX" ]; then
+      sums_url="$S3_PREFIX/releases/$VERSION/SHA256SUMS"; names="archive.tar.gz aigentron-$VERSION.tar.gz"
+    else
+      sums_url="https://github.com/$REPO/releases/download/v$VERSION/SHA256SUMS"; names="v$VERSION.tar.gz aigentron-$VERSION.tar.gz"
+    fi
+    if fetch "$sums_url" "$sums" >/dev/null 2>&1; then
+      for n in $names; do
+        expected=$(awk -v f="$n" '{ name=$2; sub(/^\*/, "", name); if (name == f) print $1 }' "$sums" | head -1)
+        [ -n "$expected" ] && break
+      done
+      rm -f "$sums"
+      [ -n "$expected" ] || die "SHA256SUMS of this release has no entry for the archive ($names) - refusing to install an unverifiable archive"
+    fi
+    rm -f "$sums"
+  fi
+  if [ -z "$expected" ]; then
+    [ "$REQUIRE_CHECKSUM" != 1 ] || { rm -f "$1"; die "no SHA256SUMS for this release and REQUIRE_CHECKSUM=1"; }
+    log "WARNING: this release publishes no SHA256SUMS - the archive could not be verified"
+    return 0
+  fi
+  actual=$(sha256_of "$1") || die "no sha256sum/shasum/openssl on this system - cannot verify the archive"
+  expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
+  if [ "$actual" != "$expected" ]; then
+    rm -f "$1"
+    die "archive checksum MISMATCH (expected $expected, got $actual) - the download is corrupt or tampered with; nothing was installed"
+  fi
+  log "Archive checksum verified (sha256 $(printf '%s' "$actual" | cut -c1-12)...)"
+}
+
+# Wait for GET /api/health on this host. 0 = healthy; 0 + a warning = the server answers with a working database but a component
+# (LiteLLM) is still starting; 1 = nothing healthy within $1 seconds.
+wait_health() {  # $1=seconds
+  i=0; last=
+  while [ "$i" -lt "$1" ]; do
+    last=$(curl -fsS --max-time 3 "http://127.0.0.1:3001/api/health" 2>/dev/null || true)
+    case "$last" in *'"status":"ok"'*) return 0 ;; esac
+    sleep 2; i=$((i + 2))
+  done
+  case "$last" in *'"db":true'*) log "WARNING: the server answers but reports 'degraded' ($last) - check: aigentron doctor"; return 0 ;; esac
+  return 1
+}
+
+# Fresh installs only: a random operator password through POST /api/auth/setup on localhost, so the instance is never open
+# between the first start and the moment you open the dashboard. Printed once and kept (0600) in <secrets>/initial-password.txt.
+# $1 = "bare" or "docker".
+set_initial_password() {
+  [ "${NO_INITIAL_PASSWORD:-0}" != 1 ] || { log "NO_INITIAL_PASSWORD=1 - the dashboard stays open until you set a password (Settings -> Security)."; return 0; }
+  command -v curl >/dev/null 2>&1 || return 0
+  pw=$(rand_alnum 20)
+  [ "${#pw}" -ge 16 ] || { log "could not generate a password - set one in the dashboard (Settings -> Security)"; return 0; }
+  resp=$(curl -sS --max-time 20 -X POST -H 'content-type: application/json' -d "{\"password\":\"$pw\"}" "http://127.0.0.1:3001/api/auth/setup" 2>/dev/null || true)
+  case "$resp" in
+    *'"ok":true'*) ;;
+    *'already set'*) return 0 ;;
+    *) log "WARNING: could not set the initial password ($resp). The dashboard is OPEN - set a password now (Settings -> Security)."; return 0 ;;
+  esac
+  if [ "$1" = docker ]; then
+    printf '%s\n' "$pw" | docker exec -i "$CONTAINER_NAME" sh -c 'umask 077; mkdir -p /data/secrets; cat > /data/secrets/initial-password.txt' >/dev/null 2>&1 || true
+    pwfile="/data/secrets/initial-password.txt (inside the container volume)"
+  else
+    (umask 077; mkdir -p "$DATA_DIR/secrets"; printf '%s\n' "$pw" > "$DATA_DIR/secrets/initial-password.txt")
+    chmod 700 "$DATA_DIR/secrets" 2>/dev/null || true
+    pwfile="$DATA_DIR/secrets/initial-password.txt"
+  fi
+  log ""
+  log "================================================================"
+  log " Dashboard sign-in (operator) - shown ONCE:"
+  log "   password: $pw"
+  log " Also saved in $pwfile - change it in Settings -> Security."
+  log "================================================================"
 }
 
 # ---- install mode: docker vs bare-metal ----------------------------------
@@ -358,6 +456,12 @@ else
   [ -L "$CURRENT_LINK" ] && installed=$(basename "$(readlink "$CURRENT_LINK")")
 fi
 log "Currently installed: $installed"
+FRESH_INSTALL=0
+if [ "$installed" = none ]; then
+  FRESH_INSTALL=1
+  # a data dir that already holds a password (re-install after a deleted release link) is not fresh
+  [ "$INSTALL_MODE" = bare ] && [ -s "$DATA_DIR/secrets/auth.json" ] && FRESH_INSTALL=0
+fi
 if [ "$installed" = "$VERSION" ] && [ "$FORCE" != "1" ]; then
   log "Already on $VERSION — nothing to do (set FORCE=1 to reinstall anyway)."
   exit 0
@@ -443,6 +547,7 @@ fi
 mkdir -p "$RELEASE_DIR"
 log "Downloading $ARCHIVE_URL"
 fetch "$ARCHIVE_URL" "$ARCHIVE_PATH" || die "download failed — check REPO/S3_PREFIX/VERSION/ARCHIVE_URL"
+verify_archive "$ARCHIVE_PATH"
 tar -xzf "$ARCHIVE_PATH" -C "$RELEASE_DIR" --strip-components=1
 rm -f "$ARCHIVE_PATH"
 
@@ -465,7 +570,12 @@ if [ ! -f "$ENV_FILE" ]; then
     # bare-metal install, so Ollama (if you run one) is just on localhost.
     sed -i.bak 's#http://host.docker.internal:11434#http://localhost:11434#' "$ENV_FILE" && rm -f "$ENV_FILE.bak"
   fi
-  log "First install: wrote a starter .env to $ENV_FILE"
+  # S-08: no fixed, publicly known defaults for the two shared secrets of this install (existing installs keep their .env as it is).
+  sed -i.bak "s#^LITELLM_MASTER_KEY=.*#LITELLM_MASTER_KEY=sk-lds-$(rand_alnum 40)#" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  grep -q '^LITELLM_MASTER_KEY=' "$ENV_FILE" || printf 'LITELLM_MASTER_KEY=sk-lds-%s\n' "$(rand_alnum 40)" >> "$ENV_FILE"
+  grep -q '^LDS_HOOK_SECRET=' "$ENV_FILE" || printf 'LDS_HOOK_SECRET=%s\n' "$(rand_alnum 40)" >> "$ENV_FILE"
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
+  log "First install: wrote a starter .env to $ENV_FILE (random LITELLM_MASTER_KEY and LDS_HOOK_SECRET)"
   log "Fill in ANTHROPIC_API_KEY (and anything else you need) before relying on the cloud tier."
   if [ "$INSTALL_MODE" = bare ]; then
     log "Ollama is optional — leave OLLAMA_NATIVE_URL unreachable if you only use cloud Claude."
@@ -558,26 +668,30 @@ if [ "$INSTALL_MODE" = docker ]; then
 
   log "Aigentron $VERSION is running."
   log "Dashboard + API: http://localhost:3001"
+  if [ "$FRESH_INSTALL" = 1 ]; then
+    if wait_health "${HEALTH_TIMEOUT:-120}"; then set_initial_password docker
+    else log "WARNING: the server did not answer on :3001 in time - set the dashboard password yourself as soon as it is up (the instance is open until then). Logs: docker logs $CONTAINER_NAME"; fi
+  fi
   log ""
   log "Set up providers, channels, agents and a repo with the guided menu:"
   log "  $CLI_HINT"
 else
-  # Prune superseded release dirs BEFORE building this one: each holds a full
-  # monorepo checkout + its own node_modules/dist/.next build output (unlike
-  # Docker mode, where the equivalent build happens inside the image, not on
-  # host disk) — left behind indefinitely across upgrades otherwise, easily
-  # enough to exhaust disk on a small server after a few version bumps (found
-  # live: three superseded release dirs plus litellm[proxy]'s own sizeable
-  # pip deps were enough to hit "No space left on device"). The release that is running RIGHT NOW is kept (it is what `aigentron
-  # rollback` returns to, and what keeps the server alive if the build below fails); everything older goes.
+  # The release that is running RIGHT NOW is what `aigentron rollback` returns to, and what the automatic rollback below returns to
+  # when the new one does not become healthy - it is kept; everything older goes, but only AFTER the new release proved healthy
+  # (each dir is a full monorepo checkout + node_modules + build output). Only when the disk is already tight do the oldest go before the build.
   PREV_RELEASE="$(basename "$(readlink "$CURRENT_LINK" 2>/dev/null || true)")"
-  for d in "$INSTALL_DIR"/releases/*/; do
-    d="${d%/}"
-    [ "$(basename "$d")" = "$VERSION" ] && continue
-    [ -n "$PREV_RELEASE" ] && [ "$(basename "$d")" = "$PREV_RELEASE" ] && continue
-    log "Removing superseded release dir $d"
-    rm -rf "$d"
-  done
+  prune_releases() {
+    for d in "$INSTALL_DIR"/releases/*/; do
+      d="${d%/}"
+      [ -d "$d" ] || continue
+      [ "$(basename "$d")" = "$VERSION" ] && continue
+      [ -n "$PREV_RELEASE" ] && [ "$(basename "$d")" = "$PREV_RELEASE" ] && continue
+      log "Removing superseded release dir $d"
+      rm -rf "$d"
+    done
+  }
+  tight=$(free_mb "$INSTALL_DIR")
+  if [ -n "$tight" ] && [ "$tight" -lt 3072 ]; then log "Only ${tight}MB free - removing old releases before the build"; prune_releases; fi
 
   cd "$RELEASE_DIR"
   log "Installing dependencies + building from source (this can take a few minutes)"
@@ -596,39 +710,10 @@ else
   fi
 
   mkdir -p "$DATA_DIR"
-  # Snapshot the live database first (VACUUM INTO backups/pre-<version>.db, last 3 kept): Prisma does not run a SQLite migration
-  # in a transaction, so a failed one can leave the db half-migrated and block both the new and the old version.
-  # shellcheck disable=SC1091
-  . "$RELEASE_DIR/infra/db-snapshot.sh"
-  DB_FILE="$DATA_DIR/orchestrator.db"
-  DB_SNAPSHOT=
-  if [ -s "$DB_FILE" ]; then
-    log "Snapshotting the database → $DATA_DIR/backups/pre-$VERSION.db"
-    snapshot_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION" "$RELEASE_DIR/apps/orchestrator" </dev/null \
-      || die "could not snapshot the database before migrating — nothing was changed (the running version stays in place). Check free disk space / that $DB_FILE is readable."
-    DB_SNAPSHOT=1
-  fi
-  log "Applying database migrations (sqlite)…"
-  if ! (cd "$RELEASE_DIR/apps/orchestrator" && \
-    DATABASE_URL="file:$DB_FILE" \
-    node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts) </dev/null; then
-    if [ -n "$DB_SNAPSHOT" ]; then
-      log "Migration FAILED — restoring the database from the snapshot"
-      systemctl stop aigentron >/dev/null 2>&1 || true
-      if restore_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION"; then
-        systemctl start aigentron >/dev/null 2>&1 || true
-        die "database migration to $VERSION failed; the database was restored from $DATA_DIR/backups/pre-$VERSION.db and the previous release stays in place. Nothing is lost — see the error above."
-      fi
-      die "database migration to $VERSION failed AND restoring the snapshot failed — restore it by hand: cp $DATA_DIR/backups/pre-$VERSION.db $DB_FILE (rm -f $DB_FILE-wal $DB_FILE-shm first)"
-    fi
-    die "database migration to $VERSION failed (no snapshot: there was no database yet); the previous release stays in place."
-  fi
-
-  ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
-
   SERVICE_FILE=/etc/systemd/system/aigentron.service
-  log "Writing $SERVICE_FILE"
-  cat > "$SERVICE_FILE" <<EOF
+  # The unit for release $1 (also used to point the unit back at the previous release on a rollback).
+  write_unit() {
+    cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Aigentron (minimal profile)
 After=network-online.target
@@ -646,10 +731,11 @@ Environment=WORKSPACE_REPO_PATH=$DATA_DIR/repo
 Environment=WORKTREES_ROOT=$DATA_DIR/worktrees
 Environment=ATTACHMENTS_DIR=$DATA_DIR/agent/attachments
 Environment=WORKSPACE_SHARED=true
-Environment=APP_VERSION=$VERSION
+Environment=APP_VERSION=$1
 Environment=ORCHESTRATOR_PORT=3001
 Environment=LITELLM_MANAGED=1
 Environment=LITELLM_MANAGED_COMMAND=$LITELLM_VENV/bin/litellm
+Environment=LITELLM_MANAGED_CONFIG_PATH=$DATA_DIR/litellm-config.generated.yaml
 Environment=LITELLM_BASE_URL=http://127.0.0.1:4000
 Environment=DASHBOARD_BASE_URL=http://localhost:3001
 ExecStart=$CURRENT_LINK/infra/minimal-entrypoint.sh
@@ -659,8 +745,44 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+  }
 
-  log "Enabling + (re)starting the aigentron service"
+  # Order: stop the old server -> snapshot the (now quiet) database -> migrate -> switch the release -> start -> wait for /api/health.
+  # The old process never serves requests on a half-migrated schema, and the snapshot is taken with nothing writing.
+  # shellcheck disable=SC1091
+  . "$RELEASE_DIR/infra/db-snapshot.sh"
+  DB_FILE="$DATA_DIR/orchestrator.db"
+  DB_SNAPSHOT=
+  log "Stopping the running service (running agents get a graceful stop)"
+  systemctl stop aigentron >/dev/null 2>&1 || true
+  if [ -s "$DB_FILE" ]; then
+    log "Snapshotting the database → $DATA_DIR/backups/pre-$VERSION.db"
+    if ! snapshot_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION" "$RELEASE_DIR/apps/orchestrator" </dev/null; then
+      systemctl start aigentron >/dev/null 2>&1 || true
+      die "could not snapshot the database before migrating — nothing was changed (the running version stays in place). Check free disk space / that $DB_FILE is readable."
+    fi
+    DB_SNAPSHOT=1
+  fi
+  log "Applying database migrations (sqlite)…"
+  if ! (cd "$RELEASE_DIR/apps/orchestrator" && \
+    DATABASE_URL="file:$DB_FILE" \
+    node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts) </dev/null; then
+    if [ -n "$DB_SNAPSHOT" ]; then
+      log "Migration FAILED — restoring the database from the snapshot"
+      if restore_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION"; then
+        systemctl start aigentron >/dev/null 2>&1 || true
+        die "database migration to $VERSION failed; the database was restored from $DATA_DIR/backups/pre-$VERSION.db and the previous release stays in place. Nothing is lost — see the error above."
+      fi
+      die "database migration to $VERSION failed AND restoring the snapshot failed — restore it by hand: cp $DATA_DIR/backups/pre-$VERSION.db $DB_FILE (rm -f $DB_FILE-wal $DB_FILE-shm first)"
+    fi
+    systemctl start aigentron >/dev/null 2>&1 || true
+    die "database migration to $VERSION failed (no snapshot: there was no database yet); the previous release stays in place."
+  fi
+
+  ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
+  log "Writing $SERVICE_FILE"
+  write_unit "$VERSION"
+
   # Console access to the admin agent from any shell on this server. Points at the `current` symlink, so updates apply.
   install_cli bare
   cat > /usr/local/bin/aigentron-admin <<SHIM
@@ -669,12 +791,31 @@ exec node "$CURRENT_LINK/infra/admin-cli.mjs" "\$@"
 SHIM
   chmod +x /usr/local/bin/aigentron-admin
 
+  log "Enabling + starting the aigentron service"
   systemctl daemon-reload
   systemctl enable aigentron
-  # `enable --now` is a no-op start on an already-active unit — on an upgrade
-  # (symlink + unit file just changed) that would silently leave the OLD
-  # process running old code. `restart` always applies the new state.
   systemctl restart aigentron
+
+  log "Waiting for the new version to answer on /api/health (up to ${HEALTH_TIMEOUT:-120}s)…"
+  if ! wait_health "${HEALTH_TIMEOUT:-120}"; then
+    log "The new release did NOT become healthy — rolling back."
+    systemctl stop aigentron >/dev/null 2>&1 || true
+    if [ -n "$DB_SNAPSHOT" ]; then
+      if restore_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION"; then log "Database restored from the pre-update snapshot."
+      else log "WARNING: could not restore the database snapshot $DATA_DIR/backups/pre-$VERSION.db - restore it by hand."; fi
+    fi
+    if [ -n "$PREV_RELEASE" ] && [ "$PREV_RELEASE" != "$VERSION" ] && [ -d "$INSTALL_DIR/releases/$PREV_RELEASE" ]; then
+      ln -sfn "$INSTALL_DIR/releases/$PREV_RELEASE" "$CURRENT_LINK"
+      write_unit "$PREV_RELEASE"
+      systemctl daemon-reload
+      systemctl start aigentron >/dev/null 2>&1 || true
+      if wait_health 60; then die "release $VERSION did not start (see: journalctl -u aigentron -n 80); rolled back to $PREV_RELEASE and its database snapshot - the server is running the old version."; fi
+      die "release $VERSION did not start and the rollback to $PREV_RELEASE did not come up either - see: journalctl -u aigentron -n 80"
+    fi
+    die "release $VERSION did not start and there is no previous release to return to - see: journalctl -u aigentron -n 80"
+  fi
+
+  prune_releases
 
   log "Aigentron $VERSION is running."
   log "Dashboard + API: http://localhost:3001"
@@ -682,6 +823,7 @@ SHIM
   log ""
   log "Set up providers, channels, agents and a repo with the guided menu:"
   log "  aigentron"
-  log "Other commands: aigentron status | logs | restart | update | admin | help"
+  log "Other commands: aigentron status | logs | restart | update | backup | admin | help"
   log "Or chat with the admin assistant: aigentron-admin"
+  if [ "$FRESH_INSTALL" = 1 ]; then set_initial_password bare; fi
 fi

@@ -29,9 +29,11 @@ export class MediaService {
   ) {}
 
   /** A path an agent gave us, checked: it must really be inside this task's attachments, the resource library or its worktree. */
-  async safePath(path: string, worktree?: string | string[]): Promise<string> {
+  async safePath(path: string, worktree?: string | string[], taskId?: string): Promise<string> {
     const extra = Array.isArray(worktree) ? worktree : worktree ? [worktree] : [];
-    const roots = [this.config.attachmentsDir, join(this.config.agentDir, 'resources'), this.config.workspaceDir, ...extra].filter(Boolean);
+    // With a task id only THAT task's attachments are readable (not other tasks' files); without one (the HTTP endpoints) the whole folder, as before.
+    if (taskId !== undefined && !/^[\w-]+$/.test(taskId)) throw new Error('That path is not available.');
+    const roots = [taskId !== undefined ? join(this.config.attachmentsDir, taskId) : this.config.attachmentsDir, join(this.config.agentDir, 'resources'), this.config.workspaceDir, ...extra].filter(Boolean);
     if (!path.startsWith('/') || !insideRoot(path, roots)) throw new Error('That path is not available: give the full path of a photo or video from the task\'s attachments, the resource library, or the workspace.');
     const real = await realpath(path).catch(() => '');
     const realRoots = await Promise.all(roots.map((r) => realpath(r).catch(() => r)));
@@ -40,14 +42,14 @@ export class MediaService {
     return real;
   }
 
-  async videoDigest(path: string, worktree?: string | string[], plan?: Parameters<typeof cleanPlan>[0]): Promise<string> {
-    const file = await this.safePath(path, worktree);
+  async videoDigest(path: string, worktree?: string | string[], plan?: Parameters<typeof cleanPlan>[0], taskId?: string): Promise<string> {
+    const file = await this.safePath(path, worktree, taskId);
     if (!isVideoName(file)) throw new Error('video_digest is for video files (mp4, mov, webm …).');
     return (await this.video.digest(file, cleanPlan(plan))).text;
   }
 
-  async lookAt(path: string, question: string, worktree?: string | string[], plan?: Parameters<typeof cleanPlan>[0], own?: { provider: string; model: string }): Promise<string> {
-    const file = await this.safePath(path, worktree);
+  async lookAt(path: string, question: string, worktree?: string | string[], plan?: Parameters<typeof cleanPlan>[0], own?: { provider: string; model: string }, taskId?: string): Promise<string> {
+    const file = await this.safePath(path, worktree, taskId);
     const images: LookImage[] = [];
     let intro = '';
     if (isVideoName(file)) {

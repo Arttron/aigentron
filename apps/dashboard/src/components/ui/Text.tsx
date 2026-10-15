@@ -9,5 +9,5 @@ export function Muted({ className, ...rest }: HTMLAttributes<HTMLSpanElement>) {
 
 /** Inline error text. */
 export function ErrorText({ className, ...rest }: HTMLAttributes<HTMLSpanElement>) {
-  return <span data-ui="text" className={cn(styles.error, className)} {...rest} />;
+  return <span data-ui="text" role="alert" className={cn(styles.error, className)} {...rest} />;
 }

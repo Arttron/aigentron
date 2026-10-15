@@ -1,14 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   SERVER_EVENT,
-  CLIENT_EVENT,
   isTerminalStatus,
-  type AgentLogEvent,
   type TaskStatus,
 } from '@lds/shared';
 import { api, type TaskDetail } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
 import { useIsPhone } from '@/lib/use-media';
 import { Tabs } from '@/components/ui/Tabs';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -32,20 +31,18 @@ import {
 } from '@/components/ui';
 import styles from './TaskDetailPage.module.css';
 
-/** Stable de-dup key — the same line can arrive via fetch and over the socket. */
-const lineKey = (sessionId: string, seq: number) => `${sessionId}:${seq}`;
-
 /** Keyed by the route id: parent → subtask navigation remounts the page, so no state (lines, form draft, staged files) leaks between tasks. */
 export function TaskDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   return <TaskDetailView key={id} id={id} />;
 }
 
+const toLogLine = (e: StreamEntry): LogLine => e;
+
 function TaskDetailView({ id }: { id: string }) {
   const navigate = useNavigate();
 
   const [task, setTask] = useState<TaskDetail | null>(null);
-  const [lines, setLines] = useState<LogLine[]>([]);
   const [discussing, setDiscussing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -54,9 +51,6 @@ function TaskDetailView({ id }: { id: string }) {
   // Bumped whenever a log line carries new attachments, so the gallery reloads
   // mid-run (agents share screenshots while the status stays 'running').
   const [assetTick, setAssetTick] = useState(0);
-  const seen = useRef<Set<string>>(new Set());
-  // Last time anything arrived from the agent (any event), for the "no reply" notice.
-  const [activityAt, setActivityAt] = useState(() => Date.now());
   // Does the agent's provider run through the LiteLLM gateway with a local model (Ollama)?
   const [localModel, setLocalModel] = useState(false);
   // Current task mirror, for WS handlers to read without a stale closure.
@@ -84,12 +78,14 @@ function TaskDetailView({ id }: { id: string }) {
       .catch((e) => setError((e as Error).message));
   }, [id]);
 
-  const addLine = useCallback((key: string, line: LogLine) => {
-    setActivityAt(Date.now());
-    if (seen.current.has(key)) return;
-    seen.current.add(key);
-    setLines((prev) => [...prev, line]);
-  }, []);
+  // History + live lines (merged by key, refetched after a reconnect).
+  const { items: lines, activityAt } = useTaskStream<LogLine>(id, toLogLine, {
+    // A tool shared an image (screenshot, etc.) → refresh the gallery live.
+    onLive: (e) => {
+      if (e.attachments?.length) setAssetTick((n) => n + 1);
+    },
+    onReconnect: refreshTask,
+  });
 
   useEffect(() => {
     taskRef.current = task;
@@ -111,42 +107,8 @@ function TaskDetailView({ id }: { id: string }) {
         setSubdir(cfg.workspaceSubdir ?? '');
       })
       .catch(() => undefined);
-    api
-      .transcript(id)
-      .then((events) => {
-        if (!active) return;
-        seen.current = new Set();
-        const initial: LogLine[] = [];
-        for (const e of events) {
-          const key = lineKey(e.agentSessionId, e.seq);
-          if (seen.current.has(key)) continue;
-          seen.current.add(key);
-          initial.push({
-            id: key,
-            kind: e.kind,
-            text: e.text,
-            attachments: e.attachments,
-            speaker: e.speaker ?? undefined,
-            ts: e.createdAt,
-          });
-        }
-        setLines(initial);
-      })
-      .catch(() => undefined);
-
     const socket = getSocket();
-    const subscribe = () => socket.emit(CLIENT_EVENT.subscribeTask, id);
-    subscribe();
-    // Re-join the per-task room after a reconnect, or live logs go silent.
-    socket.on('connect', subscribe);
 
-    const onLog = (e: AgentLogEvent) => {
-      if (e.taskId !== id) return;
-      const key = lineKey(e.agentSessionId, e.seq);
-      addLine(key, { id: key, kind: e.kind, text: e.text, attachments: e.attachments, speaker: e.speaker, ts: e.ts });
-      // A tool shared an image (screenshot, etc.) → refresh the gallery live.
-      if (e.attachments?.length) setAssetTick((n) => n + 1);
-    };
     const onStatus = (e: { taskId: string; status: TaskStatus }) => {
       if (e.taskId === id) {
         setTask((prev) => (prev ? { ...prev, status: e.status } : prev));
@@ -177,21 +139,17 @@ function TaskDetailView({ id }: { id: string }) {
     };
     const onApproval = () => refreshTask();
 
-    socket.on(SERVER_EVENT.agentLog, onLog);
     socket.on(SERVER_EVENT.taskStatus, onStatus);
     socket.on(SERVER_EVENT.approvalCreated, onApproval);
     socket.on(SERVER_EVENT.approvalResolved, onApproval);
 
     return () => {
       active = false;
-      socket.emit(CLIENT_EVENT.unsubscribeTask, id);
-      socket.off('connect', subscribe);
-      socket.off(SERVER_EVENT.agentLog, onLog);
       socket.off(SERVER_EVENT.taskStatus, onStatus);
       socket.off(SERVER_EVENT.approvalCreated, onApproval);
       socket.off(SERVER_EVENT.approvalResolved, onApproval);
     };
-  }, [id, refreshTask, addLine]);
+  }, [id, refreshTask]);
 
   const cancel = async () => {
     setBusy(true);
@@ -238,23 +196,28 @@ function TaskDetailView({ id }: { id: string }) {
   const [tab, setTab] = useState<'chat' | 'files' | 'tasks'>('chat');
   const relatedCount = (task?.subtasks?.length ?? 0) + (task?.linksOut?.length ?? 0);
   // The agent's latest final answer (read aloud in voice-only mode; a new id = a new answer).
-  const lastReply = (() => {
-    const l = [...lines].reverse().find((x) => x.kind === 'result' && x.text.trim());
-    return l ? { id: l.id, text: l.text } : null;
-  })();
+  const lastReply = useMemo(() => {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const l = lines[i]!;
+      if (l.kind === 'result' && l.text.trim()) return { id: l.id, text: l.text };
+    }
+    return null;
+  }, [lines]);
   const pendingApprovals = task?.approvals.filter((a) => a.status === 'pending') ?? [];
   const terminal = task ? isTerminalStatus(task.status) : false;
   // Hide verbose intermediate 'assistant' lines unless debug mode is on
   // (the final answer is already shown once as 'result').
-  let visibleLines = debug ? lines : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
-  // Until the run emits the opening `prompt` event, seed the request from the
-  // task so the conversation always shows what was asked.
-  if (task && !visibleLines.some((l) => l.kind === 'prompt')) {
-    visibleLines = [
-      { id: 'seed-prompt', kind: 'prompt', text: task.prompt, ts: task.createdAt },
-      ...visibleLines,
-    ];
-  }
+  const promptText = task?.prompt;
+  const promptTs = task?.createdAt;
+  const visibleLines = useMemo(() => {
+    const vis = debug ? lines : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
+    // Until the run emits the opening `prompt` event, seed the request from the
+    // task so the conversation always shows what was asked.
+    if (promptText !== undefined && !vis.some((l) => l.kind === 'prompt')) {
+      return [{ id: 'seed-prompt', kind: 'prompt', text: promptText, ts: promptTs }, ...vis];
+    }
+    return vis;
+  }, [lines, debug, promptText, promptTs]);
 
   // Phone: an app-like shell. Header + tabs on top, the conversation fills what is left, the message box is pinned to the bottom.
   useEffect(() => {

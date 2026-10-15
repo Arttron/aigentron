@@ -33,14 +33,18 @@ export function parseBudgetLimit(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** A human-readable reason the run must not start, or null. Limits of 0 are disabled. */
+/**
+ * A human-readable reason the run must not start, or null. Limits of 0 are
+ * disabled. `used` counts every billed token — input, output and cache
+ * (X-COST-4); `day` is the current calendar day (server time).
+ */
 export function budgetExceeded(used: { task: number; day: number }, limits: BudgetLimits): string | null {
   const fmt = (n: number) => n.toLocaleString('en-US');
   if (limits.perTask > 0 && used.task >= limits.perTask) {
-    return `Token budget for this task is used up (${fmt(used.task)} of ${fmt(limits.perTask)} tokens, BUDGET_TOKENS_PER_TASK). Raise the limit or continue in a new task.`;
+    return `Token budget for this task is used up (${fmt(used.task)} of ${fmt(limits.perTask)} tokens incl. cache, BUDGET_TOKENS_PER_TASK). Raise the limit or continue in a new task.`;
   }
   if (limits.perDay > 0 && used.day >= limits.perDay) {
-    return `Daily token budget is used up (${fmt(used.day)} of ${fmt(limits.perDay)} tokens in the last 24 hours, BUDGET_TOKENS_PER_DAY). Runs resume as older usage ages out, or raise the limit.`;
+    return `Daily token budget is used up (${fmt(used.day)} of ${fmt(limits.perDay)} tokens incl. cache today, BUDGET_TOKENS_PER_DAY). Runs resume tomorrow, or raise the limit.`;
   }
   return null;
 }

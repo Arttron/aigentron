@@ -114,6 +114,20 @@ this on while *you* are connected through a public name without a valid token. I
 sign-in still applies on top. The **Test** button (and the terminal) show whether the keys can be fetched and — when opened on your public address — who Access says you are.
 The setting is stored in `secrets/cloudflare-access.json`.
 
+## Orange cloud straight to the server on ports 80/443 (AWS / VPS, no tunnel)
+
+The recommended hardening when the DNS record is proxied by Cloudflare (orange cloud) and the server itself serves 80/443:
+
+- **Security group / firewall:** allow inbound **80 (and 443 if you terminate TLS on the server) only from Cloudflare's published ranges**
+  (https://www.cloudflare.com/ips/ - IPv4 and IPv6; refresh them now and then). Allow SSH only from your own address.
+- **Nothing else must be reachable.** In particular `http://<server-IP>:3001` (the orchestrator's own port) must NOT be open to the internet: it would bypass
+  Cloudflare Access completely. Do not add a rule for 3001, 3000, 4000, 5432, 6379.
+- The built-in sign-in rate limit then sees the real visitor: the server believes `cf-connecting-ip` only from a Cloudflare edge address (ranges are built in; `TRUST_CLOUDFLARE=0`
+  turns that off) or from `TRUSTED_PROXY` (comma list of IPs **or CIDRs**, e.g. `10.0.0.0/8` for a load balancer). Failed sign-ins are also counted per account.
+- A fresh `install.sh` sets a random operator password and prints it once (`<data>/secrets/initial-password.txt`, 0600), so the instance is never open
+  between the first start and your first visit. Port binding is unchanged.
+- With `cloudflared` on the same host every proxied request reaches the app from loopback; requests carrying `cf-connecting-ip` / `x-forwarded-for` are not treated as "from this machine".
+
 ## Address settings in `.env`
 
 `aigentron access` also shows the two address settings that live in the server's `.env` and need a restart: `PUBLIC_URL` (your public address) and

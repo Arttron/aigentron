@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { isTerminalStatus, type PendingFollowUp, type Task, type TaskStatus } from '@lds/shared';
+import { TERMINAL_TASK_STATUSES, isTerminalStatus, type PendingFollowUp, type Task, type TaskStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { decodeAttachments } from '../prisma/agent-event-attachments';
@@ -54,6 +54,14 @@ export interface SubtaskInput {
  *  limit (FollowUpForm.tsx), now enforced server-side since any client can add. */
 export const MAX_PENDING_FOLLOWUPS = 3;
 
+/** How long delete() waits for a live run to leave the worktree after aborting it. */
+const DELETE_SETTLE_WAIT_MS = 15_000;
+/** How long the next job of a task waits for the previous run's tail (push / PR) to finish. */
+const START_SETTLE_WAIT_MS = 60_000;
+
+/** What the worker's guarded `→ running` transition found. */
+export type RunEntry = 'started' | 'busy' | 'gone';
+
 /** Prisma row shape for a pending follow-up. */
 type PendingFollowUpRow = Awaited<ReturnType<PrismaService['pendingFollowUp']['create']>>;
 
@@ -88,6 +96,14 @@ export class TasksService {
 
   /** Statuses a person may accept as finished: the agent's result is waiting, or the run ended without one and the person is content anyway. */
   private static readonly ACCEPTABLE: readonly TaskStatus[] = ['review', 'blocked', 'stalled', 'failed'];
+
+  /**
+   * Runs the worker of THIS process has in flight (startRunning → runSettled). While a task is here, a
+   * terminal status written by the worker does not drain its pending follow-ups — the next run would
+   * start in the same worktree while this one still pushes / opens the PR, and the old `finally` would
+   * then stop the new run's preview (X-Q-3). The drain happens in runSettled, once the worker is out.
+   */
+  private readonly runs = new Map<string, { settled: Promise<void>; resolve: () => void }>();
 
   /**
    * The person says the task is finished (button, `/done`, or "done" in a message): `done`. Only a person does this for a top-level task —
@@ -449,14 +465,38 @@ export class TasksService {
     return this.runFollowUpNow(id, prompt, attachments, references);
   }
 
-  /** Actually dispatch a follow-up now — caller has already confirmed the task is terminal. */
+  /**
+   * Dispatch a follow-up now. The task is claimed ATOMICALLY (terminal → queued): of two follow-ups that
+   * arrive at once only one gets a job, the other is held in the pending queue and runs after it (X-Q-1).
+   * The caller has seen the task terminal, but that read is not a lock.
+   */
   private async runFollowUpNow(id: string, prompt: string, attachments?: string[], references?: string[]) {
     // References added in a message accumulate on the task and fold into context.
     if (references?.length) await this.linkReferences(id, references);
-    await this.setStatus(id, 'queued');
+    const claimed = await this.prisma.task.updateMany({
+      where: { id, status: { in: [...TERMINAL_TASK_STATUSES] } },
+      data: { status: 'queued' },
+    });
+    if (claimed.count === 0) {
+      // Someone else just restarted it (or it is gone): hold the message for the next settle instead of a second run.
+      this.logger.log(`Task ${id}: a run was just queued by another follow-up — holding this one`);
+      return this.enqueueFollowUp(id, prompt, attachments);
+    }
+    this.publishStatus(id, 'queued');
     await this.queue.enqueue({ taskId: id, followUpPrompt: prompt, attachments });
     const queueLength = await this.prisma.pendingFollowUp.count({ where: { taskId: id } });
     return { ...(await this.get(id)), queued: false as const, queueLength };
+  }
+
+  /**
+   * Hold a follow-up for the next settle (the worker uses this for a job — a scheduled re-check, a late
+   * continuation — that found another run of the task live). A full queue drops it with a warning rather
+   * than failing the job: the running agent will settle and the person can resend.
+   */
+  async holdFollowUp(id: string, prompt: string, attachments?: string[]): Promise<void> {
+    await this.enqueueFollowUp(id, prompt, attachments).catch((err) => {
+      this.logger.warn(`Task ${id}: could not hold a follow-up for after the current run: ${(err as Error).message}`);
+    });
   }
 
   private async enqueueFollowUp(id: string, prompt: string, attachments?: string[], references?: string[]) {
@@ -478,8 +518,8 @@ export class TasksService {
     return { ...(await this.get(id)), queued: true as const, queueLength: count + 1 };
   }
 
-  /** Pop the oldest pending follow-up (if any) and run it now — called from
-   *  setStatus() whenever a task settles into a terminal status. */
+  /** Pop the oldest pending follow-up (if any) and run it now — called whenever a task settles into a
+   *  terminal status (setStatus outside a run; runSettled for the worker's own runs). */
   private async drainPendingFollowUp(id: string): Promise<void> {
     const next = await this.prisma.pendingFollowUp.findFirst({
       where: { taskId: id },
@@ -541,7 +581,17 @@ export class TasksService {
    * task is in `needs_approval` when the continuation is approved.
    */
   async continueRun(id: string, prompt: string) {
-    await this.setStatus(id, 'queued');
+    // Guarded: only a task waiting for that approval (or the worker's own hand-back of a still-running one)
+    // is re-queued. A continuation approved after the task was cancelled or finished must not revive it (X-Q-5).
+    const claimed = await this.prisma.task.updateMany({
+      where: { id, status: { in: ['needs_approval', 'running'] } },
+      data: { status: 'queued' },
+    });
+    if (claimed.count === 0) {
+      this.logger.warn(`Task ${id}: continuation ignored — the task is no longer waiting for it`);
+      return this.get(id);
+    }
+    this.publishStatus(id, 'queued');
     await this.queue.enqueue({ taskId: id, followUpPrompt: prompt });
     return this.get(id);
   }
@@ -704,14 +754,20 @@ export class TasksService {
     return events.map((e) => ({ ...e, attachments: decodeAttachments(this.config, e.attachments) }));
   }
 
-  /** Delete a task (cascades to sessions/events/approvals) and clean up its git artifacts. */
+  /** Delete a task (cascades to sessions/events/approvals/questions/jobs) and clean up its git artifacts. */
   async delete(id: string) {
     const task = await this.get(id); // 404 if missing
     // Stop any in-flight/queued work first so we don't tear the worktree out
     // from under a running agent. Always — a finished task may still own a
     // delayed job (schedule_check), which would otherwise run on a deleted row.
     await this.queue.removeForTask(id).catch((err) => this.logger.warn(`could not drop queued jobs of ${id}: ${(err as Error).message}`));
+    // A live task is cancelled first (its pending follow-ups go with it), so the worker sees `cancelled`
+    // and writes nothing more; then wait for the run to actually leave the worktree before removing it (E-23).
+    if (!isTerminalStatus(task.status)) await this.cancel(id);
     this.executor.cancel(id);
+    if (!(await this.awaitRunEnd(id, DELETE_SETTLE_WAIT_MS))) {
+      this.logger.warn(`Task ${id}: its run did not end within ${DELETE_SETTLE_WAIT_MS / 1000}s — deleting anyway`);
+    }
     await this.worktrees.cleanup(task.branch, task.worktreePath).catch(() => undefined);
     await this.attachments.remove(id).catch(() => undefined);
     await this.prisma.task.delete({ where: { id } });
@@ -744,28 +800,82 @@ export class TasksService {
     await this.queue.removeForTask(id);
     const cancelled = await this.setStatus(id, 'cancelled');
     this.executor.cancel(id);
-    return cancelled;
+    return cancelled ?? (await this.get(id));
   }
 
   /**
    * The worker's entry transition: `→ running`, but only for a task that is not
    * already finished by a person (`done`) or cancelled — a job that outlived its
    * task (a delayed re-check, a job claimed in the cancel window) must not
-   * resurrect it. Returns false (and changes nothing) when the task is in one of
-   * those states or no longer exists; the worker then drops the job.
+   * resurrect it (`gone`) — and not for one whose run is live or paused on an
+   * approval: two runs of one task would share a worktree and abort each other
+   * (`busy`, X-Q-1; the worker holds a follow-up for later). Only `started`
+   * changes anything; the run is then tracked until runSettled().
    */
-  async startRunning(id: string): Promise<boolean> {
+  async startRunning(id: string): Promise<RunEntry> {
+    // The previous run of this task may still be in its tail (status written, PR being opened) when its
+    // next job arrives — a hand-back or a follow-up sent the moment it settled. Let it leave the worktree first.
+    if (!(await this.awaitRunEnd(id, START_SETTLE_WAIT_MS))) {
+      this.logger.warn(`Task ${id}: the previous run is still finishing after ${START_SETTLE_WAIT_MS / 1000}s — starting the next one anyway`);
+    }
     const r = await this.prisma.task.updateMany({
-      where: { id, status: { notIn: ['cancelled', 'done'] } },
+      where: { id, status: { notIn: ['cancelled', 'done', 'running', 'needs_approval'] } },
       data: { status: 'running' },
     });
-    if (r.count === 0) return false;
-    const task = await this.prisma.task.findUnique({ where: { id } });
-    if (task) {
-      this.bus.publish({ type: 'task-status', payload: { taskId: id, status: 'running', ts: new Date().toISOString() } });
-      this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(task) } });
+    if (r.count === 0) {
+      const row = await this.prisma.task.findUnique({ where: { id }, select: { status: true } });
+      return row && (row.status === 'running' || row.status === 'needs_approval') ? 'busy' : 'gone';
     }
-    return true;
+    let resolve!: () => void;
+    const settled = new Promise<void>((res) => (resolve = res));
+    this.runs.get(id)?.resolve();
+    this.runs.set(id, { settled, resolve });
+    this.publishStatus(id, 'running');
+    return 'started';
+  }
+
+  /** Whether this process's worker has a run of the task in flight. */
+  isRunning(id: string): boolean {
+    return this.runs.has(id);
+  }
+
+  /**
+   * The worker is fully out of the task (status written, preview stopped, PR opened): untrack the run
+   * and, if the task settled, start the next held follow-up — the drain deferred by setStatus (X-Q-3).
+   */
+  async runSettled(id: string): Promise<void> {
+    const run = this.runs.get(id);
+    this.runs.delete(id);
+    run?.resolve();
+    const row = await this.prisma.task.findUnique({ where: { id }, select: { status: true } });
+    if (row && isTerminalStatus(row.status as TaskStatus)) {
+      await this.drainPendingFollowUp(id).catch((err) =>
+        this.logger.warn(`drain pending follow-up failed for ${id}: ${(err as Error).message}`),
+      );
+    }
+  }
+
+  /** Wait (bounded) for a live run of the task in this process to end; false when it is still going. */
+  private async awaitRunEnd(id: string, timeoutMs: number): Promise<boolean> {
+    const run = this.runs.get(id);
+    if (!run) return true;
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([run.settled, new Promise<void>((res) => (timer = setTimeout(res, timeoutMs)))]);
+    if (timer) clearTimeout(timer);
+    return this.runs.get(id) !== run;
+  }
+
+  /** Fan the current row out to listeners after a status change. */
+  private publishStatus(id: string, status: TaskStatus, task?: TaskRow | null): void {
+    this.bus.publish({ type: 'task-status', payload: { taskId: id, status, ts: new Date().toISOString() } });
+    if (task) {
+      this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(task) } });
+      return;
+    }
+    void this.prisma.task
+      .findUnique({ where: { id } })
+      .then((row) => row && this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(row) } }))
+      .catch(() => undefined);
   }
 
   /**
@@ -786,20 +896,30 @@ export class TasksService {
     return orphans.length;
   }
 
-  /** Persist a lifecycle transition. Used by the queue/agent layers. */
+  /**
+   * Persist a lifecycle transition. Used by the queue/agent layers. Returns the row, or null when nothing
+   * changed: the task is gone (deleted during its run — not an error, E-23), or the transition is refused —
+   * `needs_approval` is only written over a live run (`running`/`queued`), never over a task that was
+   * cancelled or finished while the approval hook was still asking (E-35).
+   */
   async setStatus(id: string, status: TaskStatus, error?: string) {
-    const task = await this.prisma.task.update({
-      where: { id },
+    const guard = status === 'needs_approval' ? { status: { in: ['running', 'queued', 'needs_approval'] as TaskStatus[] } } : {};
+    const r = await this.prisma.task.updateMany({
+      where: { id, ...guard },
       data: { status, ...(error !== undefined ? { error } : {}) },
     });
-    const ts = new Date().toISOString();
-    this.bus.publish({ type: 'task-status', payload: { taskId: id, status, ts } });
-    this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(task) } });
-    // The task just settled — drain one pending follow-up if the queue has any
-    // (runFollowUpNow's own setStatus('queued') call is NOT terminal, so this
-    // doesn't recurse). Never let a drain failure mask the status change itself.
+    if (r.count === 0) {
+      this.logger.warn(`Task ${id}: status ${status} not written — the task is gone or no longer in a state that allows it`);
+      return null;
+    }
+    const task = await this.prisma.task.findUnique({ where: { id } });
+    if (!task) return null;
+    this.publishStatus(id, status, task);
     if (status === 'review' || status === 'done') void this.nameAfterRun(id).catch(() => undefined);
-    if (isTerminalStatus(status)) {
+    // The task just settled — drain one pending follow-up if the queue has any (`queued` is NOT terminal,
+    // so a dispatch doesn't recurse). While the worker is still inside the run the drain is deferred to
+    // runSettled() (see `runs`). Never let a drain failure mask the status change itself.
+    if (isTerminalStatus(status) && !this.runs.has(id)) {
       await this.drainPendingFollowUp(id).catch((err) =>
         this.logger.warn(`drain pending follow-up failed for ${id}: ${(err as Error).message}`),
       );

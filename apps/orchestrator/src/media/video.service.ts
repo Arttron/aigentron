@@ -30,6 +30,8 @@ export class VideoService {
   private readonly logger = new Logger('Video');
   private ffmpegOk: boolean | null = null;
   private running = new Map<string, Promise<Digest>>();
+  /** Builds of the same file never overlap (they share one folder, and a build clears it): the next plan waits for the previous. */
+  private fileChain = new Map<string, Promise<unknown>>();
 
   constructor(private readonly voice: VoiceService) {}
 
@@ -43,7 +45,27 @@ export class VideoService {
   async probe(file: string): Promise<ProbeResult | null> {
     try {
       const { stdout } = await pexec('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', file], { timeout: 30_000, maxBuffer: 8 * 1024 * 1024 });
-      return parseProbe(JSON.parse(stdout));
+      const json = JSON.parse(stdout) as { format?: Record<string, unknown> };
+      const parsed = parseProbe(json);
+      if (parsed) return parsed;
+      // No duration anywhere (a clip recorded in the browser): the last packet's timestamp is the length.
+      const last = await this.lastPacketTime(file);
+      return last ? parseProbe({ ...json, format: { ...(json.format ?? {}), duration: last } }) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Largest packet timestamp (s) of the first video stream; null when unreadable. Reads packet headers only. */
+  private async lastPacketTime(file: string): Promise<number | null> {
+    try {
+      const { stdout } = await pexec('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time,duration_time', '-of', 'csv=p=0', file], { timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
+      let end = 0;
+      for (const line of stdout.split('\n')) {
+        const [pts, dur] = line.split(',').map(Number);
+        if (Number.isFinite(pts)) end = Math.max(end, pts! + (Number.isFinite(dur) ? dur! : 0));
+      }
+      return end > 0 ? end : null;
     } catch {
       return null;
     }
@@ -72,7 +94,13 @@ export class VideoService {
     const key = `${file}|${planKey(opts)}`;
     const existing = this.running.get(key);
     if (existing) return existing;
-    const p = this.build(file, opts).finally(() => this.running.delete(key));
+    const prev = this.fileChain.get(file) ?? Promise.resolve();
+    const p = prev.then(() => this.build(file, opts)).finally(() => {
+      this.running.delete(key);
+      if (this.fileChain.get(file) === settled) this.fileChain.delete(file);
+    });
+    const settled = p.catch(() => undefined);
+    this.fileChain.set(file, settled);
     this.running.set(key, p);
     return p;
   }

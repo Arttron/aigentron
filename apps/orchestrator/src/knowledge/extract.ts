@@ -1,3 +1,5 @@
+import { readFile, realpath, stat } from 'node:fs/promises';
+import { basename } from 'node:path';
 import { extractText as pdfText, getDocumentProxy } from 'unpdf';
 import * as mammoth from 'mammoth';
 import { extractText } from './kb-core';
@@ -43,3 +45,46 @@ export async function extractDocument(name: string, data: Buffer): Promise<strin
   if (text === null) throw new Error(`Files of this type (.${e}) cannot be read — use PDF, Word (.docx), text, Markdown, HTML or CSV.`);
   return text;
 }
+
+/** The most a document may weigh to be turned into text on request (a 25 MB PDF was parsed in full for a 12 000-character answer). */
+export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+const CACHE_MAX_ENTRIES = 24;
+const CACHE_MAX_CHARS = 8_000_000;
+const textCache = new Map<string, string>(); // insertion order = age; "real path|mtime|size" → extracted text
+const inFlight = new Map<string, Promise<string>>();
+
+/**
+ * The text of a document file, for `read_document`: extracted once per (path, mtime, size) and kept in memory, so reading a long document
+ * in several slices (`from=…`) does not parse it again each time. Refuses files over 10 MB.
+ */
+export async function readDocumentText(file: string): Promise<string> {
+  const real = await realpath(file);
+  const st = await stat(real);
+  if (!st.isFile()) throw new Error('That is not a file.');
+  if (st.size > MAX_DOCUMENT_BYTES) throw new Error(`That file is too large to read (${Math.round(st.size / 1048576)} MB; the limit is ${MAX_DOCUMENT_BYTES / 1048576} MB).`);
+  const key = `${real}|${Math.round(st.mtimeMs)}|${st.size}`;
+  const hit = textCache.get(key);
+  if (hit !== undefined) {
+    textCache.delete(key); // refresh its place
+    textCache.set(key, hit);
+    return hit;
+  }
+  const running = inFlight.get(key);
+  if (running) return running;
+  const p = (async () => {
+    const text = await extractDocument(basename(real), await readFile(real));
+    textCache.set(key, text);
+    let chars = 0;
+    for (const v of textCache.values()) chars += v.length;
+    for (const k of textCache.keys()) {
+      if (textCache.size <= CACHE_MAX_ENTRIES && chars <= CACHE_MAX_CHARS) break;
+      chars -= textCache.get(k)!.length;
+      textCache.delete(k);
+    }
+    return text;
+  })().finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+
+export const documentCacheSize = (): number => textCache.size;

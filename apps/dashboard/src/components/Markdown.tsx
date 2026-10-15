@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import { parseInline, parseMarkdown, type Inline } from '@/lib/markdown-parse';
 import styles from './Markdown.module.css';
 
@@ -48,8 +48,8 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 }
 
 /** Renders chat text as React elements (never raw HTML). */
-export function Markdown({ text }: { text: string }) {
-  const blocks = parseMarkdown(text);
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
   return (
     <div className={styles.md} dir="auto">
       {blocks.map((b, i) => {
@@ -70,6 +70,6 @@ export function Markdown({ text }: { text: string }) {
       })}
     </div>
   );
-}
+});
 
 export { parseInline };

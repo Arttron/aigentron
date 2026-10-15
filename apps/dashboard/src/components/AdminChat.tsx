@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { SERVER_EVENT, CLIENT_EVENT, type AgentLogEvent, type TaskStatus } from '@lds/shared';
+import { SERVER_EVENT, type TaskStatus } from '@lds/shared';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
 import type { StateName } from '@/lib/mascot';
 import {
   ASSISTANT_RESET_EVENT,
@@ -30,7 +31,6 @@ interface Msg {
   text: string;
 }
 
-const lineKey = (sessionId: string, seq: number) => `${sessionId}:${seq}`;
 
 function readId(): string | null {
   try {
@@ -55,6 +55,8 @@ function toMsg(kind: string, text: string, id: string): Msg | null {
   if (kind === 'result') return { id, from: 'admin', text };
   return null;
 }
+
+const toMsgEntry = (e: StreamEntry): Msg | null => toMsg(e.kind, e.text, e.id);
 
 /**
  * Support-style chat with the built-in admin agent: a bubble in the corner of every page.
@@ -89,7 +91,8 @@ export function AdminChat() {
     setTab(null);
     writeEdgeTab(null);
   };
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  const { items: msgs } = useTaskStream<Msg>(taskId, toMsgEntry, { onReconnect: () => setReconnects((n) => n + 1) });
+  const [reconnects, setReconnects] = useState(0);
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -102,21 +105,12 @@ export function AdminChat() {
   const flashTimer = useRef<number | undefined>(undefined);
   const openRef = useRef(false);
   const taskIdRef = useRef<string | null>(null);
-  const seen = useRef<Set<string>>(new Set());
   const endRef = useRef<HTMLDivElement>(null);
-
-  const push = useCallback((m: Msg) => {
-    if (seen.current.has(m.id)) return;
-    seen.current.add(m.id);
-    setMsgs((prev) => [...prev, m]);
-  }, []);
 
   // Load history + live updates for the current chat task.
   useEffect(() => {
     if (!taskId) {
-      setMsgs([]);
       setStatus(null);
-      seen.current = new Set();
       return;
     }
     let live = true;
@@ -137,46 +131,16 @@ export function AdminChat() {
           setError(`Could not load the chat (${e.message}) — it is kept, reload to retry.`);
         }
       });
-    api
-      .transcript(taskId)
-      .then((events) => {
-        if (!live) return;
-        seen.current = new Set();
-        const initial: Msg[] = [];
-        for (const e of events) {
-          const id = lineKey(e.agentSessionId, e.seq);
-          const m = toMsg(e.kind, e.text, id);
-          if (m && !seen.current.has(id)) {
-            seen.current.add(id);
-            initial.push(m);
-          }
-        }
-        setMsgs(initial);
-      })
-      .catch(() => undefined);
-
     const socket = getSocket();
-    const subscribe = () => socket.emit(CLIENT_EVENT.subscribeTask, taskId);
-    subscribe();
-    socket.on('connect', subscribe);
-    const onLog = (e: AgentLogEvent) => {
-      if (e.taskId !== taskId) return;
-      const m = toMsg(e.kind, e.text, lineKey(e.agentSessionId, e.seq));
-      if (m) push(m);
-    };
     const onStatus = (e: { taskId: string; status: TaskStatus }) => {
       if (e.taskId === taskId) setStatus(e.status);
     };
-    socket.on(SERVER_EVENT.agentLog, onLog);
     socket.on(SERVER_EVENT.taskStatus, onStatus);
     return () => {
       live = false;
-      socket.emit(CLIENT_EVENT.unsubscribeTask, taskId);
-      socket.off('connect', subscribe);
-      socket.off(SERVER_EVENT.agentLog, onLog);
       socket.off(SERVER_EVENT.taskStatus, onStatus);
     };
-  }, [taskId, push]);
+  }, [taskId, reconnects]);
 
   // Before the first message: is the default provider actually able to answer?
   useEffect(() => {

@@ -94,6 +94,7 @@ model User {
   identities   ChannelIdentity[]
   createdTasks Task[]            @relation("TaskCreator")
   resolved     ApprovalRequest[] @relation("ApprovalResolver")
+  sessions     AuthSession[]
 }
 
 // Maps one User to their id on a connected channel (dashboard, Slack, Telegram,
@@ -182,10 +183,18 @@ model Task {
   linksIn   TaskLink[]        @relation("LinkTo")
   threads   ChannelThread[]
   pendingFollowUps PendingFollowUp[]
+  // Everything else that points at a task goes with it (or lets go of it) when the task is deleted — no orphans.
+  questions          AgentQuestion[]
+  messageLinks       ChannelMessageLink[]
+  approvalExceptions ApprovalException[]
+  queueJobs          QueueJob[]
+  activeInChats      ChannelChatState[]
+  schedules          Schedule[]
 
   @@index([status])
   @@index([createdById])
-  @@index([parentId])
+  // subtasks of a parent, in creation order (list(), subtaskStatuses, fan-in)
+  @@index([parentId, createdAt])
   @@index([kind])
 }
 
@@ -247,6 +256,8 @@ model ChannelChatState {
   channelId    String
   chatId       String
   activeTaskId String?
+  // the chat simply stops talking to a task that was deleted
+  activeTask   Task?    @relation(fields: [activeTaskId], references: [id], onDelete: SetNull)
   agent        String?
   model        String? // provider (model endpoint) name
   // When true, suppress routine task-outcome posts to this chat (approvals still sent).
@@ -260,12 +271,14 @@ model ChannelChatState {
   updatedAt    DateTime @updatedAt
 
   @@unique([channelId, chatId])
+  @@index([activeTaskId])
 }
 
 // A signed-in browser / device: one row per session cookie (the cookie itself is stateless and signed; this is the list shown in Settings).
 model AuthSession {
   id         String    @id
   userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt  DateTime  @default(now())
   lastSeenAt DateTime  @default(now())
   expiresAt  DateTime
@@ -338,6 +351,7 @@ model KnowledgeChunk {
 model AgentQuestion {
   id             String    @id @default(cuid())
   taskId         String
+  task           Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
   agentSessionId String?
   question       String
   // string[] of answer choices (empty = free text only)
@@ -368,10 +382,17 @@ model ChannelMessageLink {
   chatId    String
   messageId String
   taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  // What the message is, when it is more than a plain post from the task — so buttons/replies/reactions on it still work
+  // after a restart (C-04): 'approval' | 'question' | 'attachment' | 'ack' | 'status'; null = an ordinary message.
+  kind      String?
+  // the approval / question id, or the attachment name, that the message shows
+  refId     String?
   createdAt DateTime @default(now())
 
   @@unique([channelId, chatId, messageId])
   @@index([createdAt])
+  @@index([taskId])
 }
 
 /// An allowlist rule that auto-approves a matching dangerous tool call, added
@@ -382,6 +403,7 @@ model ApprovalException {
   id        String   @id @default(cuid())
   scope     String // 'task' | 'global'
   taskId    String? // set when scope='task'
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
   toolName  String
   signature String
   createdAt DateTime @default(now())
@@ -436,6 +458,8 @@ model AgentSession {
   approvals ApprovalRequest[]
 
   @@index([taskId])
+  // the daily budget check and the stats page scan sessions by time
+  @@index([startedAt])
 }
 
 // A single streamed line of agent output — the persisted transcript.
@@ -454,7 +478,8 @@ model AgentEvent {
   createdAt      DateTime     @default(now())
 
   @@index([agentSessionId, seq])
-  @@index([taskId])
+  // the transcript (taskId, createdAt) and "the latest result of a task" (taskId, kind, createdAt)
+  @@index([taskId, kind, createdAt])
 }
 
 model ApprovalRequest {
@@ -490,6 +515,7 @@ model ApprovalRequest {
 model QueueJob {
   id        String    @id @default(cuid())
   taskId    String
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
   /// JSON-encoded TaskJobData (followUpPrompt, attachments).
   payload   String
   /// Set to the taskId for initial runs (deduped per task); null for follow-ups.
@@ -543,8 +569,9 @@ model Schedule {
   chatId     String?
   // task kind: `same` = every run continues ONE task (a follow-up in the same conversation), `new` = every run starts a new task
   taskMode   String    @default("same")
-  // the task that `same` mode keeps continuing (created on the first run)
+  // the task that `same` mode keeps continuing (created on the first run); a deleted task is let go — the next run starts a new one
   taskId     String?
+  task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
   // optional quiet hours (HH:MM, in `timezone`): runs that fall inside are skipped
   quietStart String?
   quietEnd   String?
@@ -558,4 +585,5 @@ model Schedule {
   updatedAt  DateTime  @updatedAt
 
   @@index([enabled, nextRunAt])
+  @@index([taskId])
 }

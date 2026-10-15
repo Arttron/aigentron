@@ -92,6 +92,13 @@ export interface RunAgentParams {
   /** Fires for every raw message from the runtime (even ones we don't surface, e.g. model reasoning) — liveness for the watchdog. */
   onProgress?: () => void;
   /**
+   * Per-step usage as it happens (each API response once; main loop only; input +
+   * cache tokens — the per-step output count is a placeholder). The caller sums
+   * these to attribute SOMETHING to a run that never reaches its result message
+   * (abort, timeout, transport error) instead of 0 (X-COST-3).
+   */
+  onPartialUsage?: (step: Pick<SessionTotals, 'inputTokens' | 'cacheReadTokens' | 'cacheCreationTokens'>) => void;
+  /**
    * When set, the agent gets a `create_subtask` tool to decompose its task into
    * independent child tasks. Each call creates + enqueues a subtask and resolves
    * with the new task's id/title. Wire this only for lead agents.
@@ -330,6 +337,21 @@ export interface RunUsage {
   apiMs: number;
 }
 
+/**
+ * Running totals of a whole Claude session as the SDK reports them on the
+ * result message (`modelUsage` summed over models + `total_cost_usd`):
+ * subagents included, and — on a resumed session — the earlier calls' spend
+ * restored from the transcript. The caller stores the DELTA against what it
+ * already attributed to that session (X-COST-1/2).
+ */
+export interface SessionTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+}
+
 export interface AgentRunResult {
   /** Claude session id captured from the init event (null if never seen). */
   sessionId: string | null;
@@ -338,8 +360,14 @@ export interface AgentRunResult {
   result: string;
   /** True when the run ended by hitting maxTurns (subtype error_max_turns). */
   maxTurnsExceeded: boolean;
-  /** Usage from the SDK result message (zeroed when none was reported). */
+  /**
+   * Usage from the SDK result message (zeroed when none was reported). For the
+   * Claude runtime: this call's main loop only, with `costUsd` = the session's
+   * running total (see `sessionTotals`). For Codex: per-turn sums of this run.
+   */
   usage: RunUsage;
+  /** Claude runtime only, and only when a result message arrived: the session's running totals. */
+  sessionTotals?: SessionTotals;
 }
 
 export type AgentEventHandler = (event: AgentEvent) => void;

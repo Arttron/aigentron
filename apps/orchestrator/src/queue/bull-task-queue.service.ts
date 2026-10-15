@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { Queue, Worker } from 'bullmq';
 import type IORedis from 'ioredis';
@@ -54,6 +55,11 @@ export class BullTaskQueue extends TaskQueue implements OnModuleInit, OnModuleDe
     this.worker = new Worker<TaskJobData>(TASK_QUEUE, (job) => processor(job.data), {
       connection: this.connection!,
       concurrency,
+      // One attempt per job (queue.constants.ts): a job whose process died must NOT be
+      // handed back to the queue — it would restart the task from its original prompt
+      // in a dirty worktree. BullMQ's default (1) does exactly that; 0 fails it instead,
+      // and the orphan reconcile marks the task `stalled` (X-Q-4).
+      maxStalledCount: 0,
     });
     this.worker.on('failed', (job, err) => {
       this.logger.error(`Job ${job?.id} failed: ${err.message}`);
@@ -77,8 +83,9 @@ export class BullTaskQueue extends TaskQueue implements OnModuleInit, OnModuleDe
   }
 }
 
-function jobIdFor(data: TaskJobData): string {
-  // Follow-ups get unique ids; initial runs are deduped per task.
-  // NB: BullMQ forbids ':' in custom job ids (it's the Redis key separator).
-  return data.followUpPrompt ? `${data.taskId}-${Date.now()}` : data.taskId;
+/** Follow-ups get unique ids (two in one millisecond — a drain and a scheduled re-check — must not
+ *  dedupe into one, E-32); initial runs are deduped per task.
+ *  NB: BullMQ forbids ':' in custom job ids (it's the Redis key separator). */
+export function jobIdFor(data: TaskJobData): string {
+  return data.followUpPrompt ? `${data.taskId}-${randomUUID()}` : data.taskId;
 }

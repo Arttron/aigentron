@@ -14,6 +14,7 @@ import {
   type HookWiring,
   type ReportedStatus,
   type RunUsage,
+  type SessionTotals,
   type SubagentDefinition,
 } from '@lds/agent-runner';
 import { resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
@@ -30,7 +31,7 @@ import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
 import { codexImagesDir, listGeneratedImages } from './codex-images';
 import { inlineBlock, readInlineFiles } from './inline-attachments';
-import { extractDocument } from '../knowledge/extract';
+import { readDocumentText } from '../knowledge/extract';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
@@ -48,6 +49,11 @@ import { PreviewService } from '../preview/preview.service';
 import { budgetExceeded, isIdleStuck } from './run-guards';
 import { assemblePromptLayers, withRunContext } from './prompt-layers';
 import { AgentExecutor, type AgentRunOutcome, type TaskRunContext } from './agent-executor';
+import { errorTextOf, isFailoverWorthy, reportText, shortReason, tagSessionId, untagSessionId } from './run-outcome';
+import { resolveProviderChain } from './provider-chain';
+import { accountRunUsage, addTotals, budgetTokens, emptyTotals, reportingResumeUsage, startOfLocalDay, totalsAfter } from './usage-accounting';
+import { RunDeadline } from './run-watchdogs';
+import { getTaskLiteOrThrow } from './task-lite';
 
 /** Per-skill and total caps (chars) on skill content folded into the prompt. */
 const SKILL_FILE_CAP = 16_000;
@@ -76,19 +82,6 @@ const REPORTING_RESUME_PROMPT =
   'in `handoff` — that question is routed to whoever can answer (the lead that created ' +
   'this task, or the user). Do not just wait; a question left in prose is lost.\n' +
   'Do not do any further work — just report your status accurately.';
-
-/**
- * Human-facing text of a report: summary + the blocked `handoff` (what the agent
- * needs from a human). Folding handoff in here is what carries a blocked agent's
- * question into task.error → fan-in summaries → escalations; without it the
- * question would be silently dropped.
- */
-function reportText(report: ReportedStatus): string | null {
-  const summary = report.summary?.trim();
-  const handoff = report.handoff?.trim();
-  if (summary && handoff) return `${summary}\n\nNeeds from a human: ${handoff}`;
-  return summary || handoff || null;
-}
 
 /**
  * Real executor: drives @lds/agent-runner for a task, persisting a transcript
@@ -134,7 +127,7 @@ export class RealAgentExecutor extends AgentExecutor {
   }
 
   async run(ctx: TaskRunContext): Promise<AgentRunOutcome> {
-    const task = await this.prisma.task.findUniqueOrThrow({ where: { id: ctx.taskId } });
+    const task = await getTaskLiteOrThrow(this.prisma, ctx.taskId);
     // A discussion turn runs the named participant, not the task's own agent.
     const agentName = ctx.discussion?.agent ?? task.agentName;
     const agentDef = agentName
@@ -166,26 +159,40 @@ export class RealAgentExecutor extends AgentExecutor {
     const orientation =
       (chat ? buildChatOrientation(workDir) : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared)) +
       (workspaceOn ? `\n\n${this.workspace.orientation()}` : '');
-    // Other registered agents become delegatable subagents (each on its own provider);
-    // a chat agent talks to the user directly and delegates to no one.
-    const leadProvider = task.providerOverride ?? agentDef?.provider ?? defaultProvider;
-    const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation);
-    if (Object.keys(agents).length) {
-      this.logger.log(`Task ${task.id} subagents: [${Object.keys(agents).join(', ')}]`);
-    }
     // What changes between runs (the project map, the workspace memory) goes into
     // the run's MESSAGE, never into the system append: a changed system block
     // throws away the prompt cache of the whole conversation (see prompt-layers.ts).
     const projectMap = chat ? '' : await buildProjectMap(workDir);
     const memory = workspaceOn ? await this.workspace.digest().catch(() => '') : '';
-    const layers = assemblePromptLayers({ orientation, instructions: await this.buildInstructions(agentDef), roster, projectMap, memory });
+    const instructions = await this.buildInstructions(agentDef);
+    // Other registered agents become delegatable subagents (each on its own provider);
+    // a chat agent talks to the user directly and delegates to no one. The map
+    // depends on the LEAD's provider (an agent without a provider of its own runs
+    // on the lead's; a subscription lead cannot share its connection), so it is
+    // built per attempt: after a failover the `Task` tool must not point at the
+    // failed provider's routes (X-FO-7).
+    const prepared = new Map<string, { agents: Record<string, SubagentDefinition>; systemAppend: string; runContext: string }>();
+    const prepare = async (leadProvider: string) => {
+      const hit = prepared.get(leadProvider);
+      if (hit) return hit;
+      const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation);
+      if (Object.keys(agents).length) {
+        this.logger.log(`Task ${task.id} subagents on ${leadProvider}: [${Object.keys(agents).join(', ')}]`);
+      }
+      const layers = assemblePromptLayers({ orientation, instructions, roster, projectMap, memory });
+      const p = { agents, systemAppend: layers.systemAppend, runContext: layers.runContext };
+      prepared.set(leadProvider, p);
+      return p;
+    };
 
     // Resume the most recent session with a Claude session id on a follow-up
     // (first attempt only) — including one that ended `errored` by hitting the
     // step limit, so "continue" truly resumes the conversation (with full
     // context) rather than starting fresh.
     let resumeSessionId: string | undefined;
-    if (ctx.followUpPrompt && !ctx.discussion) {
+    let resumedFrom: Date | undefined;
+    const followUp = Boolean(ctx.followUpPrompt) && !ctx.discussion;
+    if (followUp) {
       const last = await this.prisma.agentSession.findFirst({
         where: {
           taskId: ctx.taskId,
@@ -193,13 +200,22 @@ export class RealAgentExecutor extends AgentExecutor {
           claudeSessionId: { not: null },
         },
         orderBy: { startedAt: 'desc' },
+        select: { claudeSessionId: true, startedAt: true },
       });
       resumeSessionId = last?.claudeSessionId ?? undefined;
+      resumedFrom = last?.startedAt;
     }
 
     // Provider chain: the primary followed by declared fallbacks (existing, with
-    // a model), deduped. On a provider-level failure we walk to the next.
-    const chain = await this.resolveProviderChain(agentDef, defaultProvider, ctx.discussion ? null : task.providerOverride);
+    // a model), deduped. On a provider-level failure we walk to the next — except
+    // on a follow-up (X-FO-1): the conversation lives with its provider, so a
+    // failure there ends the run with the provider's error instead of handing
+    // another provider just the follow-up text.
+    const chain = await resolveProviderChain(
+      { agent: agentDef, defaultProvider, override: ctx.discussion ? null : task.providerOverride, noFailover: followUp },
+      (name) => this.providers.get(name),
+      (m) => this.logger.warn(m),
+    );
     if (!chain.length) {
       throw new Error('No runnable provider: set a default model on the provider or pick one on the agent.');
     }
@@ -208,8 +224,10 @@ export class RealAgentExecutor extends AgentExecutor {
     }
 
     // Referenced tasks' summaries, folded into the prompt so the agent considers
-    // related work. Empty when the task has no references.
-    const refContext = await this.buildReferencesContext(ctx.taskId);
+    // related work. Empty when the task has no references. A resumed session
+    // already has the earlier references in its context: only the ones added
+    // since the last run are repeated (E-05).
+    const refContext = await this.buildReferencesContext(ctx.taskId, resumeSessionId ? resumedFrom : undefined);
     const common = {
       ctx,
       workDir,
@@ -217,9 +235,6 @@ export class RealAgentExecutor extends AgentExecutor {
       basePrompt: task.prompt,
       agentDef,
       mcpServers,
-      agents,
-      appendSystemPrompt: layers.systemAppend,
-      runContext: layers.runContext,
       chat,
       attachmentPaths,
       messageAttachments,
@@ -233,11 +248,18 @@ export class RealAgentExecutor extends AgentExecutor {
     for (let i = 0; i < chain.length; i++) {
       const { provider, model } = chain[i]!;
       const isLast = i === chain.length - 1;
+      const resume = i === 0 ? resumeSessionId : undefined;
+      const { agents, systemAppend, runContext } = await prepare(provider.name);
       const r = await this.attempt({
         ...common,
         provider,
         model,
-        resumeSessionId: i === 0 ? resumeSessionId : undefined,
+        agents,
+        appendSystemPrompt: systemAppend,
+        runContext,
+        resumeSessionId: resume,
+        // A resumed session was already told about the task's files: list only the ones sent with THIS message (E-06).
+        listedAttachments: resume && !chat ? attachmentPaths.filter((p) => messageAttachments.includes(basename(p))) : attachmentPaths,
         firstAttempt: i === 0,
         leadingNote: note,
       });
@@ -314,43 +336,58 @@ export class RealAgentExecutor extends AgentExecutor {
   }
 
   /**
-   * Build the ordered provider chain for a run: the agent's provider (or the
-   * default) first, then its declared fallbacks. Missing providers or ones
-   * without a resolvable model are skipped; duplicates are collapsed.
+   * Soft token budgets (env, opt-in): returns the reason a run must not start,
+   * or null. Counted tokens include cache reads/writes (X-COST-4) — what the
+   * provider bills; the daily budget covers the current calendar day (server
+   * time). Checked on every run, follow-ups included.
    */
-  private async resolveProviderChain(
-    agentDef: AgentDef | null,
-    defaultProvider: string,
-    override?: string | null,
-  ): Promise<{ provider: Provider; model: string }[]> {
-    // A per-task provider override (e.g. a channel's /model) wins as the primary.
-    const primary = override?.trim() || agentDef?.provider || defaultProvider;
-    const primaryName = primary?.trim();
-    const names = [primary, ...(agentDef?.fallbackProviders ?? [])];
-    const seen = new Set<string>();
-    const chain: { provider: Provider; model: string }[] = [];
-    for (const raw of names) {
-      const name = (raw ?? '').trim();
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-      const provider = await this.providers.get(name).catch(() => null);
-      if (!provider) {
-        this.logger.warn(`Provider "${name}" not found — skipping in chain`);
-        continue;
-      }
-      // The agent's pinned model belongs to its PRIMARY provider only — a
-      // fallback provider can't run another provider's model, so it falls back
-      // to its own default model. A provider override also ignores the pin (the
-      // pinned model is for the agent's own provider, not the overridden one).
-      const pinned = !override && name === primaryName ? agentDef?.model : undefined;
-      const model = (pinned || provider.model || '').trim();
-      if (!model) {
-        this.logger.warn(`Provider "${name}" has no model — skipping in chain`);
-        continue;
-      }
-      chain.push({ provider, model });
-    }
-    return chain;
+  private async checkBudget(taskId: string): Promise<string | null> {
+    const { budgetTokensPerTask: perTask, budgetTokensPerDay: perDay } = this.config;
+    if (!perTask && !perDay) return null;
+    const sum = async (where: { taskId?: string; startedAt?: { gte: Date } }): Promise<number> => {
+      const a = await this.prisma.agentSession.aggregate({ where, _sum: { inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheCreationTokens: true } });
+      return budgetTokens(a._sum);
+    };
+    const task = perTask ? await sum({ taskId }) : 0;
+    const day = perDay ? await sum({ startedAt: { gte: startOfLocalDay(new Date()) } }) : 0;
+    return budgetExceeded({ task, day }, { perTask, perDay });
+  }
+
+  /**
+   * What earlier rows of the same Claude session already account for (the SDK
+   * reports running totals of the session — X-COST-1). Rows written before the
+   * delta accounting hold running totals themselves, so the baseline may
+   * overstate once; the delta is clamped at 0 (see usage-accounting.ts).
+   */
+  private async sessionBaseline(taskId: string, claudeSessionId: string | undefined): Promise<SessionTotals> {
+    if (!claudeSessionId) return emptyTotals();
+    const a = await this.prisma.agentSession
+      .aggregate({ where: { taskId, claudeSessionId }, _sum: { inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheCreationTokens: true, costUsd: true } })
+      .catch(() => null);
+    if (!a) return emptyTotals();
+    return addTotals(emptyTotals(), {
+      inputTokens: a._sum.inputTokens ?? 0,
+      outputTokens: a._sum.outputTokens ?? 0,
+      cacheReadTokens: a._sum.cacheReadTokens ?? 0,
+      cacheCreationTokens: a._sum.cacheCreationTokens ?? 0,
+      costUsd: a._sum.costUsd ?? 0,
+    });
+  }
+
+  /**
+   * The agent's last own message of a session (before `beforeSeq`): the implicit
+   * question/handoff the worker escalates when there was no report (E-13).
+   */
+  private async salvageFinalText(agentSessionId: string, beforeSeq: number): Promise<string | undefined> {
+    const last = await this.prisma.agentEvent
+      .findFirst({
+        where: { agentSessionId, kind: 'assistant', text: { not: '' }, seq: { lt: beforeSeq } },
+        orderBy: { seq: 'desc' },
+        select: { text: true },
+      })
+      .catch(() => null);
+    const text = last?.text?.trim();
+    return text ? text.slice(0, 1000) : undefined;
   }
 
   /**
@@ -358,19 +395,6 @@ export class RealAgentExecutor extends AgentExecutor {
    * agent's reported status. Returns the outcome plus whether the failure (if
    * any) is a provider-level error worth failing over to the next provider.
    */
-  /** Soft token budgets (env, opt-in): returns the reason a run must not start, or null. */
-  private async checkBudget(taskId: string): Promise<string | null> {
-    const { budgetTokensPerTask: perTask, budgetTokensPerDay: perDay } = this.config;
-    if (!perTask && !perDay) return null;
-    const sum = async (where: { taskId?: string; startedAt?: { gte: Date } }): Promise<number> => {
-      const a = await this.prisma.agentSession.aggregate({ where, _sum: { inputTokens: true, outputTokens: true } });
-      return (a._sum.inputTokens ?? 0) + (a._sum.outputTokens ?? 0);
-    };
-    const task = perTask ? await sum({ taskId }) : 0;
-    const day = perDay ? await sum({ startedAt: { gte: new Date(Date.now() - 24 * 3600_000) } }) : 0;
-    return budgetExceeded({ task, day }, { perTask, perDay });
-  }
-
   private async attempt(opts: {
     ctx: TaskRunContext;
     workDir: string;
@@ -386,7 +410,10 @@ export class RealAgentExecutor extends AgentExecutor {
     runContext: string;
     /** Conversational agent: no forced status-report resume. */
     chat?: boolean;
+    /** Every file of the task (chat agents read some of them inline). */
     attachmentPaths: string[];
+    /** The ones the prompt lists for a working agent: all on a fresh run, only this message's on a resume (E-06). */
+    listedAttachments: string[];
     messageAttachments: string[];
     resumeSessionId?: string;
     /** The first provider of the chain: the person's message is recorded once, not per failover attempt (E-34). */
@@ -398,10 +425,10 @@ export class RealAgentExecutor extends AgentExecutor {
     const rawPrompt = ctx.followUpPrompt ?? opts.basePrompt;
     const prompt = opts.refContext ? `${opts.refContext}\n${rawPrompt}` : rawPrompt;
     const isCodex = provider.kind === 'codex';
-    // Codex talks to OpenAI itself (ChatGPT login / API key) — no Anthropic env, no LiteLLM route.
-    const modelEnv: AgentModelEnv = isCodex ? { ANTHROPIC_MODEL: model } : await this.resolveModelEnv(provider, model);
     // Session ids are runtime-specific; only resume a session this runtime created.
     const resumeSessionId = untagSessionId(opts.resumeSessionId, isCodex);
+    // What earlier runs of this Claude session already accounted for (X-COST-1).
+    const baseline = isCodex ? emptyTotals() : await this.sessionBaseline(ctx.taskId, resumeSessionId);
     this.logger.log(
       `Task ${ctx.taskId} → provider ${provider.name} (${model})` +
         (Object.keys(opts.mcpServers).length ? ` · mcp=[${Object.keys(opts.mcpServers).join(', ')}]` : ''),
@@ -468,8 +495,11 @@ export class RealAgentExecutor extends AgentExecutor {
         ctx.discussion.collect.text = event.text.trim() || lastAssistantText;
         event = { kind: 'discussion', speaker: ctx.discussion.agent, text: stripMark(ctx.discussion.collect.text) };
       }
-      lastEventAt = Date.now();
-      lastEventKind = event.kind;
+      // stderr (CLI retries, our own notes) is not progress of the agent: it must not keep the idle watchdog quiet (X-RUN-2).
+      if (event.kind !== 'stderr') {
+        lastEventAt = Date.now();
+        lastEventKind = event.kind;
+      }
       if (event.kind === 'system') capturedSessionId = event.sessionId || capturedSessionId;
       const current = seq++;
       let attachments: string[] = event.kind === 'prompt' || event.kind === 'assistant' ? (event.attachments ?? []) : [];
@@ -537,23 +567,37 @@ export class RealAgentExecutor extends AgentExecutor {
     // Abort any stale controller for this task before replacing it.
     this.active.get(ctx.taskId)?.abort();
     this.active.set(ctx.taskId, abortController);
+    // The hard ceiling counts ACTIVE time only (E-02): it is paused while the
+    // agent waits for a human — an ask_user question (the handler below holds
+    // it) or an approval in the PreToolUse hook (the bus events hold it).
     const timeoutMs = this.config.agentRunTimeoutMs;
-    const timer = setTimeout(() => {
-      onEvent({ kind: 'stderr', text: `agent run timed out after ${Math.round(timeoutMs / 1000)}s — aborting` });
+    const deadline = new RunDeadline(timeoutMs, () => {
+      const waited = Math.round(deadline.waitedMs / 1000);
+      onEvent({ kind: 'stderr', text: `agent run timed out after ${Math.round(timeoutMs / 1000)}s of active time${waited ? ` (plus ${waited}s waiting for a person)` : ''} — aborting` });
       timedOut = true;
       abortController.abort();
-    }, timeoutMs);
+    });
+    const heldApprovals = new Set<string>();
+    const unsubscribeBus = this.bus.subscribe((e) => {
+      if (e.type === 'approval-created' && e.payload.approval.taskId === ctx.taskId && !heldApprovals.has(e.payload.approval.id)) {
+        heldApprovals.add(e.payload.approval.id);
+        deadline.pause();
+      } else if (e.type === 'approval-resolved' && heldApprovals.delete(e.payload.approvalId)) {
+        deadline.resume();
+      }
+    });
+    deadline.start();
     // No-progress watchdog: a run that goes silent (stuck provider stream, hung model call) is
     // aborted long before the overall ceiling. Waiting on a human or a running tool is not "stuck".
     const idleMs = this.config.agentIdleTimeoutMs;
     const idleTimer =
       idleMs > 0
         ? setInterval(() => {
-            if (!isIdleStuck({ now: Date.now(), lastEventAt, lastEventKind, approvalsPending: false, idleMs })) return;
+            if (!isIdleStuck({ now: Date.now(), lastEventAt, lastEventKind, approvalsPending: deadline.paused, idleMs })) return;
             void this.prisma.approvalRequest
               .count({ where: { taskId: ctx.taskId, status: 'pending' } })
               .then((pending) => {
-                if (pending > 0 || !isIdleStuck({ now: Date.now(), lastEventAt, lastEventKind, approvalsPending: false, idleMs })) return;
+                if (pending > 0 || !isIdleStuck({ now: Date.now(), lastEventAt, lastEventKind, approvalsPending: deadline.paused, idleMs })) return;
                 onEvent({ kind: 'stderr', text: `agent made no progress for ${Math.round(idleMs / 1000)}s — aborting (AGENT_IDLE_TIMEOUT_MS)` });
                 timedOut = true;
                 abortController.abort();
@@ -562,6 +606,8 @@ export class RealAgentExecutor extends AgentExecutor {
           }, Math.min(15_000, Math.max(1_000, Math.floor(idleMs / 4))))
         : null;
     idleTimer?.unref?.();
+    // Usage of a run that never reaches its result message (abort, timeout, transport error) — X-COST-3.
+    let partial = emptyTotals();
 
     // Folders an agent may hand to show_images / look_at / workspace_save besides the library: its worktree, and (Codex) the pictures it generated.
     const generatedDir = codexImagesDir(this.config.agentDir, ctx.taskId);
@@ -589,23 +635,26 @@ export class RealAgentExecutor extends AgentExecutor {
           : {
               note: (input: { kind: string; text: string; resolves?: string }) => this.workspace.note(input, agentDef?.name),
               save: (input: { path: string; content?: string; from?: string; note?: string }) =>
-                this.workspace.save(input, mediaRoots, async (dest) => {
-                  // the result shows up in THIS task's attachments (gallery, chat, channels) as a link to the workspace file — no copy
-                  const name = await this.attachments.link(ctx.taskId, dest);
-                  if (/\.(png|jpe?g|webp|gif)$/i.test(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
-                  return `It is listed in the task's attachments as "${name}" (the person sees it there — no need to copy it).`;
-                }),
+                this.workspace.save(
+                  input,
+                  mediaRoots,
+                  async (dest) => {
+                    // the result shows up in THIS task's attachments (gallery, chat, channels) as a link to the workspace file — no copy
+                    const name = await this.attachments.link(ctx.taskId, dest);
+                    if (/\.(png|jpe?g|webp|gif)$/i.test(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
+                    return `It is listed in the task's attachments as "${name}" (the person sees it there — no need to copy it).`;
+                  },
+                  this.attachments.dir(ctx.taskId), // only THIS task's attachments are a source (X-NEW-2)
+                ),
             }),
       },
       // An agent with no file reader of its own (the admin, a read-restricted agent) reads attachments / workspace / library files through this.
       onReadDocument:
         !ctx.discussion && (agentDef?.mode === 'chat' || (agentDef?.allowedTools?.length && !agentDef.allowedTools.includes('Read')))
           ? async ({ path, from }) => {
-              const file = path.startsWith('/') ? await this.media.safePath(path, mediaRoots) : (await this.attachments.filePath(ctx.taskId, path)).path;
-              const st = await stat(file);
-              if (!st.isFile()) throw new Error('That is not a file.');
-              if (st.size > 25 * 1024 * 1024) throw new Error(`That file is too large to read (${Math.round(st.size / 1048576)} MB; the limit is 25 MB).`);
-              const text = await extractDocument(basename(file), await readFile(file));
+              const file = path.startsWith('/') ? await this.media.safePath(path, mediaRoots, ctx.taskId) : (await this.attachments.filePath(ctx.taskId, path)).path;
+              // 10 MB limit, extracted text cached by (path, mtime, size) — X-NEW-4
+              const text = await readDocumentText(file);
               const start = Math.max(0, Math.floor(from ?? 0));
               const part = text.slice(start, start + READ_DOCUMENT_CHARS);
               if (!part && start > 0) return `(end of the file — it has ${text.length} characters)`;
@@ -621,7 +670,7 @@ export class RealAgentExecutor extends AgentExecutor {
         const skipped: string[] = [];
         for (const p of paths) {
           try {
-            const real = await this.media.safePath(p, mediaRoots);
+            const real = await this.media.safePath(p, mediaRoots, ctx.taskId);
             // already one of this task's attachments → just reference it; otherwise copy it in
             const own = await realpath(this.attachments.dir(ctx.taskId)).catch(() => this.attachments.dir(ctx.taskId));
             const name = dirname(real) === own ? basename(real) : await this.attachments.adopt(ctx.taskId, real);
@@ -635,18 +684,23 @@ export class RealAgentExecutor extends AgentExecutor {
         return `Shown ${names.length} picture(s) to the user${names.length > 1 ? ' as an album' : ''}.${skipped.length ? ` Skipped: ${skipped.join('; ')}` : ''}`;
       },
       onAskUser: ctx.discussion ? undefined : async (input) => {
-        const answer = await this.questions.ask(ctx.taskId, session.id, {
-          ...input,
-          // the picture shown with the question must be a real file of this task (never an arbitrary path)
-          image: input.image ? await this.media.safePath(input.image, mediaRoots).catch(() => undefined) : undefined,
-        });
-        // what the person decided is team knowledge: it goes to workspace memory (decisions.md) by itself
-        if (!opts.chat) void this.workspace.recordAnswer(input.question, answer);
-        return answer;
+        deadline.pause(); // the person's thinking time is not the agent's run time (E-02)
+        try {
+          const answer = await this.questions.ask(ctx.taskId, session.id, {
+            ...input,
+            // the picture shown with the question must be a real file of this task (never an arbitrary path)
+            image: input.image ? await this.media.safePath(input.image, mediaRoots, ctx.taskId).catch(() => undefined) : undefined,
+          });
+          // what the person decided is team knowledge: it goes to workspace memory (decisions.md) by itself
+          if (!opts.chat) void this.workspace.recordAnswer(input.question, answer);
+          return answer;
+        } finally {
+          deadline.resume();
+        }
       },
       onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
-      onLookAt: (input) => this.media.lookAt(input.path, input.question, mediaRoots, input, { provider: provider.name, model }),
-      onVideoDigest: (input) => this.media.videoDigest(input.path, mediaRoots, input),
+      onLookAt: (input) => this.media.lookAt(input.path, input.question, mediaRoots, input, { provider: provider.name, model }, ctx.taskId),
+      onVideoDigest: (input) => this.media.videoDigest(input.path, mediaRoots, input, ctx.taskId),
       onStartPreview: ctx.discussion ? undefined : () => this.preview.getOrStart(ctx.taskId, opts.workDir),
       onProposeLearnedSkill: ctx.discussion ? undefined : (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.
@@ -664,6 +718,10 @@ export class RealAgentExecutor extends AgentExecutor {
       : undefined;
 
     try {
+      // Codex talks to OpenAI itself (ChatGPT login / API key) — no Anthropic env, no LiteLLM route.
+      // Inside the try: a LiteLLM that is down / refuses the route is a provider-level failure
+      // to fail over from, not a crash of run() that fails the task (X-FO-4).
+      const modelEnv: AgentModelEnv = isCodex ? { ANTHROPIC_MODEL: model } : await this.resolveModelEnv(provider, model);
       const result = await runtimeForProviderKind(provider.kind).run(
         {
           prompt: withRunContext(await this.promptWithAttachments(prompt, opts), opts.runContext),
@@ -691,6 +749,9 @@ export class RealAgentExecutor extends AgentExecutor {
           onProgress: () => {
             lastEventAt = Date.now();
           },
+          onPartialUsage: (step) => {
+            partial = addTotals(partial, step);
+          },
           ...toolHandlers,
         },
         onEvent,
@@ -699,7 +760,7 @@ export class RealAgentExecutor extends AgentExecutor {
       // reporting-resume below (own controller, own 90s cap) would otherwise
       // race it, and a late firing would stamp timedOut/abort onto a run that
       // actually completed. (finally still clears it on the throw paths.)
-      clearTimeout(timer);
+      deadline.clear();
       if (idleTimer) clearInterval(idleTimer);
       if (ctx.discussion && !ctx.discussion.collect.text.trim() && !ctx.discussion.collect.error && lastAssistantText.trim()) onEvent({ kind: 'result', text: lastAssistantText, isError: false, numTurns: 0, costUsd: 0 });
       // Codex generates pictures into its own sandbox folder: hand them to the person (attachments + chat) without asking the agent to copy them.
@@ -718,16 +779,19 @@ export class RealAgentExecutor extends AgentExecutor {
       // Skipped on abort/timeout (orchestrator-driven stops) and on a provider
       // error we're about to fail over. Best-effort: sets reported.value via
       // onReportStatus when it works; on failure the salvage below still runs.
-      // Usage is attributed to THIS session (its provider). Accumulate the main
-      // run and — when it runs — the reporting-resume, so the extra turn's
-      // tokens/cost aren't dropped from per-provider stats.
-      let usage: RunUsage = result.usage;
+      // Usage is attributed to THIS session (its provider): the DELTA of the
+      // session's running totals against what earlier rows of the same session
+      // hold (X-COST-1), subagents included (X-COST-2), the per-step partial
+      // when no result arrived (X-COST-3). The reporting-resume's own share —
+      // when it runs — is added so the extra turn isn't dropped from the stats.
+      let usage: RunUsage = accountRunUsage(result, baseline, partial);
       const willFailover = result.isError && isFailoverWorthy(result.result);
       // Boundary for the salvage below: events at seq >= this belong to the
       // reporting-resume turn, not the original run.
       const preResumeSeq = seq;
-      if (!opts.chat && !reported.value && !abortController.signal.aborted && !willFailover && finalSessionId) {
-        const resumeUsage = await this.reportingResume({
+      // Skipped for a verify-fix / schedule-check run (the caller re-verifies anyway — E-07).
+      if (!opts.chat && !ctx.skipReportingResume && !reported.value && !abortController.signal.aborted && !willFailover && finalSessionId) {
+        const resume = await this.reportingResume({
           sessionId: finalSessionId,
           codex: codexOpts,
           workDir: opts.workDir,
@@ -745,33 +809,23 @@ export class RealAgentExecutor extends AgentExecutor {
           onHeartbeat,
           onEvent,
         });
-        usage = addUsage(usage, resumeUsage);
+        // The resume continues the same session: its totals include the main run.
+        usage = addUsage(usage, reportingResumeUsage({ sessionTotals: result.sessionTotals ?? totalsAfter(baseline, usage) }, resume));
         await writeChain;
       }
 
       // If report_task_status STILL wasn't called (the agent skipped it even on
       // the reporting resume), salvage a summary from its last message so the
       // task doesn't end with an empty summary. Clearly marked as auto-generated
-      // — it is NOT an agent-attested outcome.
+      // — it is NOT an agent-attested outcome. Bounded to the ORIGINAL run: the
+      // resume turn appends to the same session with higher seq, and its reply
+      // ("Understood…") is a response to our resume prompt — not the agent's own
+      // last word.
       let fallbackSummary: string | undefined;
       let finalText: string | undefined;
       if (!reported.value) {
-        const last = await this.prisma.agentEvent
-          .findFirst({
-            // Bounded to the ORIGINAL run: the resume turn appends to the same
-            // session with higher seq, and its reply ("Understood…") is a
-            // response to our resume prompt — not the agent's own last word.
-            where: { agentSessionId: session.id, kind: 'assistant', text: { not: '' }, seq: { lt: preResumeSeq } },
-            orderBy: { seq: 'desc' },
-            select: { text: true },
-          })
-          .catch(() => null);
-        const text = last?.text?.trim();
-        if (text) {
-          // Raw last message — the implicit question/handoff the worker escalates.
-          finalText = text.slice(0, 1000);
-          fallbackSummary = `(auto-summary — agent did not call report_task_status)\n${finalText}`;
-        }
+        finalText = await this.salvageFinalText(session.id, preResumeSeq);
+        if (finalText) fallbackSummary = `(auto-summary — agent did not call report_task_status)\n${finalText}`;
       }
 
       await this.prisma.agentSession.update({
@@ -806,6 +860,8 @@ export class RealAgentExecutor extends AgentExecutor {
           timedOut,
           maxTurns: result.maxTurnsExceeded,
           finalText,
+          // The provider's own words when the run failed (X-FO-6) — not for an abort, which is ours.
+          errorText: result.isError && !aborted ? errorTextOf(result.result) : undefined,
         },
         failoverWorthy,
         reason: failoverWorthy ? shortReason(result.result) : '',
@@ -813,14 +869,27 @@ export class RealAgentExecutor extends AgentExecutor {
     } catch (err) {
       // runAgent only rethrows for a genuine (non-abort) SDK/transport error.
       await writeChain.catch(() => undefined);
+      const message = (err as Error).message;
+      // What was spent before the failure (per-step usage) is still spent — X-COST-3.
+      const spent = accountRunUsage({ usage: emptyUsage() }, baseline, partial);
       await this.prisma.agentSession
         .update({
           where: { id: session.id },
-          data: { status: 'errored', claudeSessionId: tagSessionId(capturedSessionId, isCodex), endedAt: new Date() },
+          data: {
+            status: 'errored',
+            claudeSessionId: tagSessionId(capturedSessionId, isCodex),
+            endedAt: new Date(),
+            inputTokens: spent.inputTokens,
+            outputTokens: spent.outputTokens,
+            cacheReadTokens: spent.cacheReadTokens,
+            cacheCreationTokens: spent.cacheCreationTokens,
+            numTurns: spent.numTurns,
+            costUsd: spent.costUsd,
+            apiMs: spent.apiMs,
+          },
         })
         .catch(() => undefined);
       this.publishAgentStatus(ctx.taskId, session.id, 'errored');
-      const message = (err as Error).message;
       this.logger.warn(`Task ${ctx.taskId} run error on "${provider.name}": ${message}`);
       // A rethrow from runAgent means the SDK itself couldn't proceed on this
       // provider (transport/protocol/fatal) — inherently provider-level, so fail
@@ -832,19 +901,24 @@ export class RealAgentExecutor extends AgentExecutor {
       // Flag it so the worker can offer to continue instead.
       const maxTurns = /maximum number of turns/i.test(message);
       const failoverWorthy = !aborted && !reported.value && !maxTurns;
+      // The agent's last word (an implicit question) survives a thrown error too (E-13).
+      const finalText = reported.value ? undefined : await this.salvageFinalText(session.id, seq);
       return {
         outcome: {
           reported: reported.value ? reported.value.status : null,
-          reportedSummary: reported.value?.summary,
+          reportedSummary: reported.value ? (reportText(reported.value) ?? undefined) : undefined,
           errored: true,
           timedOut,
           maxTurns,
+          finalText,
+          errorText: aborted ? undefined : errorTextOf(message),
         },
         failoverWorthy,
         reason: failoverWorthy ? shortReason(message) : '',
       };
     } finally {
-      clearTimeout(timer);
+      deadline.clear();
+      unsubscribeBus();
       if (idleTimer) clearInterval(idleTimer);
       internalReg?.dispose();
       if (this.active.get(ctx.taskId) === abortController) this.active.delete(ctx.taskId);
@@ -866,8 +940,8 @@ export class RealAgentExecutor extends AgentExecutor {
    * The message plus its attachments. A chat agent (the admin, a discussion participant) has no file-reading tool, so the text of this
    * message's text files (md/txt/csv/json …) is put into the prompt itself (bounded); everyone else gets the paths to Read.
    */
-  private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; messageAttachments: string[] }): Promise<string> {
-    if (!opts.chat) return withAttachments(prompt, opts.attachmentPaths);
+  private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; listedAttachments: string[]; messageAttachments: string[] }): Promise<string> {
+    if (!opts.chat) return withAttachments(prompt, opts.listedAttachments);
     const mine = new Set(opts.messageAttachments);
     const files = await readInlineFiles(opts.attachmentPaths.filter((p) => mine.has(basename(p))));
     const others = opts.attachmentPaths.filter((p) => mine.has(basename(p)) && !files.some((f) => f.name === basename(p)));
@@ -923,7 +997,7 @@ export class RealAgentExecutor extends AgentExecutor {
     onReportStatus: (report: ReportedStatus) => void;
     onHeartbeat: () => void;
     onEvent: (event: AgentEvent) => void;
-  }): Promise<RunUsage> {
+  }): Promise<{ usage: RunUsage; sessionTotals?: SessionTotals }> {
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), REPORTING_RESUME_TIMEOUT_MS);
     // Surface as an orchestration note (stderr), not a user turn.
@@ -956,12 +1030,12 @@ export class RealAgentExecutor extends AgentExecutor {
         },
         opts.onEvent,
       );
-      return r.usage;
+      return { usage: r.usage, sessionTotals: r.sessionTotals };
     } catch (err) {
       this.logger.warn(
         `Reporting-resume failed for session ${opts.sessionId}: ${(err as Error).message}`,
       );
-      return emptyUsage();
+      return { usage: emptyUsage() };
     } finally {
       clearTimeout(timer);
     }
@@ -1024,11 +1098,13 @@ export class RealAgentExecutor extends AgentExecutor {
    * Build the "Related tasks" context block from a task's outgoing references —
    * each referenced task's title + its latest reported summary (fallback:
    * title + status). Prepended to the prompt so the agent considers related
-   * work. Empty string when the task has no references.
+   * work. Empty string when the task has no references. With `since` (a
+   * resumed session), only references added after that moment — the earlier
+   * ones are already in the conversation (E-05).
    */
-  private async buildReferencesContext(taskId: string): Promise<string> {
+  private async buildReferencesContext(taskId: string, since?: Date): Promise<string> {
     const links = await this.prisma.taskLink.findMany({
-      where: { fromTaskId: taskId },
+      where: { fromTaskId: taskId, ...(since ? { createdAt: { gt: since } } : {}) },
       orderBy: { createdAt: 'asc' },
       include: {
         to: {
@@ -1054,7 +1130,7 @@ export class RealAgentExecutor extends AgentExecutor {
     });
     return (
       `## Related tasks (for context)\n` +
-      `These related tasks were referenced; consider their outcomes before implementing:\n` +
+      `These related tasks were ${since ? 'added since your last run' : 'referenced'}; consider their outcomes before implementing:\n` +
       `${items.join('\n')}\n`
     );
   }
@@ -1162,8 +1238,9 @@ export class RealAgentExecutor extends AgentExecutor {
    * Build the system-prompt append, top to bottom:
    *   1. global SOUL  (<agentDir>/SOUL.md — fleet charter, all agents)
    *   2. project SOUL (<workspace repo>/SOUL.md — project charter)
-   *   3. the chosen agent's body (or the DB default instruction)
-   *   4. skill files from <agentDir>/skills (all, or the subset the agent declares)
+   *   3. the chosen agent's body
+   *   4. the global "Agent instructions" from Settings — appended for EVERY agent (E-21)
+   *   5. skill files from <agentDir>/skills (all, or the subset the agent declares)
    */
   private async buildInstructions(agent: AgentDef | null): Promise<string> {
     const parts: string[] = [];
@@ -1177,8 +1254,12 @@ export class RealAgentExecutor extends AgentExecutor {
       this.logger.log(`SOUL loaded (global=${!!globalSoul}, project=${!!projectSoul})`);
     }
 
-    const base = (agent?.instructions || (await this.settings.agentInstructions())).trim();
-    if (base) parts.push(base);
+    // The agent's own body, then the Settings "Agent instructions" for every agent
+    // (what the UI, the admin tool and the docs promise — not a fallback).
+    const own = (agent?.instructions ?? '').trim();
+    if (own) parts.push(own);
+    const global = (await this.settings.agentInstructions()).trim();
+    if (global && global !== own) parts.push(global);
 
     const skillsDir = join(this.config.agentDir, 'skills');
     try {
@@ -1298,18 +1379,6 @@ function isOauthToken(provider: Pick<Provider, 'authMode'>): boolean {
   return provider.authMode === 'oauth-token';
 }
 
-/** Session ids are runtime-specific: Codex thread ids are stored with a `codex:` prefix. */
-function tagSessionId(id: string | null, codex: boolean): string | null {
-  return id && codex ? `codex:${id}` : id;
-}
-/** The raw id this runtime can resume, or undefined if the stored session belongs to the other runtime. */
-function untagSessionId(stored: string | undefined, codex: boolean): string | undefined {
-  if (!stored) return undefined;
-  const isCodexId = stored.startsWith('codex:');
-  if (codex) return isCodexId ? stored.slice('codex:'.length) : undefined;
-  return isCodexId ? undefined : stored;
-}
-
 /** Orientation for a chat agent: no repo, no worktree — just a conversation. */
 function buildChatOrientation(workDir: string): string {
   return [
@@ -1390,41 +1459,6 @@ async function buildProjectMap(cwd: string): Promise<string> {
   } catch {
     return '';
   }
-}
-
-/**
- * Provider-level failure patterns worth failing over to the next provider:
- * transport/connection, HTTP 4xx/5xx from the endpoint, rate limits, auth, and
- * model/tool-capability errors (e.g. a local model that can't emit tool calls).
- * Deliberately excludes aborts/timeouts (handled separately) and clean runs.
- */
-// Keyed off reason phrases and status-codes-in-context — NOT bare digits, which
-// match a stray "500"/"403" in a file path / diff / echoed model output and
-// trigger a spurious failover. The catch-path already fails over on any non-abort
-// throw, so this only needs to catch provider errors that arrive as a *result*.
-const FAILOVER_PATTERNS: readonly RegExp[] = [
-  /ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|EPIPE/i,
-  /socket hang up|fetch failed|network error|connection (error|closed|refused)/i,
-  /rate.?limit|too many requests|overloaded|capacity|temporarily unavailable/i,
-  /internal server error|bad gateway|service unavailable|gateway timeout/i,
-  /unauthorized|forbidden|authentication|invalid.*(api.?key|token)/i,
-  /not signed in|failed to start \w+: spawn \S+ ENOENT/i,
-  // A status code only when qualified by a status keyword (HTTP/status/code/error).
-  /\b(?:http|status(?:\s*code)?|code|error)\b[^0-9a-z]{0,8}(?:401|403|404|408|409|429|5\d\d)\b/i,
-  /model.*(not found|not exist|unavailable|does not support)|no endpoints|unsupported model|invalid model/i,
-  /does not support tools|tool use is not supported|function calling is not/i,
-];
-
-function isFailoverWorthy(message: string): boolean {
-  if (!message) return false;
-  // Abort/timeout are orchestrator-driven stops, not provider failures.
-  if (/\baborted\b|timed out/i.test(message)) return false;
-  return FAILOVER_PATTERNS.some((re) => re.test(message));
-}
-
-function shortReason(message: string): string {
-  const m = (message || 'provider error').replace(/\s+/g, ' ').trim();
-  return m.length > 80 ? `${m.slice(0, 80)}…` : m;
 }
 
 /** File extension for an image media type (defaults to png). */

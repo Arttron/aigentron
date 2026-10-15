@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { usePolling } from '@/lib/use-polling';
 import { api } from '@/lib/api';
 import { Button, Muted } from '@/components/ui';
 import { speakerColor } from '@/components/Transcript';
@@ -11,17 +12,12 @@ export function DiscussionBar({ taskId, running }: { taskId: string; running: bo
   const [state, setState] = useState<State | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const poll = () => void api.discussionState(taskId).then(setState).catch(() => undefined);
   useEffect(() => {
     if (!running) return setState(null);
-    let live = true;
-    const poll = () => api.discussionState(taskId).then((s) => live && setState(s)).catch(() => undefined);
-    void poll();
-    const t = setInterval(poll, 2500);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
+    poll();
   }, [taskId, running]);
+  usePolling(poll, 2500, running);
 
   if (!state?.active) return null;
   const act = async (fn: () => Promise<unknown>) => {

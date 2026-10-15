@@ -1,11 +1,13 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, realpath, rm, stat, access, writeFile, copyFile, rename } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rm, stat, lstat, access, writeFile, copyFile, rename, link, unlink } from 'node:fs/promises';
 import { join, basename, extname, resolve, sep } from 'node:path';
 import { once } from 'node:events';
+import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { ImageOptimizer } from '../media/image-optimizer.service';
+import { remuxWebm } from '../media/media-fix';
 
 /**
  * Rendered/served inline as their real type — safe because a browser can only
@@ -64,10 +66,23 @@ function isInlineSafe(ext: string): boolean {
 }
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB
-/** A video may be much bigger (a walk-through of a room…). */
-const MAX_VIDEO_BYTES_ATT = 300 * 1024 * 1024;
+/**
+ * A video may be much bigger (a walk-through of a room…) — but not beyond what the proxy in front lets through: Cloudflare's free plan
+ * refuses request bodies over 100 MB with an HTML error page. 95 MB leaves room for headers; the server says it plainly itself.
+ */
+export const MAX_VIDEO_UPLOAD_BYTES = 95 * 1024 * 1024;
+/** All files of one task together (a runaway upload loop cannot fill the disk). */
+export const TASK_QUOTA_BYTES = 1024 * 1024 * 1024;
+const MAX_VIDEO_BYTES_ATT = MAX_VIDEO_UPLOAD_BYTES;
 const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', '3gp']);
-const limitFor = (ext: string): number => (VIDEO_EXTS.has(ext) ? MAX_VIDEO_BYTES_ATT : MAX_BYTES);
+export const limitFor = (ext: string): number => (VIDEO_EXTS.has(ext) ? MAX_VIDEO_BYTES_ATT : MAX_BYTES);
+/** The message for a file over its limit — says what to do, not just "too large". */
+export function tooBigMessage(ext: string, limit = limitFor(ext)): string {
+  const mb = Math.round(limit / 1024 / 1024);
+  return VIDEO_EXTS.has(ext)
+    ? `The video is larger than ${mb} MB, which is the most this server accepts (the web proxy in front of it refuses bigger uploads). Trim it, lower the resolution, or record a shorter clip.`
+    : `The file is larger than ${mb} MB, which is the most this server accepts for this type of file.`;
+}
 const TASK_ID_RE = /^[\w-]+$/;
 
 export interface AttachmentMeta {
@@ -99,34 +114,57 @@ export class AttachmentsService {
     return join(this.config.attachmentsDir, taskId);
   }
 
-  /** Stream an upload to disk, validating size — any file type is accepted. */
+  /** Bytes already stored for a task (own files; links are not copies). */
+  async usedBytes(taskId: string): Promise<number> {
+    let sum = 0;
+    for (const n of await readdir(this.dir(taskId)).catch(() => [] as string[])) {
+      const st = await lstat(join(this.dir(taskId), n)).catch(() => null);
+      if (st?.isFile()) sum += st.size;
+    }
+    return sum;
+  }
+
+  /** Stream an upload to disk, validating size — any file type is accepted. `declaredBytes` (Content-Length) lets an obviously too big upload be refused before reading a byte. */
   async save(
     taskId: string,
     rawName: string,
     source: Readable,
+    declaredBytes?: number,
   ): Promise<AttachmentMeta> {
     const ext = extname(rawName).slice(1).toLowerCase();
     const mime = mimeFor(ext);
     const dir = this.dir(taskId);
+    const limit = limitFor(ext);
+    if (declaredBytes !== undefined && declaredBytes > limit) throw new PayloadTooLargeException(tooBigMessage(ext, limit));
     await mkdir(dir, { recursive: true });
-    const name = await this.uniqueName(dir, sanitize(rawName));
-    const dest = join(dir, name);
+    const used = await this.usedBytes(taskId);
+    if (used + (declaredBytes ?? 0) > TASK_QUOTA_BYTES) throw new PayloadTooLargeException(`This task already holds ${Math.round(used / 1048576)} MB of files; the limit per task is ${TASK_QUOTA_BYTES / 1048576} MB.`);
 
-    const out = createWriteStream(dest);
+    // written under a hidden `.part` name (never listed, never served), then moved into place without overwriting anything
+    const tmp = join(dir, `.${randomBytes(6).toString('hex')}.part`);
+    const out = createWriteStream(tmp, { flags: 'wx' });
     let size = 0;
     try {
       for await (const chunk of source) {
         size += (chunk as Buffer).length;
-        if (size > limitFor(ext)) throw new PayloadTooLargeException(`file exceeds ${limitFor(ext) / 1024 / 1024}MB`);
+        if (size > limit) throw new PayloadTooLargeException(tooBigMessage(ext, limit));
+        if (used + size > TASK_QUOTA_BYTES) throw new PayloadTooLargeException(`The task would exceed its ${TASK_QUOTA_BYTES / 1048576} MB limit of files.`);
         if (!out.write(chunk)) await once(out, 'drain');
       }
       out.end();
       await once(out, 'finish');
     } catch (e) {
       out.destroy();
-      await rm(dest, { force: true }).catch(() => undefined);
+      await rm(tmp, { force: true }).catch(() => undefined);
       throw e;
     }
+    // A clip recorded in the browser (webm) has no length in its header: copy it into a proper webm (no re-encoding; skipped without ffmpeg).
+    if (ext === 'webm') size = (await remuxWebm(tmp)) ?? size;
+    const dest = await this.place(dir, tmp, sanitize(rawName)).catch(async (e) => {
+      await rm(tmp, { force: true }).catch(() => undefined);
+      throw e;
+    });
+    const name = basename(dest);
     // A phone photo is 4000 px and several MB: shrink it to what the agents need (a PNG may become a JPEG → the name can change).
     if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
       const r = await this.images.optimize(dest, undefined, false, (d, n) => this.uniqueName(d, n));
@@ -140,13 +178,37 @@ export class AttachmentsService {
     return { name, size, mime };
   }
 
+  /** Move a finished temp file to `<dir>/<wanted>` (or `-1`, `-2` … when taken), never replacing an existing file — also not when two uploads race. */
+  private async place(dir: string, tmp: string, wanted: string): Promise<string> {
+    const taken = new Set(Object.keys(await this.readLinksAt(dir)));
+    const ext = extname(wanted);
+    for (let n = 0; n < 1000; n++) {
+      const name = n === 0 ? wanted : `${basename(wanted, ext)}-${n}${ext}`;
+      if (taken.has(name)) continue;
+      const dest = join(dir, name);
+      try {
+        await link(tmp, dest); // fails with EEXIST instead of overwriting
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EEXIST') continue;
+        // a filesystem without hard links: the best remaining option
+        if (await access(dest).then(() => true, () => false)) continue;
+        await rename(tmp, dest);
+        return dest;
+      }
+      await unlink(tmp).catch(() => undefined);
+      return dest;
+    }
+    throw new BadRequestException('too many files with that name');
+  }
+
   /** Copy an existing picture (a generated image in the workspace, a library resource …) into the task's attachments so the chat can show it. Returns the stored name. */
   async adopt(taskId: string, srcPath: string): Promise<string> {
     const ext = extname(srcPath).slice(1).toLowerCase();
     if (!INLINE_MIME_BY_EXT[ext] || ext === 'pdf') throw new BadRequestException(`"${basename(srcPath)}" is not a picture I can show (png, jpg, webp, gif).`);
     const dir = this.dir(taskId);
     await mkdir(dir, { recursive: true });
-    const stat0 = await stat(srcPath);
+    const stat0 = await lstat(srcPath); // not stat: a symlink (or a hard link to a file elsewhere) must never be followed into a copy of something private
+    if (!stat0.isFile() || stat0.nlink !== 1) throw new BadRequestException(`"${basename(srcPath)}" is not a plain picture file.`);
     if (stat0.size > MAX_BYTES * 3) throw new PayloadTooLargeException(`"${basename(srcPath)}" is too large to show.`);
     const name = await this.uniqueName(dir, sanitize(basename(srcPath)));
     const dest = join(dir, name);
@@ -164,12 +226,15 @@ export class AttachmentsService {
     const name = sanitize(filename);
     const ext = extname(name).slice(1).toLowerCase();
     if (!INLINE_MIME_BY_EXT[ext] || ext === 'pdf') throw new BadRequestException('unsupported image type');
+    if (Math.floor((base64.length * 3) / 4) > MAX_BYTES) throw new PayloadTooLargeException(`image exceeds ${MAX_BYTES / 1024 / 1024}MB`); // before decoding: no big allocation for a refused image
     const buf = Buffer.from(base64, 'base64');
     if (buf.length > MAX_BYTES) throw new PayloadTooLargeException(`image exceeds ${MAX_BYTES / 1024 / 1024}MB`);
     const dir = this.dir(taskId);
     await mkdir(dir, { recursive: true });
     const file = join(dir, name);
-    await writeFile(file, buf);
+    const tmp = join(dir, `.${randomBytes(6).toString('hex')}.part`);
+    await writeFile(tmp, buf);
+    await rename(tmp, file); // never visible half-written
     await this.images.optimize(file, undefined, true).catch(() => undefined); // a screenshot never needs to be 4K
     this.logger.log(`Saved screenshot ${taskId}/${name} (${buf.length}B)`);
   }
@@ -185,9 +250,13 @@ export class AttachmentsService {
     return join(this.dir(taskId), '.links.json');
   }
 
-  private async readLinks(taskId: string): Promise<Record<string, string>> {
+  private readLinks(taskId: string): Promise<Record<string, string>> {
+    return this.readLinksAt(this.dir(taskId));
+  }
+
+  private async readLinksAt(dir: string): Promise<Record<string, string>> {
     try {
-      const raw = JSON.parse(await readFile(this.linksFile(taskId), 'utf8')) as unknown;
+      const raw = JSON.parse(await readFile(join(dir, '.links.json'), 'utf8')) as unknown;
       if (!raw || typeof raw !== 'object') return {};
       return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
     } catch {
@@ -309,11 +378,14 @@ export class AttachmentsService {
   private async uniqueName(dir: string, name: string): Promise<string> {
     let candidate = name;
     let n = 1;
+    const links = await this.readLinksAt(dir); // a name used by a link counts as taken too
     while (true) {
-      try {
-        await access(join(dir, candidate));
-      } catch {
-        return candidate;
+      if (!(candidate in links)) {
+        try {
+          await access(join(dir, candidate));
+        } catch {
+          return candidate;
+        }
       }
       const ext = extname(name);
       candidate = `${basename(name, ext)}-${n++}${ext}`;

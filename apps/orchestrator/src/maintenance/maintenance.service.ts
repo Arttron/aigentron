@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const pexec = promisify(execFile);
 const DAY = 86_400_000;
+/** A digest folder younger than this is left alone by pruning (it may be mid-build or just read). */
+const DIGEST_IN_USE_MS = 10 * 60_000;
 const ACTIVE = ['queued', 'running', 'needs_approval'];
 const AGENT_BRANCH = /^agent\/task-([a-z0-9]+)$/;
 
@@ -146,6 +148,7 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
       const cut = Date.now() - dDays * DAY;
       for (const d of await this.digestDirs()) {
         if (d.mtime >= cut && dDays > 0) continue;
+        if (Date.now() - d.mtime < DIGEST_IN_USE_MS) continue; // built or touched a moment ago: may be in use, even for the emergency relief
         bytes += await this.dirBytes(d.path);
         await rm(d.path, { recursive: true, force: true }).catch(() => undefined);
         digests += 1;

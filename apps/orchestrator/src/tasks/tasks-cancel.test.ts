@@ -22,9 +22,9 @@ function make(row: Row, pending: { id: string; taskId: string }[] = []) {
         Object.assign(r, data);
         return r;
       },
-      updateMany: async ({ where, data }: { where: { id: string; status: { notIn: string[] } }; data: { status: string } }) => {
+      updateMany: async ({ where, data }: { where: { id: string; status?: { in?: string[]; notIn?: string[] } }; data: { status: string } }) => {
         calls.push(`task.updateMany:${data.status}`);
-        const r = rows.find((x) => x.id === where.id && !where.status.notIn.includes(x.status));
+        const r = rows.find((x) => x.id === where.id && !where.status?.notIn?.includes(x.status) && (!where.status?.in || where.status.in.includes(x.status)));
         if (!r) return { count: 0 };
         Object.assign(r, data);
         return { count: 1 };
@@ -62,6 +62,7 @@ function make(row: Row, pending: { id: string; taskId: string }[] = []) {
     },
     executor: { cancel: () => void calls.push('executor.cancel') },
     bus: { publish: () => undefined },
+    runs: new Map(),
     worktrees: { cleanup: async () => void calls.push('worktrees.cleanup') },
     attachments: { remove: async () => undefined, list: async () => [] },
     get: async (id: string) => {
@@ -79,11 +80,11 @@ describe('TasksService.cancel', () => {
   it('drops pending follow-ups, then queued jobs, then marks cancelled, then aborts the run — in that order', async () => {
     const { svc, calls, rows, followUps } = make(running(), [{ id: 'f1', taskId: 'T' }, { id: 'f2', taskId: 'T' }]);
     await svc.cancel('T');
-    expect(calls).toEqual(['pendingFollowUp.deleteMany', 'queue.removeForTask', 'task.update:cancelled', 'pendingFollowUp.findFirst', 'executor.cancel']);
+    expect(calls).toEqual(['pendingFollowUp.deleteMany', 'queue.removeForTask', 'task.updateMany:cancelled', 'pendingFollowUp.findFirst', 'executor.cancel']);
     expect(rows[0]!.status).toBe('cancelled');
     expect(followUps()).toEqual([]);
     expect(calls).not.toContain('queue.enqueue'); // the drain found nothing → no new run
-    expect(calls).not.toContain('task.update:queued');
+    expect(calls).not.toContain('task.updateMany:queued');
   });
 
   it('a finished task is left alone', async () => {
@@ -97,7 +98,7 @@ describe('TasksService.markDone / delete', () => {
   it('markDone drops queued jobs before the terminal status', async () => {
     const { svc, calls } = make({ ...running(), status: 'review' });
     await svc.markDone('T');
-    expect(calls.slice(0, 2)).toEqual(['queue.removeForTask', 'task.update:done']);
+    expect(calls.slice(0, 2)).toEqual(['queue.removeForTask', 'task.updateMany:done']);
   });
 
   it('delete drops queued jobs and aborts the run even for a finished task', async () => {
@@ -106,21 +107,34 @@ describe('TasksService.markDone / delete', () => {
     expect(calls.indexOf('queue.removeForTask')).toBeLessThan(calls.indexOf('task.delete'));
     expect(calls.indexOf('executor.cancel')).toBeLessThan(calls.indexOf('task.delete'));
   });
+
+  it('delete of a live task cancels it first (follow-ups dropped, status cancelled) and waits for the run before the worktree goes (E-23)', async () => {
+    const { svc, calls, rows } = make(running(), [{ id: 'f1', taskId: 'T' }]);
+    await svc.startRunning('T');
+    const settled = svc.runSettled('T'); // the worker leaves as soon as it is aborted
+    await svc.delete('T');
+    await settled;
+    expect(calls.indexOf('pendingFollowUp.deleteMany')).toBeLessThan(calls.indexOf('task.updateMany:cancelled'));
+    expect(calls.indexOf('task.updateMany:cancelled')).toBeLessThan(calls.indexOf('executor.cancel'));
+    expect(calls.indexOf('executor.cancel')).toBeLessThan(calls.indexOf('worktrees.cleanup'));
+    expect(calls.indexOf('worktrees.cleanup')).toBeLessThan(calls.indexOf('task.delete'));
+    expect(rows).toEqual([]);
+  });
 });
 
 describe('TasksService.startRunning (the worker entry guard)', () => {
   it('moves a queued task to running', async () => {
     const { svc, rows } = make({ ...running(), status: 'queued' });
-    expect(await svc.startRunning('T')).toBe(true);
+    expect(await svc.startRunning('T')).toBe('started');
     expect(rows[0]!.status).toBe('running');
   });
   it('refuses a cancelled or done task and a missing one', async () => {
     for (const status of ['cancelled', 'done']) {
       const { svc, rows } = make({ ...running(), status });
-      expect(await svc.startRunning('T')).toBe(false);
+      expect(await svc.startRunning('T')).toBe('gone');
       expect(rows[0]!.status).toBe(status);
     }
     const { svc } = make(running());
-    expect(await svc.startRunning('nope')).toBe(false);
+    expect(await svc.startRunning('nope')).toBe('gone');
   });
 });

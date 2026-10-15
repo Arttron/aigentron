@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   LoginLimiter,
   clientAddress,
+  ipMatches,
+  isDirectLocalRequest,
   describeAgent,
   canRemovePassword,
   hashPassword,
@@ -162,5 +164,30 @@ describe('describeAgent', () => {
     expect(verifySession('k', tok)?.sid).toBe('a'.repeat(32));
     const bad = signSession('k', { exp: Date.now() + 1000, epoch: 1, uid: 'u', ue: 1, sid: '../../x' });
     expect(verifySession('k', bad)?.sid).toBeUndefined();
+  });
+});
+
+describe('trusted proxies by CIDR (X-CF-1)', () => {
+  it('matches exact addresses and CIDRs, v4 and v6, ignores garbage', () => {
+    expect(ipMatches('10.1.2.3', ['10.0.0.0/8'])).toBe(true);
+    expect(ipMatches('::ffff:10.1.2.3', ['10.0.0.0/8'])).toBe(true);
+    expect(ipMatches('11.1.2.3', ['10.0.0.0/8'])).toBe(false);
+    expect(ipMatches('2606:4700::1', ['2606:4700::/32'])).toBe(true);
+    expect(ipMatches('1.1.1.1', ['1.1.1.1'])).toBe(true);
+    expect(ipMatches('1.1.1.1', ['bogus', '1.1.1.0/99', ''])).toBe(false);
+    expect(ipMatches('not-an-ip', ['0.0.0.0/0'])).toBe(false);
+  });
+  it('believes cf-connecting-ip from a Cloudflare edge peer, not from anyone else', () => {
+    expect(clientAddress('203.0.113.7', '172.67.10.1', [])).toBe('203.0.113.7');
+    expect(clientAddress('203.0.113.7', '172.67.10.1', [], false)).toBe('172.67.10.1');
+    expect(clientAddress('203.0.113.7', '198.51.100.20', [])).toBe('198.51.100.20');
+    expect(clientAddress('203.0.113.7', '172.18.0.9', ['172.18.0.0/16'])).toBe('203.0.113.7');
+    expect(clientAddress('garbage', '127.0.0.1', [])).toBe('127.0.0.1');
+  });
+  it('a forwarded request from loopback is not "this machine"', () => {
+    expect(isDirectLocalRequest('127.0.0.1', [], {})).toBe(true);
+    expect(isDirectLocalRequest('127.0.0.1', [], { 'cf-connecting-ip': '1.2.3.4' })).toBe(false);
+    expect(isDirectLocalRequest('127.0.0.1', [], { 'x-forwarded-for': '1.2.3.4' })).toBe(false);
+    expect(isDirectLocalRequest('203.0.113.1', [], {})).toBe(false);
   });
 });

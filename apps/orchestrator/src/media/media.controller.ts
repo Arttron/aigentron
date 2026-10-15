@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Post, Put, UseGuards } from '@nestjs/common';
 import { Roles } from '../identity/roles.decorator';
 import { RolesGuard } from '../identity/roles.guard';
+import { MAX_VIDEO_UPLOAD_BYTES, TASK_QUOTA_BYTES, limitFor } from '../attachments/attachments.service';
 import { VoiceService } from '../voice/voice.service';
 import { MediaService } from './media.service';
 import { VideoService } from './video.service';
@@ -18,7 +19,7 @@ export class MediaController {
 
   @Get('media')
   async status() {
-    return { vision: this.vision.get(), visionReady: this.vision.ready(), ffmpeg: await this.video.available(), sttReady: this.voice.sttReady() };
+    return { vision: this.vision.get(), visionReady: this.vision.ready(), ffmpeg: await this.video.available(), sttReady: this.voice.sttReady(), limits: { videoUploadBytes: MAX_VIDEO_UPLOAD_BYTES, fileUploadBytes: limitFor('bin'), taskQuotaBytes: TASK_QUOTA_BYTES } };
   }
 
   /** Frames + transcript of a video that lives in the attachments or the resource library (processed once, then cached). */

@@ -144,16 +144,19 @@ export class ResourcesService {
   }
 
   /** A file uploaded as the raw request body. */
-  async upload(rawName: string, source: Readable, m: ResourceMeta = {}): Promise<ResourceEntry> {
+  async upload(rawName: string, source: Readable, m: ResourceMeta = {}, declaredBytes?: number): Promise<ResourceEntry> {
     const ext = extname(rawName).slice(1).toLowerCase();
     const name = safeFileName(rawName);
     const meta = this.meta(m, titleFromName(rawName));
+    if (declaredBytes !== undefined && declaredBytes > maxBytesFor(kindFor(ext))) throw new PayloadTooLargeException(`the file exceeds ${maxBytesFor(kindFor(ext)) / 1024 / 1024} MB`);
+    await this.room(declaredBytes ?? 0); // refuse a full library before a byte is written
     const id = this.newId();
     const file = `${id}-${name}`;
     await mkdir(this.filesDir, { recursive: true });
     const dest = join(this.filesDir, file);
     const out = createWriteStream(dest);
     let size = 0;
+    let storedFileOnDisk: string | null = null; // the optimiser may have written a different file (PNG → JPG): it must go too when we give up
     try {
       for await (const chunk of source) {
         size += (chunk as Buffer).length;
@@ -172,6 +175,7 @@ export class ResourcesService {
         if (r.changed) {
           size = r.size;
           storedFile = basename(r.path);
+          storedFileOnDisk = r.path;
           storedExt = extname(r.path).slice(1).toLowerCase();
         }
       }
@@ -186,6 +190,7 @@ export class ResourcesService {
     } catch (e) {
       out.destroy();
       await rm(dest, { force: true }).catch(() => undefined);
+      if (storedFileOnDisk) await rm(storedFileOnDisk, { force: true }).catch(() => undefined);
       throw e;
     }
   }

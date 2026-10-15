@@ -1,26 +1,26 @@
-Aigentron v0.1.59
+Aigentron v0.1.60
 
-For people who are not programmers: a safety-and-stability release after a full review of the project — no new screens, but several real holes closed and updates made safer.
+For people who are not programmers: a reliability release — safer updates with backups, fewer ways for a task to get stuck, more honest cost numbers, and smoother handling of files.
 
-Safety
-- Roles are now enforced where they were missing: only operators and admins can change settings, agents and providers (and run MCP commands); task actions (start, follow-up, cancel, delete, upload) need at least the task-setter role. Viewers (reviewers) can still look, approve and answer questions. Your own account is unaffected.
-- A request for a folder name instead of a file (e.g. an attachment called "..") could shut the whole server down — fixed. Attachments with non-Latin names (кухня.docx) now download.
-- The assistant in the chat can no longer read files that hold sign-in tokens; empty folder settings can no longer open everything; research pages are capped when unpacked; the wizard password check is rate-limited.
-- If the approval hook cannot run, the action is now BLOCKED instead of silently allowed (and its timeout is in the right units).
+Updates and backups
+- "aigentron backup" / "aigentron restore": one archive with the database, secrets, your agents, skills, library, attachments and workspace (a timer for daily backups is available, off by default). Before every update the database is snapshotted; if the new version does not come up healthy the update rolls itself back, snapshot included.
+- A fresh install now sets a random operator password and shows it once (also saved in secrets/initial-password.txt). Existing installs are untouched.
+- Release archives are checked against SHA256SUMS when the release provides them.
+- Approvals and questions left over from a previous run are closed when the server starts, so nothing waits forever.
 
-Stability
-- Cancelling a task can no longer bring it back to life; a single database hiccup can no longer stop the queue.
-- git fetch for the project repository no longer sends a duplicate credential header (it failed silently before — now a failure is logged).
-- Telegram: approval requests are clipped to Telegram's limit so they are always delivered; questions and approvals of a subtask go to the chat of the task that created it; commands like /tasks@MyBot work in groups.
-- Files: attachment names cannot start with a dot.
+Tasks that get stuck less
+- Two follow-ups sent at the same time run one after the other, never twice at once; cancelling or deleting a running task waits for the run to stop; a cancelled task never comes back.
+- A task waiting for your answer (ask_user or an approval) no longer runs out of time while you think.
+- If the provider fails on a follow-up, the task ends "stalled" with the provider's own error message instead of silently switching models.
+- The administrator instructions from Settings now really are added for every agent, as the screen says.
 
 Cost
-- The project map and the workspace memory are no longer part of the system prompt, so the provider's cache of the long, stable part survives between follow-ups (cheaper repeated messages).
+- Token and cost statistics no longer add the same session's totals again on every follow-up (they were overstated). Daily/per-task token budgets now count cache tokens too, so existing limits are effectively stricter (roughly 5–10 times); raise BUDGET_TOKENS_PER_TASK / BUDGET_TOKENS_PER_DAY if tasks get blocked. Sessions started before this update are counted once from the update on.
 
-Updates
-- Before every update migration the database is snapshotted (backups/pre-<version>.db, last 3 kept). If the migration fails the snapshot is restored automatically; "aigentron rollback" offers to restore it too. A stuck "update running" status expires after 30 minutes.
+Files
+- Clips recorded by the browser camera (Chrome/Android) can be looked at by the agents; videos over 95 MB are refused with a clear message (the limit behind Cloudflare); an attachment can only be added to an existing task (1 GB per task); the assistant can read only the attachments of its own task; old versions in the workspace's deliverables are rotated.
 
 Dashboard
-- The first load is smaller (main script 634 → 433 kB), the assistant animation loads after the page is ready, the task page no longer keeps the previous task's state when you move between tasks, and approvals are shown once on the home page.
+- Live lines are no longer lost while a conversation loads and are re-synced after a lost connection; long conversations re-render less; background refreshes pause in hidden tabs.
 
-Update note: no database changes.
+Update note: the database gets a migration (foreign keys, indexes; orphaned rows are cleaned) — a snapshot is taken first.

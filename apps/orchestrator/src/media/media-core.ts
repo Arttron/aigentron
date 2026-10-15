@@ -3,7 +3,7 @@
 export const VIDEO_EXTS = ['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', '3gp'] as const;
 export const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif'] as const;
 
-export const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 300 * 1024 * 1024; // what a digest will process (a file already on disk)
 export const MAX_VIDEO_SECONDS = 20 * 60;
 export const MAX_FRAMES = 24;
 /** When the caller picks the interval, up to this many frames (a longer clip gets a larger step). */
@@ -103,13 +103,23 @@ export interface ProbeResult {
 
 /** `ffprobe -print_format json -show_format -show_streams` output → what we need. null = not a readable video. */
 export function parseProbe(json: unknown): ProbeResult | null {
-  const j = (json && typeof json === 'object' ? json : {}) as { format?: { duration?: string | number }; streams?: { codec_type?: string; width?: number; height?: number; duration?: string | number }[] };
+  type Stream = { codec_type?: string; width?: number; height?: number; duration?: string | number; tags?: Record<string, string> };
+  const j = (json && typeof json === 'object' ? json : {}) as { format?: { duration?: string | number; tags?: Record<string, string> }; streams?: Stream[] };
   const streams = Array.isArray(j.streams) ? j.streams : [];
   const video = streams.find((s) => s.codec_type === 'video');
   if (!video) return null;
-  const dur = Number(j.format?.duration ?? video.duration ?? 0);
-  if (!Number.isFinite(dur) || dur <= 0) return null;
+  // Browser-recorded webm (MediaRecorder) has no format duration: try the stream's own, then its DURATION tag ("00:00:05.120"), then the audio stream's.
+  const candidates = [j.format?.duration, video.duration, tagDuration(video.tags), tagDuration(j.format?.tags), ...streams.map((s) => s.duration), ...streams.map((s) => tagDuration(s.tags))];
+  const dur = candidates.map((c) => Number(c)).find((n) => Number.isFinite(n) && n > 0) ?? 0;
+  if (!(dur > 0)) return null;
   return { durationSec: dur, width: Number(video.width ?? 0), height: Number(video.height ?? 0), hasAudio: streams.some((s) => s.codec_type === 'audio') };
+}
+
+/** `DURATION` tag "HH:MM:SS.fff" → seconds (undefined when absent / not that shape). */
+function tagDuration(tags: Record<string, string> | undefined): number | undefined {
+  const v = tags?.DURATION ?? tags?.duration;
+  const m = typeof v === 'string' ? /^(\d+):(\d{1,2}):(\d{1,2}(?:\.\d+)?)$/.exec(v.trim()) : null;
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) : undefined;
 }
 
 /**

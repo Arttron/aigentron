@@ -3,7 +3,7 @@ import { createWriteStream } from 'node:fs';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
 import { appendFile, copyFile, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AppConfigService } from '../config/app-config.service';
 import { insideRoot } from '../media/media-core';
 import {
@@ -31,6 +31,9 @@ import {
   type NoteKind,
 } from './workspace-core';
 
+/** Earlier versions of an overwritten deliverable: the newest few, and nothing older than this many days (the latest one is always kept). */
+const VERSIONS_KEPT = 5;
+const VERSIONS_MAX_DAYS = 90;
 const FOLDERS = ['memory', 'work', 'deliverables'] as const;
 type Folder = (typeof FOLDERS)[number];
 
@@ -146,7 +149,7 @@ export class WorkspaceService implements OnModuleInit {
   }
 
   /** Saves a result into deliverables/. `from` must be a file of this task (attachments / workspace / `allowFrom`). */
-  async save(raw: { path: string; content?: string; from?: string; note?: string }, allowFrom: readonly string[] = [], onSaved?: (dest: string) => Promise<string | undefined>): Promise<string> {
+  async save(raw: { path: string; content?: string; from?: string; note?: string }, allowFrom: readonly string[] = [], onSaved?: (dest: string) => Promise<string | undefined>, taskAttachmentsDir?: string): Promise<string> {
     // models often send the unused argument as an empty string — that means "not given"
     const from = raw.from?.trim() ? raw.from.trim() : undefined;
     const input = { ...raw, from, content: from && !raw.content ? undefined : raw.content };
@@ -167,7 +170,7 @@ export class WorkspaceService implements OnModuleInit {
     if (input.from !== undefined) {
       if (!input.from.startsWith('/')) throw new Error('`from` must be the full path of the file.');
       const real = await realpath(input.from).catch(() => '');
-      const roots = await Promise.all([this.config.attachmentsDir, this.root, ...allowFrom].map((r) => realpath(r).catch(() => r)));
+      const roots = await Promise.all([taskAttachmentsDir ?? this.config.attachmentsDir, this.root, ...allowFrom].map((r) => realpath(r).catch(() => r)));
       if (!real || !insideRoot(real, roots)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
       // a sign-in token or env file is never a deliverable, wherever it sits (a deliverable is served to everyone who can open the task)
       if (looksSecret(real) || looksSecret(input.from)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
@@ -186,6 +189,7 @@ export class WorkspaceService implements OnModuleInit {
         const keep = join(this.root, 'deliverables', '.versions', `${rel}.${new Date().toISOString().replace(/[:.]/g, '-')}`);
         await mkdir(dirname(keep), { recursive: true });
         await copyFile(dest, keep);
+        await this.rotateVersions(keep, basename(rel)).catch(() => undefined); // best effort: a failed cleanup must not fail the save
       }
       if (source) await copyFile(source, dest);
       else await writeFile(dest, input.content ?? '');
@@ -194,6 +198,17 @@ export class WorkspaceService implements OnModuleInit {
       const extra = onSaved ? await onSaved(dest).catch(() => undefined) : undefined;
       return `Saved ${human(bytes)} to ${dest}${existed ? ' (the previous version was kept)' : ''}.${extra ? ` ${extra}` : ' Mention this path to the person.'}`;
     });
+  }
+
+  /** Keep only the newest VERSIONS_KEPT old versions of one file (and none older than VERSIONS_MAX_DAYS, but always the latest one). */
+  private async rotateVersions(justKept: string, base: string): Promise<void> {
+    const dir = dirname(justKept);
+    const mine = (await readdir(dir)).filter((n) => n.startsWith(`${base}.`) && /\.\d{4}-\d{2}-\d{2}T[\d-]+Z$/.test(n)).sort().reverse(); // ISO stamps sort by time
+    const cut = Date.now() - VERSIONS_MAX_DAYS * 86_400_000;
+    for (const [i, n] of mine.entries()) {
+      const at = Date.parse(n.slice(n.lastIndexOf('.') + 1).replace(/T(\d\d)-(\d\d)-(\d\d)-(\d+)Z$/, 'T$1:$2:$3.$4Z')); // the name holds the moment it was replaced
+      if (i >= VERSIONS_KEPT || (i > 0 && Number.isFinite(at) && at < cut)) await rm(join(dir, n), { force: true }).catch(() => undefined);
+    }
   }
 
   /** Files of the workspace (all three folders, or one) with sizes and dates. */

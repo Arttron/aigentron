@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { pipeFile } from '../media/pipe-file';
 import { serveWithRanges } from '../media/serve-range';
@@ -34,9 +34,13 @@ export class ResourcesController {
   upload(@Req() req: Request) {
     const dec = (h: string) => {
       const v = req.header(h);
-      return v ? decodeURIComponent(v) : undefined;
+      try {
+        return v ? decodeURIComponent(v) : undefined;
+      } catch {
+        throw new BadRequestException(`The ${h} header is not valid (it must be URL-encoded).`);
+      }
     };
-    return this.resources.upload(dec('x-filename') ?? 'upload', req, { title: dec('x-title'), description: dec('x-description'), tags: dec('x-tags') });
+    return this.resources.upload(dec('x-filename') ?? 'upload', req, { title: dec('x-title'), description: dec('x-description'), tags: dec('x-tags') }, Number(req.header('content-length')) > 0 ? Number(req.header('content-length')) : undefined);
   }
 
   @Get(':id')

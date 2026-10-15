@@ -33,6 +33,11 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
   private tail: string[] = [];
   /** Serializes regenerate+restart calls so concurrent route CRUD can't race two restarts. */
   private queue: Promise<void> = Promise.resolve();
+  /** >0 while a `batch()` is open: route changes only mark the config dirty; one regenerate runs at the end (E-25). */
+  private batchDepth = 0;
+  private batchDirty = false;
+  /** The config the running child was started with — an identical render needs no restart (X-MEM-1). */
+  private runningYaml: string | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -48,6 +53,25 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
     this.child?.kill();
   }
 
+  /**
+   * Group several route changes behind ONE regenerate+restart (and none at all
+   * when the rendered config did not change). The boot-time resync of every
+   * provider used to restart litellm up to twice per provider, each restart
+   * cutting the live agent streams.
+   */
+  async batch<T>(fn: () => Promise<T>): Promise<T> {
+    this.batchDepth += 1;
+    try {
+      return await fn();
+    } finally {
+      this.batchDepth -= 1;
+      if (this.batchDepth === 0 && this.batchDirty) {
+        this.batchDirty = false;
+        await this.regenerateAndRestart();
+      }
+    }
+  }
+
   async registerRoute(
     name: string,
     backend: string,
@@ -58,7 +82,7 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
       create: { name, backend, apiBase: params.apiBase, apiKey: params.apiKey || null, rpm: params.rpm, tpm: params.tpm, dropReasoning: params.dropReasoning },
       update: { backend, apiBase: params.apiBase, apiKey: params.apiKey || null, rpm: params.rpm, tpm: params.tpm, dropReasoning: params.dropReasoning },
     });
-    await this.regenerateAndRestart();
+    await this.changed();
   }
 
   async ensureRoute(
@@ -72,7 +96,16 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
 
   async deleteRoutesFor(namePrefix: string): Promise<void> {
     const deleted = await this.prisma.managedLitellmRoute.deleteMany({ where: { name: { startsWith: namePrefix } } });
-    if (deleted.count) await this.regenerateAndRestart();
+    if (deleted.count) await this.changed();
+  }
+
+  /** A route row changed: regenerate now, or at the end of the open batch. */
+  private async changed(): Promise<void> {
+    if (this.batchDepth > 0) {
+      this.batchDirty = true;
+      return;
+    }
+    await this.regenerateAndRestart();
   }
 
   /** Serialized entry point: queue this regenerate+restart behind any in-flight one. */
@@ -87,9 +120,15 @@ export class LitellmManagedService implements OnModuleInit, OnModuleDestroy {
   private async doRegenerateAndRestart(): Promise<void> {
     const routes = await this.prisma.managedLitellmRoute.findMany({ orderBy: { name: 'asc' } });
     const yaml = renderLitellmConfig(routes);
+    const alive = Boolean(this.child) && this.child!.exitCode === null && this.child!.signalCode === null;
+    if (alive && yaml === this.runningYaml) {
+      this.logger.debug('litellm config unchanged — no restart');
+      return;
+    }
     await mkdir(dirname(this.config.litellmManagedConfigPath), { recursive: true });
     await writeFile(this.config.litellmManagedConfigPath, yaml);
     await this.restartChild();
+    this.runningYaml = yaml;
   }
 
   private async restartChild(): Promise<void> {

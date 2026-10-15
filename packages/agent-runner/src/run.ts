@@ -68,6 +68,8 @@ import type {
   AgentEventHandler,
   AgentRunResult,
   RunAgentParams,
+  RunUsage,
+  SessionTotals,
 } from './types';
 
 /**
@@ -85,6 +87,19 @@ interface SdkContentBlock {
   content?: unknown;
   is_error?: boolean;
 }
+type SdkUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+};
+type SdkModelUsage = {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  costUSD?: number;
+};
 type SdkMessage = {
   type: string;
   subtype?: string;
@@ -95,15 +110,22 @@ type SdkMessage = {
   num_turns?: number;
   total_cost_usd?: number;
   duration_api_ms?: number;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_read_input_tokens?: number | null;
-    cache_creation_input_tokens?: number | null;
-  };
+  usage?: SdkUsage;
+  /** Per-model running totals of the session (subagents included; restored on resume). */
+  modelUsage?: Record<string, SdkModelUsage>;
+  /** Set on messages a subagent produced (its tool_use id in the lead's loop). */
+  parent_tool_use_id?: string | null;
   mcp_servers?: { name: string; status?: string }[];
-  message?: { content?: SdkContentBlock[] | string };
+  message?: { id?: string; usage?: SdkUsage; content?: SdkContentBlock[] | string };
 };
+
+/**
+ * stderr of the Claude CLI is unbounded and chatty when it retries; cap each
+ * chunk and the number of chunks surfaced per run so a looping CLI cannot flood
+ * the transcript (X-RUN-2). The caller does not count stderr as progress.
+ */
+const STDERR_CHUNK_CHARS = 2000;
+const STDERR_MAX_CHUNKS = 200;
 interface SdkQueryOptions {
   cwd?: string;
   env?: Record<string, string>;
@@ -270,6 +292,26 @@ function num(v: number | null | undefined): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+/**
+ * The session's running totals from a result message: `modelUsage` summed over
+ * models (subagents included) when the SDK provides it, else the main-loop
+ * `usage`; cost is always `total_cost_usd`. Exported for tests.
+ */
+export function sessionTotalsOf(msg: Pick<SdkMessage, 'modelUsage' | 'total_cost_usd'>, mainLoop: RunUsage): SessionTotals {
+  const models = Object.values(msg.modelUsage ?? {});
+  if (!models.length) {
+    return { inputTokens: mainLoop.inputTokens, outputTokens: mainLoop.outputTokens, cacheReadTokens: mainLoop.cacheReadTokens, cacheCreationTokens: mainLoop.cacheCreationTokens, costUsd: num(msg.total_cost_usd) };
+  }
+  const t = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: num(msg.total_cost_usd) };
+  for (const m of models) {
+    t.inputTokens += num(m.inputTokens);
+    t.outputTokens += num(m.outputTokens);
+    t.cacheReadTokens += num(m.cacheReadInputTokens);
+    t.cacheCreationTokens += num(m.cacheCreationInputTokens);
+  }
+  return t;
+}
+
 function summarizeInput(input: Record<string, unknown>): string {
   const cmd = input.command ?? input.file_path ?? input.path ?? input.pattern;
   if (typeof cmd === 'string') return cmd.length > 200 ? `${cmd.slice(0, 200)}…` : cmd;
@@ -355,6 +397,10 @@ export async function runAgent(
     usage: emptyUsage(),
   };
 
+  let stderrChunks = 0;
+  // Per-step usage, one API response at a time: parallel tool calls share one message id.
+  const seenStepIds = new Set<string>();
+
   const stream = query({
     prompt: params.prompt,
     options: {
@@ -382,10 +428,16 @@ export async function runAgent(
       // The PreToolUse hook is authoritative; default mode defers to it.
       permissionMode: 'default',
       abortController: params.abortController,
-      stderr: (data: string) => onEvent({ kind: 'stderr', text: data }),
+      stderr: (data: string) => {
+        stderrChunks += 1;
+        if (stderrChunks > STDERR_MAX_CHUNKS) {
+          if (stderrChunks === STDERR_MAX_CHUNKS + 1) onEvent({ kind: 'stderr', text: `(further stderr output muted — ${STDERR_MAX_CHUNKS} chunks reached)` });
+          return;
+        }
+        onEvent({ kind: 'stderr', text: data.length > STDERR_CHUNK_CHARS ? `${data.slice(0, STDERR_CHUNK_CHARS)}…` : data });
+      },
     },
   });
-
   try {
     for await (const msg of stream) {
       params.onProgress?.();
@@ -401,6 +453,12 @@ export async function runAgent(
           text: `agent started — provider=${params.providerLabel} model=${msg.model ?? params.modelLabel}${mcp}`,
         });
       } else if (msg.type === 'assistant') {
+        const id = msg.message?.id;
+        const u = msg.message?.usage;
+        if (params.onPartialUsage && u && !msg.parent_tool_use_id && (!id || !seenStepIds.has(id))) {
+          if (id) seenStepIds.add(id);
+          params.onPartialUsage({ inputTokens: num(u.input_tokens), cacheReadTokens: num(u.cache_read_input_tokens), cacheCreationTokens: num(u.cache_creation_input_tokens) });
+        }
         for (const ev of blocksToEvents(msg.message?.content)) onEvent(ev);
       } else if (msg.type === 'user') {
         for (const ev of blocksToEvents(msg.message?.content)) onEvent(ev);
@@ -412,6 +470,10 @@ export async function runAgent(
         // Usage arrives on the result message (snake_case, per the SDK's
         // NonNullableUsage). Coerce null/undefined → 0 so downstream stats never
         // see NaN. `num_turns` ≈ requests; `total_cost_usd` is SDK-estimated.
+        // `usage` covers this call's main loop only; `modelUsage` and
+        // `total_cost_usd` are the SESSION's running totals (subagents included,
+        // earlier calls restored on resume) — handed over as `sessionTotals` for
+        // the caller to store the delta of (X-COST-1/2).
         const u = msg.usage ?? {};
         result.usage = {
           inputTokens: num(u.input_tokens),
@@ -422,6 +484,7 @@ export async function runAgent(
           costUsd: num(msg.total_cost_usd),
           apiMs: num(msg.duration_api_ms),
         };
+        result.sessionTotals = sessionTotalsOf(msg, result.usage);
         onEvent({
           kind: 'result',
           isError: Boolean(msg.is_error),

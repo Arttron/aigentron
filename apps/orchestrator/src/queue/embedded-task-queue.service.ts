@@ -127,7 +127,8 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
       // processor itself; the job is spent either way.
       this.logger.error(`Job ${job.id} (task ${data.taskId}) failed: ${(err as Error).message}`);
     } finally {
-      await this.prisma.queueJob.delete({ where: { id: job.id } }).catch((err) => {
+      // deleteMany: the row may already be gone (its task was deleted — the job cascades with it).
+      await this.prisma.queueJob.deleteMany({ where: { id: job.id } }).catch((err) => {
         this.logger.warn(`Job ${job.id}: could not delete the spent row (it is dropped at the next start): ${(err as Error).message}`);
       });
     }

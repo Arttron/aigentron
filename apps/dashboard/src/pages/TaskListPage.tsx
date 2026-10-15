@@ -71,17 +71,30 @@ export function TaskListPage() {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Only the newest request may write state: an older one is aborted, and a late answer is ignored.
+  const inflight = useRef<AbortController | null>(null);
+  const reqId = useRef(0);
   const refreshTasks = useCallback(() => {
+    inflight.current?.abort();
+    const ctl = new AbortController();
+    inflight.current = ctl;
+    const mine = ++reqId.current;
+    const fresh = () => mine === reqId.current && !ctl.signal.aborted;
     api
-      .listTasks({ q: q.trim() || undefined, type: type || undefined, status: status || undefined, page, pageSize: PAGE_SIZE })
+      .listTasks({ q: q.trim() || undefined, type: type || undefined, status: status || undefined, page, pageSize: PAGE_SIZE }, ctl.signal)
       .then((r) => {
+        if (!fresh()) return;
         setTasks(r.items);
         setTotal(r.total);
+        setError(null);
       })
-      .catch((e) => setError((e as Error).message));
-    api.taskTypeCounts().then(setCounts).catch(() => undefined);
-    api.taskStatusCounts(type || undefined).then(setStatusCounts).catch(() => undefined);
+      .catch((e) => {
+        if (fresh()) setError((e as Error).message);
+      });
+    api.taskTypeCounts(ctl.signal).then((c) => fresh() && setCounts(c)).catch(() => undefined);
+    api.taskStatusCounts(type || undefined, ctl.signal).then((c) => fresh() && setStatusCounts(c)).catch(() => undefined);
   }, [q, type, status, page]);
+  useEffect(() => () => inflight.current?.abort(), []);
 
   const removeTask = useCallback(
     async (id: string) => {
@@ -110,14 +123,30 @@ export function TaskListPage() {
 
   useEffect(() => {
     const socket = getSocket();
-    const onConnect = () => setConnected(true);
+    // After a break the list may be stale: refresh once on reconnect.
+    const onConnect = () => {
+      setConnected(true);
+      schedule();
+    };
     const onDisconnect = () => setConnected(false);
     setConnected(socket.connected);
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
 
-    const onTask = () => refreshRef.current();
-    const onApproval = () => refreshRef.current();
+    // Agents emit status/upsert events often: coalesce a burst into one trailing refresh (≤ 1 per second).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let last = 0;
+    const schedule = () => {
+      if (timer !== undefined) return;
+      const wait = Math.max(0, last + 1000 - Date.now());
+      timer = setTimeout(() => {
+        timer = undefined;
+        last = Date.now();
+        refreshRef.current();
+      }, wait);
+    };
+    const onTask = schedule;
+    const onApproval = schedule;
     socket.on(SERVER_EVENT.taskUpserted, onTask);
     socket.on(SERVER_EVENT.taskStatus, onTask);
     socket.on(SERVER_EVENT.taskDeleted, onTask);
@@ -125,6 +154,7 @@ export function TaskListPage() {
     socket.on(SERVER_EVENT.approvalResolved, onApproval);
 
     return () => {
+      if (timer !== undefined) clearTimeout(timer);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off(SERVER_EVENT.taskUpserted, onTask);

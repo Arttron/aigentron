@@ -1,3 +1,4 @@
+import { usePolling } from '@/lib/use-polling';
 import { useCallback, useEffect, useState } from 'react';
 import {
   api,
@@ -31,25 +32,20 @@ export function ChannelsManager() {
     }
   }, []);
 
-  // Chats that wrote to a bot but are not allowed yet: refreshed while this tab is open.
+  // Chats that wrote to a bot but are not allowed yet: refreshed while this tab is open and visible.
+  const loadWaiting = useCallback(async () => {
+    try {
+      const list = await api.listChannels();
+      const entries = await Promise.all(list.filter((c) => c.enabled).map(async (c) => [c.id, await api.listPairings(c.id).catch(() => [])] as const));
+      setWaiting(Object.fromEntries(entries.filter(([, v]) => v.length)));
+    } catch {
+      /* not fatal */
+    }
+  }, []);
   useEffect(() => {
-    let live = true;
-    const load = async () => {
-      try {
-        const list = await api.listChannels();
-        const entries = await Promise.all(list.filter((c) => c.enabled).map(async (c) => [c.id, await api.listPairings(c.id).catch(() => [])] as const));
-        if (live) setWaiting(Object.fromEntries(entries.filter(([, v]) => v.length)));
-      } catch {
-        /* not fatal */
-      }
-    };
-    void load();
-    const t = setInterval(load, 5000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, [channels.length]);
+    void loadWaiting();
+  }, [channels.length, loadWaiting]);
+  usePolling(() => void loadWaiting(), 5000);
 
   useEffect(() => {
     refresh();

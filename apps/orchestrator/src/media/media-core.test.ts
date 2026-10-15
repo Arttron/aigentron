@@ -16,6 +16,11 @@ describe('parseProbe', () => {
     expect(parseProbe({ format: { duration: '12.5' }, streams: [{ codec_type: 'video', width: 1920, height: 1080 }, { codec_type: 'audio' }] })).toEqual({ durationSec: 12.5, width: 1920, height: 1080, hasAudio: true });
     expect(parseProbe({ format: { duration: '3' }, streams: [{ codec_type: 'video', width: 640, height: 480 }] })?.hasAudio).toBe(false);
   });
+  it('reads the length of a browser-recorded clip that has none in the format (stream or tag)', () => {
+    expect(parseProbe({ format: {}, streams: [{ codec_type: 'video', width: 64, height: 48, tags: { DURATION: '00:00:05.120000000' } }] })?.durationSec).toBeCloseTo(5.12);
+    expect(parseProbe({ format: {}, streams: [{ codec_type: 'video', duration: '2.5' }, { codec_type: 'audio' }] })?.durationSec).toBe(2.5);
+    expect(parseProbe({ format: { duration: 'N/A' }, streams: [{ codec_type: 'video' }] })).toBeNull();
+  });
   it('rejects things that are not a video', () => {
     expect(parseProbe({ format: { duration: '3' }, streams: [{ codec_type: 'audio' }] })).toBeNull();
     expect(parseProbe({})).toBeNull();

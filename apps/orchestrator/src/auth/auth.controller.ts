@@ -26,7 +26,7 @@ export class AuthController {
 
   private trusted: { at: number; ips: string[] } = { at: 0, ips: [] };
 
-  /** Peers whose `cf-connecting-ip` we believe: TRUSTED_PROXY (comma list) plus the `cloudflared` container of the compose stack. */
+  /** Peers whose `cf-connecting-ip` we believe: TRUSTED_PROXY (comma list of IPs or CIDRs; Cloudflare's own ranges are built in, TRUST_CLOUDFLARE=0 turns that off) plus the `cloudflared` container of the compose stack. */
   private async trustedPeers(): Promise<string[]> {
     if (Date.now() - this.trusted.at < 60_000) return this.trusted.ips;
     const fromEnv = (process.env.TRUSTED_PROXY ?? '').split(',').map((x) => x.trim()).filter(Boolean);
@@ -37,7 +37,7 @@ export class AuthController {
 
   private async clientKey(req: Request): Promise<string> {
     const cf = req.headers['cf-connecting-ip'];
-    return clientAddress(Array.isArray(cf) ? cf[0] : cf, req.socket.remoteAddress || 'unknown', await this.trustedPeers());
+    return clientAddress(Array.isArray(cf) ? cf[0] : cf, req.socket.remoteAddress || 'unknown', await this.trustedPeers(), !/^(0|false|no)$/i.test(process.env.TRUST_CLOUDFLARE ?? ''));
   }
 
   private setCookie(req: Request, res: Response, token: string): void {

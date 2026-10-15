@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ATTACH_ACCEPT, hasLiveCamera, prepareFile } from '@/lib/capture';
 import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { CameraCapture } from '@/components/CameraCapture';
+import { uploadSizeError } from '@/lib/upload-limits';
 import { api, type AgentInfo } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
 import { DiscussionModal } from '@/components/DiscussionModal';
@@ -26,6 +27,10 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
   const [discussing, setDiscussing] = useState(false);
   const navigate = useNavigate();
   const stage = async (files: File[]) => {
+    // too big for the proxy → say so now, before a task is created without its file
+    const tooBig = files.map(uploadSizeError).find(Boolean);
+    if (tooBig) setError(tooBig);
+    files = files.filter((f) => !uploadSizeError(f));
     const ready = await Promise.all(files.map(prepareFile));
     setStaged((s) => [...s, ...ready]);
   };

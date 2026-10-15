@@ -169,6 +169,14 @@ export class LitellmService {
     }
   }
 
+  /**
+   * Group route changes: in the managed profile they cause ONE restart at the
+   * end (none when the config is unchanged); elsewhere this just runs `fn`.
+   */
+  batch<T>(fn: () => Promise<T>): Promise<T> {
+    return this.config.litellmManaged ? this.managed.batch(fn) : fn();
+  }
+
   /** Register `<provider>/<model>` → `<backend>/<model>` (replacing any prior). */
   async registerRoute(
     provider: string,

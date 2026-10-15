@@ -35,6 +35,15 @@ export interface WorkspaceConfig {
 }
 
 /**
+ * How long a loaded row is served from memory (E-10). Every accessor used to be
+ * a `findUnique`: ≈ 8 queries at the start of one run plus the worker's poll
+ * every 10 s. Writes through this service refresh the cache at once; a write by
+ * ANOTHER instance (full profile with several orchestrators) is seen within
+ * this window.
+ */
+const CACHE_TTL_MS = 3000;
+
+/**
  * Runtime configuration store. Seeded from environment on first use, then the
  * DB row is authoritative — the orchestrator reads it at agent-spawn time, so
  * the dashboard can change routing/keys without recreating the container.
@@ -42,14 +51,27 @@ export interface WorkspaceConfig {
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+  private cache: { row: SettingsRow; at: number } | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
   ) {}
 
-  /** Load the singleton, seeding from environment defaults on first call. */
+  /** Load the singleton (served from memory for a few seconds), seeding from environment defaults on first call. */
   async load(): Promise<SettingsRow> {
+    if (this.cache && Date.now() - this.cache.at < CACHE_TTL_MS) return this.cache.row;
+    const row = await this.loadFresh();
+    this.cache = { row, at: Date.now() };
+    return row;
+  }
+
+  /** Forget the cached row (the next accessor reads the DB). */
+  invalidate(): void {
+    this.cache = null;
+  }
+
+  private async loadFresh(): Promise<SettingsRow> {
     const existing = await this.prisma.appSettings.findUnique({ where: { id: SINGLETON_ID } });
     if (existing) return existing;
 
@@ -85,6 +107,7 @@ export class SettingsService {
       where: { id: SINGLETON_ID },
       data: patch,
     });
+    this.cache = { row: updated, at: Date.now() };
     this.logger.log('Settings updated');
     return updated;
   }
@@ -100,10 +123,11 @@ export class SettingsService {
    */
   async markSkillConsolidationRun(): Promise<void> {
     await this.load();
-    await this.prisma.appSettings.update({
+    const updated = await this.prisma.appSettings.update({
       where: { id: SINGLETON_ID },
       data: { lastSkillConsolidationAt: new Date() },
     });
+    this.cache = { row: updated, at: Date.now() };
   }
 
   /** Verification commands (one per line) run in the worktree after a run. */

@@ -90,4 +90,18 @@ rollup later only if history grows large enough to matter.
 
 - Stats populate **from the Phase 1 deploy onward**; pre-existing sessions have empty usage
   columns and will show as 0 / "—". Expected.
+- **Cost recalculated from 0.1.60 (2026-10-15).** The SDK's `total_cost_usd` and `modelUsage` are
+  running totals of the whole Claude session, restored on every resume; each follow-up and each
+  reporting-resume used to store the full total again, so Stats grew ≈ quadratically with the
+  number of follow-ups. A session row now holds the **delta** (session totals at the end of the run
+  minus what earlier rows of the same Claude session already hold); `usage-accounting.ts`.
+  Historical rows are not recalculated: figures before that date are overstated for tasks with
+  follow-ups, and the first follow-ups of a session that started before the upgrade may be
+  under-counted once (the delta is clamped at 0).
+- Tokens come from `modelUsage` (subagents and compaction included) instead of the main-loop
+  `usage`, so a lead that delegates now shows its subagents' tokens. A run that never reaches its
+  result message (cancel, timeout, transport error) stores the per-step input/cache tokens of
+  what ran (output tokens and cost are not recoverable → 0).
+- Codex sessions always show `—` for cost (the runtime reports no price; subscription or API key
+  alike), and "Requests" counts Codex turns but Claude API requests.
 - Delivery: phases 1 → 2 → 3, one commit each.

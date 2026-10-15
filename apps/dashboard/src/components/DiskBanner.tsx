@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { usePolling } from '@/lib/use-polling';
 import { api } from '@/lib/api';
 import { formatBytes } from '@/lib/format-bytes';
 import styles from './AuthGate.module.css';
@@ -16,20 +17,13 @@ export function DiskBanner() {
     }
   });
 
-  useEffect(() => {
-    let live = true;
-    const poll = () =>
-      api
-        .diskStatus()
-        .then((d) => live && setDisk(d))
-        .catch(() => undefined); // a person without the manager role simply sees nothing
-    void poll();
-    const t = setInterval(poll, 60_000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, []);
+  const poll = () =>
+    void api
+      .diskStatus()
+      .then(setDisk)
+      .catch(() => undefined); // a person without the manager role simply sees nothing
+  useEffect(poll, []);
+  usePolling(poll, 60_000);
 
   if (!disk || disk.level === 'ok' || hiddenFor === disk.level) return null; // dismissing "warn" does not hide a later "critical"
   const critical = disk.level === 'critical';

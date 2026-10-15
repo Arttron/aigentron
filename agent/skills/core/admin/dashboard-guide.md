@@ -60,7 +60,7 @@ Shared folder for non-code work: `WORKSPACE.md` (the brief — the person edits 
 
 ## Stats (`/stats`)
 
-Tokens and requests per provider: Today, 7 days, 30 days, All time.
+By provider: tokens, requests, cost (Codex "—"); Today/7/30 days/all. Before 2026-10-15 follow-ups were over-counted.
 
 ## Settings (`/settings`) — tabs
 
@@ -92,7 +92,7 @@ Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N 
 
 ## Approvals
 
-A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails (not mine): `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` block a task. Approvals time out (deny) per Settings → General → Approvals.
+A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails (not mine): `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` (incl. cache) block a task. Approvals time out (deny) per Settings → General → Approvals.
 
 ## Questions from agents
 

@@ -11,6 +11,7 @@ import type {
   User,
   UserRole,
 } from '@lds/shared';
+import { uploadSizeError } from './upload-limits';
 import { API_BASE } from './config';
 
 /** Body for create/update user. */
@@ -474,7 +475,7 @@ export const api = {
   getMcpStatus: () =>
     fetch(`${API_BASE}/mcp/status`, { cache: 'no-store' }).then(unwrap<McpHostStatus>),
 
-  listTasks: (params: ListTasksParams = {}) => {
+  listTasks: (params: ListTasksParams = {}, signal?: AbortSignal) => {
     const qs = new URLSearchParams();
     if (params.q) qs.set('q', params.q);
     if (params.type) qs.set('type', params.type);
@@ -482,7 +483,7 @@ export const api = {
     if (params.page) qs.set('page', String(params.page));
     if (params.pageSize) qs.set('pageSize', String(params.pageSize));
     const suffix = qs.toString() ? `?${qs}` : '';
-    return fetch(`${API_BASE}/tasks${suffix}`, { cache: 'no-store' })
+    return fetch(`${API_BASE}/tasks${suffix}`, { cache: 'no-store', signal })
       .then(unwrap<TaskPage | TaskListItem[]>)
       .then((data): TaskPage =>
         // Tolerate an orchestrator that hasn't restarted yet (old array shape).
@@ -492,9 +493,9 @@ export const api = {
       );
   },
 
-  taskStatusCounts: (type?: TaskTypeFilter) =>
-    fetch(`${API_BASE}/tasks/status-counts${type ? `?type=${type}` : ''}`, { cache: 'no-store' }).then(unwrap<Record<TaskStatusFilter, number>>),
-  taskTypeCounts: () => fetch(`${API_BASE}/tasks/type-counts`, { cache: 'no-store' }).then(unwrap<Record<TaskTypeFilter | 'all', number>>),
+  taskStatusCounts: (type?: TaskTypeFilter, signal?: AbortSignal) =>
+    fetch(`${API_BASE}/tasks/status-counts${type ? `?type=${type}` : ''}`, { cache: 'no-store', signal }).then(unwrap<Record<TaskStatusFilter, number>>),
+  taskTypeCounts: (signal?: AbortSignal) => fetch(`${API_BASE}/tasks/type-counts`, { cache: 'no-store', signal }).then(unwrap<Record<TaskTypeFilter | 'all', number>>),
 
   getTask: (id: string) =>
     fetch(`${API_BASE}/tasks/${id}`, { cache: 'no-store' }).then(unwrap<TaskDetail>),
@@ -805,15 +806,19 @@ export const api = {
       unwrap<AttachmentMeta[]>,
     ),
 
-  uploadAttachment: (id: string, file: File) =>
-    fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/attachments`, {
+  uploadAttachment: (id: string, file: File) => {
+    // refuse before sending: the proxy would answer a too-big body with a raw HTML 413
+    const tooBig = uploadSizeError(file);
+    if (tooBig) return Promise.reject(new Error(tooBig));
+    return fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/attachments`, {
       method: 'POST',
       headers: {
         'content-type': file.type || 'application/octet-stream',
         'x-filename': encodeURIComponent(file.name),
       },
       body: file,
-    }).then(unwrap<AttachmentMeta>),
+    }).then(unwrap<AttachmentMeta>);
+  },
 
   workspaceSummary: () => fetch(`${API_BASE}/workspace`, { cache: 'no-store' }).then(unwrap<WorkspaceSummary>),
   workspaceList: (path: string) =>

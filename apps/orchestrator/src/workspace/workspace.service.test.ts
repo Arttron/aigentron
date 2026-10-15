@@ -50,6 +50,32 @@ describe('WorkspaceService', () => {
     expect(await svc.digest()).toBe('');
   });
 
+  it('keeps only the newest 5 earlier versions of a deliverable, and drops those older than 90 days', async () => {
+    await svc.save({ path: 'a.md', content: 'v0' });
+    const vdir = join(root(), 'deliverables', '.versions');
+    await mkdir(vdir, { recursive: true });
+    await writeFile(join(vdir, 'a.md.2020-01-01T00-00-00-000Z'), 'ancient');
+    await writeFile(join(vdir, 'other.md.2020-01-01T00-00-00-000Z'), 'someone else\'s');
+    for (let i = 1; i <= 8; i++) {
+      await svc.save({ path: 'a.md', content: `v${i}` });
+      await new Promise((r) => setTimeout(r, 3)); // distinct timestamps
+    }
+    const kept = (await readdir(vdir)).filter((n) => n.startsWith('a.md.'));
+    expect(kept).toHaveLength(5);
+    expect(kept).not.toContain('a.md.2020-01-01T00-00-00-000Z');
+    expect((await readdir(vdir)).includes('other.md.2020-01-01T00-00-00-000Z')).toBe(true); // other files' history is not touched
+  });
+
+  it('copies `from` only out of the given task attachments folder, not another task\'s', async () => {
+    await mkdir(join(base, 'attachments', 'tA'), { recursive: true });
+    await mkdir(join(base, 'attachments', 'tB'), { recursive: true });
+    await writeFile(join(base, 'attachments', 'tA', 'a.txt'), 'mine');
+    await writeFile(join(base, 'attachments', 'tB', 'b.txt'), 'theirs');
+    const mine = join(base, 'attachments', 'tA');
+    await expect(svc.save({ path: 'x.txt', from: join(mine, 'a.txt') }, [], undefined, mine)).resolves.toContain('Saved');
+    await expect(svc.save({ path: 'y.txt', from: join(base, 'attachments', 'tB', 'b.txt') }, [], undefined, mine)).rejects.toThrow(/not available/);
+  });
+
   it('saves into deliverables, keeps the previous version, refuses escapes', async () => {
     expect(await svc.save({ path: 'reports/a.md', content: 'v1' })).toContain('Saved');
     expect(await svc.save({ path: 'reports/a.md', content: 'v2' })).toContain('previous version was kept');

@@ -23,6 +23,7 @@ function setup() {
   writeFileSync(join(agentDir, 'research-cache', 'old.json'), '{}');
   writeFileSync(join(agentDir, 'research-cache', 'new.json'), '{}');
   age(join(attachmentsDir, 't1', 'old.mp4.digest'), 60);
+  age(join(attachmentsDir, 't1', 'new.mp4.digest'), 1);
   age(join(agentDir, 'research-cache', 'old.json'), 400);
   const svc = new MaintenanceService({ agentDir, attachmentsDir, worktreesRoot: join(root, 'wt'), workspaceRepoPath: root } as never, { task: { findMany: async () => [] } } as never);
   return { root, agentDir, attachmentsDir, svc };
@@ -47,6 +48,14 @@ describe('cache pruning (digests and fetched pages)', () => {
     expect(r.digests).toBe(2);
     expect(existsSync(join(attachmentsDir, 't1', 'new.mp4.digest'))).toBe(false);
     expect(existsSync(join(agentDir, 'research-cache', 'new.json'))).toBe(true);
+    rmSync(root, { recursive: true });
+  });
+  it('never removes a digest built in the last minutes, even for the emergency relief', async () => {
+    const { root, attachmentsDir, svc } = setup();
+    mkdirSync(join(attachmentsDir, 't1', 'busy.mp4.digest'), { recursive: true });
+    const r = await svc.pruneCaches({ digestDays: 0 });
+    expect(r.digests).toBe(2);
+    expect(existsSync(join(attachmentsDir, 't1', 'busy.mp4.digest'))).toBe(true);
     rmSync(root, { recursive: true });
   });
   it('reports sizes and which caches are stale', async () => {

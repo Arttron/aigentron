@@ -72,9 +72,22 @@ write_status() { # state finishedAt error
 }
 write_status running "" ""
 TMP=$(mktemp -d)
+# The installer runs as root: when the release publishes SHA256SUMS, install.sh must match its entry (no SHA256SUMS = older release, allowed;
+# the installer then verifies the release ARCHIVE the same way).
+verify_installer() {
+  if curl -fsSL "https://github.com/${o.repo}/releases/download/v$VERSION/SHA256SUMS" -o "$TMP/SHA256SUMS" 2>/dev/null; then
+    want=$(awk '{ n=$2; sub(/^\\*/, "", n); if (n == "install.sh") print $1 }' "$TMP/SHA256SUMS" | head -1)
+    if [ -n "$want" ]; then
+      have=$( (sha256sum "$TMP/install.sh" 2>/dev/null || shasum -a 256 "$TMP/install.sh") | cut -d' ' -f1)
+      [ "$have" = "$want" ] || { echo "install.sh does not match SHA256SUMS - refusing to run it"; return 1; }
+    fi
+  fi
+  return 0
+}
 {
   echo "== update to v$VERSION started $STARTED"
   if curl -fsSL "https://raw.githubusercontent.com/${o.repo}/v$VERSION/install.sh" -o "$TMP/install.sh" \\
+     && verify_installer \\
      && INSTALL_MODE=bare INSTALL_DIR=${shq(o.installDir)} DATA_DIR=${shq(o.dataDir)} VERSION="$VERSION" sh "$TMP/install.sh" </dev/null; then
     echo "== update finished OK"
     OK=1

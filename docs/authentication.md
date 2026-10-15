@@ -13,6 +13,8 @@ what they may do; the session — not any header — decides who is acting.
 - **Your own password:** Settings → General → Security → *Change my password*. At least one operator/admin must always keep a password.
 - **Headless install:** set `ADMIN_PASSWORD` in `.env` before the first start; it is applied once (for the default operator) when no
   password exists yet (you can remove it afterwards). Installs with the earlier single password are migrated to the default operator automatically.
+- **Fresh `install.sh`** (never on an existing install): right after the first start it sets a random operator password through `POST /api/auth/setup` on localhost, prints it once and saves it to
+  `<data>/secrets/initial-password.txt` (0600). `NO_INITIAL_PASSWORD=1` skips this. Change it in Settings → Security (then delete the file).
 - Until a password exists nothing changes: the instance is open, and a warning is logged at startup.
   **Set it right after updating**, especially if the dashboard is reachable from outside.
 
@@ -52,7 +54,7 @@ active, with **Sign out** for each. You see your own; an **operator or admin see
 - Operators/admins: **Sign … out everywhere** ends all sessions of one person (their password stays).
 - **Changing or resetting a password ends all of that person's sessions** (when you change your own, this browser stays signed in). Removing a password does too.
 - "Sign out other browsers" under Security (everyone's) still exists; it ends every session of everyone.
-The addresses shown are the real client addresses (behind a tunnel the connecting proxy is trusted for `cf-connecting-ip`, see `TRUSTED_PROXY`). **Logging out ends the session on the server too** (the dashboard's Sign out and `aigentron logout`), so it disappears from the list and the old cookie stops working. The terminal (`aigentron`, `aigentron admin`) keeps ONE
+The addresses shown are the real client addresses (the connecting proxy is trusted for `cf-connecting-ip` when it is loopback, the `cloudflared` container, a Cloudflare edge address, or listed in `TRUSTED_PROXY` - IPs or CIDRs; `TRUST_CLOUDFLARE=0` disables the built-in Cloudflare ranges). Failed sign-ins are limited per address (5 free) and per account (15 free, up to 15 min wait). **Logging out ends the session on the server too** (the dashboard's Sign out and `aigentron logout`), so it disappears from the list and the old cookie stops working. The terminal (`aigentron`, `aigentron admin`) keeps ONE
 session in `~/.local/state/aigentron/admin-session.json` (mode 0600) and reuses it, so running it again does not add a new device each time; if that session was ended or expired it signs in again.
 Sessions signed in before this feature
 keep working until they expire, but are not listed.

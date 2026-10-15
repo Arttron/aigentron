@@ -271,9 +271,15 @@ The heart of a run. `run(ctx)`:
    (errored/aborted sessions have no saved transcript → fresh run). (`:100`)
 5. Create an `AgentSession`, wire the **hook**, record the user's message as a `prompt` event, then
    `runAgent(...)`. Every SDK event is published to the bus immediately and persisted via a serial
-   `writeChain` (ordered). A hard timeout (`AGENT_RUN_TIMEOUT_MS`, default 10 min) aborts the run.
+   `writeChain` (ordered). A hard timeout (`AGENT_RUN_TIMEOUT_MS`, default 10 min of **active** time —
+   paused while the agent waits for a person in `ask_user` or for an approval) aborts the run.
+   On a follow-up the provider chain is the primary alone: a provider failure ends the run with
+   the provider's error (`AgentRunOutcome.errorText`) instead of handing another provider just the
+   follow-up text. Usage per session row is the **delta** of the SDK's session totals (`modelUsage`,
+   subagents included) — the SDK reports running totals across resumes.
 6. `buildInstructions` (`:329`) assembles the system-prompt append **top→bottom**: global
-   `agent/SOUL.md` → project `<repo>/SOUL.md` → agent body (or the DB `agentInstructions`) → skill
+   `agent/SOUL.md` → project `<repo>/SOUL.md` → agent body → the Settings `agentInstructions`
+   (appended for **every** agent) → skill
    files (per-file cap 16 KB, total 64 KB) → colleague roster → workspace memory digest last (work agents; the workspace folders block sits in the orientation). See `docs/request-flow.md`.
 
 Note: **`SendMessage` is always disallowed** for the lead (`:195`) — delegation goes through the
@@ -624,7 +630,8 @@ Env is grouped in `.env.example` and allowlisted in `turbo.json` `globalEnv`. No
 | `ANTHROPIC_API_KEY` / `COMPLEX_MODEL` | — / claude-sonnet-4-6 | cloud tier |
 | `WORKSPACE_REPO_PATH` / `AGENT_DIR` / `WORKTREES_ROOT` | /workspace/repo · /workspace/agent · volume | paths |
 | `WORKSPACE_DIR` | next to the agent dir (`/workspace/workspace`) | shared workspace (memory/work/deliverables); host side in dev compose: `WORKSPACE_HOST_PATH` (`./workspace`) |
-| `AGENT_CONCURRENCY` / `AGENT_MAX_TURNS` / `AGENT_RUN_TIMEOUT_MS` | 2 / 40 / 600000 | `AGENT_CONCURRENCY` only seeds Settings' `concurrency` on first load — live-editable after (§6.7) |
+| `AGENT_CONCURRENCY` / `AGENT_MAX_TURNS` / `AGENT_RUN_TIMEOUT_MS` | 2 / 40 / 600000 | `AGENT_CONCURRENCY` only seeds Settings' `concurrency` on first load — live-editable after (§6.7); the run timeout counts active time only (paused while a person is asked) |
+| `BUDGET_TOKENS_PER_TASK` / `BUDGET_TOKENS_PER_DAY` | 0 / 0 | soft budgets; since 0.1.60 they count input + output + **cache** tokens, per task / per calendar day (server time) |
 | `APPROVALS_API_URL` / `APPROVAL_TIMEOUT_SECONDS` | http://orchestrator:3001 / 300 | hook callback + gate timeout |
 | `LDS_HOOK_SECRET` | randomUUID() | hook ↔ orchestrator shared secret |
 | `HOOK_SCRIPT_PATH` / `SHARED_DIST_PATH` | infra hook / resolved | hook wiring |

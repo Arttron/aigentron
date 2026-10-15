@@ -44,7 +44,7 @@ completion() {
 _aigentron() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update reset-password rollback logout version completion help -h --help -v --version" -- "$cur") )
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update backup restore backup-timer reset-password rollback logout version completion help -h --help -v --version" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   fi
@@ -74,6 +74,9 @@ _aigentron() {
     'logs:follow the server log'
     'doctor:check the common problems'
     'update:install the latest release'
+    'backup:one archive of the database, secrets, agents, files'
+    'restore:restore from a backup archive'
+    'backup-timer:daily automatic backup on|off'
     'reset-password:remove the dashboard password'
     'rollback:go back to the previous release'
     'logout:end this terminal\'s signed-in session'
@@ -124,6 +127,9 @@ $(say "${B}Run${N}")
 $(say "${B}Maintain${N}")
   aigentron update            install the latest release (keeps your data and settings)
   aigentron rollback          go back to the previous release (bare-metal; the last one is kept)
+  aigentron backup [file]     one archive: database, secrets, agents/skills/resources/attachments, workspace (not runs/ or caches)
+  aigentron restore <file>    put a backup back (stops the server, keeps what it replaces in backups/before-restore-*)
+  aigentron backup-timer on|off   daily automatic backup, 7 kept (bare-metal; off by default)
   aigentron reset-password    forgot the dashboard password? removes all passwords
   aigentron version           (also -v, --version)
   aigentron completion bash|zsh   tab completion for this command (the installer sets it up)
@@ -167,6 +173,83 @@ doctor() {
   [ "$bad" = 0 ] || exit 1
 }
 
+
+# ---- backup / restore ----------------------------------------------------------------------------------------------------
+# The work is infra/backup.sh (inside the container for Docker, on the host for bare-metal).
+docker_volume() { docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null; }
+
+do_backup() {
+  ts=$(date +%Y%m%d-%H%M%S)
+  if [ "$MODE" = docker ]; then
+    dest="${1:-$PWD/aigentron-backup-$ts.tar.gz}"
+    command -v docker >/dev/null 2>&1 || die "docker is required"
+    docker exec "$CONTAINER" sh /app/infra/backup.sh backup /data "/data/backups/aigentron-backup-$ts.tar.gz"
+    docker cp "$CONTAINER:/data/backups/aigentron-backup-$ts.tar.gz" "$dest" >/dev/null
+    chmod 600 "$dest" 2>/dev/null || true
+    say "${G}✔${N} $dest   ${D}(the container keeps a copy in /data/backups; the host .env with your API keys is not included - keep $INSTALL_DIR/.env yourself)${N}"
+  else
+    need_root backup
+    dest="${1:-$DATA_DIR/backups/aigentron-backup-$ts.tar.gz}"
+    ORCH_DIR="$CURRENT/apps/orchestrator" APP_VERSION="$(version)" BACKUP_ENV_FILE="$INSTALL_DIR/.env" DATABASE_URL="file:$DATA_DIR/orchestrator.db" \
+      sh "$CURRENT/infra/backup.sh" backup "$DATA_DIR" "$dest"
+    say "${D}Copy it off this server (scp / aws s3 cp) - a backup on the same disk does not survive losing the disk.${N}"
+  fi
+}
+
+do_restore() {
+  [ -n "${1:-}" ] || die "usage: aigentron restore <backup-file>"
+  [ -s "$1" ] || die "$1 not found"
+  say "${Y}Restoring replaces the database, secrets, agents, skills, resources, attachments and the workspace with the archive's content${N} (the replaced files are kept in backups/before-restore-*)."
+  printf 'Type yes to continue: '; read -r ans || ans=
+  [ "$ans" = yes ] || { say "cancelled"; exit 1; }
+  if [ "$MODE" = docker ]; then
+    img=$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null) || die "container $CONTAINER not found"
+    vol=$(docker_volume); [ -n "$vol" ] || die "cannot find the data volume of $CONTAINER"
+    src=$(cd "$(dirname "$1")" && pwd)
+    docker stop -t 60 "$CONTAINER" >/dev/null
+    docker run --rm --entrypoint sh -v "$vol:/data" -v "$src:/in:ro" "$img" /app/infra/backup.sh restore /data "/in/$(basename "$1")" || { say "${R}restore failed${N} - starting the server again"; docker start "$CONTAINER" >/dev/null; exit 1; }
+    docker start "$CONTAINER" >/dev/null
+  else
+    need_root restore
+    systemctl stop "$SERVICE" || true
+    ORCH_DIR="$CURRENT/apps/orchestrator" DATABASE_URL="file:$DATA_DIR/orchestrator.db" sh "$CURRENT/infra/backup.sh" restore "$DATA_DIR" "$1" || { say "${R}restore failed${N} - starting the server again"; systemctl start "$SERVICE" || true; exit 1; }
+    systemctl start "$SERVICE"
+  fi
+  say "${G}✔${N} restored and started. Check: aigentron status"
+}
+
+backup_timer() {
+  [ "$MODE" = docker ] && die "backup-timer is for bare-metal installs; for Docker run 'aigentron backup' from cron (docs/updates.md)"
+  need_root backup-timer
+  case "${1:-}" in
+    on)
+      cat > /etc/systemd/system/aigentron-backup.service <<UNIT
+[Unit]
+Description=Aigentron backup
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/aigentron backup
+UNIT
+      cat > /etc/systemd/system/aigentron-backup.timer <<UNIT
+[Unit]
+Description=Daily Aigentron backup
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=20min
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+      systemctl daemon-reload; systemctl enable --now aigentron-backup.timer
+      say "${G}✔${N} daily backup on (03:30) into $DATA_DIR/backups, the last 7 are kept. Copy them off this server too." ;;
+    off) systemctl disable --now aigentron-backup.timer 2>/dev/null || true; rm -f /etc/systemd/system/aigentron-backup.timer /etc/systemd/system/aigentron-backup.service; systemctl daemon-reload; say "${G}✔${N} daily backup off" ;;
+    *) die "usage: aigentron backup-timer on|off" ;;
+  esac
+}
+
+# The newest release number (the installer is then fetched at THAT tag, not from the moving main branch).
+latest_version() { curl -fsSL --max-time 15 https://api.github.com/repos/Arttron/aigentron/releases/latest 2>/dev/null | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1; }
+
 # -h / --help anywhere
 for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
 
@@ -196,13 +279,19 @@ case "${1:-}" in
     exec journalctl -u "$SERVICE" -f -n 100 ;;
   update)
     command -v curl >/dev/null 2>&1 || die "curl is required"
-    say "Installing the latest release into ${B}$INSTALL_DIR${N} (your data and settings are kept)."
+    latest=$(latest_version); [ -n "$latest" ] || die "could not find the latest release (GitHub unreachable?)"
+    say "Installing ${B}$latest${N} into ${B}$INSTALL_DIR${N} (your data and settings are kept)."
+    # The installer is fetched at the release TAG (not main) and verifies the release archive against SHA256SUMS.
+    inst="https://raw.githubusercontent.com/Arttron/aigentron/v$latest/install.sh"
     if [ "$MODE" = docker ]; then
-      curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | INSTALL_MODE=docker INSTALL_DIR="$INSTALL_DIR" CONTAINER_NAME="$CONTAINER" sh
+      curl -fsSL "$inst" | VERSION="$latest" INSTALL_MODE=docker INSTALL_DIR="$INSTALL_DIR" CONTAINER_NAME="$CONTAINER" sh
     else
       need_root update
-      curl -fsSL https://raw.githubusercontent.com/Arttron/aigentron/main/install.sh | INSTALL_MODE=bare INSTALL_DIR="$INSTALL_DIR" DATA_DIR="$DATA_DIR" sh
+      curl -fsSL "$inst" | VERSION="$latest" INSTALL_MODE=bare INSTALL_DIR="$INSTALL_DIR" DATA_DIR="$DATA_DIR" sh
     fi ;;
+  backup) shift; do_backup "$@" ;;
+  restore) shift; do_restore "$@" ;;
+  backup-timer) shift; backup_timer "$@" ;;
   rollback)
     [ "$MODE" = docker ] && die "rollback is for bare-metal installs; under Docker, re-run the installer with VERSION=<the older version>"
     need_root rollback

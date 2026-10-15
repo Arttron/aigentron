@@ -11,12 +11,7 @@ import { ApprovalsService } from '../approvals/approvals.service';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { VerificationService, type VerifyResult } from './verification.service';
 import { TaskQueue, type TaskJobData } from './queue.constants';
-
-/** Append the agent's salvaged last message (its implicit question) to a stall
- *  reason so escalation carries the real content, not just a generic string. */
-function withQuestion(base: string, finalText?: string): string {
-  return finalText ? `${base} — agent's last message:\n${finalText}` : base;
-}
+import { decideStatus } from './decide-status';
 
 /** How often to check Settings for a changed concurrency value. Not event-driven
  *  (the setting can change from a plain PUT /settings with no signal to this
@@ -79,8 +74,20 @@ export class TaskWorkerService implements OnModuleInit {
   private async process(data: TaskJobData): Promise<void> {
     const { taskId, followUpPrompt, attachments } = data;
     // Guarded transition: a job whose task was cancelled, accepted as done or
-    // deleted since it was queued is dropped here — never `running` over that.
-    if (!(await this.tasks.startRunning(taskId))) {
+    // deleted since it was queued is dropped here — never `running` over that;
+    // one whose task is already running (a scheduled re-check that fired during
+    // a follow-up) is held for after that run instead of a second run alongside.
+    const entry = await this.tasks.startRunning(taskId);
+    if (entry === 'busy') {
+      if (followUpPrompt) {
+        this.logger.log(`Task ${taskId} is already running — holding this follow-up for after it`);
+        await this.tasks.holdFollowUp(taskId, followUpPrompt, attachments);
+      } else {
+        this.logger.log(`Task ${taskId} is already running — dropping its duplicate job`);
+      }
+      return;
+    }
+    if (entry !== 'started') {
       this.logger.log(`Task ${taskId} is cancelled, done or gone — dropping its job`);
       return;
     }
@@ -143,19 +150,12 @@ export class TaskWorkerService implements OnModuleInit {
       // hasn't timed out yet) — treat it as finishable so the task can't orphan.
       const after = await this.tasks.get(taskId);
       if (!isTerminalStatus(after.status)) {
-        // Structured completion contract: the terminal status comes from what the
-        // agent explicitly reported (report_task_status), never from parsing prose.
-        //  - blocked/failed report → honor it (skip verify/push).
-        //  - abnormal end without a 'done' report → `stalled` (outcome unknown).
-        //  - strict mode: a clean finish with no report at all → `stalled`.
-        if (outcome.reported === 'blocked') {
-          await this.tasks.setStatus(taskId, 'blocked', outcome.reportedSummary ?? 'agent reported blocked');
-          this.logger.log(`Task ${taskId} blocked (agent-reported)`);
-          return;
-        }
-        if (outcome.reported === 'failed') {
-          await this.tasks.setStatus(taskId, 'failed', outcome.reportedSummary ?? 'agent reported failure');
-          this.logger.log(`Task ${taskId} failed (agent-reported)`);
+        // Structured completion contract (decideStatus): the terminal status comes from
+        // what the agent explicitly reported (report_task_status), never from parsing prose.
+        const decision = decideStatus(outcome, { chat: false, parentId: after.parentId, requireStatusReport: this.config.requireStatusReport });
+        if (decision.kind === 'settle') {
+          await this.tasks.setStatus(taskId, decision.status, decision.error);
+          this.logger.log(`Task ${taskId} ${decision.status}: ${decision.error.split('\n')[0]}`);
           return;
         }
         // Ran out of steps (maxTurns) before reporting → ask a human whether to
@@ -164,7 +164,7 @@ export class TaskWorkerService implements OnModuleInit {
         // limit maxContinuations times without finishing, stop offering — a
         // non-converging run (weak model grinding, repeating the same failing
         // action) would otherwise loop "40 turns → continue → 40 turns" forever.
-        if (outcome.maxTurns && !outcome.reported) {
+        if (decision.kind === 'continuation') {
           const priorContinuations = await this.approvals.continuationCount(taskId);
           if (priorContinuations >= this.config.maxContinuations) {
             // One-shot decomposition hand-back: a TOP-LEVEL task that ground
@@ -198,22 +198,6 @@ export class TaskWorkerService implements OnModuleInit {
           );
           return;
         }
-        if (outcome.errored && outcome.reported !== 'done') {
-          const base = outcome.timedOut
-            ? 'run timed out without a status report'
-            : 'run ended abnormally without a status report';
-          await this.tasks.setStatus(taskId, 'stalled', withQuestion(base, outcome.finalText));
-          this.logger.warn(`Task ${taskId} stalled: ${base}`);
-          return;
-        }
-        if (!outcome.reported && this.config.requireStatusReport) {
-          // Salvage the agent's last message as the reason so an implicit question
-          // (agent stopped waiting for an answer) survives to be escalated.
-          const base = 'run finished without calling report_task_status';
-          await this.tasks.setStatus(taskId, 'stalled', withQuestion(base, outcome.finalText));
-          this.logger.warn(`Task ${taskId} stalled: no status report (strict mode)`);
-          return;
-        }
 
         // Clean finish (reported 'done', or unreported with strict mode off).
         // Verification gate: run the project's checks and let the agent fix
@@ -231,7 +215,7 @@ export class TaskWorkerService implements OnModuleInit {
         }
 
         // The agent is finished: the person accepts the result. (A subtask is accepted by its lead, so it is simply done.)
-        await this.tasks.setStatus(taskId, task.parentId ? 'done' : 'review');
+        await this.tasks.setStatus(taskId, decision.status);
         // Publish (best-effort; never fails the task):
         //  - shared mode: push the current branch straight to origin (no PR) if
         //    a repo is configured — the agent's commits go up as-is.
@@ -261,9 +245,14 @@ export class TaskWorkerService implements OnModuleInit {
       this.logger.log(`Task ${taskId} finished`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      // If the task was cancelled mid-run, leave it cancelled (don't fail it).
+      // If the task was cancelled mid-run, leave it cancelled (don't fail it); if it
+      // was deleted mid-run, there is no row to fail and nothing to report (E-23).
       const current = await this.tasks.get(taskId).catch(() => null);
-      if (current?.status === 'cancelled') {
+      if (!current) {
+        this.logger.log(`Task ${taskId} was deleted during its run`);
+        return;
+      }
+      if (current.status === 'cancelled') {
         this.logger.log(`Task ${taskId} cancelled`);
         return;
       }
@@ -273,6 +262,11 @@ export class TaskWorkerService implements OnModuleInit {
     } finally {
       // Tear down any ephemeral worktree preview started during this run.
       this.preview.stop(taskId);
+      // Only now is the worker fully out of the task's worktree: the next held
+      // follow-up may start (the drain deferred by setStatus — X-Q-3).
+      await this.tasks.runSettled(taskId).catch((err) =>
+        this.logger.warn(`settle failed for ${taskId}: ${(err as Error).message}`),
+      );
       // Fan-in: resume the lead once all its subtasks have finished.
       await this.tasks.fanInAfterSettle(taskId).catch((err) =>
         this.logger.warn(`fan-in failed for ${taskId}: ${(err as Error).message}`),
@@ -291,18 +285,14 @@ export class TaskWorkerService implements OnModuleInit {
     });
     const after = await this.tasks.get(taskId);
     if (isTerminalStatus(after.status)) return; // cancelled mid-turn — leave it
-    if (outcome.errored && outcome.reported !== 'done') {
-      const why = outcome.timedOut ? 'chat turn timed out' : (outcome.finalText ?? 'chat turn failed');
-      await this.tasks.setStatus(taskId, 'failed', why.slice(0, 500));
-      this.logger.warn(`Chat task ${taskId} failed: ${why.slice(0, 200)}`);
+    const decision = decideStatus(outcome, { chat: true, parentId: after.parentId, requireStatusReport: this.config.requireStatusReport });
+    if (decision.kind === 'settle') {
+      await this.tasks.setStatus(taskId, decision.status, decision.error);
+      this.logger.warn(`Chat task ${taskId} ${decision.status}: ${decision.error.slice(0, 200)}`);
       return;
     }
-    if (outcome.reported === 'blocked' && outcome.reportedSummary) {
-      // e.g. a token budget stopped the turn before it started — say so instead of silently "done".
-      await this.tasks.setStatus(taskId, 'blocked', outcome.reportedSummary.slice(0, 500));
-      return;
-    }
-    await this.tasks.setStatus(taskId, after.parentId ? 'done' : 'review');
+    // A chat turn never asks for a continuation: out of steps is just the end of the turn.
+    await this.tasks.setStatus(taskId, decision.kind === 'finish' ? decision.status : after.parentId ? 'done' : 'review');
     this.logger.log(`Chat task ${taskId} turn finished`);
   }
 
@@ -328,6 +318,8 @@ export class TaskWorkerService implements OnModuleInit {
         worktreePath: ctx.worktreePath,
         branch: ctx.branch,
         followUpPrompt: `Your change did not pass verification. Fix the problems below, then stop.\n\n${result.output}`,
+        // a fix run needs no extra "report your status" turn (the gate re-verifies anyway)
+        skipReportingResume: true,
       });
       result = await this.verification.verify(ctx.worktreePath);
     }

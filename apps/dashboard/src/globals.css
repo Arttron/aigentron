@@ -193,6 +193,14 @@ select:focus {
   box-shadow: var(--inset-sm), 0 0 0 2px var(--accent-soft);
 }
 
+/* keyboard focus: a clearly visible ring that takes no space (outline does not move layout) */
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 textarea {
   resize: vertical;
   min-height: 64px;

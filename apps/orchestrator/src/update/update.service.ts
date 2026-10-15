@@ -43,8 +43,12 @@ export class UpdateService {
   private get repo(): string {
     return process.env.UPDATE_REPO?.trim() || 'Arttron/aigentron';
   }
+  /** The data directory: DATA_DIR (set by the systemd unit), else the parent of the secrets dir - which is wrong when SECRETS_DIR points elsewhere. */
+  private get dataDir(): string {
+    return process.env.DATA_DIR?.trim() || dirname(this.config.secretsDir);
+  }
   private get stateDir(): string {
-    return join(dirname(this.config.secretsDir), 'update');
+    return join(this.dataDir, 'update');
   }
   currentVersion(): string {
     return process.env.APP_VERSION ?? 'dev';
@@ -157,7 +161,7 @@ export class UpdateService {
 
     mkdirSync(this.stateDir, { recursive: true, mode: 0o700 });
     const script = join(this.stateDir, `run-${target}.sh`);
-    writeFileSync(script, buildRunnerScript({ repo: this.repo, version: target, installDir, dataDir: dirname(this.config.secretsDir), stateDir: this.stateDir }), { mode: 0o700 });
+    writeFileSync(script, buildRunnerScript({ repo: this.repo, version: target, installDir, dataDir: this.dataDir, stateDir: this.stateDir }), { mode: 0o700 });
     chmodSync(script, 0o700);
     this.logger.warn(`Updating ${current} → ${target}${input.by ? ` (requested by ${input.by})` : ''}`);
     if (process.env.UPDATE_DRY_RUN === '1') return { started: true, version: target };

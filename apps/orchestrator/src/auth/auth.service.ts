@@ -51,6 +51,8 @@ type Result<T> = ({ ok: true } & T) | { ok: false; error: string; status?: numbe
 export class AuthService implements OnModuleInit {
   private readonly logger = new Logger('Auth');
   private readonly limiter = new LoginLimiter();
+  /** Per ACCOUNT (X-CF-1): many addresses guessing one password still hit a wall; more generous than the per-address limit so one attacker cannot lock the owner out cheaply. */
+  private readonly accountLimiter = new LoginLimiter(15);
   private cache: { mtime: number; state: AuthState | null } = { mtime: -1, state: null };
 
   constructor(
@@ -223,12 +225,16 @@ export class AuthService implements OnModuleInit {
       return { ok: false, error: 'Choose who is signing in.' };
     }
     const cred = u && s.users[u.id];
+    const acctWait = u ? this.accountLimiter.wait(u.id) : 0;
+    if (acctWait > 0) return { ok: false, error: `Too many attempts — try again in ${acctWait}s.`, status: 429 };
     // Same work and same message whether the user or the password is wrong.
     if (!u || !cred || typeof password !== 'string' || !verifyPassword(password, cred.hash)) {
       this.limiter.fail(key);
+      if (u) this.accountLimiter.fail(u.id);
       return { ok: false, error: 'Wrong password.', status: 401 };
     }
     this.limiter.ok(key);
+    this.accountLimiter.ok(u.id);
     return { ok: true, token: this.issue(s, u.id, meta), uid: u.id };
   }
 

@@ -3,7 +3,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { AuthService } from './auth.service';
 import { SessionsService } from './sessions.service';
 import { ownAddresses } from '../access/own-addresses';
-import { isMachineRoute, isPublicRoute, isThisMachine } from './auth-core';
+import { isDirectLocalRequest, isMachineRoute, isPublicRoute } from './auth-core';
 
 /**
  * Global gate. When a sign-in password is set, every /api route needs a valid session — except liveness + the sign-in
@@ -35,7 +35,7 @@ export class AuthGuard implements CanActivate {
       this.sessions.touch(this.auth.sessionIdOf(req.headers));
       return true;
     }
-    if (isMachineRoute(path) && isThisMachine(req.socket?.remoteAddress, ownAddresses())) return true;
+    if (isMachineRoute(path) && isDirectLocalRequest(req.socket?.remoteAddress, ownAddresses(), req.headers)) return true;
     // The MCP entry point for outside clients has its own token check inside the handler.
     if (path === '/api/mcp' && this.config.mcpToken) return true;
     throw new UnauthorizedException('Sign in required.');

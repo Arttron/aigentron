@@ -60,7 +60,10 @@ export class ProvidersService implements OnModuleInit {
     try {
       await this.ensureSeeded();
       const rows = await this.prisma.provider.findMany();
-      await Promise.all(rows.map((r) => this.syncRoute(r)));
+      // One regenerate for the whole resync (managed profile): the routes are
+      // rewritten row by row, litellm restarts once at the end — or not at all
+      // when the table already matched the running config (E-25 / X-MEM-1).
+      await this.litellm.batch(() => Promise.all(rows.map((r) => this.syncRoute(r))));
     } catch (e) {
       this.logger.warn(`LiteLLM route resync failed: ${(e as Error).message}`);
     }
