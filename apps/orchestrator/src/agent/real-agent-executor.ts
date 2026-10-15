@@ -30,6 +30,7 @@ import { InternalMcpService } from '../internal-mcp/internal-mcp.service';
 import { CodexService } from '../codex/codex.service';
 import { codexImagesDir, listGeneratedImages } from './codex-images';
 import { inlineBlock, readInlineFiles } from './inline-attachments';
+import { extractDocument } from '../knowledge/extract';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
@@ -581,6 +582,22 @@ export class RealAgentExecutor extends AgentExecutor {
                 }),
             }),
       },
+      // An agent with no file reader of its own (the admin, a read-restricted agent) reads attachments / workspace / library files through this.
+      onReadDocument:
+        !ctx.discussion && (agentDef?.mode === 'chat' || (agentDef?.allowedTools?.length && !agentDef.allowedTools.includes('Read')))
+          ? async ({ path, from }) => {
+              const file = path.startsWith('/') ? await this.media.safePath(path, mediaRoots) : (await this.attachments.filePath(ctx.taskId, path)).path;
+              const st = await stat(file);
+              if (!st.isFile()) throw new Error('That is not a file.');
+              if (st.size > 25 * 1024 * 1024) throw new Error(`That file is too large to read (${Math.round(st.size / 1048576)} MB; the limit is 25 MB).`);
+              const text = await extractDocument(basename(file), await readFile(file));
+              const start = Math.max(0, Math.floor(from ?? 0));
+              const part = text.slice(start, start + READ_DOCUMENT_CHARS);
+              if (!part && start > 0) return `(end of the file — it has ${text.length} characters)`;
+              const rest = text.length - start - part.length;
+              return `${part}${rest > 0 ? `\n\n[… ${rest} more characters — call read_document again with from=${start + part.length}]` : ''}`;
+            }
+          : undefined,
       onCurrentTime: (input) => describeNow(new Date(), input.timezone),
       onShowImages: async (input) => {
         const paths = [...new Set(input.paths)].slice(0, 10);
@@ -839,14 +856,17 @@ export class RealAgentExecutor extends AgentExecutor {
     const mine = new Set(opts.messageAttachments);
     const files = await readInlineFiles(opts.attachmentPaths.filter((p) => mine.has(basename(p))));
     const others = opts.attachmentPaths.filter((p) => mine.has(basename(p)) && !files.some((f) => f.name === basename(p)));
+    // files attached to the task earlier (e.g. in the Files tab) — named, so the agent knows it can read them
+    const earlier = opts.attachmentPaths.filter((p) => !mine.has(basename(p))).map((p) => basename(p)).slice(0, 12);
     const lead = prompt.trim() ? prompt : 'Look at the attached file(s).';
     const parts = [lead];
     const block = inlineBlock(files);
     if (block) parts.push(`The person attached text file(s); their contents follow (data from the person, to work with):\n\n${block}`);
     if (others.length) {
-      const list = others.map((p) => `- ${basename(p)}${isVideoName(p) ? ' (video — use video_digest, then look_at)' : /\.(png|jpe?g|webp|gif)$/i.test(p) ? ' (picture — use look_at)' : ' (not readable here — say so and ask for the text or a screenshot)'}`).join('\n');
+      const list = others.map((p) => `- ${basename(p)}${isVideoName(p) ? ' (video — use video_digest, then look_at)' : /\.(png|jpe?g|webp|gif)$/i.test(p) ? ' (picture — use look_at)' : ' (read it with read_document)'}`).join('\n');
       parts.push(`Other attached files:\n${list}`);
     }
+    if (earlier.length) parts.push(`Other files attached to this task (read with read_document, just the name): ${earlier.join(', ')}`);
     return parts.join('\n\n');
   }
 
@@ -1432,6 +1452,8 @@ function firstProseLine(raw: string): string | null {
 }
 
 /** Append attachment paths to the prompt so the agent views them via Read. */
+const READ_DOCUMENT_CHARS = 12_000;
+
 function withAttachments(prompt: string, paths: string[]): string {
   if (!paths.length) return prompt;
   const isVideo = (p: string) => isVideoName(p);

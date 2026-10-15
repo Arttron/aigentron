@@ -132,6 +132,8 @@ export interface RunAgentParams {
     note?: (input: { kind: string; text: string; resolves?: string }) => Promise<string>;
     save?: (input: { path: string; content?: string; from?: string; note?: string }) => Promise<string>;
   };
+  /** `read_document`: the text of an attachment / workspace / library file, for agents that have no file reader (the admin). */
+  onReadDocument?: (input: { path: string; from?: number }) => Promise<string>;
   /** Show pictures in the chat (single or an album); resolves with the text the model reads. */
   onShowImages?: (input: { paths: string[]; caption?: string }) => Promise<string>;
   onAskUser?: (input: { question: string; options: string[]; allowText: boolean; multiple?: boolean; image?: string }) => Promise<string>;

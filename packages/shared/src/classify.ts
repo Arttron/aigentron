@@ -43,6 +43,8 @@ export const WORKSPACE_INFO_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_info`;
 export const WORKSPACE_NOTE_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_note`;
 export const WORKSPACE_SAVE_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_save`;
 export const WORKSPACE_FILES_TOOL = `${INTERNAL_TOOL_PREFIX}workspace_files`;
+/** Read the text of an attachment / workspace / library file (md, txt, csv, json, html, PDF text layer, Word) — for agents without a file reader. Read-only. */
+export const READ_DOCUMENT_TOOL = `${INTERNAL_TOOL_PREFIX}read_document`;
 export const CURRENT_TIME_TOOL = `${INTERNAL_TOOL_PREFIX}current_time`;
 /** Knowledge bases: search / read passages, list what exists, add a note (only to bases that allow it). Not gated. */
 export const KB_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}kb_list`;

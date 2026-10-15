@@ -27,6 +27,7 @@ export type InternalToolHandlers = Pick<
   | 'onSearchResources'
   | 'kb'
   | 'workspace'
+  | 'onReadDocument'
   | 'onShowImages'
   | 'onCurrentTime'
   | 'onAskUser'
@@ -227,6 +228,16 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         handler: (args) => save({ path: String(args.path ?? ''), content: typeof args.content === 'string' ? args.content : undefined, from: typeof args.from === 'string' ? args.from : undefined, note: typeof args.note === 'string' ? args.note : undefined }),
       });
     }
+  }
+
+  if (params.onReadDocument) {
+    specs.push({
+      name: 'read_document',
+      description:
+        "Read the TEXT of a file: something the person attached to the task (give just its name, e.g. plan.md) or a file of the workspace / resource library (full path). Works for Markdown, text, CSV, JSON, HTML, PDF with a text layer and Word (.docx). Returns up to ~12 000 characters and says where to continue — call again with `from` (character offset) for the next part. Pictures: use look_at instead. Use it whenever the person attaches a file or mentions one; never say you cannot open attachments.",
+      shape: { path: z.string(), from: z.number().optional() },
+      handler: (args) => params.onReadDocument!({ path: String(args.path ?? ''), from: typeof args.from === 'number' ? args.from : undefined }),
+    });
   }
 
   if (params.onShowImages) {

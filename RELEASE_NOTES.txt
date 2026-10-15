@@ -1,17 +1,9 @@
-Aigentron v0.1.57
+Aigentron v0.1.58
 
-For people who are not programmers: pictures made by Codex reach you by themselves, every message can be copied, and a reply in Telegram goes to the task that just asked you something, and the admin can read the text files you send it.
-
-Pictures from Codex
-- Codex generates images into its own sandbox, where you could not see them (and copying them needed an approval that sometimes timed out). Now the new pictures are attached to the task and shown in the chat (and Telegram) right after the run — nothing to approve. You can also ask the agent to "show" such a picture again.
-
-Copy a message
-- A small copy icon under every message in the task chat (yours and the agent's) and in the chat with the admin. It works on plain HTTP addresses too.
+For people who are not programmers: the admin can now read the files you give it.
 
 Files for the admin
-- You can attach a text file (Markdown, txt, csv, json …) to a message for the admin, in the dashboard or in Telegram: it now reads it (before it answered that it could not open attachments). Pictures are looked at, other formats (PDF, Word) are reported as unreadable so it asks for the text.
-
-Telegram
-- When a task becomes blocked and asks you something in a chat, your next plain message answers THAT task (before, it could go to whichever task was active earlier, so lesson answers landed in the wrong place). Replying (quoting) to a specific message still addresses that message's task; with several tasks waiting at once, quote the one you answer.
+- The admin has no file reader of its own, so it used to answer "I cannot open attachments" — even for a file you had uploaded to the task. Now it has a tool to read the text of a task's attachment (also one uploaded later in the Files tab, by name), or a file of the workspace or the library: Markdown, text, CSV, JSON, HTML, PDF with a text layer and Word (.docx), 12 000 characters at a time (it asks for the next part itself). Pictures are looked at; scans without text are reported as unreadable.
+- The same tool is given to any agent whose allowed tools do not include Read.
 
 Update note: no database changes.

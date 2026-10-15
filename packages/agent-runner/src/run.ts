@@ -15,6 +15,7 @@ import {
   KB_SEARCH_TOOL,
   CURRENT_TIME_TOOL,
   SHOW_IMAGES_TOOL,
+  READ_DOCUMENT_TOOL,
   WORKSPACE_INFO_TOOL,
   WORKSPACE_FILES_TOOL,
   WORKSPACE_NOTE_TOOL,
@@ -179,6 +180,7 @@ function internalToolNames(params: RunAgentParams): string[] {
   if (params.onShowImages) names.push(SHOW_IMAGES_TOOL);
   if (params.workspace) names.push(WORKSPACE_INFO_TOOL, WORKSPACE_FILES_TOOL, ...(params.workspace.note ? [WORKSPACE_NOTE_TOOL] : []), ...(params.workspace.save ? [WORKSPACE_SAVE_TOOL] : []));
   if (params.onCurrentTime) names.push(CURRENT_TIME_TOOL);
+  if (params.onReadDocument) names.push(READ_DOCUMENT_TOOL);
   if (params.kb) names.push(KB_LIST_TOOL, KB_SEARCH_TOOL, KB_READ_TOOL, ...(params.kb.add ? [KB_ADD_TOOL] : []));
   if (params.onAskUser) names.push(ASK_USER_TOOL);
   if (params.onLookAt) names.push(LOOK_AT_TOOL);
