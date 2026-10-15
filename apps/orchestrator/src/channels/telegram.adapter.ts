@@ -157,7 +157,7 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   async sendApproval(chatId: string, approval: OutgoingApproval): Promise<{ messageId: string }> {
-    const text = `⚠️ Approval needed for task ${approval.taskId}\n\n${approval.summary}\n${approval.reason}`;
+    const text = clip(`⚠️ Approval needed for task ${approval.taskId}\n\n${approval.summary}\n${approval.reason}`, 4096); // the full text is in the dashboard
     const msg = await this.call<{ message_id: number }>('sendMessage', {
       chat_id: chatId,
       text,

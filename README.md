@@ -16,7 +16,7 @@ Two pillars:
 > password sign-in with roles ([`docs/authentication.md`](docs/authentication.md)), provider failover,
 > structured task status with a watchdog, Telegram channel, scheduler, Codex runtime, knowledge bases,
 > camera/video/vision, voice, discussions between agents, starter packs, learned skills, in-place
-> updates. Not done: multi-tenancy, OS-level isolation of agents from the orchestrator, Slack/email
+> updates, a shared workspace (memory / drafts / deliverables, page `/workspace`). Not done: multi-tenancy, OS-level isolation of agents from the orchestrator, Slack/email
 > channels. Plan: [`docs/roadmap.md`](docs/roadmap.md) and [`docs/BACKLOG.md`](docs/BACKLOG.md).
 
 ## Quick start
@@ -126,7 +126,7 @@ separate LiteLLM service. SQLite + an in-process queue replace them. Full design
 > Where the project, agent files, secrets and env files live in each mode, and how cleanup works:
 > [`docs/workspace-layout.md`](docs/workspace-layout.md).
 >
-> Features: [media (camera, video, vision, pictures)](docs/media.md) · [questions with buttons](docs/questions.md) · [knowledge bases](docs/knowledge-base.md) · [discussion between agents](docs/discussions.md) · [browser through a proxy](docs/browser-proxy.md) · [voice](docs/voice.md) · [resources](docs/resources.md) · [starter packs](docs/packs.md) · [sign-in](docs/authentication.md) · [any language / token policy](docs/languages.md) · [updates](docs/updates.md).
+> Features: [media (camera, video, vision, pictures)](docs/media.md) · [questions with buttons](docs/questions.md) · [knowledge bases](docs/knowledge-base.md) · [discussion between agents](docs/discussions.md) · [browser through a proxy](docs/browser-proxy.md) · [voice](docs/voice.md) · [resources](docs/resources.md) · [starter packs](docs/packs.md) · [sign-in](docs/authentication.md) · [any language / token policy](docs/languages.md) · [updates](docs/updates.md) · [shared workspace](docs/workspace-layout.md) · [how a request is built](docs/request-flow.md).
 
 **Status:** builds and runs correctly (verified end to end, including a real agent task
 against a real local Ollama through the self-managed LiteLLM). No container registry is
@@ -210,7 +210,7 @@ docker run -d --name lds \
 ```
 
 Dashboard + Orchestrator API → http://localhost:3001 (same origin, one port). Everything
-persists in the `/data` volume (SQLite DB, agent defs, repo, worktrees, attachments) —
+persists in the `/data` volume (SQLite DB, agent defs, repo, shared workspace, worktrees, attachments) —
 back it up by copying that volume, nothing else to snapshot. `/api/health` reports the
 running `version` alongside DB/LiteLLM status.
 

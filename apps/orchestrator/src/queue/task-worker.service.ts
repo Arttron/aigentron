@@ -78,8 +78,13 @@ export class TaskWorkerService implements OnModuleInit {
 
   private async process(data: TaskJobData): Promise<void> {
     const { taskId, followUpPrompt, attachments } = data;
+    // Guarded transition: a job whose task was cancelled, accepted as done or
+    // deleted since it was queued is dropped here — never `running` over that.
+    if (!(await this.tasks.startRunning(taskId))) {
+      this.logger.log(`Task ${taskId} is cancelled, done or gone — dropping its job`);
+      return;
+    }
     this.logger.log(`Processing task ${taskId}`);
-    await this.tasks.setStatus(taskId, 'running');
 
     try {
       const task = await this.tasks.get(taskId);

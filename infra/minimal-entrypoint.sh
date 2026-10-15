@@ -25,9 +25,37 @@ if [ ! -d "$DATA_DIR/agent/agents" ] && [ ! -f "$DATA_DIR/agent/.sync/admin-seed
   cp -r "$APP_DIR/agent/." "$DATA_DIR/agent/"
 fi
 
+# Safety net before migrating: a consistent snapshot of the SQLite db (backups/pre-<version>.db, last 3 kept), taken once
+# per version (the bare-metal installer has already taken it before this service was restarted). A failed migration is
+# rolled back to it, and the container then exits with a clear message instead of booting on a half-migrated db.
+DB_FILE="${DATABASE_URL#file:}"
+SNAP_VERSION="${APP_VERSION:-unknown}"
+SNAP_TAKEN=
+case "${DATABASE_URL:-}" in
+  file:*)
+    # shellcheck disable=SC1091
+    . "$APP_DIR/infra/db-snapshot.sh"
+    if [ -s "$DB_FILE" ] && [ ! -s "$DATA_DIR/backups/pre-$SNAP_VERSION.db" ]; then
+      if (cd "$APP_DIR/apps/orchestrator" && snapshot_db "$DB_FILE" "$DATA_DIR/backups" "$SNAP_VERSION" .); then
+        SNAP_TAKEN=1
+        echo "[entrypoint] database snapshot: $DATA_DIR/backups/pre-$SNAP_VERSION.db"
+      else
+        echo "[entrypoint] WARNING: could not take a database snapshot — continuing without one" >&2
+      fi
+    fi ;;
+  *) echo "[entrypoint] non-SQLite DATABASE_URL — no snapshot (back up Postgres with pg_dump)" ;;
+esac
+
 echo "[entrypoint] applying database migrations (sqlite)…"
 cd "$APP_DIR/apps/orchestrator"
-node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts
+if ! node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts; then
+  if [ -n "$SNAP_TAKEN" ] && restore_db "$DB_FILE" "$DATA_DIR/backups" "$SNAP_VERSION"; then
+    echo "[entrypoint] ERROR: database migration FAILED — the database was restored from backups/pre-$SNAP_VERSION.db. Roll back to the previous version." >&2
+  else
+    echo "[entrypoint] ERROR: database migration FAILED and no snapshot was restored (see $DATA_DIR/backups)." >&2
+  fi
+  exit 1
+fi
 cd "$APP_DIR"
 
 echo "[entrypoint] starting orchestrator (also serves the dashboard, same-origin)…"

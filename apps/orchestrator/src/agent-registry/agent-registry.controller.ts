@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { RolesGuard } from '../identity/roles.guard';
+import { Roles } from '../identity/roles.decorator';
 import { AgentRegistryService } from './agent-registry.service';
 import { AgentCatalogService } from './agent-catalog.service';
 import { AgentBodyDto, CreateAgentDto } from './dto/agent.dto';
@@ -62,16 +64,22 @@ export class AgentRegistryController {
     return this.registry.get(name);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Post()
   create(@Body() dto: CreateAgentDto) {
     return this.registry.save(dto.name, toDef(dto));
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Put(':name')
   update(@Param('name') name: string, @Body() dto: AgentBodyDto) {
     return this.registry.save(name, toDef(dto));
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Delete(':name')
   async remove(@Param('name') name: string) {
     await this.registry.remove(name);

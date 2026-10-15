@@ -101,6 +101,8 @@ export class TasksService {
         isTerminalStatus(task.status as TaskStatus) ? `A ${task.status} task cannot be marked done — start it again with a message first.` : `The task is still ${task.status} — wait until the agent has finished.`,
       );
     }
+    // A job still waiting for this task (a scheduled re-check, a continuation) must not resurrect it later.
+    await this.queue.removeForTask(id).catch((err) => this.logger.warn(`could not drop queued jobs of ${id}: ${(err as Error).message}`));
     await this.setStatus(id, 'done');
     this.logger.log(`Task ${id} accepted as done by a person`);
     return serializeTask(await this.get(id));
@@ -706,11 +708,10 @@ export class TasksService {
   async delete(id: string) {
     const task = await this.get(id); // 404 if missing
     // Stop any in-flight/queued work first so we don't tear the worktree out
-    // from under a running agent.
-    if (!isTerminalStatus(task.status)) {
-      await this.queue.removeForTask(id).catch(() => undefined);
-      this.executor.cancel(id);
-    }
+    // from under a running agent. Always — a finished task may still own a
+    // delayed job (schedule_check), which would otherwise run on a deleted row.
+    await this.queue.removeForTask(id).catch((err) => this.logger.warn(`could not drop queued jobs of ${id}: ${(err as Error).message}`));
+    this.executor.cancel(id);
     await this.worktrees.cleanup(task.branch, task.worktreePath).catch(() => undefined);
     await this.attachments.remove(id).catch(() => undefined);
     await this.prisma.task.delete({ where: { id } });
@@ -719,16 +720,52 @@ export class TasksService {
     return { id, deleted: true };
   }
 
+  /**
+   * Cancel a task. The ORDER matters:
+   *  1. drop the pending follow-ups — `setStatus('cancelled')` is terminal and
+   *     would otherwise drain one into a brand-new run (queued → running) of a
+   *     task the person just stopped;
+   *  2. drop the queued/delayed jobs, so nothing picks the task up again;
+   *  3. mark it cancelled (the worker's guarded `running` transition refuses a
+   *     job that slipped through between 2 and 3);
+   *  4. abort the in-flight run last — its worker then sees `cancelled` and
+   *     leaves the status alone instead of writing `stalled` over it.
+   */
   async cancel(id: string) {
     const task = await this.get(id);
     if (isTerminalStatus(task.status)) {
       return task; // already finished — nothing to cancel
     }
-    // Drop any queued jobs and abort an in-flight run, then mark cancelled.
+    const dropped = await this.prisma.pendingFollowUp.deleteMany({ where: { taskId: id } });
+    if (dropped.count) {
+      this.logger.log(`Task ${id}: dropped ${dropped.count} pending follow-up(s) on cancel`);
+      await this.publishFollowUpQueue(id).catch(() => undefined);
+    }
     await this.queue.removeForTask(id);
     const cancelled = await this.setStatus(id, 'cancelled');
     this.executor.cancel(id);
     return cancelled;
+  }
+
+  /**
+   * The worker's entry transition: `→ running`, but only for a task that is not
+   * already finished by a person (`done`) or cancelled — a job that outlived its
+   * task (a delayed re-check, a job claimed in the cancel window) must not
+   * resurrect it. Returns false (and changes nothing) when the task is in one of
+   * those states or no longer exists; the worker then drops the job.
+   */
+  async startRunning(id: string): Promise<boolean> {
+    const r = await this.prisma.task.updateMany({
+      where: { id, status: { notIn: ['cancelled', 'done'] } },
+      data: { status: 'running' },
+    });
+    if (r.count === 0) return false;
+    const task = await this.prisma.task.findUnique({ where: { id } });
+    if (task) {
+      this.bus.publish({ type: 'task-status', payload: { taskId: id, status: 'running', ts: new Date().toISOString() } });
+      this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(task) } });
+    }
+    return true;
   }
 
   /**

@@ -1,5 +1,5 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, realpath, rm, stat, access, writeFile, copyFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rm, stat, access, writeFile, copyFile, rename } from 'node:fs/promises';
 import { join, basename, extname, resolve, sep } from 'node:path';
 import { once } from 'node:events';
 import type { Readable } from 'node:stream';
@@ -228,7 +228,9 @@ export class AttachmentsService {
         name = `${sanitize(basename(real, ext))}-${n}${ext}`;
       }
       links[name] = real;
-      await writeFile(this.linksFile(taskId), JSON.stringify(links));
+      const tmp = `${this.linksFile(taskId)}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify(links));
+      await rename(tmp, this.linksFile(taskId));
       return name;
     });
     this.linkChain.set(taskId, run.catch(() => undefined));
@@ -273,11 +275,13 @@ export class AttachmentsService {
     taskId: string,
     rawName: string,
   ): Promise<{ path: string; mime: string; inline: boolean; name: string }> {
+    if (basename(rawName).startsWith('.')) throw new BadRequestException('attachment not found'); // `.links.json` is never a downloadable attachment
     const name = sanitize(rawName);
     const ext = extname(name).slice(1).toLowerCase();
     let path = join(this.dir(taskId), name);
     try {
-      await access(path);
+      // a name like ".." must never resolve to a folder: only regular files are served
+      if (!(await stat(path)).isFile()) throw new Error('not a file');
     } catch {
       // not one of its own files: a linked one?
       const src = (await this.readLinks(taskId))[name];
@@ -320,6 +324,7 @@ export class AttachmentsService {
 /** Reduce an upload name to a safe basename (no path traversal, ascii-ish). */
 export function sanitize(rawName: string): string {
   // letters / digits / marks of ANY script are kept (a photo called "кухня 2.jpg" or "写真.jpg" must stay readable); only path/odd characters go
-  const base = basename(rawName).normalize('NFC').replace(/[^\p{L}\p{N}\p{M}.\-_ ]+/gu, '_').trim();
+  // no leading dot: a user file can never be `.links.json` or hide as a dotfile
+  const base = basename(rawName).normalize('NFC').replace(/[^\p{L}\p{N}\p{M}.\-_ ]+/gu, '_').trim().replace(/^[.\s]+/, '');
   return base.length ? base.slice(0, 120) : 'file';
 }

@@ -531,6 +531,9 @@ if [ "$INSTALL_MODE" = docker ]; then
   log "Building $IMAGE:$VERSION (this can take a few minutes on first install)"
   docker build --build-arg VERSION="$VERSION" -f infra/minimal.Dockerfile -t "$IMAGE:$VERSION" .
 
+  # Graceful stop first (60 s for running agents / the SQLite WAL to flush) — `rm -f` alone is SIGKILL. The new container's
+  # entrypoint snapshots the database before it migrates (infra/minimal-entrypoint.sh).
+  docker stop -t 60 "$CONTAINER_NAME" >/dev/null 2>&1 || true
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   log "Starting $CONTAINER_NAME"
   # Ports 80 / 443 too (the app serves HTTP on 80 and HTTPS on 443 once a certificate is installed — Settings → Web server /
@@ -593,10 +596,33 @@ else
   fi
 
   mkdir -p "$DATA_DIR"
+  # Snapshot the live database first (VACUUM INTO backups/pre-<version>.db, last 3 kept): Prisma does not run a SQLite migration
+  # in a transaction, so a failed one can leave the db half-migrated and block both the new and the old version.
+  # shellcheck disable=SC1091
+  . "$RELEASE_DIR/infra/db-snapshot.sh"
+  DB_FILE="$DATA_DIR/orchestrator.db"
+  DB_SNAPSHOT=
+  if [ -s "$DB_FILE" ]; then
+    log "Snapshotting the database → $DATA_DIR/backups/pre-$VERSION.db"
+    snapshot_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION" "$RELEASE_DIR/apps/orchestrator" </dev/null \
+      || die "could not snapshot the database before migrating — nothing was changed (the running version stays in place). Check free disk space / that $DB_FILE is readable."
+    DB_SNAPSHOT=1
+  fi
   log "Applying database migrations (sqlite)…"
-  (cd "$RELEASE_DIR/apps/orchestrator" && \
-    DATABASE_URL="file:$DATA_DIR/orchestrator.db" \
-    node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts) </dev/null
+  if ! (cd "$RELEASE_DIR/apps/orchestrator" && \
+    DATABASE_URL="file:$DB_FILE" \
+    node_modules/.bin/prisma migrate deploy --config prisma.sqlite.config.ts) </dev/null; then
+    if [ -n "$DB_SNAPSHOT" ]; then
+      log "Migration FAILED — restoring the database from the snapshot"
+      systemctl stop aigentron >/dev/null 2>&1 || true
+      if restore_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION"; then
+        systemctl start aigentron >/dev/null 2>&1 || true
+        die "database migration to $VERSION failed; the database was restored from $DATA_DIR/backups/pre-$VERSION.db and the previous release stays in place. Nothing is lost — see the error above."
+      fi
+      die "database migration to $VERSION failed AND restoring the snapshot failed — restore it by hand: cp $DATA_DIR/backups/pre-$VERSION.db $DB_FILE (rm -f $DB_FILE-wal $DB_FILE-shm first)"
+    fi
+    die "database migration to $VERSION failed (no snapshot: there was no database yet); the previous release stays in place."
+  fi
 
   ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 

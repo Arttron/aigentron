@@ -397,7 +397,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // A top-level task that is blocked on the person has just asked them something in this chat: their next plain message
     // answers IT (the last ask wins the chat), not whatever task happened to be active before — the same rule the default-channel
     // escalation uses. Replying (quoting) to any message still addresses that message's task.
-    if (status === 'blocked' && !prefix) {
+    if (status === 'blocked' && !task.parentId) {
       await this.channels.setChatState(dest.channel.id, dest.externalThreadId, { activeTaskId: taskId }).catch(() => undefined);
     }
 
@@ -569,8 +569,16 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   /** Question id → the chat messages posted for it (to edit when it is answered). */
   private readonly questionMessages = new Map<string, { channelId: string; chatId: string; messageId: string; taskId: string }[]>();
 
+  /** The chat thread of a task; a subtask has none of its own, so its asks go to the parent's chat (like its status does). */
+  private async threadOrParentThread(taskId: string) {
+    const own = await this.channels.threadForTask(taskId);
+    if (own) return own;
+    const t = await this.prisma.task.findUnique({ where: { id: taskId }, select: { parentId: true } });
+    return t?.parentId ? this.channels.threadForTask(t.parentId) : null;
+  }
+
   private async onQuestionCreated(q: AgentQuestion): Promise<void> {
-    const dest = await this.channels.threadForTask(q.taskId);
+    const dest = await this.threadOrParentThread(q.taskId);
     if (dest) {
       await this.postQuestion(dest.channel.id, dest.externalThreadId, q);
       return;
@@ -659,7 +667,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
 
   private async onApprovalCreated(approval: ApprovalMsg): Promise<void> {
     // Channel-originated task → always ask in its own thread.
-    const dest = await this.channels.threadForTask(approval.taskId);
+    const dest = await this.threadOrParentThread(approval.taskId);
     if (dest) {
       const adapter = this.adapters.get(dest.channel.id) ?? this.channels.buildAdapter(dest.channel);
       await this.postApproval(adapter, dest.externalThreadId, approval)

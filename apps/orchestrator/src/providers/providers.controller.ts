@@ -45,6 +45,8 @@ export class ProvidersController {
     return (await this.providers.list()).map(serialize);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Post()
   async create(@Body() dto: CreateProviderDto) {
     return serialize(
@@ -61,6 +63,8 @@ export class ProvidersController {
     );
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Put(':name')
   async update(@Param('name') name: string, @Body() dto: UpdateProviderDto) {
     return serialize(await this.providers.update(name, toPatch(dto)));
@@ -75,12 +79,16 @@ export class ProvidersController {
   }
 
   /** Preview a provider's model list from ad-hoc params (create/edit form). */
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Post('models-preview')
   modelsPreview(@Body() dto: ModelsPreviewDto) {
     return this.providers.previewModels(dto);
   }
 
   /** Connectivity check: send a tiny "whoami" request to the provider. */
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Post(':name/test')
   test(@Param('name') name: string) {
     return this.providers.test(name);
@@ -92,6 +100,8 @@ export class ProvidersController {
     return this.providers.listModels(name);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Delete(':name')
   async remove(@Param('name') name: string) {
     await this.providers.remove(name);

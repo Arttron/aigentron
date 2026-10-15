@@ -80,6 +80,23 @@ describe('WorkspaceService', () => {
     await expect(svc.save({ path: 'p.txt', from: 'relative/p.txt' })).rejects.toThrow(/full path/);
   });
 
+  it('never copies a sign-in token or env file into deliverables, even from an allowed root', async () => {
+    // a chat agent's allowed roots used to be the whole agent dir — runs/*/codex-home holds live Codex tokens
+    const agentDir = join(base, 'agent');
+    for (const rel of ['runs/t1/codex-home/auth.json', 'runs/t1/codex-home/sessions/s.jsonl', '.codex-home/auth.json', 'runs/t1/codex-home/generated_images/pic.png', 'runs/t1/.env', 'runs/t1/notes.txt']) {
+      await mkdir(join(agentDir, rel, '..'), { recursive: true });
+      await writeFile(join(agentDir, rel), 'x');
+    }
+    for (const rel of ['runs/t1/codex-home/auth.json', 'runs/t1/codex-home/sessions/s.jsonl', '.codex-home/auth.json', 'runs/t1/.env']) {
+      await expect(svc.save({ path: 'out.txt', from: join(agentDir, rel) }, [agentDir]), rel).rejects.toThrow(/not available/);
+    }
+    expect(await svc.save({ path: 'pic.png', from: join(agentDir, 'runs/t1/codex-home/generated_images/pic.png') }, [agentDir])).toContain('Saved');
+    expect(await svc.save({ path: 'notes.txt', from: join(agentDir, 'runs/t1/notes.txt') }, [agentDir])).toContain('Saved');
+    // a symlink inside an allowed root that points at a token: the real path is checked too
+    await symlink(join(agentDir, '.codex-home', 'auth.json'), join(base, 'attachments', 'innocent.json'));
+    await expect(svc.save({ path: 'i.json', from: join(base, 'attachments', 'innocent.json') })).rejects.toThrow(/not available/);
+  });
+
   it('lists files with dir and glob filters, hides internals', async () => {
     await writeFile(join(root(), 'work', 'a.md'), 'a');
     await writeFile(join(root(), 'work', 'b.txt'), 'b');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRunnerScript, cleanVersion, compareVersions, parseRelease, parseVersion, shq } from './update-core';
+import { buildRunnerScript, cleanVersion, compareVersions, parseRelease, parseVersion, resolveStaleStatus, shq } from './update-core';
 
 describe('versions', () => {
   it('parses and compares', () => {
@@ -42,5 +42,21 @@ describe('parseRelease', () => {
     expect(parseRelease({ tag_name: 'v0.1.47', body: 'notes', html_url: 'https://x', published_at: '2026-10-09T00:00:00Z' })).toEqual({ version: '0.1.47', notes: 'notes', url: 'https://x', publishedAt: '2026-10-09T00:00:00Z' });
     expect(parseRelease({ tag_name: 'nightly' })).toBeNull();
     expect(parseRelease(null)).toBeNull();
+  });
+});
+
+describe('resolveStaleStatus', () => {
+  const now = Date.parse('2026-10-15T12:00:00Z');
+  const base = { state: 'running' as const, version: '0.1.59', startedAt: '2026-10-15T11:50:00Z', finishedAt: '', error: '' };
+  it('keeps a recent running update', () => expect(resolveStaleStatus(base, now).state).toBe('running'));
+  it('turns a running update older than 30 minutes into failed', () => {
+    const r = resolveStaleStatus({ ...base, startedAt: '2026-10-15T11:20:00Z' }, now);
+    expect(r.state).toBe('failed');
+    expect(r.error).toContain('30 minutes');
+    expect(r.finishedAt).not.toBe('');
+  });
+  it('treats an unreadable start time as stale and leaves ok/failed alone', () => {
+    expect(resolveStaleStatus({ ...base, startedAt: 'garbage' }, now).state).toBe('failed');
+    expect(resolveStaleStatus({ ...base, state: 'ok' as const, startedAt: '2020-01-01T00:00:00Z' }, now).state).toBe('ok');
   });
 });

@@ -1,6 +1,8 @@
-import { Controller, Get, Param, Post, Req, Res } from '@nestjs/common';
+import { Controller, Get, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { createReadStream } from 'node:fs';
+import { RolesGuard } from '../identity/roles.guard';
+import { Roles } from '../identity/roles.decorator';
+import { pipeFile } from '../media/pipe-file';
 import { serveWithRanges } from '../media/serve-range';
 import { AttachmentsService } from './attachments.service';
 
@@ -13,6 +15,8 @@ export class AttachmentsController {
    * Upload one file as the raw request body. The client sends the bytes with
    * the file's content-type and an `x-filename` header (URL-encoded).
    */
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
   @Post()
   async upload(@Param('id') id: string, @Req() req: Request) {
     const rawName = decodeURIComponent(req.header('x-filename') ?? 'upload');
@@ -28,13 +32,14 @@ export class AttachmentsController {
   async serve(@Param('id') id: string, @Param('file') file: string, @Req() req: Request, @Res() res: Response) {
     const { path, mime, inline, name } = await this.attachments.filePath(id, file);
     res.setHeader('content-type', mime);
+    res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('cache-control', 'private, max-age=300');
     // Anything outside the known-safe inline set (images/PDF) force-downloads
     // instead of rendering — an uploaded .html/.svg/.js must never execute as
     // same-origin script just because its URL was opened in a browser tab.
-    if (!inline) res.setHeader('content-disposition', `attachment; filename="${name}"`);
+    if (!inline) res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`); // names may be non-ASCII (кухня.docx): a raw value makes Node throw
     // Video needs byte ranges (browsers seek, and iOS refuses to play without them).
     if (mime.startsWith('video/')) return serveWithRanges(req, res, path);
-    createReadStream(path).pipe(res);
+    pipeFile(res, path);
   }
 }

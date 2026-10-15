@@ -120,3 +120,20 @@ describe('planImage', () => {
     expect(planImage(f({ width: 3000, height: 2000, bytes: 300_000 }), 1600).action).toBe('recompress');
   });
 });
+
+describe('empty roots and secret paths', () => {
+  it('an empty root allows nothing', () => {
+    expect(insideRoot('/etc/passwd', [''])).toBe(false);
+    expect(insideRoot('/a/b', ['', '/a'])).toBe(true);
+  });
+  it('refuses sign-in tokens and env files', async () => {
+    const { isSecretPath } = await import('./media-core');
+    expect(isSecretPath('/d/runs/t1/codex-home/auth.json')).toBe(true);
+    expect(isSecretPath('/d/runs/t1/codex-home/sessions/x.jsonl')).toBe(true);
+    expect(isSecretPath('/d/.codex-home/auth.json')).toBe(true);
+    expect(isSecretPath('/w/.env.local')).toBe(true);
+    expect(isSecretPath('/w/.env')).toBe(true);
+    expect(isSecretPath('/d/runs/t1/codex-home/generated_images/a.png')).toBe(false);
+    expect(isSecretPath('/w/photo.jpg')).toBe(false);
+  });
+});

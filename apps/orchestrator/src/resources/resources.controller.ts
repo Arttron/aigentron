@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { createReadStream } from 'node:fs';
+import { pipeFile } from '../media/pipe-file';
 import { serveWithRanges } from '../media/serve-range';
 import { ResourcesService } from './resources.service';
 import { isInline } from './resources-core';
@@ -54,7 +54,7 @@ export class ResourcesController {
     // Only images and PDFs render in the browser; everything else downloads (an uploaded .html must never run as script).
     if (!isInline(r.kind)) res.setHeader('content-disposition', `attachment; filename="${encodeURIComponent(r.originalName)}"`);
     if (r.kind === 'video') return serveWithRanges(req, res, this.resources.pathOf(r));
-    createReadStream(this.resources.pathOf(r)).pipe(res);
+    pipeFile(res, this.resources.pathOf(r));
   }
 
   @Put(':id')

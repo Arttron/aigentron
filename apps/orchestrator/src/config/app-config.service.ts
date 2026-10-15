@@ -191,7 +191,7 @@ export class AppConfigService {
     this.litellmManagedArgs = (process.env.LITELLM_MANAGED_ARGS ?? '').split(' ').filter(Boolean);
     this.dashboardBaseUrl = (process.env.DASHBOARD_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
     this.attachmentsDir = process.env.ATTACHMENTS_DIR ?? join(this.agentDir, 'attachments');
-    this.workspaceDir = process.env.WORKSPACE_DIR ?? join(this.agentDir, '..', 'workspace');
+    this.workspaceDir = process.env.WORKSPACE_DIR?.trim() || join(this.agentDir, '..', 'workspace');
     this.mcpHostEnabled = !/^(0|false|no)$/i.test(process.env.MCP_HOST_ENABLED ?? 'true');
     this.mcpAllowedOrigins = (process.env.MCP_ALLOWED_ORIGINS ?? '')
       .split(',')

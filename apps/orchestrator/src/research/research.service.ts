@@ -10,6 +10,7 @@ import { htmlToText, isPrivateAddress, normalizeForQuote, safeLookup } from './r
 export { htmlToText, isPrivateAddress, normalizeForQuote };
 
 const MAX_BYTES = 3 * 1024 * 1024;
+const MAX_DECOMPRESSED = 12 * 1024 * 1024;
 const TIMEOUT_MS = 20_000;
 const MAX_REDIRECTS = 5;
 const DEFAULT_PAGE_CHARS = 40_000;
@@ -176,11 +177,13 @@ export class ResearchService {
             let body: Buffer = Buffer.concat(chunks);
             try {
               const enc = String(res.headers['content-encoding'] ?? '').toLowerCase();
-              if (enc === 'gzip') body = gunzipSync(body);
-              else if (enc === 'deflate') body = inflateSync(body);
-              else if (enc === 'br') body = brotliDecompressSync(body);
+              const cap = { maxOutputLength: MAX_DECOMPRESSED }; // a small "zip bomb" must not become gigabytes of memory
+              if (enc === 'gzip') body = gunzipSync(body, cap);
+              else if (enc === 'deflate') body = inflateSync(body, cap);
+              else if (enc === 'br') body = brotliDecompressSync(body, cap);
             } catch (err) {
-              return reject(new Error(`could not decompress response: ${(err as Error).message}`));
+              const tooBig = (err as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE';
+              return reject(new Error(tooBig ? 'page too large after decompression' : `could not decompress response: ${(err as Error).message}`));
             }
             resolve({ status: res.statusCode ?? 0, headers: res.headers, body });
           });

@@ -60,3 +60,6 @@ coverage/
 
 # Project resource library (user content) — never shipped
 /agent/resources/
+
+# generated research cache (runtime artifact)
+/agent/research-cache/

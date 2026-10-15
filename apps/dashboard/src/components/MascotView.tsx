@@ -15,7 +15,10 @@ export function MascotView({ state, size = 56 }: { state: StateName; size?: numb
 
   useEffect(() => {
     let dead = false;
-    (async () => {
+    // Never in the main path: wait for an idle moment (timeout fallback where requestIdleCallback is missing).
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number; cancelIdleCallback?: (h: number) => void };
+    const hasIdle = typeof w.requestIdleCallback === 'function';
+    const start = async () => {
       const [{ default: lottie }, { Mascot }, { default: data }] = await Promise.all([
         import('lottie-web/build/player/lottie_light'),
         import('@/lib/mascot'),
@@ -27,9 +30,13 @@ export function MascotView({ state, size = 56 }: { state: StateName; size?: numb
       mascotRef.current = m;
       if (wanted.current !== 'idle') m.go(wanted.current, { urgent: wanted.current === 'success' || wanted.current === 'error' });
       setReady(true);
-    })().catch(() => undefined); // keep the static fallback
+    };
+    const run = () => void start().catch(() => undefined); // keep the static fallback
+    const handle = hasIdle ? w.requestIdleCallback!(run, { timeout: 3000 }) : window.setTimeout(run, 1500);
     return () => {
       dead = true;
+      if (hasIdle) w.cancelIdleCallback?.(handle);
+      else window.clearTimeout(handle);
       mascotRef.current?.destroy();
       mascotRef.current = null;
     };

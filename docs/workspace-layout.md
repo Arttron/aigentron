@@ -21,6 +21,7 @@
 |---|---|---|---|
 | Project | host `./project` → `/workspace/repo` (`PROJECT_HOST_PATH`) | `/data/repo` | `$DATA_DIR/repo` |
 | Agent dir | host `./agent` → `/workspace/agent` (`AGENT_HOST_PATH`) | `/data/agent` | `$DATA_DIR/agent` |
+| Shared workspace | host `./workspace` → `/workspace/workspace` (`WORKSPACE_HOST_PATH`) | `/data/workspace` | `$DATA_DIR/workspace` |
 | Secrets | named volume `secrets` → `/workspace/secrets` | `/data/secrets` | `$DATA_DIR/secrets` |
 | Worktrees | named volume `worktrees` → `/workspace/.worktrees` | `/data/worktrees` | `$DATA_DIR/worktrees` |
 | Database | volume `pgdata` (Postgres), `redisdata` (Redis) | `/data/orchestrator.db` (SQLite) | `$DATA_DIR/orchestrator.db` |
@@ -70,9 +71,9 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `WORKSPACE_REPO_PATH`, `WORKTREES_ROOT`, `AGENT_DIR`, `ATTACHMENTS_DIR`, `SECRETS_DIR` | see §2 | Container/process paths. |
-| `PROJECT_HOST_PATH`, `AGENT_HOST_PATH` | `./project`, `./agent` | Host side of the dev bind mounts. |
-| `WORKSPACE_SHARED` | `true` | Shared vs worktree mode (§3). |
+| `WORKSPACE_REPO_PATH`, `WORKSPACE_DIR`, `WORKTREES_ROOT`, `AGENT_DIR`, `ATTACHMENTS_DIR`, `SECRETS_DIR` | see §2 (`WORKSPACE_DIR` default: next to the agent dir) | Container/process paths. |
+| `PROJECT_HOST_PATH`, `AGENT_HOST_PATH`, `WORKSPACE_HOST_PATH` | `./project`, `./agent`, `./workspace` | Host side of the dev bind mounts. |
+| `WORKSPACE_SHARED` | `true` (set by compose and the minimal/bare profiles; the code default without it is `false`) | Shared vs worktree mode (§3). |
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface the **dev compose** ports are published on. `0.0.0.0` exposes dashboard, API, LiteLLM, Postgres, Redis — they have no authentication. Minimal/bare listen on all interfaces; protect them with a firewall/VPN. |
 | `ORCHESTRATOR_PORT`, `DASHBOARD_PORT`, `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT` | 3001, 3000, 5432, 6379 | Host ports (your `.env` may shift them, e.g. 3011/3088/5434/6381). |
 | `LITELLM_MASTER_KEY` | public dev default if unset | Must be random when anything is reachable from a network. `make init-env` sets it on fresh installs only (changing it under an existing LiteLLM database would orphan stored routes). |

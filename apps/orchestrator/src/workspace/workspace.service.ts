@@ -169,6 +169,8 @@ export class WorkspaceService implements OnModuleInit {
       const real = await realpath(input.from).catch(() => '');
       const roots = await Promise.all([this.config.attachmentsDir, this.root, ...allowFrom].map((r) => realpath(r).catch(() => r)));
       if (!real || !insideRoot(real, roots)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
+      // a sign-in token or env file is never a deliverable, wherever it sits (a deliverable is served to everyone who can open the task)
+      if (looksSecret(real) || looksSecret(input.from)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
       const st = await stat(real);
       if (!st.isFile()) throw new Error('`from` is not a file.');
       if (st.size > MAX_SAVE_BYTES) throw new Error(`The file is too large (${human(st.size)}; the limit is ${human(MAX_SAVE_BYTES)}).`);
@@ -335,6 +337,18 @@ export class WorkspaceService implements OnModuleInit {
   get writeRoots(): string[] {
     return [resolve(this.root)];
   }
+}
+
+/**
+ * Files that hold secrets and must never be copied into deliverables: Codex sign-in tokens (`auth.json`, anything under a
+ * `codex-home` except its `generated_images`, the shared `.codex-home`) and env files. Mirrors media-core's `isSecretPath`
+ * (the media tools' read gate) — kept local so the two gates do not depend on each other's file.
+ */
+function looksSecret(path: string): boolean {
+  const parts = path.split('/').filter(Boolean);
+  if (parts.some((s) => s === 'auth.json' || s === '.codex-home' || /^\.env(\.|$)/.test(s))) return true;
+  const i = parts.indexOf('codex-home');
+  return i >= 0 && parts[i + 1] !== 'generated_images';
 }
 
 async function walk(dir: string, depth: number, cap = 5000): Promise<{ path: string; size: number; mtime: Date }[]> {

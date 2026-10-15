@@ -1,9 +1,26 @@
-Aigentron v0.1.58
+Aigentron v0.1.59
 
-For people who are not programmers: the admin can now read the files you give it.
+For people who are not programmers: a safety-and-stability release after a full review of the project — no new screens, but several real holes closed and updates made safer.
 
-Files for the admin
-- The admin has no file reader of its own, so it used to answer "I cannot open attachments" — even for a file you had uploaded to the task. Now it has a tool to read the text of a task's attachment (also one uploaded later in the Files tab, by name), or a file of the workspace or the library: Markdown, text, CSV, JSON, HTML, PDF with a text layer and Word (.docx), 12 000 characters at a time (it asks for the next part itself). Pictures are looked at; scans without text are reported as unreadable.
-- The same tool is given to any agent whose allowed tools do not include Read.
+Safety
+- Roles are now enforced where they were missing: only operators and admins can change settings, agents and providers (and run MCP commands); task actions (start, follow-up, cancel, delete, upload) need at least the task-setter role. Viewers (reviewers) can still look, approve and answer questions. Your own account is unaffected.
+- A request for a folder name instead of a file (e.g. an attachment called "..") could shut the whole server down — fixed. Attachments with non-Latin names (кухня.docx) now download.
+- The assistant in the chat can no longer read files that hold sign-in tokens; empty folder settings can no longer open everything; research pages are capped when unpacked; the wizard password check is rate-limited.
+- If the approval hook cannot run, the action is now BLOCKED instead of silently allowed (and its timeout is in the right units).
+
+Stability
+- Cancelling a task can no longer bring it back to life; a single database hiccup can no longer stop the queue.
+- git fetch for the project repository no longer sends a duplicate credential header (it failed silently before — now a failure is logged).
+- Telegram: approval requests are clipped to Telegram's limit so they are always delivered; questions and approvals of a subtask go to the chat of the task that created it; commands like /tasks@MyBot work in groups.
+- Files: attachment names cannot start with a dot.
+
+Cost
+- The project map and the workspace memory are no longer part of the system prompt, so the provider's cache of the long, stable part survives between follow-ups (cheaper repeated messages).
+
+Updates
+- Before every update migration the database is snapshotted (backups/pre-<version>.db, last 3 kept). If the migration fails the snapshot is restored automatically; "aigentron rollback" offers to restore it too. A stuck "update running" status expires after 30 minutes.
+
+Dashboard
+- The first load is smaller (main script 634 → 433 kB), the assistant animation loads after the page is ready, the task page no longer keeps the previous task's state when you move between tasks, and approvals are shown once on the home page.
 
 Update note: no database changes.

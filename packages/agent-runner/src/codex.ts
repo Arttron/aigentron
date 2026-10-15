@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { chmod, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { buildAgentEnv } from './env';
+import { hooksConfig } from './settings';
 import { emptyUsage } from './usage';
 import type { AgentEvent, AgentEventHandler, AgentRunResult, RunAgentParams } from './types';
 
@@ -53,19 +54,11 @@ export function renderCodexConfig(params: RunAgentParams, model: string | undefi
   return lines.join('\n');
 }
 
-function renderHooks(params: RunAgentParams): string {
+/** Codex's hooks.json: the same PreToolUse gate as Claude's settings.json (seconds, fail-closed). Exported for tests. */
+export function renderHooks(params: Pick<RunAgentParams, 'hook'>): string {
   const hook = params.hook;
   if (!hook) return JSON.stringify({ hooks: {} });
-  return JSON.stringify({
-    hooks: {
-      PreToolUse: [
-        {
-          matcher: '',
-          hooks: [{ type: 'command', command: `node ${hook.scriptPath}`, timeout: hook.approvalTimeoutSeconds + 15 }],
-        },
-      ],
-    },
-  });
+  return JSON.stringify({ hooks: hooksConfig(hook, '') });
 }
 
 /**

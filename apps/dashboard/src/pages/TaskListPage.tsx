@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { SERVER_EVENT, type ApprovalRequest } from '@lds/shared';
+import { SERVER_EVENT } from '@lds/shared';
 import { api, type TaskListItem, type TaskStatusFilter, type TaskTypeFilter } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { CreateTaskForm } from '@/components/CreateTaskForm';
-import { ApprovalCard } from '@/components/ApprovalCard';
 import { TaskList } from '@/components/TaskList';
 import { UserSwitcher } from '@/components/UserSwitcher';
 import { AppHeader, Button, Card, SectionTitle, ConnStatus, ErrorText, Muted } from '@/components/ui';
@@ -69,7 +68,6 @@ export function TaskListPage() {
   const [status, setStatus] = useState<TaskStatusFilter | ''>(initialStatus);
   const [statusCounts, setStatusCounts] = useState<Record<string, number> | null>(null);
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
-  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,13 +82,6 @@ export function TaskListPage() {
     api.taskTypeCounts().then(setCounts).catch(() => undefined);
     api.taskStatusCounts(type || undefined).then(setStatusCounts).catch(() => undefined);
   }, [q, type, status, page]);
-
-  const refreshApprovals = useCallback(() => {
-    api
-      .listApprovals('pending')
-      .then(setApprovals)
-      .catch(() => undefined);
-  }, []);
 
   const removeTask = useCallback(
     async (id: string) => {
@@ -118,8 +109,6 @@ export function TaskListPage() {
   refreshRef.current = refreshTasks;
 
   useEffect(() => {
-    refreshApprovals();
-
     const socket = getSocket();
     const onConnect = () => setConnected(true);
     const onDisconnect = () => setConnected(false);
@@ -128,10 +117,7 @@ export function TaskListPage() {
     socket.on('disconnect', onDisconnect);
 
     const onTask = () => refreshRef.current();
-    const onApproval = () => {
-      refreshRef.current();
-      refreshApprovals();
-    };
+    const onApproval = () => refreshRef.current();
     socket.on(SERVER_EVENT.taskUpserted, onTask);
     socket.on(SERVER_EVENT.taskStatus, onTask);
     socket.on(SERVER_EVENT.taskDeleted, onTask);
@@ -147,7 +133,7 @@ export function TaskListPage() {
       socket.off(SERVER_EVENT.approvalCreated, onApproval);
       socket.off(SERVER_EVENT.approvalResolved, onApproval);
     };
-  }, [refreshApprovals]);
+  }, []);
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const pickStatus = (next: TaskStatusFilter | '') => {
@@ -208,15 +194,6 @@ export function TaskListPage() {
       )}
 
       <CreateTaskForm onCreated={refreshTasks} />
-
-      {approvals.length > 0 && (
-        <Card>
-          <SectionTitle>Pending approvals ({approvals.length})</SectionTitle>
-          {approvals.map((a) => (
-            <ApprovalCard key={a.id} approval={a} showTask />
-          ))}
-        </Card>
-      )}
 
       <Card>
         <div

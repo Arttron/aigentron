@@ -94,7 +94,7 @@ COPY --from=build /app/apps/dashboard/dist /app/apps/dashboard/dist
 # Agent operational files (skills, agent defs) — read at runtime, not compiled.
 COPY agent /app/agent
 
-COPY infra/minimal-entrypoint.sh infra/minimal-healthcheck.sh infra/setup-wizard.mjs /app/infra/
+COPY infra/minimal-entrypoint.sh infra/db-snapshot.sh infra/minimal-healthcheck.sh infra/setup-wizard.mjs /app/infra/
 # The PreToolUse approval hook (apps/orchestrator's AppConfigService resolves
 # it relative to its own compiled location, expecting it here) — previously
 # missing from this COPY list entirely, so the hook script never existed in

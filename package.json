@@ -5,7 +5,7 @@
   "description": "Self-hosted orchestration platform for a fleet of autonomous Claude Code agents.",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=20.11.0"
+    "node": ">=22"
   },
   "scripts": {
     "build": "turbo run build",

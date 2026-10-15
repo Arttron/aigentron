@@ -17,7 +17,7 @@ By default the agents talk terse English to each other (~80 words per message) a
 ## What works in every language (checked by tests, `src/languages.test.ts`)
 - Task text, titles (generated in the request's language), file names (Cyrillic, CJK, Arabic … keep their letters), agent names and knowledge-base names in any script; `/name` and `@name` find agents with non-Latin names, tolerating case and typos.
 - Knowledge-base search: Latin (with accents), Cyrillic, Greek, Arabic (harakat ignored), Hebrew, Hindi/Thai/Vietnamese (combining marks kept), Chinese/Japanese/Korean (character pairs); sentence and clause detection for CJK, Hindi and Arabic punctuation, "第N条", "Artikel 3.".
-- "The task is finished" in a message: ~20 languages (button and `/done` work in all). Task search on SQLite also handles non-ASCII case. Telegram messages are cut without splitting emoji. Right-to-left text (Arabic, Hebrew) is shown with automatic direction in messages and inputs. Voice recognition: automatic language by default, 50 languages selectable.
+- "The task is finished" in a message: ~20 languages (the dashboard button and `/done` work in all; Telegram has no button). Task search on SQLite also handles non-ASCII case. Telegram messages are cut without splitting emoji. Right-to-left text (Arabic, Hebrew) is shown with automatic direction in messages and inputs. Voice recognition: automatic language by default, 50 languages selectable.
 
 ## Not translated
 The dashboard's own labels are English (a localised interface is a possible later step).

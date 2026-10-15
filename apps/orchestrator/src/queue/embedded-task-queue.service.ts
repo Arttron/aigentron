@@ -72,18 +72,27 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
     setImmediate(() => void this.tick());
   }
 
-  /** Claim due jobs up to the concurrency cap and run them. */
+  /**
+   * Claim due jobs up to the concurrency cap and run them. Never rejects: it is
+   * called fire-and-forget from the poll timer, and an unhandled rejection ends
+   * the whole process (main.ts) — a transient SQLITE_BUSY / DB hiccup must only
+   * cost this tick; the next poll retries.
+   */
   private async tick(): Promise<void> {
     if (!this.processor || this.stopped) return;
-    while (this.inFlight < this.concurrency) {
-      const job = await this.claimNext();
-      if (!job) return;
-      this.inFlight++;
-      void this.run(job).finally(() => {
-        this.inFlight--;
-        // A slot just freed — a queued job may be due; don't wait for the poll.
-        if (!this.stopped) setImmediate(() => void this.tick());
-      });
+    try {
+      while (this.inFlight < this.concurrency) {
+        const job = await this.claimNext();
+        if (!job) return;
+        this.inFlight++;
+        void this.run(job).finally(() => {
+          this.inFlight--;
+          // A slot just freed — a queued job may be due; don't wait for the poll.
+          if (!this.stopped) setImmediate(() => void this.tick());
+        });
+      }
+    } catch (err) {
+      this.logger.error(`Queue tick failed (retrying on the next poll): ${(err as Error).message}`);
     }
   }
 
@@ -118,7 +127,9 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
       // processor itself; the job is spent either way.
       this.logger.error(`Job ${job.id} (task ${data.taskId}) failed: ${(err as Error).message}`);
     } finally {
-      await this.prisma.queueJob.delete({ where: { id: job.id } }).catch(() => undefined);
+      await this.prisma.queueJob.delete({ where: { id: job.id } }).catch((err) => {
+        this.logger.warn(`Job ${job.id}: could not delete the spent row (it is dropped at the next start): ${(err as Error).message}`);
+      });
     }
   }
 

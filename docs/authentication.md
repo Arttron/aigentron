@@ -68,12 +68,23 @@ Changing your password signs your other browsers out; "Sign out other browsers" 
 `<secrets dir>/auth.json` (mode 0600): a scrypt hash per user and the key that signs session cookies. It sits in the
 credentials directory that the approval gate already guards, outside the agent tree. No database change.
 
+## Routes and roles
+
+| Routes | Who may call (with sign-in on, or as the acting user when it is off) |
+|---|---|
+| `PUT /api/settings`, `POST /api/settings/verify-wizard-password` (rate-limited), `POST/PUT/DELETE /api/agents`, `POST/PUT/DELETE /api/providers`, `POST /api/providers/models-preview`, `POST /api/providers/:name/test`, `/api/mcp-servers` (changes), `POST /api/update/check`, `POST /api/update/apply` | operator, admin |
+| Task changes: create, subtasks, start, done, follow-up, cancel, delete, pending follow-ups (edit / remove), attachment upload | task setter, operator, admin |
+| Viewing (all `GET`), approving, answering questions | any signed-in user, including reviewer |
+
+Without a sign-in password the request is attributed to the default operator (or to the user in the `x-lds-user` header), so the owner's own setup is unaffected.
+A reviewer or task setter who tries a route above gets 403. `apps/orchestrator/src/identity/roles-coverage.test.ts` fails when a mutating handler of these controllers has no `@Roles`.
+
 ## Honest limits
 
 - Agents run on the same machine as the orchestrator. The sign-in stops them using the HTTP API, but an agent that is allowed to
   read `secrets/auth.json` (the approval gate asks you first) or to reach the database directly could still tamper with state.
   Real isolation = running agents as a separate OS user / container — see `docs/BACKLOG.md`.
 - The login screen shows the users' names and roles to anyone who can open the page. If that matters, keep the page behind Cloudflare Access (`docs/remote-access.md`).
-- Roles are enforced on the routes that declare them: tasks, approvals, questions, discussions, users, channels, maintenance, stats, providers, resources, schedules, packs, knowledge bases, voice, media, updates, task titles, domains / web server / Cloudflare Access (mostly operator/admin; creating tasks and answering questions also task setter / reviewer). General settings, agents and MCP servers are open to every signed-in user for now.
+- Roles are enforced on the routes that declare them (see "Routes and roles" below). Roles apply to HTTP routes only; Telegram and other channel users act through the services and are not affected.
 - The cookie is `HttpOnly`, `SameSite=Lax`, and `Secure` when served over HTTPS (also behind a tunnel). Use HTTPS for any non-local access
   (see `docs/remote-access.md`); over plain HTTP on an open network the password travels in clear text.

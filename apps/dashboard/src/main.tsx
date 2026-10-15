@@ -4,32 +4,29 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import './globals.css';
 import { installAuthFetch } from './lib/auth';
 import { App } from './App';
-import { TaskListPage } from './pages/TaskListPage';
-import { AgentsPage } from './pages/AgentsPage';
-import { TaskDetailPage } from './pages/TaskDetailPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { StatsPage } from './pages/StatsPage';
-import { SecretLinkPage } from './pages/SecretLinkPage';
-import { ResourcesPage } from './pages/ResourcesPage';
-import { KnowledgePage } from './pages/KnowledgePage';
-import { WorkspacePage } from './pages/WorkspacePage';
 
 installAuthFetch();
 
+/** Page background while a route chunk loads — no empty/white flash (the colour comes from globals.css). */
+function Fallback() {
+  return <div style={{ minHeight: '100vh', background: 'var(--bg, transparent)' }} />;
+}
+
 const router = createBrowserRouter([
   // Outside <App/> on purpose: no sign-in gate, no chat widget — the one-time token in the URL is the credential.
-  { path: '/secret/:token', element: <SecretLinkPage /> },
+  { path: '/secret/:token', lazy: async () => ({ Component: (await import('./pages/SecretLinkPage')).SecretLinkPage }), HydrateFallback: Fallback },
   {
     element: <App />,
+    HydrateFallback: Fallback,
     children: [
-      { path: '/', element: <TaskListPage /> },
-      { path: '/agents', element: <AgentsPage /> },
-      { path: '/tasks/:id', element: <TaskDetailPage /> },
-      { path: '/settings', element: <SettingsPage /> },
-      { path: '/stats', element: <StatsPage /> },
-      { path: '/resources', element: <ResourcesPage /> },
-      { path: '/knowledge', element: <KnowledgePage /> },
-      { path: '/workspace', element: <WorkspacePage /> },
+      { path: '/', lazy: async () => ({ Component: (await import('./pages/TaskListPage')).TaskListPage }) },
+      { path: '/agents', lazy: async () => ({ Component: (await import('./pages/AgentsPage')).AgentsPage }) },
+      { path: '/tasks/:id', lazy: async () => ({ Component: (await import('./pages/TaskDetailPage')).TaskDetailPage }) },
+      { path: '/settings', lazy: async () => ({ Component: (await import('./pages/SettingsPage')).SettingsPage }) },
+      { path: '/stats', lazy: async () => ({ Component: (await import('./pages/StatsPage')).StatsPage }) },
+      { path: '/resources', lazy: async () => ({ Component: (await import('./pages/ResourcesPage')).ResourcesPage }) },
+      { path: '/knowledge', lazy: async () => ({ Component: (await import('./pages/KnowledgePage')).KnowledgePage }) },
+      { path: '/workspace', lazy: async () => ({ Component: (await import('./pages/WorkspacePage')).WorkspacePage }) },
     ],
   },
 ]);

@@ -46,6 +46,7 @@ import { McpService } from '../mcp/mcp.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PreviewService } from '../preview/preview.service';
 import { budgetExceeded, isIdleStuck } from './run-guards';
+import { assemblePromptLayers, withRunContext } from './prompt-layers';
 import { AgentExecutor, type AgentRunOutcome, type TaskRunContext } from './agent-executor';
 
 /** Per-skill and total caps (chars) on skill content folded into the prompt. */
@@ -159,11 +160,11 @@ export class RealAgentExecutor extends AgentExecutor {
     const workDir = chat ? ctx.worktreePath : await this.settings.workDir(ctx.worktreePath);
     // Orient every agent (lead AND delegated sub-agents share this cwd): its cwd
     // IS the project (a per-task worktree checkout), so none of them hunt for a
-    // "main project" elsewhere or hedge about the location.
-    const projectMap = chat ? '' : await buildProjectMap(workDir);
+    // "main project" elsewhere or hedge about the location. The orientation is
+    // static for a task (paths, branch) — it lives in the system append.
     const workspaceOn = !chat; // chat agents and discussion participants get the tools, not the prompt block
     const orientation =
-      (chat ? buildChatOrientation(workDir) : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared, projectMap)) +
+      (chat ? buildChatOrientation(workDir) : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared)) +
       (workspaceOn ? `\n\n${this.workspace.orientation()}` : '');
     // Other registered agents become delegatable subagents (each on its own provider);
     // a chat agent talks to the user directly and delegates to no one.
@@ -172,9 +173,12 @@ export class RealAgentExecutor extends AgentExecutor {
     if (Object.keys(agents).length) {
       this.logger.log(`Task ${task.id} subagents: [${Object.keys(agents).join(', ')}]`);
     }
-    // The workspace memory goes LAST so the static part of the prompt stays cacheable.
+    // What changes between runs (the project map, the workspace memory) goes into
+    // the run's MESSAGE, never into the system append: a changed system block
+    // throws away the prompt cache of the whole conversation (see prompt-layers.ts).
+    const projectMap = chat ? '' : await buildProjectMap(workDir);
     const memory = workspaceOn ? await this.workspace.digest().catch(() => '') : '';
-    const appendSystemPrompt = (await this.buildInstructions(agentDef)) + roster + (memory ? `\n\n${memory}` : '');
+    const layers = assemblePromptLayers({ orientation, instructions: await this.buildInstructions(agentDef), roster, projectMap, memory });
 
     // Resume the most recent session with a Claude session id on a follow-up
     // (first attempt only) — including one that ended `errored` by hitting the
@@ -214,7 +218,8 @@ export class RealAgentExecutor extends AgentExecutor {
       agentDef,
       mcpServers,
       agents,
-      appendSystemPrompt: `${orientation}\n\n${appendSystemPrompt}`,
+      appendSystemPrompt: layers.systemAppend,
+      runContext: layers.runContext,
       chat,
       attachmentPaths,
       messageAttachments,
@@ -233,6 +238,7 @@ export class RealAgentExecutor extends AgentExecutor {
         provider,
         model,
         resumeSessionId: i === 0 ? resumeSessionId : undefined,
+        firstAttempt: i === 0,
         leadingNote: note,
       });
       last = r.outcome;
@@ -376,11 +382,15 @@ export class RealAgentExecutor extends AgentExecutor {
     mcpServers: Record<string, Record<string, unknown>>;
     agents: Record<string, SubagentDefinition>;
     appendSystemPrompt: string;
+    /** Project map + workspace memory for THIS run — goes into the agent's message, not the transcript (see prompt-layers.ts). */
+    runContext: string;
     /** Conversational agent: no forced status-report resume. */
     chat?: boolean;
     attachmentPaths: string[];
     messageAttachments: string[];
     resumeSessionId?: string;
+    /** The first provider of the chain: the person's message is recorded once, not per failover attempt (E-34). */
+    firstAttempt: boolean;
     leadingNote?: string;
   }): Promise<{ outcome: AgentRunOutcome; failoverWorthy: boolean; reason: string }> {
     const { ctx, agentDef, provider, model } = opts;
@@ -515,9 +525,13 @@ export class RealAgentExecutor extends AgentExecutor {
 
     // On a fallback attempt, lead the transcript with why we failed over.
     if (opts.leadingNote) onEvent({ kind: 'stderr', text: opts.leadingNote });
-    // Record the user's message so the transcript reads as a chat.
-    if (!ctx.discussion) onEvent({ kind: 'prompt', text: prompt, attachments: opts.messageAttachments });
-    else if (ctx.discussion.opening) onEvent({ kind: 'prompt', text: ctx.discussion.opening.text, attachments: ctx.discussion.opening.attachments });
+    // Record the user's message so the transcript reads as a chat — once per
+    // run: a failover attempt re-sends the same message to the next provider,
+    // which is not a second message from the person.
+    if (opts.firstAttempt) {
+      if (!ctx.discussion) onEvent({ kind: 'prompt', text: prompt, attachments: opts.messageAttachments });
+      else if (ctx.discussion.opening) onEvent({ kind: 'prompt', text: ctx.discussion.opening.text, attachments: ctx.discussion.opening.attachments });
+    }
 
     const abortController = new AbortController();
     // Abort any stale controller for this task before replacing it.
@@ -551,7 +565,8 @@ export class RealAgentExecutor extends AgentExecutor {
 
     // Folders an agent may hand to show_images / look_at / workspace_save besides the library: its worktree, and (Codex) the pictures it generated.
     const generatedDir = codexImagesDir(this.config.agentDir, ctx.taskId);
-    const mediaRoots = [ctx.worktreePath, generatedDir];
+    // A chat agent's "worktree" is the whole agent dir (it holds runs/*/codex-home with sign-in tokens): never an allowed root for it.
+    const mediaRoots = opts.chat ? [generatedDir] : [ctx.worktreePath, generatedDir];
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
     const toolHandlers: InternalToolHandlers = {
       onReportStatus,
@@ -651,7 +666,7 @@ export class RealAgentExecutor extends AgentExecutor {
     try {
       const result = await runtimeForProviderKind(provider.kind).run(
         {
-          prompt: await this.promptWithAttachments(prompt, opts),
+          prompt: withRunContext(await this.promptWithAttachments(prompt, opts), opts.runContext),
           cwd: opts.workDir,
           workspaceRoot: ctx.worktreePath,
           extraWriteRoots: ctx.discussion ? undefined : this.workspace.writeRoots,
@@ -1310,14 +1325,10 @@ function buildChatOrientation(workDir: string): string {
  * A short orientation block prepended to every agent's system prompt so it knows
  * its working directory IS the project — a per-task git worktree (isolated
  * checkout of the repo) — and doesn't go looking for a "main project" elsewhere.
+ * Static for a task (no file list): the project map travels in the run's message
+ * (prompt-layers.ts), and a sub-agent runs `git ls-files` itself.
  */
-function buildOrientation(
-  workDir: string,
-  worktreeRoot: string,
-  branch: string | null,
-  shared = false,
-  projectMap = '',
-): string {
+function buildOrientation(workDir: string, worktreeRoot: string, branch: string | null, shared = false): string {
   const kind = shared
     ? 'the project repository (the shared main working directory)'
     : 'a dedicated git worktree (an isolated checkout of the project repository) created for this task';
@@ -1340,24 +1351,14 @@ function buildOrientation(
     'launch collides with it and corrupts the `.next` build cache. Use `preview_worktree` to',
     'render a page if you have it; otherwise report and let the lead preview.',
   );
-  if (projectMap) {
-    lines.push(
-      '',
-      '## Project map',
-      "The project's files (git-tracked) — use this instead of scanning to find things:",
-      '```',
-      projectMap,
-      '```',
-    );
-  }
   return lines.join('\n');
 }
 
 /**
- * A compact map of the project's git-tracked files, injected into orientation so
- * an agent doesn't burn turns discovering structure. `.gitignore` already keeps
- * node_modules/build output out. Lists files when few; summarizes per top-level
- * directory when many. Best-effort — returns '' on any error.
+ * A compact map of the project's git-tracked files, handed to the lead in its
+ * message (prompt-layers.ts) so it doesn't burn turns discovering structure.
+ * `.gitignore` already keeps node_modules/build output out. Lists files when
+ * few; summarizes per top-level directory when many. Best-effort — '' on error.
  */
 async function buildProjectMap(cwd: string): Promise<string> {
   const pexec = promisify(execFile);

@@ -24,6 +24,25 @@ export function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** A `running` update older than this is treated as dead (the updater was killed / the machine rebooted before it wrote ok/failed). */
+export const STALE_RUNNING_MS = 30 * 60_000;
+
+export interface UpdateStatusRecord {
+  state: 'running' | 'ok' | 'failed';
+  version: string;
+  startedAt: string;
+  finishedAt: string;
+  error: string;
+}
+
+/** status.json as written by the runner, with a stale `running` (or one with an unreadable start time) reported as `failed`, so it never blocks apply() forever. */
+export function resolveStaleStatus<T extends UpdateStatusRecord>(s: T, now: number = Date.now()): T {
+  if (s.state !== 'running') return s;
+  const started = Date.parse(s.startedAt);
+  if (Number.isFinite(started) && now - started <= STALE_RUNNING_MS) return s;
+  return { ...s, state: 'failed', finishedAt: s.finishedAt || new Date(now).toISOString(), error: s.error || 'the update did not finish within 30 minutes (the updater was probably killed) - treated as failed' };
+}
+
 export interface RunnerOptions {
   repo: string;
   version: string;

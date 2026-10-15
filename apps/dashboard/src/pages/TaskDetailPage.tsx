@@ -35,8 +35,13 @@ import styles from './TaskDetailPage.module.css';
 /** Stable de-dup key — the same line can arrive via fetch and over the socket. */
 const lineKey = (sessionId: string, seq: number) => `${sessionId}:${seq}`;
 
+/** Keyed by the route id: parent → subtask navigation remounts the page, so no state (lines, form draft, staged files) leaks between tasks. */
 export function TaskDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
+  return <TaskDetailView key={id} id={id} />;
+}
+
+function TaskDetailView({ id }: { id: string }) {
   const navigate = useNavigate();
 
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -350,7 +355,7 @@ export function TaskDetailPage() {
         </div>
 
         {tab === 'chat' && (
-          <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact />
+          <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact />
         )}
         {/* the phone layout returns early: the discussion window has to be here as well */}
         {discussing && <DiscussionModal taskId={id} initialTopic={task.prompt} onClose={() => setDiscussing(false)} onStarted={() => refreshTask()} />}
@@ -432,7 +437,7 @@ export function TaskDetailPage() {
             <DiscussionBar taskId={id} running={!terminal} />
             <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           </Card>
-          <FollowUpForm taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} />
+          <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} />
 
           <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           <TaskRelations task={task} onChange={refreshTask} />

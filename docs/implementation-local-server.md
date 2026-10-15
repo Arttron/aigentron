@@ -54,6 +54,7 @@ local-dev-server/
 │   ├── resources/           Shared library for all agents (docs/resources.md)
 │   └── runs/<taskId>/       Generated Claude Code settings.json (gitignored)
 ├── project/                 The workspace repo agents work in (/workspace/repo)
+├── workspace/               Shared workspace for non-code results: WORKSPACE.md, memory/, work/, deliverables/ (/workspace/workspace)
 ├── infra/                   Dockerfile, entrypoints, litellm config, approval hook, pg init
 ├── docker-compose.yml       Full stack
 ├── turbo.json               Build pipeline + globalEnv allowlist
@@ -220,7 +221,8 @@ modules; `ConfigModule` is global.
 | **providers** | Model-endpoint CRUD + tests | `providers.service.ts` CRUD, `test` ("whoami"), `listModels`, LiteLLM route sync |
 | **litellm** | LiteLLM admin-API client | `litellm.service.ts` ensureRoute/registerRoute/deleteRoutesFor/listRoutes |
 | **mcp** | MCP server registry + resolution | `mcp.service.ts` resolveMany + `${SECRET}` substitution; seeds playwright/github/postgres/code-intel |
-| **attachments** | Per-task file upload/serve | `attachments.service.ts` save/list/paths/dir/remove (images+PDF, 10 MB) |
+| **attachments** | Per-task file upload/serve, links | `attachments.service.ts` save/list/paths/dir/remove (images+PDF, 10 MB); `.links.json` lists workspace/library files in a task's attachments without copying |
+| **workspace** | Shared workspace (`WORKSPACE_DIR`): layout, memory digest + prompt block, `workspace_*` tools, file API | `workspace.service.ts`, `workspace-core.ts`, `workspace.controller.ts` (`GET /api/workspace`, `/files`, `GET\|PUT\|DELETE /file`); `docs/workspace-layout.md` |
 | **worktrees** | Workspace + per-task git worktrees + PR | `workspace.service.ts` ensure/provision/baseRef; `worktree.service.ts` createForTask/cleanup; `github.service.ts` publishResult |
 | **settings** | Singleton runtime config | `settings.service.ts` accessors; secret-masked API |
 | **bus** | Event bus (Redis pub/sub; in-process in `minimal`) | `agent-event-bus.ts` publish/subscribe |
@@ -272,7 +274,7 @@ The heart of a run. `run(ctx)`:
    `writeChain` (ordered). A hard timeout (`AGENT_RUN_TIMEOUT_MS`, default 10 min) aborts the run.
 6. `buildInstructions` (`:329`) assembles the system-prompt append **top→bottom**: global
    `agent/SOUL.md` → project `<repo>/SOUL.md` → agent body (or the DB `agentInstructions`) → skill
-   files (per-file cap 16 KB, total 64 KB).
+   files (per-file cap 16 KB, total 64 KB) → colleague roster → workspace memory digest last (work agents; the workspace folders block sits in the orientation). See `docs/request-flow.md`.
 
 Note: **`SendMessage` is always disallowed** for the lead (`:195`) — delegation goes through the
 built-in **Task tool**, since subagents are spawned per-delegation, not persistently addressable.
@@ -368,7 +370,7 @@ non-fatal) bare-metal installs (`install.sh`'s `ensure_uv`) — so `code-intel` 
 `--profile mcp` compose service provides; bare-metal/minimal have no equivalent yet (tracked in
 `docs/BACKLOG.md`). Attachments are per-task files (images/PDF ≤10 MB, video ≤300 MB; pictures are shrunk to ≤1600 px on upload, `docs/media.md`) streamed
 to `<attachmentsDir>/<taskId>/`, surfaced to the agent as prompt paths (read via the Read tool) and
-to the UI as inline thumbnails.
+to the UI as inline thumbnails. A task's attachment list may also hold **links** to workspace/library files (no copy). Chat agents (the admin) have no `Read`: the text of attached text files goes into the prompt (`agent/inline-attachments.ts`, ≤12 000 chars per file, ≤24 000 per message) and the `read_document` tool reads any attachment, workspace or library file (`docs/media.md`). Pictures Codex generates are adopted into the attachments after the run (`agent/codex-images.ts`).
 
 ### 6.7 Settings (`settings/settings.service.ts`)
 
@@ -591,7 +593,7 @@ Vite + React SPA (`react-router-dom`), CSS Modules (no Tailwind) — neumorphic 
 - `/settings` — tabbed: General (repo/token/timeouts/verify/concurrency/defaults/theme, security, access,
   task titles, disk & cleanup, version & updates), Providers (CRUD + test), LiteLLM (read-only routes),
   MCP servers, MCP endpoint, Channels, Schedules, Voice, Vision, Users, Signed-in devices.
-- `/stats` — token/cost usage by provider. `/resources` — shared library. `/knowledge` — knowledge bases.
+- `/stats` — token/cost usage by provider. `/resources` — shared library. `/knowledge` — knowledge bases. `/workspace` — shared workspace file browser.
   `/secret/:token` — one-time page for entering a key from a phone. A floating admin-assistant chat is on every page.
 
 **Client libs** (`src/lib`): `config.ts` (relative `/api` + same-origin socket by default;
@@ -621,6 +623,7 @@ Env is grouped in `.env.example` and allowlisted in `turbo.json` `globalEnv`. No
 | `OLLAMA_BASE_URL` / `ROUTINE_MODEL` | host.docker.internal:11434 / — | local tier |
 | `ANTHROPIC_API_KEY` / `COMPLEX_MODEL` | — / claude-sonnet-4-6 | cloud tier |
 | `WORKSPACE_REPO_PATH` / `AGENT_DIR` / `WORKTREES_ROOT` | /workspace/repo · /workspace/agent · volume | paths |
+| `WORKSPACE_DIR` | next to the agent dir (`/workspace/workspace`) | shared workspace (memory/work/deliverables); host side in dev compose: `WORKSPACE_HOST_PATH` (`./workspace`) |
 | `AGENT_CONCURRENCY` / `AGENT_MAX_TURNS` / `AGENT_RUN_TIMEOUT_MS` | 2 / 40 / 600000 | `AGENT_CONCURRENCY` only seeds Settings' `concurrency` on first load — live-editable after (§6.7) |
 | `APPROVALS_API_URL` / `APPROVAL_TIMEOUT_SECONDS` | http://orchestrator:3001 / 300 | hook callback + gate timeout |
 | `LDS_HOOK_SECRET` | randomUUID() | hook ↔ orchestrator shared secret |

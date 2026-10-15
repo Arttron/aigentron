@@ -1,4 +1,9 @@
-import { Body, Controller, Get, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpException, HttpStatus, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { timingSafeEqual } from 'node:crypto';
+import type { Request } from 'express';
+import { LoginLimiter } from '../auth/auth-core';
+import { RolesGuard } from '../identity/roles.guard';
+import { Roles } from '../identity/roles.decorator';
 import { IsString, MinLength } from 'class-validator';
 import { SettingsService, type SettingsPatch } from './settings.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -58,6 +63,8 @@ function toPatch(dto: UpdateSettingsDto): SettingsPatch {
 
 @Controller('settings')
 export class SettingsController {
+  private readonly limiter = new LoginLimiter();
+
   constructor(
     private readonly settings: SettingsService,
     private readonly config: AppConfigService,
@@ -68,6 +75,8 @@ export class SettingsController {
     return serialize(await this.settings.get());
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Put()
   async update(@Body() dto: UpdateSettingsDto) {
     return serialize(await this.settings.update(toPatch(dto)));
@@ -78,11 +87,21 @@ export class SettingsController {
    * speed bump (mirrors hook-secret.guard.ts's shared-secret-from-env
    * pattern), not a security boundary — v1 has no auth anywhere else either.
    */
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   @Post('verify-wizard-password')
-  verifyWizardPassword(@Body() dto: VerifyWizardPasswordDto) {
+  verifyWizardPassword(@Body() dto: VerifyWizardPasswordDto, @Req() req: Request) {
     if (!this.config.wizardAdminPassword) {
       return { ok: false, error: 'WIZARD_ADMIN_PASSWORD is not configured on the server' };
     }
-    return { ok: dto.password === this.config.wizardAdminPassword };
+    const key = req.socket?.remoteAddress ?? 'unknown';
+    const wait = this.limiter.wait(key);
+    if (wait > 0) throw new HttpException(`Too many attempts, retry in ${wait}s`, HttpStatus.TOO_MANY_REQUESTS);
+    const a = Buffer.from(dto.password);
+    const b = Buffer.from(this.config.wizardAdminPassword);
+    const ok = a.length === b.length && timingSafeEqual(a, b);
+    if (ok) this.limiter.ok(key);
+    else this.limiter.fail(key);
+    return { ok };
   }
 }

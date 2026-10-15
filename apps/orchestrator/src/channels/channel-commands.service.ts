@@ -39,6 +39,11 @@ export interface CommandReply {
  * single readable reply (no noise). State (active task, chosen agent/model)
  * lives per (channel, chat) so a plain message continues the active task.
  */
+/** `/Tasks@MyBot` (how Telegram writes a command in a group) → `/tasks`. */
+export function commandName(text: string): string {
+  return text.trim().split(/\s+/)[0]!.toLowerCase().replace(/@\w+$/, '');
+}
+
 @Injectable()
 export class ChannelCommandService {
   constructor(
@@ -110,8 +115,8 @@ export class ChannelCommandService {
 
   async handle(ctx: CommandCtx, text: string): Promise<string | CommandReply> {
     const trimmed = text.trim();
-    const cmd = trimmed.split(/\s+/)[0]!.toLowerCase();
-    const arg = trimmed.slice(cmd.length).trim();
+    const cmd = commandName(trimmed);
+    const arg = trimmed.replace(/^\S+/, '').trim();
     switch (cmd) {
       case '/start':
       case '/help':

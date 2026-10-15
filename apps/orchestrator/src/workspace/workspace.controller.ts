@@ -1,6 +1,6 @@
 import { Controller, Delete, Get, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { createReadStream } from 'node:fs';
+import { pipeFile } from '../media/pipe-file';
 import { Roles } from '../identity/roles.decorator';
 import { RolesGuard } from '../identity/roles.guard';
 import { WorkspaceService } from './workspace.service';
@@ -29,7 +29,7 @@ export class WorkspaceController {
     // Only images, PDF and plain text render in the browser; everything else (html, svg, js …) downloads — it must never run as same-origin script.
     if (!f.inline || download === '1') res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(f.name)}`);
     res.setHeader('content-length', String(f.size));
-    createReadStream(f.abs).pipe(res);
+    pipeFile(res, f.abs);
   }
 
   /** Raw body upload; allowed only in work/ (and WORKSPACE.md). */

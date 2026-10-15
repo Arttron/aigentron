@@ -212,9 +212,27 @@ case "${1:-}" in
     say "Rolling back ${B}$cur${N} → ${B}$prev${N}"
     printf 'Type yes to continue: '; read -r ans || ans=
     [ "$ans" = yes ] || { say "cancelled"; exit 1; }
+    # The installer snapshots the database before migrating to a release: backups/pre-<cur>.db = the data as $prev last saw it.
+    snap="$DATA_DIR/backups/pre-$cur.db"
+    if [ -s "$snap" ]; then
+      say "A database snapshot taken before $cur was installed exists: ${B}$snap${N}"
+      say "${Y}Restoring it also discards everything written since the update to $cur.${N} Answer no to keep the current data (the newer schema columns are harmless to $prev unless a migration failed)."
+      printf 'Restore the database snapshot? [y/N] '; read -r rs || rs=
+    else
+      rs=n
+    fi
+    systemctl stop "$SERVICE" || true
+    if [ "$rs" = y ] || [ "$rs" = Y ] || [ "$rs" = yes ]; then
+      cp "$DATA_DIR/orchestrator.db" "$DATA_DIR/backups/before-rollback-$cur.db" 2>/dev/null || true
+      cp "$snap" "$DATA_DIR/orchestrator.db.restore.tmp"
+      rm -f "$DATA_DIR/orchestrator.db-wal" "$DATA_DIR/orchestrator.db-shm"
+      mv "$DATA_DIR/orchestrator.db.restore.tmp" "$DATA_DIR/orchestrator.db"
+      say "${G}✔${N} database restored from $snap (the data it replaced is kept in backups/before-rollback-$cur.db)"
+    fi
     ln -sfn "$INSTALL_DIR/releases/$prev" "$CURRENT"
-    systemctl restart "$SERVICE"
-    say "${G}✔${N} now on $prev (the database keeps any columns the newer version added — that is harmless)." ;;
+    systemctl start "$SERVICE"
+    say "${G}✔${N} now on $prev."
+    [ "$rs" = y ] || [ "$rs" = Y ] || [ "$rs" = yes ] || say "${D}The database was kept as is (it may hold columns the newer version added — harmless).${N}" ;;
   reset-password)
     say "${Y}This removes ALL dashboard passwords${N} — anyone who can reach the server can then open it until you set a new one."
     printf 'Type yes to continue: '; read -r ans || ans=

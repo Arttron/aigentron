@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { SettingsService, type WorkspaceConfig } from '../settings/settings.service';
+import { gitAuthEnv, redactUrl } from './git-auth';
 
 const exec = promisify(execFile);
 
@@ -32,7 +33,7 @@ export class WorkspaceService {
     const { stdout } = await exec('git', args, {
       cwd,
       maxBuffer: 64 * 1024 * 1024,
-      env: authEnv(cfg),
+      env: gitAuthEnv(cfg?.githubToken),
     });
     return stdout.trim();
   }
@@ -58,16 +59,22 @@ export class WorkspaceService {
     const cfg = await this.settings.workspaceConfig();
     await mkdir(repo, { recursive: true });
 
-    if (cfg.repoUrl) {
+    const repoUrl = cfg.repoUrl;
+    if (repoUrl) {
       if (await this.isRepo(repo)) {
-        await this.setOrigin(repo, cfg.repoUrl); // handles init'd-then-configured
+        await this.setOrigin(repo, repoUrl); // handles init'd-then-configured
         this.logger.log(`Fetching origin/${cfg.repoBranch}`);
+        // Not fatal (the task still runs on what is checked out), but loud: every
+        // worktree created until the next successful fetch is based on a STALE
+        // origin/<branch>, and the usual cause (a bad token, no network) needs a person.
         await this.git(repo, ['fetch', '--prune', 'origin', cfg.repoBranch], cfg).catch((err) =>
-          this.logger.warn(`fetch failed: ${(err as Error).message}`),
+          this.logger.error(
+            `fetch of origin/${cfg.repoBranch} from ${redactUrl(repoUrl)} failed — new worktrees will base on the last fetched state until this is fixed: ${(err as Error).message}`,
+          ),
         );
       } else {
-        this.logger.log(`Cloning ${redact(cfg.repoUrl)} (${cfg.repoBranch}) into workspace`);
-        await this.git(repo, ['clone', '--branch', cfg.repoBranch, cfg.repoUrl, '.'], cfg);
+        this.logger.log(`Cloning ${redactUrl(repoUrl)} (${cfg.repoBranch}) into workspace`);
+        await this.git(repo, ['clone', '--branch', cfg.repoBranch, repoUrl, '.'], cfg);
       }
       // Persist the token as a git credential in the repo config so `git push`
       // works for the AGENT too (its own git reads this), without putting the raw
@@ -134,24 +141,4 @@ export class WorkspaceService {
     }
     return 'HEAD';
   }
-}
-
-/**
- * Inject the token via GIT_CONFIG_* env (not argv) so it never appears in
- * `/proc/<pid>/cmdline`; the header is applied like `git -c http.extraHeader`.
- */
-function authEnv(cfg?: WorkspaceConfig): NodeJS.ProcessEnv {
-  if (!cfg?.githubToken) return process.env;
-  const basic = Buffer.from(`x-access-token:${cfg.githubToken}`).toString('base64');
-  return {
-    ...process.env,
-    GIT_CONFIG_COUNT: '1',
-    GIT_CONFIG_KEY_0: 'http.extraHeader',
-    GIT_CONFIG_VALUE_0: `AUTHORIZATION: Basic ${basic}`,
-  };
-}
-
-/** Strip any embedded credentials before logging a repo URL. */
-function redact(url: string): string {
-  return url.replace(/\/\/[^@/]+@/, '//');
 }

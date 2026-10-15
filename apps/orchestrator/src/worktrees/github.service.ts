@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { SettingsService } from '../settings/settings.service';
+import { gitAuthEnv, parseGithubRepo, redactUrl } from './git-auth';
 
 const exec = promisify(execFile);
 
@@ -38,9 +39,9 @@ export class GitHubService {
       this.logger.warn('Skipping push/PR: no GitHub token configured');
       return null;
     }
-    const slug = parseRepo(cfg.repoUrl);
+    const slug = parseGithubRepo(cfg.repoUrl);
     if (!slug) {
-      this.logger.warn(`Skipping PR: cannot parse owner/repo from ${redact(cfg.repoUrl)}`);
+      this.logger.warn(`Skipping PR: cannot parse owner/repo from ${redactUrl(cfg.repoUrl)}`);
       return null;
     }
     const repo = this.config.workspaceRepoPath;
@@ -101,10 +102,10 @@ export class GitHubService {
       this.logger.warn(`Shared push failed: ${(err as Error).message}`);
       return null;
     }
-    const slug = parseRepo(repoUrl);
+    const slug = parseGithubRepo(repoUrl);
     return slug
       ? `https://github.com/${slug.owner}/${slug.repo}/tree/${cfg.repoBranch}`
-      : redact(repoUrl);
+      : redactUrl(repoUrl);
   }
 
   private async openPullRequest(
@@ -172,28 +173,10 @@ export class GitHubService {
     const { stdout } = await exec('git', args, {
       cwd,
       maxBuffer: 16 * 1024 * 1024,
-      env: authEnv(token),
+      env: gitAuthEnv(token),
     });
     return stdout.trim();
   }
-}
-
-/** Inject the token via GIT_CONFIG_* env (not argv → not in /proc/cmdline). */
-function authEnv(token?: string): NodeJS.ProcessEnv {
-  if (!token) return process.env;
-  const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
-  return {
-    ...process.env,
-    // `http.extraHeader` is multi-valued: values from .git/config (persisted by
-    // configureCredential so the agent can push) and from here would BOTH be
-    // sent, producing two Authorization headers → GitHub 400 "Duplicate header".
-    // An empty value first RESETS the accumulated list, then we add exactly ours.
-    GIT_CONFIG_COUNT: '2',
-    GIT_CONFIG_KEY_0: 'http.extraHeader',
-    GIT_CONFIG_VALUE_0: '',
-    GIT_CONFIG_KEY_1: 'http.extraHeader',
-    GIT_CONFIG_VALUE_1: `AUTHORIZATION: Basic ${basic}`,
-  };
 }
 
 /** Strip control characters (keeping tab/newline/CR) and cap length. */
@@ -201,14 +184,4 @@ function clean(text: string, max: number): string {
   // eslint-disable-next-line no-control-regex
   const stripped = (text ?? '').replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
   return stripped.length > max ? `${stripped.slice(0, max)}\n…[truncated]` : stripped;
-}
-
-/** Parse owner/repo from an https or ssh GitHub URL. */
-function parseRepo(url: string): { owner: string; repo: string } | null {
-  const m = url.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?\/?$/i);
-  return m ? { owner: m[1]!, repo: m[2]! } : null;
-}
-
-function redact(url: string): string {
-  return url.replace(/\/\/[^@/]+@/, '//');
 }

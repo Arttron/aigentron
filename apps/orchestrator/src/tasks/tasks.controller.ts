@@ -47,6 +47,8 @@ export class TasksController {
   }
 
   /** Queue a task created with autostart=false (after its attachments upload). */
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
   @Post(':id/start')
   start(@Param('id') id: string, @Body() dto: FollowUpDto) {
     return this.tasks.start(id, dto.attachments);
@@ -60,6 +62,8 @@ export class TasksController {
     return this.tasks.markDone(id);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
   @Post(':id/follow-up')
   followUp(@Param('id') id: string, @Body() dto: FollowUpDto) {
     return this.tasks.followUp(id, dto.prompt ?? '', dto.attachments, dto.references);
@@ -71,6 +75,8 @@ export class TasksController {
     return this.tasks.listPendingFollowUps(id);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
   @Patch(':id/pending-follow-ups/:pendingId')
   updatePendingFollowUp(
     @Param('id') id: string,
@@ -84,6 +90,8 @@ export class TasksController {
     });
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
   @Delete(':id/pending-follow-ups/:pendingId')
   removePendingFollowUp(@Param('id') id: string, @Param('pendingId') pendingId: string) {
     return this.tasks.removePendingFollowUp(id, pendingId);
@@ -105,11 +113,15 @@ export class TasksController {
     );
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
   @Post(':id/cancel')
   cancel(@Param('id') id: string) {
     return this.tasks.cancel(id);
   }
 
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.tasks.delete(id);

@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { buildRunnerScript, cleanVersion, compareVersions, parseRelease, parseVersion, type ReleaseInfo } from './update-core';
+import { buildRunnerScript, cleanVersion, compareVersions, parseRelease, parseVersion, resolveStaleStatus, type ReleaseInfo } from './update-core';
 
 const CHECK_TTL_MS = 10 * 60_000;
 const MIN_FREE_BYTES = 1.5 * 1024 ** 3;
@@ -97,7 +97,7 @@ export class UpdateService {
       } catch {
         /* no log */
       }
-      return { ...s, logTail };
+      return { ...resolveStaleStatus(s), logTail };
     } catch {
       return null;
     }

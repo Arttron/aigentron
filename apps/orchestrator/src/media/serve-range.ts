@@ -1,4 +1,5 @@
-import { createReadStream, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
+import { pipeFile } from './pipe-file';
 import type { Request, Response } from 'express';
 
 /**
@@ -11,7 +12,7 @@ export function serveWithRanges(req: Request, res: Response, path: string): void
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
   if (!m || (!m[1] && !m[2])) {
     res.setHeader('content-length', String(size));
-    createReadStream(path).pipe(res);
+    pipeFile(res, path);
     return;
   }
   const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2]));
@@ -22,5 +23,5 @@ export function serveWithRanges(req: Request, res: Response, path: string): void
   }
   res.status(206).setHeader('content-range', `bytes ${start}-${end}/${size}`);
   res.setHeader('content-length', String(end - start + 1));
-  createReadStream(path, { start, end }).pipe(res);
+  pipeFile(res, path, { start, end });
 }

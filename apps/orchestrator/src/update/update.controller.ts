@@ -15,6 +15,8 @@ export class UpdateController {
 
   @Post('check')
   @HttpCode(200)
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
   check() {
     return this.update.status(true);
   }

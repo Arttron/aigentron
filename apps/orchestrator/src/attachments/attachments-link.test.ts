@@ -90,3 +90,19 @@ describe('linked attachments (no copy)', () => {
     expect(new Set(names).size).toBe(2);
   });
 });
+
+describe('dot names', () => {
+  it('sanitize drops leading dots so a user file can never be .links.json', async () => {
+    const { sanitize } = await import('./attachments.service');
+    expect(sanitize('.links.json')).toBe('links.json');
+    expect(sanitize('..')).toBe('file');
+    expect(sanitize('.hidden.txt')).toBe('hidden.txt');
+    expect(sanitize('кухня 2.jpg')).toBe('кухня 2.jpg');
+  });
+  it('filePath refuses a dotted name and the links map survives', async () => {
+    await writeFile(join(ws(), 'deliverables', 'r.md'), 'x');
+    await svc.link('t1', join(ws(), 'deliverables', 'r.md'));
+    await expect(svc.filePath('t1', '.links.json')).rejects.toThrow();
+    expect((await svc.list('t1')).map((m) => m.name)).toEqual(['r.md']);
+  });
+});

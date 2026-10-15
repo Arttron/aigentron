@@ -29,6 +29,10 @@ export class BullTaskQueue extends TaskQueue implements OnModuleInit, OnModuleDe
         removeOnFail: 5000,
       },
     });
+    // Without a listener BullMQ re-emits connection errors as 'error' on an
+    // EventEmitter with no handler → an uncaught exception ends the process.
+    // A Redis blip must only be logged; BullMQ reconnects by itself.
+    this.queue.on('error', (err) => this.logger.error(`Queue error (Redis): ${err.message}`));
   }
 
   async enqueue(data: TaskJobData, opts?: { delayMs?: number }): Promise<void> {
@@ -54,6 +58,9 @@ export class BullTaskQueue extends TaskQueue implements OnModuleInit, OnModuleDe
     this.worker.on('failed', (job, err) => {
       this.logger.error(`Job ${job?.id} failed: ${err.message}`);
     });
+    // Same as for the queue: an unhandled 'error' (lost Redis, a lock renewal
+    // that failed) would take the whole orchestrator down with the agents.
+    this.worker.on('error', (err) => this.logger.error(`Worker error (Redis): ${err.message}`));
     this.logger.log(`Task worker started (bullmq, concurrency=${concurrency})`);
   }
 

@@ -553,14 +553,19 @@ export class McpHostService implements OnModuleDestroy {
     const view = await this.taskView(id); // 404s if missing
     if (this.isSettled(view.status as TaskStatus)) return { ...view, timedOut: false };
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       let done = false;
       const finish = async (timedOut: boolean): Promise<void> => {
         if (done) return;
         done = true;
         unsubscribe();
         clearTimeout(timer);
-        resolve({ ...(await this.taskView(id)), timedOut });
+        // the task may have been deleted while we waited: that is an error for THIS call, never an unhandled rejection (it would end the process)
+        try {
+          resolve({ ...(await this.taskView(id)), timedOut });
+        } catch (e) {
+          reject(e);
+        }
       };
       const unsubscribe = this.bus.subscribe((event) => {
         if (

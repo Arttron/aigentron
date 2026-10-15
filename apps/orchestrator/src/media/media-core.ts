@@ -171,12 +171,23 @@ export function buildDigest(d: DigestInput): string {
   return lines.join('\n');
 }
 
+/** Files that hold secrets (sign-in tokens, env files): never readable through the agents' media tools, wherever they sit. */
+export function isSecretPath(path: string): boolean {
+  const parts = path.split('/').filter(Boolean);
+  if (parts.some((s) => s === 'auth.json' || s === '.codex-home' || /^\.env(\.|$)/.test(s))) return true;
+  const i = parts.indexOf('codex-home');
+  return i >= 0 && parts[i + 1] !== 'generated_images';
+}
+
 /** A path an agent gave us is only usable inside one of the allowed roots (no `..`, no other folders). */
 export function insideRoot(path: string, roots: readonly string[]): boolean {
   const norm = (p: string) => p.replace(/\/+$/, '');
   const p = norm(path);
   if (p.split('/').includes('..')) return false;
-  return roots.some((r) => p === norm(r) || p.startsWith(`${norm(r)}/`));
+  return roots.some((r) => {
+    const n = norm(r);
+    return n !== '' && (p === n || p.startsWith(`${n}/`)); // an empty root must never allow everything
+  });
 }
 
 // ------------------------------------------------------------- image sizes
