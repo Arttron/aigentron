@@ -5,7 +5,7 @@ import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { CameraCapture } from '@/components/CameraCapture';
 import { uploadSizeError } from '@/lib/upload-limits';
 import { api, type AgentInfo } from '@/lib/api';
-import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { Card, SectionTitle, Row, Button, Muted, ErrorText, HiddenFileInput } from '@/components/ui';
 import { DiscussionModal } from '@/components/DiscussionModal';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import styles from './CreateTaskForm.module.css';
@@ -128,28 +128,8 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
         </Muted>
       )}
 
-      <input
-        ref={fileRef}
-        type="file"
-        accept={ATTACH_ACCEPT}
-        multiple
-        className={styles.hidden}
-        onChange={(e) => {
-          if (e.target.files) void stage(Array.from(e.target.files));
-          if (fileRef.current) fileRef.current.value = '';
-        }}
-      />
-      <input
-        ref={camRef}
-        type="file"
-        accept="image/*,video/*"
-        capture="environment"
-        className={styles.hidden}
-        onChange={(e) => {
-          if (e.target.files) void stage(Array.from(e.target.files));
-          if (camRef.current) camRef.current.value = '';
-        }}
-      />
+      <HiddenFileInput ref={fileRef} accept={ATTACH_ACCEPT} multiple onFiles={stage} />
+      <HiddenFileInput ref={camRef} accept="image/*,video/*" capture onFiles={stage} />
       {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void stage(files)} />}
 
       <Row wrap className={styles.controls}>

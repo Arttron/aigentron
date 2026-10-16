@@ -1,8 +1,10 @@
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
-import { MAX_IMAGES_PER_LOOK, formatTime, MIN_EVERY_SECONDS, type FramePlan, imageMime, insideRoot, isSecretPath, isImageName, isVideoName } from './media-core';
+import { imageMime, isImage, isVideo } from '../files/file-types';
+import { insideRoot, isSecretPath, realInside } from '../files/fs-safe';
+import { MAX_IMAGES_PER_LOOK, formatTime, MIN_EVERY_SECONDS, type FramePlan } from './media-core';
 import { VideoService } from './video.service';
 import { VisionService, type LookImage } from './vision.service';
 
@@ -35,16 +37,14 @@ export class MediaService {
     if (taskId !== undefined && !/^[\w-]+$/.test(taskId)) throw new Error('That path is not available.');
     const roots = [taskId !== undefined ? join(this.config.attachmentsDir, taskId) : this.config.attachmentsDir, join(this.config.agentDir, 'resources'), this.config.workspaceDir, ...extra].filter(Boolean);
     if (!path.startsWith('/') || !insideRoot(path, roots)) throw new Error('That path is not available: give the full path of a photo or video from the task\'s attachments, the resource library, or the workspace.');
-    const real = await realpath(path).catch(() => '');
-    const realRoots = await Promise.all(roots.map((r) => realpath(r).catch(() => r)));
-    if (!real || !insideRoot(real, realRoots)) throw new Error('That file was not found.');
-    if (isSecretPath(real) || isSecretPath(path)) throw new Error('That file was not found.');
+    const real = await realInside(path, roots); // symlinks followed on both sides: a link out of the roots is refused
+    if (!real || isSecretPath(real) || isSecretPath(path)) throw new Error('That file was not found.');
     return real;
   }
 
   async videoDigest(path: string, worktree?: string | string[], plan?: Parameters<typeof cleanPlan>[0], taskId?: string): Promise<string> {
     const file = await this.safePath(path, worktree, taskId);
-    if (!isVideoName(file)) throw new Error('video_digest is for video files (mp4, mov, webm …).');
+    if (!isVideo(file)) throw new Error('video_digest is for video files (mp4, mov, webm …).');
     return (await this.video.digest(file, cleanPlan(plan))).text;
   }
 
@@ -52,14 +52,14 @@ export class MediaService {
     const file = await this.safePath(path, worktree, taskId);
     const images: LookImage[] = [];
     let intro = '';
-    if (isVideoName(file)) {
+    if (isVideo(file)) {
       const d = await this.video.digest(file, cleanPlan(plan));
       const pick = d.frames.length <= MAX_IMAGES_PER_LOOK ? d.frames : Array.from({ length: MAX_IMAGES_PER_LOOK }, (_, i) => d.frames[Math.round((i * (d.frames.length - 1)) / (MAX_IMAGES_PER_LOOK - 1))]!);
       for (const f of pick) images.push({ data: await readFile(f.path), mime: 'image/jpeg' });
       intro = `These are ${pick.length} frames taken in order from a video${d.durationSec ? ` of ${Math.round(d.durationSec)} s` : ''}. `;
       const said = pick.map((f, i) => (f.why ? `frame ${i + 1} (${formatTime(f.t)}) was taken when the speaker said ${f.why}` : '')).filter(Boolean);
       if (said.length) intro += `${said.join('; ')}. `;
-    } else if (isImageName(file)) {
+    } else if (isImage(file)) {
       images.push({ data: await readFile(file), mime: imageMime(file) });
     } else {
       throw new Error('look_at takes a photo (jpg, png, webp, gif) or a video.');

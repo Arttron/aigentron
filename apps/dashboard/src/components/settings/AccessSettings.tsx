@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { API_BASE } from '@/lib/config';
+import { useState } from 'react';
+import { useSettingsResource } from '@/lib/use-settings-resource';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
 
 interface AccessInfo {
@@ -13,38 +13,13 @@ interface AccessInfo {
 
 /** Settings → General → Access: which domain names this server answers to. */
 export function AccessSettings() {
-  const [info, setInfo] = useState<AccessInfo | null>(null);
   const [text, setText] = useState('');
   const [strict, setStrict] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    const r = await fetch(`${API_BASE}/access`, { cache: 'no-store' }).catch(() => null);
-    if (!r?.ok) return;
-    const j = (await r.json()) as AccessInfo;
-    setInfo(j);
+  const { info, call, busy, msg } = useSettingsResource<AccessInfo>('/access', (j) => {
     setText(j.allowedHosts.join('\n'));
     setStrict(Boolean(j.strict));
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const save = async () => {
-    setBusy(true);
-    setMsg(null);
-    const r = await fetch(`${API_BASE}/access`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ allowedHosts: text, strict }),
-    }).catch(() => null);
-    const j = (await r?.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    setBusy(false);
-    if (!r?.ok || !j.ok) return setMsg({ ok: false, text: j.error ?? 'Could not save.' });
-    setMsg({ ok: true, text: 'Saved. Takes effect immediately.' });
-    await load();
-  };
+  });
+  const save = () => call('', 'PUT', { allowedHosts: text, strict }, 'Saved. Takes effect immediately.');
 
   if (!info) return null;
   return (

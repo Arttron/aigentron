@@ -1,8 +1,8 @@
 import { ConflictException, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
-import { resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
+import type { Provider } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
-import { LitellmService, defaultKind, stripSelfPrefix } from '../litellm/litellm.service';
+import { LitellmService, defaultKind, kindOf, stripSelfPrefix } from '../litellm/litellm.service';
 import { CodexService } from '../codex/codex.service';
 import { isKeylessAudioHost } from './audio-endpoint';
 
@@ -155,7 +155,7 @@ export class ProvidersService implements OnModuleInit {
    */
   async audioEndpoint(name: string): Promise<{ base: string; headers: Record<string, string> }> {
     const p = await this.getRow(name);
-    const kind = p.kind || defaultKind(p.baseUrl);
+    const kind = kindOf(p);
     if (kind !== 'openai') throw new Error(`Provider "${name}" is of kind "${kind}". Voice needs a provider of kind "openai" (OpenAI or any OpenAI-compatible server — set its Base URL).`);
     const base = oaiBase(kind, p.baseUrl);
     if (!base) throw new Error(`Provider "${name}" has no Base URL.`);
@@ -171,7 +171,7 @@ export class ProvidersService implements OnModuleInit {
    */
   async chatEndpoint(name: string, model?: string): Promise<{ style: 'anthropic' | 'openai'; url: string; headers: Record<string, string>; kind: string; model: string }> {
     const p = await this.getRow(name);
-    const kind = p.kind || defaultKind(p.baseUrl);
+    const kind = kindOf(p);
     if (kind === 'codex' || p.authMode === 'oauth-token' || p.authMode === 'codex-login') {
       throw new Error(`Provider "${name}" is a subscription login — it cannot be called directly. Use a provider with an API key (or a local one).`);
     }
@@ -208,11 +208,6 @@ export class ProvidersService implements OnModuleInit {
   /** Shared Provider shape for resolveProvider. */
   async get(name: string): Promise<Provider> {
     return toProvider(await this.getRow(name));
-  }
-
-  /** Resolve a provider name to the agent's Anthropic env. */
-  async resolveEnv(name: string): Promise<AgentModelEnv> {
-    return resolveProvider(await this.get(name));
   }
 
   async create(input: { name: string } & ProviderPatch): Promise<ProviderRow> {
@@ -285,7 +280,7 @@ export class ProvidersService implements OnModuleInit {
       return { ok: false, error: 'OAuth/subscription tokens aren’t verified via HTTP probe — start a task on this provider to confirm it works.' };
     }
 
-    const kind = p.kind || defaultKind(p.baseUrl);
+    const kind = kindOf(p);
     const anthropic = kind === 'anthropic';
     const auth = authHeaders(kind, p);
     if (auth.error) return { ok: false, error: auth.error };
@@ -416,7 +411,7 @@ export class ProvidersService implements OnModuleInit {
       // Same reasoning as test(): don't guess at the OAuth token's request shape.
       return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
     }
-    return this.fetchModels({ kind: p.kind || defaultKind(p.baseUrl), baseUrl: p.baseUrl, authMode: p.authMode === 'api-key' ? 'api-key' : 'auth-token', secret: p.secret });
+    return this.fetchModels({ kind: kindOf(p), baseUrl: p.baseUrl, authMode: p.authMode === 'api-key' ? 'api-key' : 'auth-token', secret: p.secret });
   }
 
   /** Same as listModels but for unsaved params — lets the form preview models. */
@@ -431,7 +426,7 @@ export class ProvidersService implements OnModuleInit {
       return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
     }
     return this.fetchModels({
-      kind: input.kind || defaultKind(input.baseUrl),
+      kind: kindOf(input),
       baseUrl: input.baseUrl || null,
       authMode: input.authMode === 'api-key' ? 'api-key' : 'auth-token',
       secret: input.secret || null,

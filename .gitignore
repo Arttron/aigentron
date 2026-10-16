@@ -63,3 +63,6 @@ coverage/
 
 # generated research cache (runtime artifact)
 /agent/research-cache/
+
+# DI smoke test build output
+/apps/orchestrator/.di-dist/

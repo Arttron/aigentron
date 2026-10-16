@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -36,6 +36,8 @@ export interface KbInfo {
   createdAt: string;
 }
 
+export type KbDocStatus = 'processing' | 'ready' | 'error';
+
 export interface KbDocInfo {
   id: string;
   title: string;
@@ -44,6 +46,34 @@ export interface KbDocInfo {
   size: number;
   chunks: number;
   createdAt: string;
+  /** `processing`: still being read / cut / stored (the row is not in the database yet); `error`: it failed — see `error`. */
+  status: KbDocStatus;
+  error?: string;
+}
+
+/** What `POST …/docs/*` answers at once (202): the document's future id and `processing`. `docId/chunks/duplicate` keep the old shape for older clients. */
+export interface KbAccepted {
+  id: string;
+  status: 'processing';
+  docId: string;
+  chunks: 0;
+  duplicate: false;
+}
+
+/** A document being added in the background (kept in memory only: a restart loses in-flight work — the person adds the file again). */
+interface Job {
+  id: string;
+  kbId: string;
+  kbName: string;
+  title: string;
+  kind: string;
+  source: string | null;
+  size: number;
+  status: 'processing' | 'error';
+  error?: string;
+  createdAt: Date;
+  /** When an error is forgotten by itself (it can be dismissed earlier with DELETE docs/:id). */
+  expiresAt?: number;
 }
 
 export interface KbHit {
@@ -65,6 +95,8 @@ const MAX_CHUNKS_PER_KB = 20_000;
 const PAGE = 400;
 const MAX_OUTLINE_LINES = 100;
 const EMBED_BATCH = 32;
+/** A failed import stays visible on the Knowledge page this long, then disappears by itself. */
+const JOB_ERROR_TTL_MS = 6 * 3_600_000;
 
 interface Row {
   chunkId: string;
@@ -94,6 +126,10 @@ export class KnowledgeService {
   /** Bumped on every change to a base: an index built from an older snapshot is never cached. */
   private readonly generation = new Map<string, number>();
   private readonly embedding = new Set<string>();
+  /** Documents being added in the background (X-CF-6: an upload answers 202 at once; reading, cutting and storing happen here). */
+  private readonly jobs = new Map<string, Job>();
+  /** One document at a time: extraction is CPU-bound and chunk inserts are big, so ten dropped files are processed one after another. */
+  private jobChain: Promise<unknown> = Promise.resolve();
 
   private gen(kbId: string): number {
     return this.generation.get(kbId) ?? 0;
@@ -290,7 +326,7 @@ export class KnowledgeService {
   // --------------------------------------------------------- documents
 
   /** Add one document: chunk it by the base's settings, store the chunks, embed them when the base has a model. */
-  async addDocument(kbName: string, input: { title?: string; text: string; source?: string | null; kind?: string }): Promise<{ docId: string; chunks: number; duplicate: boolean }> {
+  async addDocument(kbName: string, input: { title?: string; text: string; source?: string | null; kind?: string; id?: string }): Promise<{ docId: string; chunks: number; duplicate: boolean }> {
     const kb = await this.row(kbName);
     const text = String(input.text ?? '');
     if (!text.trim()) throw new BadRequestException('The document is empty.');
@@ -305,6 +341,7 @@ export class KnowledgeService {
     const title = (input.title ?? '').trim().slice(0, 200) || (text.trim().split('\n')[0] ?? 'Untitled').replace(/^#+\s*/, '').slice(0, 120);
     const doc = await this.prisma.knowledgeDoc.create({
       data: {
+        ...(input.id ? { id: input.id } : {}),
         kbId: kb.id,
         title,
         source: input.source ? String(input.source).slice(0, 500) : null,
@@ -319,29 +356,79 @@ export class KnowledgeService {
     return { docId: doc.id, chunks: chunks.length, duplicate: false };
   }
 
-  async addFile(kbName: string, fileName: string, data: Buffer, title?: string): Promise<{ docId: string; chunks: number; duplicate: boolean }> {
+  // ---------------------------------------------- documents added in the background (202)
+
+  /**
+   * Accept a document now, do the work later: the HTTP request ends at once with the id the document WILL have, while reading the file,
+   * cutting it and storing the passages run in the background one document at a time (a big PDF used to hold the request for longer
+   * than a web proxy waits). The Knowledge page lists the job as `processing` until the row exists, or `error` with the reason.
+   */
+  private async startDocument(kbName: string, meta: { title: string; kind: string; source: string | null; size: number }, work: () => Promise<{ title?: string; text: string }>): Promise<KbAccepted> {
+    const kb = await this.row(kbName); // an unknown base is still a 404 right away
+    const id = `kd${randomBytes(10).toString('hex')}`;
+    const job: Job = { id, kbId: kb.id, kbName: kb.name, ...meta, status: 'processing', createdAt: new Date() };
+    this.jobs.set(id, job);
+    const run = async () => {
+      if (!this.jobs.has(id)) return; // dismissed before it started
+      try {
+        const doc = await work();
+        const r = await this.addDocument(kb.name, { id, title: doc.title ?? meta.title, text: doc.text, source: meta.source, kind: meta.kind });
+        if (r.duplicate) this.fail(job, `The same text is already in the base (document "${meta.title}" was not added twice).`);
+        else this.jobs.delete(id);
+      } catch (e) {
+        this.fail(job, (e as Error).message);
+      }
+    };
+    this.jobChain = this.jobChain.then(run, run);
+    return { id, status: 'processing', docId: id, chunks: 0, duplicate: false };
+  }
+
+  private fail(job: Job, error: string): void {
+    if (!this.jobs.has(job.id)) return;
+    job.status = 'error';
+    job.error = error.slice(0, 500);
+    job.expiresAt = Date.now() + JOB_ERROR_TTL_MS;
+    this.logger.warn(`document "${job.title}" for "${job.kbName}" failed: ${job.error}`);
+  }
+
+  /** The background jobs of one base (expired errors dropped), newest first. */
+  private jobsOf(kbId: string): Job[] {
+    const now = Date.now();
+    for (const [id, j] of this.jobs) if (j.expiresAt && j.expiresAt < now) this.jobs.delete(id);
+    return [...this.jobs.values()].filter((j) => j.kbId === kbId).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  }
+
+  /** Nothing is running or waiting for this base (tests and shutdown). */
+  async idle(): Promise<void> {
+    await this.jobChain;
+  }
+
+  /** An uploaded file: accepted at once, read (PDF / Word / text) and indexed in the background. */
+  async addFile(kbName: string, fileName: string, data: Buffer, title?: string): Promise<KbAccepted> {
     if (data.length > MAX_FILE_BYTES) throw new BadRequestException(`The file is too large (${Math.round(data.length / 1048576)} MB; the limit is ${MAX_FILE_BYTES / 1048576} MB).`);
-    let text: string;
-    try {
-      text = await extractDocument(fileName, data);
-    } catch (e) {
-      throw new BadRequestException((e as Error).message);
-    }
-    return this.addDocument(kbName, { title: title || fileName.replace(/\.\w+$/, ''), text, source: fileName, kind: 'file' });
+    return this.startDocument(kbName, { title: title || fileName.replace(/\.\w+$/, ''), kind: 'file', source: fileName, size: data.length }, async () => ({ text: await extractDocument(fileName, data) }));
+  }
+
+  /** A note typed in the dashboard: the same background path (cutting a long note is work too). */
+  async addNote(kbName: string, input: { title?: string; text: string }): Promise<KbAccepted> {
+    const text = String(input.text ?? '');
+    if (!text.trim()) throw new BadRequestException('The document is empty.');
+    const title = (input.title ?? '').trim().slice(0, 200) || (text.trim().split('\n')[0] ?? 'Untitled').replace(/^#+\s*/, '').slice(0, 120);
+    return this.startDocument(kbName, { title, kind: 'note', source: 'note', size: text.length }, async () => ({ text }));
   }
 
   /** A page from the resource library (a text note or a text-like file). */
-  async importResource(kbName: string, resourceId: string): Promise<{ docId: string; chunks: number; duplicate: boolean }> {
+  async importResource(kbName: string, resourceId: string): Promise<KbAccepted> {
     const r = await this.resources.get(resourceId);
-    const data = await readFile(this.resources.pathOf(r)).catch(() => null);
-    if (!data) throw new NotFoundException('The resource file is missing.');
-    let text: string;
-    try {
-      text = r.kind === 'text' ? data.toString('utf8') : await extractDocument(r.originalName, data);
-    } catch (e) {
-      throw new BadRequestException(`The resource "${r.title}": ${(e as Error).message}`);
-    }
-    return this.addDocument(kbName, { title: r.title, text, source: `resource:${r.id}`, kind: 'resource' });
+    return this.startDocument(kbName, { title: r.title, kind: 'resource', source: `resource:${r.id}`, size: r.size }, async () => {
+      const data = await readFile(this.resources.pathOf(r)).catch(() => null);
+      if (!data) throw new NotFoundException('The resource file is missing.');
+      try {
+        return { text: r.kind === 'text' ? data.toString('utf8') : await extractDocument(r.originalName, data) };
+      } catch (e) {
+        throw new BadRequestException(`The resource "${r.title}": ${(e as Error).message}`);
+      }
+    });
   }
 
   /** Pages the research tools fetched (agent/research-cache/*.json) → documents with their source URL. */
@@ -368,13 +455,17 @@ export class KnowledgeService {
     return { added, skipped };
   }
 
+  /** The documents of a base: those being added (processing / error, in memory) first, then the stored ones (ready). */
   async listDocs(kbName: string): Promise<KbDocInfo[]> {
     const kb = await this.row(kbName);
     const docs = await this.prisma.knowledgeDoc.findMany({ where: { kbId: kb.id }, orderBy: { createdAt: 'desc' }, include: { _count: { select: { chunks: true } } } });
-    return docs.map((d) => ({ id: d.id, title: d.title, source: d.source, kind: d.kind, size: d.size, chunks: d._count.chunks, createdAt: d.createdAt.toISOString() }));
+    const pending: KbDocInfo[] = this.jobsOf(kb.id).map((j) => ({ id: j.id, title: j.title, source: j.source, kind: j.kind, size: j.size, chunks: 0, createdAt: j.createdAt.toISOString(), status: j.status, ...(j.error ? { error: j.error } : {}) }));
+    return [...pending, ...docs.map((d) => ({ id: d.id, title: d.title, source: d.source, kind: d.kind, size: d.size, chunks: d._count.chunks, createdAt: d.createdAt.toISOString(), status: 'ready' as const }))];
   }
 
+  /** Remove a stored document — or dismiss a failed / not yet started background one. */
   async removeDoc(docId: string): Promise<void> {
+    if (this.jobs.delete(docId)) return;
     const d = await this.prisma.knowledgeDoc.findUnique({ where: { id: docId } });
     if (!d) throw new NotFoundException('No such document.');
     await this.prisma.knowledgeDoc.delete({ where: { id: docId } });

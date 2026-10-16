@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api, type WorkspaceEntry, type WorkspaceListing, type WorkspaceSummary } from '@/lib/api';
-import { AppHeader, BackLink, Button, Card, ErrorText, Muted, Row, SectionTitle } from '@/components/ui';
+import { api, errMsg, type WorkspaceEntry, type WorkspaceListing, type WorkspaceSummary } from '@/lib/api';
+import { AppHeader, BackLink, Button, Card, ErrorText, Muted, Row, SectionTitle, UploadButton } from '@/components/ui';
 import { Markdown } from '@/components/Markdown';
 import styles from './WorkspacePage.module.css';
 
@@ -29,10 +29,9 @@ export function WorkspacePage() {
   const [edit, setEdit] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
 
   const go = (next: { dir?: string; file?: string }) => setParams({ ...(next.dir ? { dir: next.dir } : {}), ...(next.file ? { file: next.file } : {}) });
-  const fail = (e: unknown) => setError((e as Error).message.replace(/^\d+ [^—]*— /, ''));
+  const fail = (e: unknown) => setError(errMsg(e));
 
   const load = useCallback(async () => {
     try {
@@ -62,7 +61,7 @@ export function WorkspacePage() {
     };
   }, [file]);
 
-  const upload = async (files: FileList | File[]) => {
+  const upload = async (files: File[]) => {
     setBusy(true);
     setError(null);
     try {
@@ -72,7 +71,6 @@ export function WorkspacePage() {
       fail(e);
     } finally {
       setBusy(false);
-      if (input.current) input.current.value = '';
     }
   };
 
@@ -139,10 +137,9 @@ export function WorkspacePage() {
             </button>
             {listing?.writable && (
               <>
-                <button type="button" className={styles.upload} disabled={busy} onClick={() => input.current?.click()} title="Upload files into this folder">
+                <UploadButton className={styles.upload} disabled={busy} onFiles={upload} title="Upload files into this folder">
                   ⬆ Upload into this folder
-                </button>
-                <input ref={input} type="file" multiple hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
+                </UploadButton>
               </>
             )}
           </li>

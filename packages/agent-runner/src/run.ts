@@ -1,63 +1,7 @@
 import { join } from 'node:path';
 import {
   INTERNAL_MCP_SERVER,
-  REPORT_STATUS_TOOL,
-  HEARTBEAT_TOOL,
-  CREATE_SUBTASK_TOOL,
-  CHECK_SUBTASKS_TOOL,
-  COMPLETE_SUBTASK_TOOL,
-  SCHEDULE_CHECK_TOOL,
-  RESOURCES_SEARCH_TOOL,
-  ASK_USER_TOOL,
-  KB_ADD_TOOL,
-  KB_LIST_TOOL,
-  KB_READ_TOOL,
-  KB_SEARCH_TOOL,
-  CURRENT_TIME_TOOL,
-  SHOW_IMAGES_TOOL,
-  READ_DOCUMENT_TOOL,
-  WORKSPACE_INFO_TOOL,
-  WORKSPACE_FILES_TOOL,
-  WORKSPACE_NOTE_TOOL,
-  WORKSPACE_SAVE_TOOL,
-  LOOK_AT_TOOL,
-  VIDEO_DIGEST_TOOL,
-  PREVIEW_TOOL,
-  PROPOSE_LEARNED_SKILL_TOOL,
-  PROPOSE_AGENT_TOOL,
-  PROPOSE_SKILL_TOOL,
-  CATALOG_LIST_TOOL,
-  CATALOG_GET_TOOL,
-  AGENTS_LIST_TOOL,
-  AGENT_GET_TOOL,
-  TASKS_LIST_TOOL,
-  PROPOSE_TASK_ACTION_TOOL,
-  PROPOSE_AGENT_DELETE_TOOL,
-  PROVIDERS_LIST_TOOL,
-  PROVIDER_TEST_TOOL,
-  PROPOSE_PROVIDER_TOOL,
-  SCHEDULES_LIST_TOOL,
-  PROPOSE_SCHEDULE_TOOL,
-  ACCESS_STATUS_TOOL,
-  UPDATE_STATUS_TOOL,
-  PROPOSE_UPDATE_TOOL,
-  PROPOSE_ALLOWED_DOMAINS_TOOL,
-  PROPOSE_CLOUDFLARE_ACCESS_TOOL,
-  CHANNELS_LIST_TOOL,
-  PROPOSE_CHANNEL_TOOL,
-  PROPOSE_RESOURCE_TOOL,
-  PACKS_LIST_TOOL,
-  PROPOSE_PACK_INSTALL_TOOL,
-  MAINTENANCE_REPORT_TOOL,
-  PROPOSE_CLEANUP_TOOL,
-  REQUEST_SECRET_TOOL,
-  TASK_DIAGNOSE_TOOL,
-  USAGE_REPORT_TOOL,
-  PROPOSE_SETTINGS_TOOL,
-  PROPOSE_UNDO_TOOL,
-  ADMIN_HISTORY_TOOL,
-  PROPOSE_TASK_TOOL,
-  PROPOSE_BATCH_TOOL,
+  INTERNAL_TOOL_PREFIX,
 } from '@lds/shared';
 import { buildAgentEnv } from './env';
 import { assertIsolationReady, isolationEnv, resolveClaudeExecutable } from './isolation';
@@ -196,65 +140,13 @@ function buildStatusServer(
   return createSdkMcpServer({ name: INTERNAL_MCP_SERVER, version: '1.0.0', tools });
 }
 
-/** Fully-qualified names of the internal status tools that are wired for this run. */
-function internalToolNames(params: RunAgentParams): string[] {
-  const names: string[] = [];
-  if (params.onReportStatus) names.push(REPORT_STATUS_TOOL);
-  if (params.onHeartbeat) names.push(HEARTBEAT_TOOL);
-  if (params.onCreateSubtask) names.push(CREATE_SUBTASK_TOOL);
-  if (params.onCheckSubtasks) names.push(CHECK_SUBTASKS_TOOL);
-  if (params.onCompleteSubtask) names.push(COMPLETE_SUBTASK_TOOL);
-  if (params.onScheduleCheck) names.push(SCHEDULE_CHECK_TOOL);
-  if (params.onSearchResources) names.push(RESOURCES_SEARCH_TOOL);
-  if (params.onShowImages) names.push(SHOW_IMAGES_TOOL);
-  if (params.workspace) names.push(WORKSPACE_INFO_TOOL, WORKSPACE_FILES_TOOL, ...(params.workspace.note ? [WORKSPACE_NOTE_TOOL] : []), ...(params.workspace.save ? [WORKSPACE_SAVE_TOOL] : []));
-  if (params.onCurrentTime) names.push(CURRENT_TIME_TOOL);
-  if (params.onReadDocument) names.push(READ_DOCUMENT_TOOL);
-  if (params.kb) names.push(KB_LIST_TOOL, KB_SEARCH_TOOL, KB_READ_TOOL, ...(params.kb.add ? [KB_ADD_TOOL] : []));
-  if (params.onAskUser) names.push(ASK_USER_TOOL);
-  if (params.onLookAt) names.push(LOOK_AT_TOOL);
-  if (params.onVideoDigest) names.push(VIDEO_DIGEST_TOOL);
-  if (params.onStartPreview) names.push(PREVIEW_TOOL);
-  if (params.onProposeLearnedSkill) names.push(PROPOSE_LEARNED_SKILL_TOOL);
-  if (params.admin) {
-    names.push(
-      CATALOG_LIST_TOOL,
-      CATALOG_GET_TOOL,
-      AGENTS_LIST_TOOL,
-      AGENT_GET_TOOL,
-      PROPOSE_AGENT_TOOL,
-      PROPOSE_SKILL_TOOL,
-      TASKS_LIST_TOOL,
-      PROPOSE_TASK_ACTION_TOOL,
-      PROPOSE_AGENT_DELETE_TOOL,
-      PROVIDERS_LIST_TOOL,
-      PROVIDER_TEST_TOOL,
-      PROPOSE_PROVIDER_TOOL,
-      SCHEDULES_LIST_TOOL,
-      PROPOSE_SCHEDULE_TOOL,
-      ACCESS_STATUS_TOOL,
-      UPDATE_STATUS_TOOL,
-      PROPOSE_UPDATE_TOOL,
-      PROPOSE_ALLOWED_DOMAINS_TOOL,
-      PROPOSE_CLOUDFLARE_ACCESS_TOOL,
-      CHANNELS_LIST_TOOL,
-      PROPOSE_CHANNEL_TOOL,
-      PROPOSE_RESOURCE_TOOL,
-      PACKS_LIST_TOOL,
-      PROPOSE_PACK_INSTALL_TOOL,
-      MAINTENANCE_REPORT_TOOL,
-      PROPOSE_CLEANUP_TOOL,
-      REQUEST_SECRET_TOOL,
-      TASK_DIAGNOSE_TOOL,
-      USAGE_REPORT_TOOL,
-      PROPOSE_SETTINGS_TOOL,
-      PROPOSE_UNDO_TOOL,
-      ADMIN_HISTORY_TOOL,
-      PROPOSE_TASK_TOOL,
-      PROPOSE_BATCH_TOOL,
-    );
-  }
-  return names;
+/**
+ * Fully-qualified names of the internal tools wired for this run. Derived from the
+ * specs themselves (single source of truth), so a tool can never be built yet
+ * missing from an `allowedTools` whitelist.
+ */
+export function internalToolNames(params: RunAgentParams): string[] {
+  return buildInternalToolSpecs(params).map((spec) => INTERNAL_TOOL_PREFIX + spec.name);
 }
 
 function blocksToEvents(content: SdkContentBlock[] | string | undefined): AgentEvent[] {

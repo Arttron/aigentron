@@ -13,6 +13,9 @@ import type {
 } from '@lds/shared';
 import { uploadSizeError } from './upload-limits';
 import { API_BASE } from './config';
+import { buildQuery, request, setActingHeaders } from './http';
+
+export { ApiError, errMsg } from './http';
 
 /** Body for create/update user. */
 export type UserInput = {
@@ -39,13 +42,11 @@ export function setActingUserId(id: string | null): void {
   else window.localStorage.removeItem(USER_KEY);
 }
 
-/** Headers carrying the acting user, optionally with a JSON content-type. */
-function authHeaders(json = false): Record<string, string> {
-  const h: Record<string, string> = json ? { 'content-type': 'application/json' } : {};
+/** Headers carrying the acting user (added to every call by request()). */
+setActingHeaders((): Record<string, string> => {
   const id = getActingUserId();
-  if (id) h['x-lds-user'] = id;
-  return h;
-}
+  return id ? { 'x-lds-user': id } : {};
+});
 
 /** Task as returned by the list endpoint (with pending-approval/session counts). */
 export type TaskListItem = Task & {
@@ -397,14 +398,6 @@ export type SettingsUpdate = Partial<{
   githubToken: string;
 }>;
 
-async function unwrap<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`${res.status} ${res.statusText}${body ? ` — ${body}` : ''}`);
-  }
-  return res.json() as Promise<T>;
-}
-
 export interface KbChunking {
   strategy: 'section' | 'paragraph' | 'chars';
   maxChars: number;
@@ -460,9 +453,9 @@ export interface KbHit {
   score: number;
 }
 
-const jsonHeaders = { 'content-type': 'application/json' };
+const e = encodeURIComponent;
+const octet = (file: File, type = 'application/octet-stream') => ({ 'content-type': type, 'x-filename': e(file.name) });
 
-/** Safe status of the hosted MCP entry point (never includes the token value). */
 export interface McpHostStatus {
   enabled: boolean;
   tokenRequired: boolean;
@@ -471,469 +464,183 @@ export interface McpHostStatus {
   path: string;
 }
 
+type KbChunkPreview = { total: number; avg: number; max: number; chunks: { heading: string; chars: number; text: string }[] };
+type MaintenanceReport = {
+  runs: { count: number; bytes: number; stale: number; staleBytes: number };
+  worktrees: { count: number; bytes: number; stale: number };
+  attachments: { bytes: number; oldTasksBytes: number };
+  caches: { digests: { count: number; bytes: number; stale: number; staleBytes: number }; research: { count: number; bytes: number; stale: number; staleBytes: number }; digestRetentionDays: number; researchRetentionDays: number };
+  resources: { bytes: number };
+  workspace?: { bytes: number };
+  retentionDays: number;
+};
+type DiskStatus = { path: string; totalBytes: number; freeBytes: number; usedPercent: number; level: 'ok' | 'warn' | 'critical'; warnBelowBytes: number; criticalBelowBytes: number; checkedAt: string; relief?: { at: string; bytes: number } | null };
+type TitleCfg = { enabled: boolean; provider: string; model: string };
+type VisionCfg = { provider: string; model: string };
+
+// Every method is one request() call: the path, the verb and the result type. Nothing else lives here.
 export const api = {
-  getMcpStatus: () =>
-    fetch(`${API_BASE}/mcp/status`, { cache: 'no-store' }).then(unwrap<McpHostStatus>),
+  getMcpStatus: () => request<McpHostStatus>('GET', '/mcp/status'),
 
-  listTasks: (params: ListTasksParams = {}, signal?: AbortSignal) => {
-    const qs = new URLSearchParams();
-    if (params.q) qs.set('q', params.q);
-    if (params.type) qs.set('type', params.type);
-    if (params.status) qs.set('status', params.status);
-    if (params.page) qs.set('page', String(params.page));
-    if (params.pageSize) qs.set('pageSize', String(params.pageSize));
-    const suffix = qs.toString() ? `?${qs}` : '';
-    return fetch(`${API_BASE}/tasks${suffix}`, { cache: 'no-store', signal })
-      .then(unwrap<TaskPage | TaskListItem[]>)
-      .then((data): TaskPage =>
-        // Tolerate an orchestrator that hasn't restarted yet (old array shape).
-        Array.isArray(data)
-          ? { items: data, total: data.length, page: 1, pageSize: data.length || 1 }
-          : data,
-      );
-  },
+  listTasks: (params: ListTasksParams = {}, signal?: AbortSignal) =>
+    request<TaskPage | TaskListItem[]>('GET', '/tasks', {
+      query: { q: params.q || undefined, type: params.type || undefined, status: params.status || undefined, page: params.page || undefined, pageSize: params.pageSize || undefined },
+      signal,
+    }).then((data): TaskPage => (Array.isArray(data) ? { items: data, total: data.length, page: 1, pageSize: data.length || 1 } : data)),
 
-  taskStatusCounts: (type?: TaskTypeFilter, signal?: AbortSignal) =>
-    fetch(`${API_BASE}/tasks/status-counts${type ? `?type=${type}` : ''}`, { cache: 'no-store', signal }).then(unwrap<Record<TaskStatusFilter, number>>),
-  taskTypeCounts: (signal?: AbortSignal) => fetch(`${API_BASE}/tasks/type-counts`, { cache: 'no-store', signal }).then(unwrap<Record<TaskTypeFilter | 'all', number>>),
+  taskStatusCounts: (type?: TaskTypeFilter, signal?: AbortSignal) => request<Record<TaskStatusFilter, number>>('GET', '/tasks/status-counts', { query: { type: type || undefined }, signal }),
+  taskTypeCounts: (signal?: AbortSignal) => request<Record<TaskTypeFilter | 'all', number>>('GET', '/tasks/type-counts', { signal }),
 
-  getTask: (id: string) =>
-    fetch(`${API_BASE}/tasks/${id}`, { cache: 'no-store' }).then(unwrap<TaskDetail>),
+  getTask: (id: string) => request<TaskDetail>('GET', `/tasks/${id}`),
+  transcript: (id: string) => request<TranscriptEvent[]>('GET', `/tasks/${id}/transcript`),
+  markTaskDone: (id: string) => request<unknown>('POST', `/tasks/${e(id)}/done`),
+  startTask: (id: string, attachments?: string[]) => request<Task>('POST', `/tasks/${e(id)}/start`, { body: { attachments } }),
 
-  transcript: (id: string) =>
-    fetch(`${API_BASE}/tasks/${id}/transcript`, { cache: 'no-store' }).then(
-      unwrap<TranscriptEvent[]>,
-    ),
+  createTask: (body: { prompt: string; title?: string; agentName?: string; attachments?: string[]; autostart?: boolean; parentId?: string; references?: string[] }) =>
+    request<Task>('POST', '/tasks', { body }),
+  createSubtask: (parentId: string, body: { prompt: string; title?: string; agentName?: string }) => request<Task>('POST', `/tasks/${e(parentId)}/subtasks`, { body }),
 
-  /** The person accepts the task as finished. */
-  markTaskDone: (id: string) => fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/done`, { method: 'POST' }).then(unwrap<unknown>),
+  listAgents: () => request<AgentInfo[]>('GET', '/agents'),
 
-  startTask: (id: string, attachments?: string[]) =>
-    fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/start`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify({ attachments }),
-    }).then(unwrap<Task>),
-
-  createTask: (body: {
-    prompt: string;
-    title?: string;
-    agentName?: string;
-    attachments?: string[];
-    autostart?: boolean;
-    parentId?: string;
-    references?: string[];
-  }) =>
-    fetch(`${API_BASE}/tasks`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body) }).then(
-      unwrap<Task>,
-    ),
-
-  /** Create + enqueue a subtask under a parent task. */
-  createSubtask: (parentId: string, body: { prompt: string; title?: string; agentName?: string }) =>
-    fetch(`${API_BASE}/tasks/${encodeURIComponent(parentId)}/subtasks`, {
-      method: 'POST',
-      headers: authHeaders(true),
-      body: JSON.stringify(body),
-    }).then(unwrap<Task>),
-
-  listAgents: () => fetch(`${API_BASE}/agents`, { cache: 'no-store' }).then(unwrap<AgentInfo[]>),
-
-  /** Shipped agent templates (summaries) and one template's full definition. */
-  /** One entry of the admin's change journal (for the undo card). */
   getAdminAudit: (id: string) =>
-    fetch(`${API_BASE}/admin-audit/${encodeURIComponent(id)}`, { cache: 'no-store' }).then(
-      unwrap<{ id: string; ts: string; tool: string; summary: string; undone?: boolean; undo?: { kind: string; name?: string; before?: unknown } }>,
-    ),
+    request<{ id: string; ts: string; tool: string; summary: string; undone?: boolean; undo?: { kind: string; name?: string; before?: unknown } }>('GET', `/admin-audit/${e(id)}`),
 
-  /** Fulfil an agent's secret request: the value goes straight to the server's storage, never through the chat. */
-  submitSecret: (approvalId: string, value: string) =>
-    fetch(`${API_BASE}/approvals/${encodeURIComponent(approvalId)}/secret`, {
-      method: 'POST',
-      headers: authHeaders(true),
-      body: JSON.stringify({ value }),
-    }).then(unwrap<unknown>),
+  submitSecret: (approvalId: string, value: string) => request<unknown>('POST', `/approvals/${e(approvalId)}/secret`, { body: { value } }),
 
-  /** Dry run of the housekeeping cleanup: how much WOULD be removed (nothing is deleted). */
   maintenanceDryRun: (body: { runs?: boolean; worktrees?: boolean; deleteBranches?: boolean; olderThanDays?: number }) =>
-    fetch(`${API_BASE}/maintenance/cleanup`, {
-      method: 'POST',
-      headers: authHeaders(true),
-      body: JSON.stringify({ ...body, dryRun: true }),
-    }).then(unwrap<{ runsRemoved: number; runBytes: number; worktreesRemoved: number; branchesDeleted: number }>),
+    request<{ runsRemoved: number; runBytes: number; worktreesRemoved: number; branchesDeleted: number }>('POST', '/maintenance/cleanup', { body: { ...body, dryRun: true } }),
 
-  listAgentTemplates: () => fetch(`${API_BASE}/agents/catalog`, { cache: 'no-store' }).then(unwrap<AgentInfo[]>),
-  getAgentTemplate: (name: string) =>
-    fetch(`${API_BASE}/agents/catalog/${encodeURIComponent(name)}`, { cache: 'no-store' }).then(unwrap<AgentDetail>),
+  listAgentTemplates: () => request<AgentInfo[]>('GET', '/agents/catalog'),
+  getAgentTemplate: (name: string) => request<AgentDetail>('GET', `/agents/catalog/${e(name)}`),
+  getAgent: (name: string) => request<AgentDetail>('GET', `/agents/${e(name)}`),
+  createAgent: (body: { name: string } & AgentBody) => request<AgentDetail>('POST', '/agents', { body }),
+  updateAgent: (name: string, body: AgentBody) => request<AgentDetail>('PUT', `/agents/${e(name)}`, { body }),
+  deleteAgent: (name: string) => request<{ name: string }>('DELETE', `/agents/${e(name)}`),
 
-  getAgent: (name: string) =>
-    fetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, { cache: 'no-store' }).then(
-      unwrap<AgentDetail>,
-    ),
+  listMcp: () => request<McpServerInfo[]>('GET', '/mcp-servers'),
+  createMcp: (body: { name: string; config: Record<string, unknown> }) => request<McpServerInfo>('POST', '/mcp-servers', { body }),
+  updateMcp: (name: string, config: Record<string, unknown>) => request<McpServerInfo>('PUT', `/mcp-servers/${e(name)}`, { body: { config } }),
+  discoverMcp: (name: string) => request<{ trusted: boolean; tools: { name: string; readOnly: boolean }[] }>('POST', `/mcp-servers/${e(name)}/discover`),
+  deleteMcp: (name: string) => request<{ name: string }>('DELETE', `/mcp-servers/${e(name)}`),
 
-  createAgent: (body: { name: string } & AgentBody) =>
-    fetch(`${API_BASE}/agents`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(
-      unwrap<AgentDetail>,
-    ),
-
-  updateAgent: (name: string, body: AgentBody) =>
-    fetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    }).then(unwrap<AgentDetail>),
-
-  deleteAgent: (name: string) =>
-    fetch(`${API_BASE}/agents/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(
-      unwrap<{ name: string }>,
-    ),
-
-  listMcp: () =>
-    fetch(`${API_BASE}/mcp-servers`, { cache: 'no-store' }).then(unwrap<McpServerInfo[]>),
-
-  createMcp: (body: { name: string; config: Record<string, unknown> }) =>
-    fetch(`${API_BASE}/mcp-servers`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(
-      unwrap<McpServerInfo>,
-    ),
-
-  updateMcp: (name: string, config: Record<string, unknown>) =>
-    fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      headers: jsonHeaders,
-      body: JSON.stringify({ config }),
-    }).then(unwrap<McpServerInfo>),
-
-  discoverMcp: (name: string) =>
-    fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}/discover`, { method: 'POST' }).then(
-      unwrap<{ trusted: boolean; tools: { name: string; readOnly: boolean }[] }>,
-    ),
-
-  deleteMcp: (name: string) =>
-    fetch(`${API_BASE}/mcp-servers/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(
-      unwrap<{ name: string }>,
-    ),
-
-  listChannelKinds: () =>
-    fetch(`${API_BASE}/channels/kinds`, { cache: 'no-store', headers: authHeaders() }).then(
-      unwrap<ChannelKindMeta[]>,
-    ),
-
+  listChannelKinds: () => request<ChannelKindMeta[]>('GET', '/channels/kinds'),
   listPairings: (channelId: string) =>
-    fetch(`${API_BASE}/channels/${encodeURIComponent(channelId)}/pairings`, { cache: 'no-store' }).then(
-      unwrap<{ chatId: string; userName: string | null; firstText: string | null; attempts: number; lastSeen: string }[]>,
-    ),
-  allowPairing: (channelId: string, chatId: string) =>
-    fetch(`${API_BASE}/channels/${encodeURIComponent(channelId)}/pairings/${encodeURIComponent(chatId)}/allow`, { method: 'POST' }).then(unwrap<unknown>),
-  dismissPairing: (channelId: string, chatId: string) =>
-    fetch(`${API_BASE}/channels/${encodeURIComponent(channelId)}/pairings/${encodeURIComponent(chatId)}`, { method: 'DELETE' }).then(unwrap<unknown>),
-  listPacks: () => fetch(`${API_BASE}/packs`, { cache: 'no-store' }).then(unwrap<PackInfo[]>),
-  getPack: (name: string) => fetch(`${API_BASE}/packs/${encodeURIComponent(name)}`, { cache: 'no-store' }).then(unwrap<PackInfo>),
-  installPack: (name: string, timezone?: string) =>
-    fetch(`${API_BASE}/packs/${encodeURIComponent(name)}/install`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ timezone }) }).then(unwrap<PackInstallResult>),
-  listResources: () =>
-    fetch(`${API_BASE}/resources`, { cache: 'no-store' }).then(
-      unwrap<{ items: ResourceInfo[]; usage: { count: number; bytes: number; maxCount: number; maxBytes: number } }>,
-    ),
-  getResource: (id: string) => fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { cache: 'no-store' }).then(unwrap<ResourceInfo>),
-  createNote: (body: { title: string; description?: string; tags?: string[]; agents?: string[]; text: string }) =>
-    fetch(`${API_BASE}/resources`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ResourceInfo>),
-  /** Raw-body upload: always octet-stream so the server's JSON parser never touches the bytes. */
-  uploadResource: (file: File) =>
-    fetch(`${API_BASE}/resources/upload`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream', 'x-filename': encodeURIComponent(file.name) },
-      body: file,
-    }).then(unwrap<ResourceInfo>),
-  updateResource: (id: string, body: { title?: string; description?: string; tags?: string[]; agents?: string[]; text?: string }) =>
-    fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ResourceInfo>),
-  deleteResource: (id: string) => fetch(`${API_BASE}/resources/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
-  resourceUrl: (id: string) => `${API_BASE}/resources/${encodeURIComponent(id)}/file`,
+    request<{ chatId: string; userName: string | null; firstText: string | null; attempts: number; lastSeen: string }[]>('GET', `/channels/${e(channelId)}/pairings`),
+  allowPairing: (channelId: string, chatId: string) => request<unknown>('POST', `/channels/${e(channelId)}/pairings/${e(chatId)}/allow`),
+  dismissPairing: (channelId: string, chatId: string) => request<unknown>('DELETE', `/channels/${e(channelId)}/pairings/${e(chatId)}`),
 
-  // ---- knowledge bases ----
-  translate: (text: string, to: string) =>
-    fetch(`${API_BASE}/translate`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ text, to }) }).then(unwrap<{ ok: boolean; text?: string; error?: string }>),
+  listPacks: () => request<PackInfo[]>('GET', '/packs'),
+  getPack: (name: string) => request<PackInfo>('GET', `/packs/${e(name)}`),
+  installPack: (name: string, timezone?: string) => request<PackInstallResult>('POST', `/packs/${e(name)}/install`, { body: { timezone } }),
+
+  listResources: () => request<{ items: ResourceInfo[]; usage: { count: number; bytes: number; maxCount: number; maxBytes: number } }>('GET', '/resources'),
+  getResource: (id: string) => request<ResourceInfo>('GET', `/resources/${e(id)}`),
+  createNote: (body: { title: string; description?: string; tags?: string[]; agents?: string[]; text: string }) => request<ResourceInfo>('POST', '/resources', { body }),
+  uploadResource: (file: File) => request<ResourceInfo>('POST', '/resources/upload', { raw: file, headers: octet(file) }),
+  updateResource: (id: string, body: { title?: string; description?: string; tags?: string[]; agents?: string[]; text?: string }) => request<ResourceInfo>('PUT', `/resources/${e(id)}`, { body }),
+  deleteResource: (id: string) => request<{ id: string }>('DELETE', `/resources/${e(id)}`),
+  resourceUrl: (id: string) => `${API_BASE}/resources/${e(id)}/file`,
+
+  translate: (text: string, to: string) => request<{ ok: boolean; text?: string; error?: string }>('POST', '/translate', { body: { text, to } }),
   startDiscussion: (body: { taskId?: string; topic: string; agents: string[]; rounds?: number; language?: 'compact' | 'user'; summaryBy?: string | null }) =>
-    fetch(`${API_BASE}/discussions`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<{ taskId: string }>),
+    request<{ taskId: string }>('POST', '/discussions', { body }),
   discussionState: (taskId: string) =>
-    fetch(`${API_BASE}/discussions/${encodeURIComponent(taskId)}`, { cache: 'no-store' }).then(
-      unwrap<{ active: boolean; topic?: string; agents?: string[]; turn?: number; total?: number; speaker?: string | null; summaryBy?: string | null }>,
-    ),
-  concludeDiscussion: (taskId: string) => fetch(`${API_BASE}/discussions/${encodeURIComponent(taskId)}/conclude`, { method: 'POST' }).then(unwrap<{ ok: boolean }>),
-  stopDiscussion: (taskId: string) => fetch(`${API_BASE}/discussions/${encodeURIComponent(taskId)}/stop`, { method: 'POST' }).then(unwrap<{ ok: boolean }>),
+    request<{ active: boolean; topic?: string; agents?: string[]; turn?: number; total?: number; speaker?: string | null; summaryBy?: string | null }>('GET', `/discussions/${e(taskId)}`),
+  concludeDiscussion: (taskId: string) => request<{ ok: boolean }>('POST', `/discussions/${e(taskId)}/conclude`),
+  stopDiscussion: (taskId: string) => request<{ ok: boolean }>('POST', `/discussions/${e(taskId)}/stop`),
 
-  listKb: () => fetch(`${API_BASE}/knowledge`, { cache: 'no-store' }).then(unwrap<KbInfo[]>),
-  createKb: (body: KbInput) => fetch(`${API_BASE}/knowledge`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<KbInfo>),
+  listKb: () => request<KbInfo[]>('GET', '/knowledge'),
+  createKb: (body: KbInput) => request<KbInfo>('POST', '/knowledge', { body }),
   updateKb: (name: string, body: Omit<Partial<KbInput>, 'embedProvider' | 'embedModel'> & { embedProvider?: string | null; embedModel?: string | null }) =>
-    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}`, { method: 'PATCH', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<KbInfo>),
-  deleteKb: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(unwrap<{ name: string }>),
-  listKbDocs: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/docs`, { cache: 'no-store' }).then(unwrap<KbDoc[]>),
-  addKbNote: (name: string, body: { title: string; text: string }) =>
-    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/docs/note`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<KbAdded>),
-  uploadKbFile: (name: string, file: File) =>
-    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/docs/upload`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream', 'x-filename': encodeURIComponent(file.name) },
-      body: file,
-    }).then(unwrap<KbAdded>),
-  importKbResource: (name: string, id: string) =>
-    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/import/resource`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ id }) }).then(unwrap<KbAdded>),
-  importKbResearch: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/import/research`, { method: 'POST' }).then(unwrap<{ added: number; skipped: number }>),
-  deleteKbDoc: (id: string) => fetch(`${API_BASE}/knowledge/docs/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
-  searchKb: (name: string, query: string) =>
-    fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/search`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ query, limit: 6 }) }).then(unwrap<{ hits: KbHit[]; note?: string }>),
-  previewKb: (text: string, chunking: KbChunking) =>
-    fetch(`${API_BASE}/knowledge/preview`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ text, chunking }) }).then(
-      unwrap<{ total: number; avg: number; max: number; chunks: { heading: string; chars: number; text: string }[] }>,
-    ),
-  reembedKb: (name: string) => fetch(`${API_BASE}/knowledge/${encodeURIComponent(name)}/reembed`, { method: 'POST' }).then(unwrap<{ started: boolean }>),
+    request<KbInfo>('PATCH', `/knowledge/${e(name)}`, { body }),
+  deleteKb: (name: string) => request<{ name: string }>('DELETE', `/knowledge/${e(name)}`),
+  listKbDocs: (name: string) => request<KbDoc[]>('GET', `/knowledge/${e(name)}/docs`),
+  addKbNote: (name: string, body: { title: string; text: string }) => request<KbAdded>('POST', `/knowledge/${e(name)}/docs/note`, { body }),
+  uploadKbFile: (name: string, file: File) => request<KbAdded>('POST', `/knowledge/${e(name)}/docs/upload`, { raw: file, headers: octet(file) }),
+  importKbResource: (name: string, id: string) => request<KbAdded>('POST', `/knowledge/${e(name)}/import/resource`, { body: { id } }),
+  importKbResearch: (name: string) => request<{ added: number; skipped: number }>('POST', `/knowledge/${e(name)}/import/research`),
+  deleteKbDoc: (id: string) => request<{ id: string }>('DELETE', `/knowledge/docs/${e(id)}`),
+  searchKb: (name: string, query: string) => request<{ hits: KbHit[]; note?: string }>('POST', `/knowledge/${e(name)}/search`, { body: { query, limit: 6 } }),
+  previewKb: (text: string, chunking: KbChunking) => request<KbChunkPreview>('POST', '/knowledge/preview', { body: { text, chunking } }),
+  reembedKb: (name: string) => request<{ started: boolean }>('POST', `/knowledge/${e(name)}/reembed`),
 
-  listSchedules: () => fetch(`${API_BASE}/schedules`, { cache: 'no-store' }).then(unwrap<ScheduleInfo[]>),
-  createSchedule: (body: ScheduleInput) =>
-    fetch(`${API_BASE}/schedules`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ScheduleInfo>),
-  updateSchedule: (id: string, body: ScheduleInput) =>
-    fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<ScheduleInfo>),
-  deleteSchedule: (id: string) => fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
-  runSchedule: (id: string) => fetch(`${API_BASE}/schedules/${encodeURIComponent(id)}/run`, { method: 'POST' }).then(unwrap<{ status: string; error?: string }>),
+  listSchedules: () => request<ScheduleInfo[]>('GET', '/schedules'),
+  createSchedule: (body: ScheduleInput) => request<ScheduleInfo>('POST', '/schedules', { body }),
+  updateSchedule: (id: string, body: ScheduleInput) => request<ScheduleInfo>('PUT', `/schedules/${e(id)}`, { body }),
+  deleteSchedule: (id: string) => request<{ id: string }>('DELETE', `/schedules/${e(id)}`),
+  runSchedule: (id: string) => request<{ status: string; error?: string }>('POST', `/schedules/${e(id)}/run`),
 
-  listChannels: () =>
-    fetch(`${API_BASE}/channels`, { cache: 'no-store', headers: authHeaders() }).then(
-      unwrap<ChannelInfo[]>,
-    ),
+  listChannels: () => request<ChannelInfo[]>('GET', '/channels'),
+  createChannel: (body: ChannelInput) => request<ChannelInfo>('POST', '/channels', { body }),
+  updateChannel: (id: string, body: ChannelInput) => request<ChannelInfo>('PUT', `/channels/${e(id)}`, { body }),
+  deleteChannel: (id: string) => request<{ id: string }>('DELETE', `/channels/${e(id)}`),
+  testChannel: (id: string) => request<ChannelTestResult>('POST', `/channels/${e(id)}/test`),
 
-  createChannel: (body: ChannelInput) =>
-    fetch(`${API_BASE}/channels`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body) }).then(
-      unwrap<ChannelInfo>,
-    ),
+  listProviders: () => request<ProviderInfo[]>('GET', '/providers'),
+  createProvider: (body: { name: string } & ProviderInput) => request<ProviderInfo>('POST', '/providers', { body }),
+  updateProvider: (name: string, body: ProviderInput) => request<ProviderInfo>('PUT', `/providers/${e(name)}`, { body }),
+  deleteProvider: (name: string) => request<{ name: string }>('DELETE', `/providers/${e(name)}`),
+  testProvider: (name: string) => request<ProviderTestResult>('POST', `/providers/${e(name)}/test`),
+  listProviderModels: (name: string) => request<ProviderModelsResult>('GET', `/providers/${e(name)}/models`),
+  previewProviderModels: (body: { kind?: ProviderKind; baseUrl?: string; authMode?: ProviderAuthMode; secret?: string }) => request<ProviderModelsResult>('POST', '/providers/models-preview', { body }),
 
-  updateChannel: (id: string, body: ChannelInput) =>
-    fetch(`${API_BASE}/channels/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: authHeaders(true),
-      body: JSON.stringify(body),
-    }).then(unwrap<ChannelInfo>),
-
-  deleteChannel: (id: string) =>
-    fetch(`${API_BASE}/channels/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() }).then(
-      unwrap<{ id: string }>,
-    ),
-
-  testChannel: (id: string) =>
-    fetch(`${API_BASE}/channels/${encodeURIComponent(id)}/test`, { method: 'POST', headers: authHeaders() }).then(
-      unwrap<ChannelTestResult>,
-    ),
-
-  listProviders: () =>
-    fetch(`${API_BASE}/providers`, { cache: 'no-store' }).then(unwrap<ProviderInfo[]>),
-
-  createProvider: (body: { name: string } & ProviderInput) =>
-    fetch(`${API_BASE}/providers`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    }).then(unwrap<ProviderInfo>),
-
-  updateProvider: (name: string, body: ProviderInput) =>
-    fetch(`${API_BASE}/providers/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    }).then(unwrap<ProviderInfo>),
-
-  deleteProvider: (name: string) =>
-    fetch(`${API_BASE}/providers/${encodeURIComponent(name)}`, { method: 'DELETE' }).then(
-      unwrap<{ name: string }>,
-    ),
-
-  testProvider: (name: string) =>
-    fetch(`${API_BASE}/providers/${encodeURIComponent(name)}/test`, { method: 'POST' }).then(
-      unwrap<ProviderTestResult>,
-    ),
-
-  listProviderModels: (name: string) =>
-    fetch(`${API_BASE}/providers/${encodeURIComponent(name)}/models`, { cache: 'no-store' }).then(
-      unwrap<ProviderModelsResult>,
-    ),
-
-  previewProviderModels: (body: { kind?: ProviderKind; baseUrl?: string; authMode?: ProviderAuthMode; secret?: string }) =>
-    fetch(`${API_BASE}/providers/models-preview`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    }).then(unwrap<ProviderModelsResult>),
-
-  listSkills: () =>
-    fetch(`${API_BASE}/agents/skills`, { cache: 'no-store' }).then(unwrap<string[]>),
-
-  listLitellmRoutes: () =>
-    fetch(`${API_BASE}/litellm/routes`, { cache: 'no-store' }).then(unwrap<LitellmRoute[]>),
+  listSkills: () => request<string[]>('GET', '/agents/skills'),
+  listLitellmRoutes: () => request<LitellmRoute[]>('GET', '/litellm/routes'),
 
   followUp: (id: string, prompt: string, attachments?: string[], references?: string[]) =>
-    fetch(`${API_BASE}/tasks/${id}/follow-up`, {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify({ prompt, attachments, references }),
-    }).then(unwrap<TaskDetail & { queued: boolean; queueLength: number }>),
+    request<TaskDetail & { queued: boolean; queueLength: number }>('POST', `/tasks/${id}/follow-up`, { body: { prompt, attachments, references } }),
+  listPendingFollowUps: (id: string) => request<PendingFollowUp[]>('GET', `/tasks/${id}/pending-follow-ups`),
+  updatePendingFollowUp: (id: string, pendingId: string, patch: { prompt?: string; attachments?: string[]; references?: string[] }) =>
+    request<PendingFollowUp[]>('PATCH', `/tasks/${id}/pending-follow-ups/${pendingId}`, { body: patch }),
+  removePendingFollowUp: (id: string, pendingId: string) => request<PendingFollowUp[]>('DELETE', `/tasks/${id}/pending-follow-ups/${pendingId}`),
 
-  /** The task's pending-follow-up queue — server-side, shared with channels. */
-  listPendingFollowUps: (id: string) =>
-    fetch(`${API_BASE}/tasks/${id}/pending-follow-ups`, { cache: 'no-store' }).then(
-      unwrap<PendingFollowUp[]>,
-    ),
+  cancelTask: (id: string) => request<Task>('POST', `/tasks/${id}/cancel`),
+  deleteTask: (id: string) => request<{ id: string }>('DELETE', `/tasks/${id}`),
 
-  updatePendingFollowUp: (
-    id: string,
-    pendingId: string,
-    patch: { prompt?: string; attachments?: string[]; references?: string[] },
-  ) =>
-    fetch(`${API_BASE}/tasks/${id}/pending-follow-ups/${pendingId}`, {
-      method: 'PATCH',
-      headers: jsonHeaders,
-      body: JSON.stringify(patch),
-    }).then(unwrap<PendingFollowUp[]>),
-
-  removePendingFollowUp: (id: string, pendingId: string) =>
-    fetch(`${API_BASE}/tasks/${id}/pending-follow-ups/${pendingId}`, { method: 'DELETE' }).then(
-      unwrap<PendingFollowUp[]>,
-    ),
-
-  cancelTask: (id: string) =>
-    fetch(`${API_BASE}/tasks/${id}/cancel`, { method: 'POST' }).then(unwrap<Task>),
-
-  deleteTask: (id: string) =>
-    fetch(`${API_BASE}/tasks/${id}`, { method: 'DELETE' }).then(unwrap<{ id: string }>),
-
-  listAttachments: (id: string) =>
-    fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/attachments`, { cache: 'no-store' }).then(
-      unwrap<AttachmentMeta[]>,
-    ),
-
+  listAttachments: (id: string) => request<AttachmentMeta[]>('GET', `/tasks/${e(id)}/attachments`),
   uploadAttachment: (id: string, file: File) => {
-    // refuse before sending: the proxy would answer a too-big body with a raw HTML 413
     const tooBig = uploadSizeError(file);
     if (tooBig) return Promise.reject(new Error(tooBig));
-    return fetch(`${API_BASE}/tasks/${encodeURIComponent(id)}/attachments`, {
-      method: 'POST',
-      headers: {
-        'content-type': file.type || 'application/octet-stream',
-        'x-filename': encodeURIComponent(file.name),
-      },
-      body: file,
-    }).then(unwrap<AttachmentMeta>);
+    return request<AttachmentMeta>('POST', `/tasks/${e(id)}/attachments`, { raw: file, headers: octet(file, file.type || 'application/octet-stream') });
   },
 
-  workspaceSummary: () => fetch(`${API_BASE}/workspace`, { cache: 'no-store' }).then(unwrap<WorkspaceSummary>),
-  workspaceList: (path: string) =>
-    fetch(`${API_BASE}/workspace/files?${new URLSearchParams({ path })}`, { cache: 'no-store' }).then(unwrap<WorkspaceListing>),
+  workspaceSummary: () => request<WorkspaceSummary>('GET', '/workspace'),
+  workspaceList: (path: string) => request<WorkspaceListing>('GET', '/workspace/files', { query: { path } }),
   workspaceFileUrl: (path: string, download = false) => `${API_BASE}/workspace/file?${new URLSearchParams({ path, ...(download ? { download: '1' } : {}) })}`,
   workspaceText: async (path: string): Promise<string> => {
-    const r = await fetch(`${API_BASE}/workspace/file?${new URLSearchParams({ path })}`, { cache: 'no-store' });
+    const r = await fetch(`${API_BASE}/workspace/file${buildQuery({ path })}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(`${r.status} — could not read the file`);
     return r.text();
   },
-  workspaceUpload: (path: string, body: Blob | string) =>
-    fetch(`${API_BASE}/workspace/file?${new URLSearchParams({ path })}`, { method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body }).then(unwrap<{ path: string; size: number }>),
-  workspaceDelete: (path: string) => fetch(`${API_BASE}/workspace/file?${new URLSearchParams({ path })}`, { method: 'DELETE' }).then(unwrap<{ ok: boolean }>),
+  workspaceUpload: (path: string, body: Blob | string) => request<{ path: string; size: number }>('PUT', '/workspace/file', { query: { path }, raw: body, headers: { 'content-type': 'application/octet-stream' } }),
+  workspaceDelete: (path: string) => request<{ ok: boolean }>('DELETE', '/workspace/file', { query: { path } }),
 
-  listQuestions: (status?: QuestionStatus, taskId?: string) =>
-    fetch(`${API_BASE}/questions?${new URLSearchParams({ ...(status ? { status } : {}), ...(taskId ? { taskId } : {}) })}`, { cache: 'no-store' }).then(unwrap<AgentQuestion[]>),
-  answerQuestion: (id: string, answer: { index?: number; indexes?: number[]; text?: string }) =>
-    fetch(`${API_BASE}/questions/${encodeURIComponent(id)}/answer`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(answer),
-    }).then(unwrap<AgentQuestion>),
-  questionImageUrl: (id: string) => `${API_BASE}/questions/${encodeURIComponent(id)}/image`,
-  diskStatus: () =>
-    fetch(`${API_BASE}/maintenance/disk`, { cache: 'no-store' }).then(
-      unwrap<{ path: string; totalBytes: number; freeBytes: number; usedPercent: number; level: 'ok' | 'warn' | 'critical'; warnBelowBytes: number; criticalBelowBytes: number; checkedAt: string; relief?: { at: string; bytes: number } | null } | null>,
-    ),
-  maintenanceReport: () =>
-    fetch(`${API_BASE}/maintenance/report`, { cache: 'no-store' }).then(
-      unwrap<{
-        runs: { count: number; bytes: number; stale: number; staleBytes: number };
-        worktrees: { count: number; bytes: number; stale: number };
-        attachments: { bytes: number; oldTasksBytes: number };
-        caches: { digests: { count: number; bytes: number; stale: number; staleBytes: number }; research: { count: number; bytes: number; stale: number; staleBytes: number }; digestRetentionDays: number; researchRetentionDays: number };
-        resources: { bytes: number };
-        workspace?: { bytes: number };
-        retentionDays: number;
-      }>,
-    ),
-  relieveDisk: () => fetch(`${API_BASE}/maintenance/relieve`, { method: 'POST' }).then(unwrap<{ digests: number; research: number; runs: number; bytes: number }>),
-  getTitleSettings: () => fetch(`${API_BASE}/titles`, { cache: 'no-store' }).then(unwrap<{ enabled: boolean; provider: string; model: string }>),
-  saveTitleSettings: (body: { enabled: boolean; provider: string; model: string }) =>
-    fetch(`${API_BASE}/titles`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }).then(unwrap<{ enabled: boolean; provider: string; model: string }>),
-  testTitle: (prompt?: string) =>
-    fetch(`${API_BASE}/titles/test`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ prompt }) }).then(unwrap<{ ok: boolean; title?: string; provider?: string; error?: string }>),
-  mediaStatus: () =>
-    fetch(`${API_BASE}/media`, { cache: 'no-store' }).then(
-      unwrap<{ vision: { provider: string; model: string } | null; visionReady: boolean; ffmpeg: boolean; sttReady: boolean }>,
-    ),
-  saveVision: (cfg: { provider: string; model: string } | null) =>
-    fetch(`${API_BASE}/vision`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(cfg ?? {}),
-    }).then(unwrap<{ ok: boolean; vision: { provider: string; model: string } | null }>),
-  testVision: () => fetch(`${API_BASE}/vision/test`, { method: 'POST' }).then(unwrap<{ ok: boolean; answer?: string; error?: string }>),
+  listQuestions: (status?: QuestionStatus, taskId?: string) => request<AgentQuestion[]>('GET', '/questions', { query: { status: status || undefined, taskId: taskId || undefined } }),
+  answerQuestion: (id: string, answer: { index?: number; indexes?: number[]; text?: string }) => request<AgentQuestion>('POST', `/questions/${e(id)}/answer`, { body: answer }),
+  questionImageUrl: (id: string) => `${API_BASE}/questions/${e(id)}/image`,
+  diskStatus: () => request<DiskStatus | null>('GET', '/maintenance/disk'),
+  maintenanceReport: () => request<MaintenanceReport>('GET', '/maintenance/report'),
+  relieveDisk: () => request<{ digests: number; research: number; runs: number; bytes: number }>('POST', '/maintenance/relieve'),
+  getTitleSettings: () => request<TitleCfg>('GET', '/titles'),
+  saveTitleSettings: (body: TitleCfg) => request<TitleCfg>('PUT', '/titles', { body }),
+  testTitle: (prompt?: string) => request<{ ok: boolean; title?: string; provider?: string; error?: string }>('POST', '/titles/test', { body: { prompt } }),
+  mediaStatus: () => request<{ vision: VisionCfg | null; visionReady: boolean; ffmpeg: boolean; sttReady: boolean }>('GET', '/media'),
+  saveVision: (cfg: VisionCfg | null) => request<{ ok: boolean; vision: VisionCfg | null }>('PUT', '/vision', { body: cfg ?? {} }),
+  testVision: () => request<{ ok: boolean; answer?: string; error?: string }>('POST', '/vision/test'),
 
-  attachmentUrl: (id: string, name: string) =>
-    `${API_BASE}/tasks/${encodeURIComponent(id)}/attachments/${encodeURIComponent(name)}`,
+  attachmentUrl: (id: string, name: string) => `${API_BASE}/tasks/${e(id)}/attachments/${e(name)}`,
 
-  listApprovals: (status?: string) =>
-    fetch(`${API_BASE}/approvals${status ? `?status=${status}` : ''}`, { cache: 'no-store' }).then(
-      unwrap<ApprovalRequest[]>,
-    ),
+  listApprovals: (status?: string) => request<ApprovalRequest[]>('GET', '/approvals', { query: { status: status || undefined } }),
+  decide: (id: string, decision: 'approve' | 'deny', opts?: { taskException?: boolean; globalException?: boolean }) =>
+    request<ApprovalRequest>('POST', `/approvals/${id}/decision`, { body: { decision, ...opts } }),
 
-  decide: (
-    id: string,
-    decision: 'approve' | 'deny',
-    opts?: { taskException?: boolean; globalException?: boolean },
-  ) =>
-    fetch(`${API_BASE}/approvals/${id}/decision`, {
-      method: 'POST',
-      headers: authHeaders(true),
-      body: JSON.stringify({ decision, ...opts }),
-    }).then(unwrap<ApprovalRequest>),
+  listUsers: () => request<User[]>('GET', '/users'),
+  createUser: (body: { displayName: string } & UserInput) => request<User>('POST', '/users', { body }),
+  updateUser: (id: string, body: UserInput) => request<User>('PUT', `/users/${e(id)}`, { body }),
+  deleteUser: (id: string) => request<{ id: string }>('DELETE', `/users/${e(id)}`),
 
-  listUsers: () => fetch(`${API_BASE}/users`, { cache: 'no-store' }).then(unwrap<User[]>),
+  getUsage: (params: { from?: string; to?: string } = {}) => request<UsageReport>('GET', '/stats/usage', { query: { from: params.from || undefined, to: params.to || undefined } }),
 
-  createUser: (body: { displayName: string } & UserInput) =>
-    fetch(`${API_BASE}/users`, { method: 'POST', headers: authHeaders(true), body: JSON.stringify(body) }).then(
-      unwrap<User>,
-    ),
-
-  updateUser: (id: string, body: UserInput) =>
-    fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: authHeaders(true),
-      body: JSON.stringify(body),
-    }).then(unwrap<User>),
-
-  deleteUser: (id: string) =>
-    fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: authHeaders(),
-    }).then(unwrap<{ id: string }>),
-
-  getUsage: (params: { from?: string; to?: string } = {}) => {
-    const qs = new URLSearchParams();
-    if (params.from) qs.set('from', params.from);
-    if (params.to) qs.set('to', params.to);
-    const suffix = qs.toString() ? `?${qs}` : '';
-    // Guarded (operator/admin): carry the acting user.
-    return fetch(`${API_BASE}/stats/usage${suffix}`, {
-      cache: 'no-store',
-      headers: authHeaders(),
-    }).then(unwrap<UsageReport>);
-  },
-
-  getSettings: () =>
-    fetch(`${API_BASE}/settings`, { cache: 'no-store' }).then(unwrap<Settings>),
-
-  updateSettings: (body: SettingsUpdate) =>
-    fetch(`${API_BASE}/settings`, {
-      method: 'PUT',
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-    }).then(unwrap<Settings>),
+  getSettings: () => request<Settings>('GET', '/settings'),
+  updateSettings: (body: SettingsUpdate) => request<Settings>('PUT', '/settings', { body }),
 };

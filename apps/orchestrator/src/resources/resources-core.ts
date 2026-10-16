@@ -3,7 +3,9 @@
  * Pure helpers only (kinds, validation, search, the block that goes into an agent's prompt) — unit-tested.
  */
 
-export type ResourceKind = 'text' | 'image' | 'pdf' | 'video' | 'file';
+import { kindFor as kindOf, mimeFor as mimeOf, type FileKind } from '../files/file-types';
+
+export type ResourceKind = FileKind;
 
 export interface ResourceEntry {
   id: string;
@@ -33,39 +35,11 @@ export const MAX_RESOURCES = 500;
 /** A text resource is shown/edited in the dashboard and read whole by tools up to this size. */
 export const MAX_TEXT_BYTES = 1024 * 1024;
 
-const TEXT_EXT = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'yaml', 'yml', 'log']);
-const VIDEO_MIME: Record<string, string> = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
-const IMAGE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
-const OTHER_MIME: Record<string, string> = {
-  txt: 'text/plain',
-  md: 'text/markdown',
-  markdown: 'text/markdown',
-  csv: 'text/csv',
-  tsv: 'text/tab-separated-values',
-  json: 'application/json',
-  yaml: 'application/yaml',
-  yml: 'application/yaml',
-  log: 'text/plain',
-  pdf: 'application/pdf',
-  zip: 'application/zip',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-};
-
-export function kindFor(ext: string): ResourceKind {
-  const e = ext.toLowerCase();
-  if (TEXT_EXT.has(e)) return 'text';
-  if (e in IMAGE_MIME) return 'image';
-  if (e === 'pdf') return 'pdf';
-  if (e in VIDEO_MIME) return 'video';
-  return 'file';
-}
-export const mimeFor = (ext: string): string => IMAGE_MIME[ext.toLowerCase()] ?? VIDEO_MIME[ext.toLowerCase()] ?? OTHER_MIME[ext.toLowerCase()] ?? 'application/octet-stream';
+/** The kind of a resource by its extension — the shared file-types table (mkv/avi/3gp count as video, like everywhere else). */
+export const kindFor = (ext: string): ResourceKind => kindOf(ext);
+export const mimeFor = (ext: string): string => mimeOf(ext);
 /** The size limit for one uploaded file of this kind. */
 export const maxBytesFor = (kind: ResourceKind): number => (kind === 'video' ? MAX_VIDEO_FILE_BYTES : MAX_FILE_BYTES);
-/** Safe to show inline in a browser (cannot run script). Everything else downloads. */
-export const isInline = (kind: ResourceKind): boolean => kind === 'image' || kind === 'pdf' || kind === 'video';
 
 export function cleanTags(input: unknown): string[] {
   const raw = Array.isArray(input) ? input : typeof input === 'string' ? input.split(/[,;\n]/) : [];

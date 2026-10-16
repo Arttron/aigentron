@@ -10,7 +10,7 @@
 |---|---|
 | **Project** (`WORKSPACE_REPO_PATH`) | The repository the agents work on. Real checkout of *your* project (e.g. `tesla-info`). |
 | **Shared workspace** (`WORKSPACE_DIR`) | Non-code results of the agents, one folder next to the repo and the agent dir (`/workspace/workspace` dev — bind-mounted from host `./workspace` via `WORKSPACE_HOST_PATH`; `/data/workspace` minimal; `$DATA_DIR/workspace` bare). Created automatically, never overwritten: `WORKSPACE.md` (brief — a person edits it), `memory/` (`decisions.md`, `questions.md`, `facts.md`, `plan.md`, `status.md` — written with `workspace_note`), `work/` (drafts, data), `deliverables/` (results via `workspace_save`, the newest 5 older versions of each file in `.versions/`, none older than 90 days). Design and the later per-project plan: `docs/plan-projects-workspace.md`. |
-| **Agent dir** (`AGENT_DIR`) | The platform's own files: `agents/` (live agents), `skills/`, `catalog/` (templates), `builtin/` (admin), `packs/` (starter packs), `resources/` (the shared library, `docs/resources.md`), `runs/<taskId>/` (per-task working files), `attachments/<taskId>/`, `research-cache/`, `research.json`, `admin-audit.jsonl`, `.sync/`, `.snapshots/`. Knowledge bases (`docs/knowledge-base.md`) live in the database, not here. |
+| **Agent dir** (`AGENT_DIR`) | The platform's own files: `agents/` (live agents), `skills/`, `catalog/` (templates), `builtin/` (admin), `packs/` (starter packs), `resources/` (the shared library, `docs/resources.md`), `runs/<taskId>/` (per-task working files), `attachments/<taskId>/`, `cache/digests/<hash>/` (video frames + transcripts, regenerable), `research-cache/`, `research.json`, `admin-audit.jsonl`, `.sync/`, `.snapshots/`. Knowledge bases (`docs/knowledge-base.md`) live in the database, not here. |
 | **Secrets dir** (`SECRETS_DIR`, default sibling `…/secrets`) | Credentials and access settings that must not sit in the agent tree: the shared Codex sign-in (`secrets/codex/auth.json`), `auth.json` (password hashes + session key, `docs/authentication.md`), `access.json` (allowed domains), `cloudflare-access.json`, `web-server.json` + `tls/` (`docs/remote-access.md`), `voice.json` (`docs/voice.md`). |
 | **Worktrees root** (`WORKTREES_ROOT`) | Per-task git worktrees — only used when `WORKSPACE_SHARED=false` (the old mode). |
 | **Database** | Postgres (full/dev) or one SQLite file (minimal/bare). |
@@ -85,7 +85,8 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 | `CODEX_AUTH_HOME`, `CODEX_BIN` | `<secrets>/codex`, `codex` | Shared ChatGPT sign-in location / binary. |
 | `BRAVE_API_KEY` or `RESEARCH_SEARXNG_URL` | unset | Search backend for the research MCP (fetch works without). |
 | `RUNS_RETENTION_DAYS` | `14` (`0` = never) | Run folders older than this are removed (never for live tasks). |
-| `DIGEST_RETENTION_DAYS`, `RESEARCH_CACHE_RETENTION_DAYS` | `30`, `180` (`0` = never) | Cached video digests (frames + transcript) and fetched web pages older than this are removed automatically — both are regenerated on demand. |
+| `DIGEST_RETENTION_DAYS`, `RESEARCH_CACHE_RETENTION_DAYS` | `30`, `180` (`0` = never) | Cached video digests (frames + transcript, `agent/cache/digests/`) and fetched web pages older than this are removed automatically — both are regenerated on demand. |
+| `ATTACHMENTS_RETENTION_DAYS` | `0` (= never; **off by default**) | When set, the attachments of tasks that *finished* more than this many days ago (and leftover folders of deleted tasks) are removed in the 6-hourly tidying. Your own files — switch it on only if the disk is small. Live tasks and tasks active within the period are never touched; linked workspace / library files are never deleted (only the link). |
 | `DISK_WARN_PERCENT`, `DISK_WARN_GB`, `DISK_CRITICAL_PERCENT`, `DISK_CRITICAL_GB` | `15`, `3`, `7`, `1` | Free-space limits (see "Disk space" below). The percentage is capped on big disks (warn under 20 GB, critical under 8 GB). |
 | `WORKTREE_RETENTION_DAYS`, `CLEANUP_WORKTREES` | `30`, `false` | Old worktrees are only removed on request (admin → *propose_cleanup*, or `POST /api/maintenance/cleanup`), unless `CLEANUP_WORKTREES=true`. |
 | `PUBLIC_URL`, `ORCHESTRATOR_HOST`, `WEB_HOST`, `TUNNEL_TOKEN`, `TRUSTED_PROXY` | unset / `0.0.0.0` | Addresses and tunnel — `docs/remote-access.md`. |
@@ -97,7 +98,7 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 
 - **Monitoring:** the server reads the free space of the data disk every 10 minutes. When it drops below the *warn* limit a banner appears across the dashboard, Settings → General → **Disk & cleanup** shows the numbers and what takes the space, and a message goes to the default notification chat (Settings → Escalations) — or, if none is set, to every allowed chat of every enabled channel (at most every 12 h while it stays low).
 - **Automatic relief at *critical*:** all video digests, fetched pages older than 30 days and run folders older than 3 days are removed by the server itself (once per 6 h). Never your files, tasks, notes or knowledge bases. **Free up space now** does the same on demand (`POST /api/maintenance/relieve`).
-- **Regular tidying (every 6 h):** run folders (14 days), video digests (30 days), fetched pages (180 days). Task attachments (your files) are only *reported* — the report shows how much belongs to tasks finished more than 90 days ago; delete those tasks yourself or ask the admin.
+- **Regular tidying (every 6 h):** run folders (14 days), video digests (30 days), fetched pages (180 days). Task attachments (your files) are only *reported* unless you set `ATTACHMENTS_RETENTION_DAYS` — the report shows how much belongs to tasks finished more than 90 days ago (and the retention in force); delete those tasks yourself or ask the admin.
 - **Container logs** are rotated (3 × 20 MB per container) in the compose file and in the installer's `docker run`.
 - What is *not* handled yet: database growth (events/sessions of old tasks) and old Docker images kept for rollback — `aigentron doctor` and `docker system df` show them.
 
@@ -111,14 +112,14 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 | Dashboard passwords, domain list, certificate, voice settings, ChatGPT/Codex sign-in | `secrets` volume (losing `auth.json` = no passwords; re-sign-in to Codex is fine) |
 | Shared workspace (memory, drafts, deliverables) | `workspace/` (`./workspace` in dev, `<data>/workspace` in minimal/bare) |
 | Library (resources) | `agent/resources/` (`<data>/agent/resources/` in minimal/bare) |
-| Disposable | `agent/runs/`, `agent/research-cache/` (reproducible), `worktrees` volume, `pnpm-store` |
+| Disposable | `agent/runs/`, `agent/cache/`, `agent/research-cache/` (reproducible), `worktrees` volume, `pnpm-store` |
 
 ## 6. Housekeeping and its safety rules
 
 - `GET /api/maintenance/disk` — free space, level and what takes it; `POST /api/maintenance/relieve` — free up space now (§4a).
 - `GET /api/maintenance/report` — counts/sizes of run folders, old worktrees and `agent/task-*` branches.
 - `POST /api/maintenance/cleanup` — **dry run unless `"dryRun": false`**; options `runs`, `worktrees`, `deleteBranches`, `olderThanDays`.
-- Scheduled (every 6 h): run folders past retention, video digests and fetched pages past theirs (§4a). Credentials are scrubbed from run folders on every boot, and after every Codex run.
+- Scheduled (every 6 h): run folders past retention, video digests and fetched pages past theirs, attachments of finished tasks only when `ATTACHMENTS_RETENTION_DAYS` is set (§4a). Credentials are scrubbed from run folders on every boot, and after every Codex run.
 - Worktrees are removed *without* deleting their `agent/task-*` branches (commits may never have been pushed); branches go only with
   `deleteBranches`. Orphaned directories under the worktrees root (no longer known to git) are handled the same way.
 - A Codex follow-up whose run folder was cleaned up continues in a fresh thread (with a notice) instead of failing.

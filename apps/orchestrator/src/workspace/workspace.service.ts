@@ -1,11 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, PayloadTooLargeException, type OnModuleInit } from '@nestjs/common';
-import { createWriteStream } from 'node:fs';
-import { once } from 'node:events';
 import type { Readable } from 'node:stream';
-import { appendFile, copyFile, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { AppConfigService } from '../config/app-config.service';
-import { insideRoot } from '../media/media-core';
+import { saveUpload } from '../files/file-io';
+import { isSecretPath, realAncestorInside, realInside } from '../files/fs-safe';
 import {
   BRIEF_FILE,
   BRIEF_TEMPLATE,
@@ -161,19 +160,16 @@ export class WorkspaceService implements OnModuleInit {
     const destDir = dirname(dest);
     await mkdir(destDir, { recursive: true });
     // never follow a symlink out of deliverables/
-    const realDeliverables = await realpath(join(this.root, 'deliverables'));
-    const realDir = await realpath(destDir);
-    if (!insideRoot(realDir, [realDeliverables])) throw new Error('That path leaves deliverables/.');
+    if (!(await realInside(destDir, [join(this.root, 'deliverables')]))) throw new Error('That path leaves deliverables/.');
 
     let source: string | null = null;
     let bytes = 0;
     if (input.from !== undefined) {
       if (!input.from.startsWith('/')) throw new Error('`from` must be the full path of the file.');
-      const real = await realpath(input.from).catch(() => '');
-      const roots = await Promise.all([taskAttachmentsDir ?? this.config.attachmentsDir, this.root, ...allowFrom].map((r) => realpath(r).catch(() => r)));
-      if (!real || !insideRoot(real, roots)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
+      const real = await realInside(input.from, [taskAttachmentsDir ?? this.config.attachmentsDir, this.root, ...allowFrom]);
+      if (!real) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
       // a sign-in token or env file is never a deliverable, wherever it sits (a deliverable is served to everyone who can open the task)
-      if (looksSecret(real) || looksSecret(input.from)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
+      if (isSecretPath(real) || isSecretPath(input.from)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
       const st = await stat(real);
       if (!st.isFile()) throw new Error('`from` is not a file.');
       if (st.size > MAX_SAVE_BYTES) throw new Error(`The file is too large (${human(st.size)}; the limit is ${human(MAX_SAVE_BYTES)}).`);
@@ -249,19 +245,8 @@ export class WorkspaceService implements OnModuleInit {
       if (clean !== BRIEF_FILE && !(TOP_FOLDERS as readonly string[]).includes(top)) throw new NotFoundException('Not found.');
     }
     const abs = join(this.root, clean);
-    const realRoot = await realpath(this.root).catch(() => this.root);
     // the deepest existing ancestor must be inside the workspace for real (no symlink out)
-    let probe = abs;
-    for (;;) {
-      const real = await realpath(probe).catch(() => null);
-      if (real) {
-        if (!insideRoot(real, [realRoot])) throw new ForbiddenException('That path leaves the workspace.');
-        break;
-      }
-      const up = dirname(probe);
-      if (up === probe) break;
-      probe = up;
-    }
+    if (!(await realAncestorInside(abs, [this.root]))) throw new ForbiddenException('That path leaves the workspace.');
     if (opts.mustExist && !(await stat(abs).catch(() => null))) throw new NotFoundException('Not found.');
     return { rel: clean, abs };
   }
@@ -301,27 +286,7 @@ export class WorkspaceService implements OnModuleInit {
     if (clean === 'work') throw new BadRequestException('Give a file name.');
     const limit = clean === BRIEF_FILE ? MAX_BRIEF_BYTES : MAX_SAVE_BYTES;
     await mkdir(dirname(abs), { recursive: true });
-    const tmp = `${abs}.part-${process.pid}-${Date.now()}`;
-    const out = createWriteStream(tmp);
-    let size = 0;
-    try {
-      for await (const chunk of source) {
-        size += (chunk as Buffer).length;
-        if (size > limit) throw new PayloadTooLargeException(`The file is too large (limit ${human(limit)}).`);
-        if (!out.write(chunk)) await once(out, 'drain');
-      }
-      out.end();
-      await once(out, 'finish');
-      await rename(tmp, abs);
-    } catch (e) {
-      // wait for the stream to close first: destroying before it has opened would create the file right after rm
-      await new Promise<void>((resolve) => {
-        out.once('close', () => resolve());
-        out.destroy();
-      });
-      await rm(tmp, { force: true }).catch(() => undefined);
-      throw e;
-    }
+    const size = await saveUpload(source, abs, { limit, tooBig: (l) => new PayloadTooLargeException(`The file is too large (limit ${human(l)}).`) });
     return { path: clean, size };
   }
 
@@ -352,18 +317,6 @@ export class WorkspaceService implements OnModuleInit {
   get writeRoots(): string[] {
     return [resolve(this.root)];
   }
-}
-
-/**
- * Files that hold secrets and must never be copied into deliverables: Codex sign-in tokens (`auth.json`, anything under a
- * `codex-home` except its `generated_images`, the shared `.codex-home`) and env files. Mirrors media-core's `isSecretPath`
- * (the media tools' read gate) — kept local so the two gates do not depend on each other's file.
- */
-function looksSecret(path: string): boolean {
-  const parts = path.split('/').filter(Boolean);
-  if (parts.some((s) => s === 'auth.json' || s === '.codex-home' || /^\.env(\.|$)/.test(s))) return true;
-  const i = parts.indexOf('codex-home');
-  return i >= 0 && parts[i + 1] !== 'generated_images';
 }
 
 async function walk(dir: string, depth: number, cap = 5000): Promise<{ path: string; size: number; mtime: Date }[]> {

@@ -25,6 +25,9 @@ init-env: ## Create .env if missing; on a fresh install generate a random LITELL
 test: ## Run the unit tests (classifier, validators, SSRF/text helpers, event mappers) + the admin-skills drift check
 	@pnpm test
 
+test-di: ## Build the orchestrator and check that every provider of the dependency-injection graph resolves (~1 min; unit tests cannot see missing module imports)
+	@pnpm test:di
+
 check-admin-skills: ## Fail if the admin agent's skills drift from its real tools
 	@node scripts/check-admin-skills.mjs
 

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { API_BASE } from '@/lib/config';
+import { useSettingsResource } from '@/lib/use-settings-resource';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
 
 interface CfInfo {
@@ -16,41 +17,19 @@ interface CfTest {
 
 /** Settings → General → Cloudflare Access: make the server itself check Access's sign-in token. */
 export function CloudflareAccessSettings() {
-  const [info, setInfo] = useState<CfInfo | null>(null);
   const [team, setTeam] = useState('');
   const [aud, setAud] = useState('');
   const [enabled, setEnabled] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [test, setTest] = useState<CfTest | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    const r = await fetch(`${API_BASE}/cloudflare-access`, { cache: 'no-store' }).catch(() => null);
-    if (!r?.ok) return;
-    const j = (await r.json()) as CfInfo;
-    setInfo(j);
+  const { info, call, busy, setBusy, msg, setMsg } = useSettingsResource<CfInfo>('/cloudflare-access', (j) => {
     setTeam(j.teamDomain);
     setEnabled(j.enabled);
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
+  });
 
   const save = async () => {
-    setBusy(true);
-    setMsg(null);
     setTest(null);
-    const r = await fetch(`${API_BASE}/cloudflare-access`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ enabled, teamDomain: team, aud }),
-    }).catch(() => null);
-    const j = (await r?.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    setBusy(false);
-    if (!r?.ok || !j.ok) return setMsg({ ok: false, text: j.error ?? 'Could not save.' });
-    setAud('');
-    setMsg({ ok: true, text: enabled ? 'Saved. Public addresses now require a Cloudflare Access sign-in.' : 'Saved (switched off).' });
-    await load();
+    const okText = enabled ? 'Saved. Public addresses now require a Cloudflare Access sign-in.' : 'Saved (switched off).';
+    if (await call('', 'PUT', { enabled, teamDomain: team, aud }, okText)) setAud('');
   };
 
   const runTest = async () => {

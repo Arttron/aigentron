@@ -20,8 +20,8 @@ export interface MaintenanceReport {
   runs: { count: number; bytes: number; stale: number; staleBytes: number };
   worktrees: { count: number; bytes: number; stale: number };
   branches: { agentBranches: number; stale: number };
-  /** All task attachments, and the part that belongs to tasks finished more than 90 days ago (user files: never deleted automatically). */
-  attachments: { bytes: number; oldTasksBytes: number };
+  /** All task attachments, and the part that belongs to tasks finished more than 90 days ago (user files: deleted only when `retentionDays` > 0 — off by default). */
+  attachments: { bytes: number; oldTasksBytes: number; retentionDays: number };
   caches: CacheReport & { digestRetentionDays: number; researchRetentionDays: number };
   resources: { bytes: number };
   /** The shared workspace (memory / work / deliverables): people's and agents' results — never cleaned automatically. */
@@ -91,24 +91,35 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
   get researchRetentionDays(): number {
     return this.num('RESEARCH_CACHE_RETENTION_DAYS', 180);
   }
+  /** Attachments of FINISHED tasks older than this are removed (the person's own files — so off by default: 0 = never). */
+  get attachmentsRetentionDays(): number {
+    return Math.max(0, this.num('ATTACHMENTS_RETENTION_DAYS', 0));
+  }
 
   private get dataDir(): string {
     return dirname(this.config.agentDir);
   }
 
-  /** `<video>.digest` folders (task attachments and library files). */
+  /** Where video digests live: `<agentDir>/cache/digests/<hash>`. */
+  private get digestsDir(): string {
+    return join(this.config.agentDir, 'cache', 'digests');
+  }
+
+  /**
+   * Video digest folders: the cache folder, plus any `<video>.digest` left next to a video by versions before 0.1.63 (attachments,
+   * library files, the workspace) — those are pruned like the rest and moved into the cache the next time the video is used.
+   */
   private async digestDirs(): Promise<{ path: string; mtime: number }[]> {
-    const roots: string[] = [join(this.config.agentDir, 'resources', 'files')];
-    for (const t of await readdir(this.config.attachmentsDir).catch(() => [] as string[])) roots.push(join(this.config.attachmentsDir, t));
     const out: { path: string; mtime: number }[] = [];
-    for (const root of roots) {
-      for (const name of await readdir(root).catch(() => [] as string[])) {
-        if (!name.endsWith('.digest')) continue;
-        const p = join(root, name);
-        const s = await stat(p).catch(() => null);
-        if (s?.isDirectory()) out.push({ path: p, mtime: s.mtimeMs });
-      }
-    }
+    const add = async (p: string) => {
+      const s = await stat(p).catch(() => null);
+      if (s?.isDirectory()) out.push({ path: p, mtime: s.mtimeMs });
+    };
+    for (const name of await readdir(this.digestsDir).catch(() => [] as string[])) await add(join(this.digestsDir, name));
+    const legacyRoots: string[] = [join(this.config.agentDir, 'resources', 'files')];
+    for (const t of await readdir(this.config.attachmentsDir).catch(() => [] as string[])) legacyRoots.push(join(this.config.attachmentsDir, t));
+    for (const root of legacyRoots) for (const name of await readdir(root).catch(() => [] as string[])) if (name.endsWith('.digest')) await add(join(root, name));
+    if (this.config.workspaceDir) for (const p of await findLegacyDigests(this.config.workspaceDir, 6)) await add(p);
     return out;
   }
 
@@ -196,6 +207,7 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
       const res = await this.cleanup({ dryRun: false, runs: this.retentionDays > 0, worktrees, deleteBranches: false });
       const caches = await this.pruneCaches();
       if (caches.digests || caches.research) this.logger.log(`Scheduled cache pruning: ${caches.digests} digest cache(s), ${caches.research} cached page(s) (${mb(caches.bytes)})`);
+      await this.pruneAttachments();
       if (res.runsRemoved || res.worktreesRemoved) {
         this.logger.log(`Scheduled cleanup: ${res.runsRemoved} run folder(s) (${mb(res.runBytes)}), ${res.worktreesRemoved} worktree(s)`);
       }
@@ -299,20 +311,48 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
     }
   }
 
-  /** Size of the attachment folders of tasks that finished (or were deleted) more than `days` ago — user files, so only reported. */
-  private async oldTaskAttachmentBytes(days: number): Promise<number> {
-    const ids = await readdir(this.config.attachmentsDir).catch(() => [] as string[]);
+  /**
+   * Attachment folders of tasks that finished (or were deleted) more than `days` ago. A live task is never listed; a task still in the
+   * database counts by its last activity, a folder of a deleted task by its own modification time.
+   */
+  private async oldTaskAttachments(days: number): Promise<{ id: string; path: string }[]> {
+    const ids = (await readdir(this.config.attachmentsDir).catch(() => [] as string[])).filter((id) => /^[\w-]+$/.test(id));
     const st = await this.statuses(ids);
     const last = await this.lastActive(ids);
     const cutoff = Date.now() - days * DAY;
-    let bytes = 0;
+    const out: { id: string; path: string }[] = [];
     for (const id of ids) {
       const s = st.get(id);
       if (s && ACTIVE.includes(s)) continue;
-      if ((last.get(id) ?? 0) >= cutoff && s) continue;
-      bytes += await this.dirBytes(join(this.config.attachmentsDir, id));
+      const path = join(this.config.attachmentsDir, id);
+      const when = s ? (last.get(id) ?? 0) : await stat(path).then((x) => x.mtimeMs, () => 0);
+      if (when < cutoff) out.push({ id, path });
     }
+    return out;
+  }
+
+  /** Size of the attachment folders of tasks that finished (or were deleted) more than `days` ago — for the report. */
+  private async oldTaskAttachmentBytes(days: number): Promise<number> {
+    let bytes = 0;
+    for (const a of await this.oldTaskAttachments(days)) bytes += await this.dirBytes(a.path);
     return bytes;
+  }
+
+  /**
+   * Remove the attachments of tasks finished more than `days` ago (files AND links; the linked workspace/library files stay). Only when
+   * the person switched it on (`ATTACHMENTS_RETENTION_DAYS` > 0); a live task, or a task active within the period, is never touched.
+   */
+  async pruneAttachments(days = this.attachmentsRetentionDays): Promise<{ removed: number; bytes: number }> {
+    let removed = 0;
+    let bytes = 0;
+    if (!(days > 0)) return { removed, bytes };
+    for (const a of await this.oldTaskAttachments(days)) {
+      bytes += await this.dirBytes(a.path);
+      await rm(a.path, { recursive: true, force: true }).catch(() => undefined);
+      removed += 1;
+    }
+    if (removed) this.logger.log(`Removed the attachments of ${removed} task(s) finished over ${days} days ago (${mb(bytes)})`);
+    return { removed, bytes };
   }
 
   async report(): Promise<MaintenanceReport> {
@@ -328,7 +368,7 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
       runs: { count: runs.length, bytes: await this.dirBytes(this.runsDir), stale: stale.length, staleBytes: stale.reduce((a, r) => a + r.bytes, 0) },
       worktrees: { count: wts.length, bytes: await this.dirBytes(this.config.worktreesRoot), stale: wts.filter((w) => w.stale).length },
       branches: { agentBranches: branches.length, stale: staleBranches.length },
-      attachments: { bytes: await this.dirBytes(this.config.attachmentsDir), oldTasksBytes: await this.oldTaskAttachmentBytes(90) },
+      attachments: { bytes: await this.dirBytes(this.config.attachmentsDir), oldTasksBytes: await this.oldTaskAttachmentBytes(90), retentionDays: this.attachmentsRetentionDays },
       caches: { ...(await this.cacheReport()), digestRetentionDays: this.digestRetentionDays, researchRetentionDays: this.researchRetentionDays },
       resources: { bytes: await this.dirBytes(join(this.config.agentDir, 'resources')) },
       workspace: { bytes: this.config.workspaceDir ? await this.dirBytes(this.config.workspaceDir) : 0 },
@@ -381,3 +421,16 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
 }
 
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(0)} MB`;
+
+/** `*.digest` folders left under a tree by versions before 0.1.63 (bounded depth; hidden folders and node_modules skipped). */
+async function findLegacyDigests(dir: string, depth: number): Promise<string[]> {
+  const out: string[] = [];
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue;
+    const p = join(dir, e.name);
+    if (e.name.endsWith('.digest')) out.push(p);
+    else if (depth > 0) out.push(...(await findLegacyDigests(p, depth - 1)));
+  }
+  return out;
+}

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { prepareFile } from '@/lib/capture';
 import { api, type AttachmentMeta } from '@/lib/api';
-import { Card, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { Card, Row, UploadButton, Muted, ErrorText } from '@/components/ui';
 import { MediaViewer } from './MediaViewer';
 import styles from './Attachments.module.css';
 
@@ -16,7 +16,6 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(() => {
     api
@@ -29,12 +28,11 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
     refresh();
   }, [refresh, reloadSignal]);
 
-  const onPick = async (files: FileList | null) => {
-    if (!files?.length) return;
+  const onPick = async (files: File[]) => {
     setBusy(true);
     setError(null);
     try {
-      for (const file of Array.from(files)) {
+      for (const file of files) {
         await api.uploadAttachment(taskId, await prepareFile(file));
       }
       refresh();
@@ -42,7 +40,6 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
       setError((e as Error).message);
     } finally {
       setBusy(false);
-      if (inputRef.current) inputRef.current.value = '';
     }
   };
 
@@ -52,17 +49,10 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
         <button type="button" className={styles.toggle} onClick={() => setOpen((o) => !o)}>
           {open ? '▾' : '▸'} Attachments ({items.length})
         </button>
-        <Button size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
+        <UploadButton size="sm" disabled={busy} onFiles={onPick}>
           {busy ? 'Uploading…' : '+ Upload'}
-        </Button>
+        </UploadButton>
       </Row>
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        className={styles.hidden}
-        onChange={(e) => onPick(e.target.files)}
-      />
 
       {open && error && <ErrorText>{error}</ErrorText>}
       {open && items.length === 0 && !error && (

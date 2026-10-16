@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { SERVER_EVENT } from '@lds/shared';
 import { api, type TaskListItem, type TaskStatusFilter, type TaskTypeFilter } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { readFilterParam, withFilterParam } from '@/lib/url-filter';
 import { CreateTaskForm } from '@/components/CreateTaskForm';
 import { TaskList } from '@/components/TaskList';
 import { UserSwitcher } from '@/components/UserSwitcher';
@@ -35,8 +36,8 @@ const STATUS_KEY = 'lds.taskStatus';
 const isStatus = (v: string | null): v is TaskStatusFilter => STATUSES.some((s) => s.id === v);
 
 function initialStatus(): TaskStatusFilter | '' {
-  const fromUrl = new URLSearchParams(window.location.search).get('status');
-  if (isStatus(fromUrl)) return fromUrl;
+  const fromUrl = readFilterParam(window.location.search, 'status', isStatus);
+  if (fromUrl) return fromUrl;
   try {
     const saved = localStorage.getItem(STATUS_KEY);
     return isStatus(saved) ? saved : '';
@@ -49,8 +50,8 @@ const TYPE_KEY = 'lds.taskType';
 const isType = (v: string | null): v is TaskTypeFilter => TYPES.some((t) => t.id === v);
 
 function initialType(): TaskTypeFilter | '' {
-  const fromUrl = new URLSearchParams(window.location.search).get('type');
-  if (isType(fromUrl)) return fromUrl;
+  const fromUrl = readFilterParam(window.location.search, 'type', isType);
+  if (fromUrl) return fromUrl;
   try {
     const saved = localStorage.getItem(TYPE_KEY);
     return isType(saved) ? saved : '';
@@ -175,10 +176,7 @@ export function TaskListPage() {
     } catch {
       /* not remembered */
     }
-    const url = new URL(window.location.href);
-    if (next) url.searchParams.set('status', next);
-    else url.searchParams.delete('status');
-    window.history.replaceState(null, '', url);
+    window.history.replaceState(null, '', withFilterParam(window.location.href, 'status', next));
   };
   const pick = (next: TaskTypeFilter | '') => {
     setType(next);
@@ -189,10 +187,7 @@ export function TaskListPage() {
     } catch {
       /* private window — the choice just is not remembered */
     }
-    const url = new URL(window.location.href);
-    if (next) url.searchParams.set('type', next);
-    else url.searchParams.delete('type');
-    window.history.replaceState(null, '', url);
+    window.history.replaceState(null, '', withFilterParam(window.location.href, 'type', next));
   };
   const onSearch = (value: string) => {
     setQ(value);

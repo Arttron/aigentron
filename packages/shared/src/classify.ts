@@ -1,3 +1,4 @@
+import { parseFrontmatter } from './frontmatter';
 /**
  * DANGER CLASSIFIER — the single source of truth for what counts as a
  * "dangerous" tool call requiring human approval. Both the orchestrator and the
@@ -145,13 +146,10 @@ function shortHash(text: string): string {
 
 /** The frontmatter lines that decide what an agent may do — surfaced in the approval reason. */
 function agentPowers(content: string): string {
-  const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const fm = parseFrontmatter(content);
   if (!fm) return 'no frontmatter';
   const keys = ['provider', 'model', 'allowedTools', 'disallowedTools', 'mcp', 'skills'];
-  const found = (fm[1] ?? '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => keys.some((k) => l.startsWith(`${k}:`)));
+  const found = fm.lines.filter((l) => keys.some((k) => l.startsWith(`${k}:`)));
   return found.length ? found.join(' | ') : 'default tools, no MCP';
 }
 

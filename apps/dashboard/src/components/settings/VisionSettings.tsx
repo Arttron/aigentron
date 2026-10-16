@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAction } from '@/lib/use-settings-resource';
 import { api, type ProviderInfo } from '@/lib/api';
 import { ModelSelect } from '@/components/ModelSelect';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
@@ -18,8 +19,7 @@ export function VisionSettings() {
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
   const [saved, setSaved] = useState({ provider: '', model: '' });
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const { busy, msg, setMsg, run } = useAction();
 
   useEffect(() => {
     void Promise.all([api.listProviders().catch(() => []), api.mediaStatus()])
@@ -35,18 +35,6 @@ export function VisionSettings() {
 
   // Subscription logins (Claude / Codex sign-in) can't be called as a plain API.
   const usable = providers.filter((p) => p.kind !== 'codex' && p.authMode !== 'oauth-token');
-
-  const run = async (fn: () => Promise<string>) => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      setMsg({ ok: true, text: await fn() });
-    } catch (e) {
-      setMsg({ ok: false, text: (e as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const dirty = provider !== saved.provider || model !== saved.model;
   const persist = async () => {

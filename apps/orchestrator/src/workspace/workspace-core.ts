@@ -1,4 +1,5 @@
 /** Pure helpers of the shared workspace (no IO): note formatting, safe paths, globs, the prompt digest. */
+import { servePolicy } from '../files/file-types';
 
 export const NOTE_KINDS = ['decision', 'question', 'fact', 'status', 'plan'] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
@@ -120,16 +121,8 @@ export function matchesGlob(glob: string, relPath: string): boolean {
   return !glob.includes('/') && re.test(relPath.split('/').pop() ?? relPath);
 }
 
-const TEXT_EXT = new Set(['md', 'txt', 'csv', 'tsv', 'json', 'log', 'yml', 'yaml', 'xml', 'toml', 'ini']);
-const INLINE_MIME: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf' };
-
-/** How a workspace file is served: images/PDF inline, plain text as text/plain (safe), everything else as a download. */
-export function serveKind(name: string): { mime: string; inline: boolean; text: boolean } {
-  const ext = (name.split('.').pop() ?? '').toLowerCase();
-  if (INLINE_MIME[ext]) return { mime: INLINE_MIME[ext]!, inline: true, text: false };
-  if (TEXT_EXT.has(ext)) return { mime: 'text/plain; charset=utf-8', inline: true, text: true };
-  return { mime: 'application/octet-stream', inline: false, text: false };
-}
+/** How a workspace file is served: the shared file-types policy (pictures / PDF / playable video inline, text as text/plain, the rest downloads). */
+export const serveKind = (name: string): { mime: string; inline: boolean; text: boolean } => servePolicy(name);
 
 /** The top-level entries of the workspace and what a person may change there. */
 export const TOP_FOLDERS = ['memory', 'work', 'deliverables'] as const;

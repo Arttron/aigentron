@@ -16,6 +16,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "test": "vitest run && node scripts/check-admin-skills.mjs",
+    "test:di": "pnpm --filter @lds/orchestrator test:di",
     "test:watch": "vitest"
   },
   "pnpm": {

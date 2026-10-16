@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type AgentInfo, type ResourceInfo } from '@/lib/api';
-import { AppHeader, BackLink, Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api, errMsg, type AgentInfo, type ResourceInfo } from '@/lib/api';
+import { AppHeader, BackLink, Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle, UploadButton, useFileDrop } from '@/components/ui';
 import { hasLiveCamera, prepareFile } from '@/lib/capture';
 import { CameraCapture } from '@/components/CameraCapture';
 import styles from './ResourcesPage.module.css';
@@ -28,9 +28,6 @@ export function ResourcesPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [drag, setDrag] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const camRef = useRef<HTMLInputElement>(null);
   const [camera, setCamera] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -53,9 +50,9 @@ export function ResourcesPage() {
     return items.filter((i) => (!tag || i.tags.includes(tag)) && words.every((w) => `${i.title} ${i.description} ${i.tags.join(' ')} ${i.originalName}`.toLowerCase().includes(w)));
   }, [items, q, tag]);
 
-  const fail = (e: unknown) => setError((e as Error).message.replace(/^\d+ [^—]*— /, ''));
+  const fail = (e: unknown) => setError(errMsg(e));
 
-  const upload = async (files: FileList | File[]) => {
+  const upload = async (files: File[]) => {
     setBusy(true);
     setError(null);
     let last: ResourceInfo | null = null;
@@ -68,9 +65,15 @@ export function ResourcesPage() {
       fail(e);
     } finally {
       setBusy(false);
-      if (fileRef.current) fileRef.current.value = '';
-      if (camRef.current) camRef.current.value = '';
     }
+  };
+
+  const { dragging, bind: dropBind } = useFileDrop(upload);
+  /** A live camera opens in the page; otherwise the phone's own camera app takes the shot (the picker). */
+  const openLiveCamera = () => {
+    if (!hasLiveCamera()) return false;
+    setCamera(true);
+    return true;
   };
 
   const edit = async (r: ResourceInfo) => {
@@ -110,34 +113,20 @@ export function ResourcesPage() {
           profile, reference photos, a price list. Agents see the titles and descriptions and read what is relevant, so write a clear one-line description.
           {usage && ` ${usage.count} item(s), ${kb(usage.bytes)} of ${kb(usage.maxBytes)} used.`}
         </Muted>
-        <div
-          className={drag ? styles.dropOn : styles.drop}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDrag(true);
-          }}
-          onDragLeave={() => setDrag(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDrag(false);
-            if (e.dataTransfer.files.length) void upload(e.dataTransfer.files);
-          }}
-        >
+        <div className={dragging ? styles.dropOn : styles.drop} {...dropBind}>
           <Row wrap>
-            <Button variant="primary" disabled={busy} onClick={() => fileRef.current?.click()}>
+            <UploadButton variant="primary" disabled={busy} onFiles={upload}>
               ⬆ Upload files
-            </Button>
-            <Button disabled={busy} onClick={() => (hasLiveCamera() ? setCamera(true) : camRef.current?.click())}>
+            </UploadButton>
+            <UploadButton disabled={busy} multiple={false} accept="image/*,video/*" capture intercept={openLiveCamera} onFiles={upload}>
               📷 Camera
-            </Button>
+            </UploadButton>
             <Button disabled={busy} onClick={() => setDraft({ id: null, kind: 'text', title: '', description: '', tags: '', agents: [], text: '' })}>
               📝 New note
             </Button>
             <Muted>or drop files here (up to 25 MB each, videos up to 300 MB — images, video, PDF, text, anything)</Muted>
           </Row>
-          <input ref={camRef} type="file" accept="image/*,video/*" capture="environment" hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
           {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void upload(files)} />}
-          <input ref={fileRef} type="file" multiple hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
         </div>
         <Row wrap>
           <input className={styles.search} placeholder="🔎 Search the library…" value={q} onChange={(e) => setQ(e.target.value)} />

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type AgentInfo } from '@/lib/api';
+import { api, errMsg, type AgentInfo } from '@/lib/api';
 import { Modal, Button, Row, Field, Muted, ErrorText, CheckboxGroup } from '@/components/ui';
 
 /** Start a round-table: pick the agents, the topic and how long they talk; they answer each other in this chat. */
@@ -28,7 +28,7 @@ export function DiscussionModal({ taskId, initialTopic, onClose, onStarted }: { 
       onStarted(r.taskId);
       onClose();
     } catch (e) {
-      setError((e as Error).message.replace(/^\d+ [^—]*— /, ''));
+      setError(errMsg(e));
       setBusy(false);
     }
   };

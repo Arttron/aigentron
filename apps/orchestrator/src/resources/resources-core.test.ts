@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { titleFromName, appliesTo, cleanTags, isInline, kindFor, mimeFor, promptBlock, safeFileName, search, searchReport, validateMeta, type ResourceEntry } from './resources-core';
+import { titleFromName, appliesTo, cleanTags, kindFor, mimeFor, promptBlock, safeFileName, search, searchReport, validateMeta, type ResourceEntry } from './resources-core';
 
 const r = (over: Partial<ResourceEntry> = {}): ResourceEntry => ({
   id: 'r1',
@@ -27,11 +27,11 @@ describe('kinds and names', () => {
     expect(mimeFor('png')).toBe('image/png');
     expect(mimeFor('xyz')).toBe('application/octet-stream');
   });
-  it('only images and PDFs are shown inline (nothing that can run script)', () => {
-    expect(isInline('image')).toBe(true);
-    expect(isInline('pdf')).toBe(true);
-    expect(isInline('text')).toBe(false);
-    expect(isInline('file')).toBe(false);
+  it('videos of every container are video (same limit), html is a plain file', () => {
+    expect(kindFor('mkv')).toBe('video');
+    expect(kindFor('MOV')).toBe('video');
+    expect(kindFor('html')).toBe('file');
+    expect(mimeFor('mkv')).toBe('video/x-matroska');
   });
   it('makes uploaded names safe, keeps letters of any language, strips paths', () => {
     expect(safeFileName('Quarterly Plan.PDF')).toBe('quarterly-plan.pdf');

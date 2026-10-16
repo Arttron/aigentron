@@ -1,69 +1,20 @@
-import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, realpath, rm, stat, lstat, access, writeFile, copyFile, rename, link, unlink } from 'node:fs/promises';
-import { join, basename, extname, resolve, sep } from 'node:path';
-import { once } from 'node:events';
+import { mkdir, readdir, readFile, rm, stat, lstat, access, writeFile, copyFile, rename, link, unlink } from 'node:fs/promises';
+import { join, basename, extname } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
+import { partName, saveStream } from '../files/file-io';
+import { extOf, isImage, isVideo, mimeFor, servePolicy } from '../files/file-types';
+import { realInside, safeName } from '../files/fs-safe';
 import { ImageOptimizer } from '../media/image-optimizer.service';
 import { remuxWebm } from '../media/media-fix';
 
 /**
- * Rendered/served inline as their real type — safe because a browser can only
- * ever display or download these, never execute script from them. Everything
- * else is still accepted (any file type is allowed as an attachment — the
- * agent's Read tool can view images/PDF via vision and text-based formats as
- * plain text either way), but is served as a forced download instead (see
- * filePath()/the controller) so an uploaded `.html`/`.svg`/`.js` can't run as
- * same-origin script just by opening its attachment URL.
+ * Any file type is accepted as an attachment (the agent's Read tool views images/PDF via vision and text formats as plain text
+ * either way). How a file is SERVED comes from the shared file-types policy: pictures / PDF / playable video inline, text as
+ * text/plain, everything else (html, svg, js …) as a forced download so an upload can never run as same-origin script.
  */
-const INLINE_MIME_BY_EXT: Record<string, string> = {
-  png: 'image/png',
-  mp4: 'video/mp4',
-  m4v: 'video/mp4',
-  mov: 'video/quicktime',
-  webm: 'video/webm',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  pdf: 'application/pdf',
-};
-/** Best-effort Content-Type for common non-inline formats — cosmetic (the
- *  file still force-downloads either way), just nicer than a blanket
- *  octet-stream for things like a .json/.csv reference file. */
-const KNOWN_MIME_BY_EXT: Record<string, string> = {
-  mkv: 'video/x-matroska',
-  avi: 'video/x-msvideo',
-  '3gp': 'video/3gpp',
-  txt: 'text/plain',
-  md: 'text/markdown',
-  csv: 'text/csv',
-  tsv: 'text/tab-separated-values',
-  json: 'application/json',
-  log: 'text/plain',
-  yaml: 'application/yaml',
-  yml: 'application/yaml',
-  zip: 'application/zip',
-  tar: 'application/x-tar',
-  gz: 'application/gzip',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-};
-
-/** Content-Type for any extension — known-safe types get their real MIME,
- *  everything else falls back to a generic binary type (still fine to store
- *  and download, just not rendered as anything specific). */
-function mimeFor(ext: string): string {
-  return INLINE_MIME_BY_EXT[ext] ?? KNOWN_MIME_BY_EXT[ext] ?? 'application/octet-stream';
-}
-
-/** Whether this extension is safe to serve inline (vs. forced download). */
-function isInlineSafe(ext: string): boolean {
-  return ext in INLINE_MIME_BY_EXT;
-}
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB
 /**
@@ -73,13 +24,11 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10MB
 export const MAX_VIDEO_UPLOAD_BYTES = 95 * 1024 * 1024;
 /** All files of one task together (a runaway upload loop cannot fill the disk). */
 export const TASK_QUOTA_BYTES = 1024 * 1024 * 1024;
-const MAX_VIDEO_BYTES_ATT = MAX_VIDEO_UPLOAD_BYTES;
-const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', '3gp']);
-export const limitFor = (ext: string): number => (VIDEO_EXTS.has(ext) ? MAX_VIDEO_BYTES_ATT : MAX_BYTES);
+export const limitFor = (ext: string): number => (isVideo(ext) ? MAX_VIDEO_UPLOAD_BYTES : MAX_BYTES);
 /** The message for a file over its limit — says what to do, not just "too large". */
 export function tooBigMessage(ext: string, limit = limitFor(ext)): string {
   const mb = Math.round(limit / 1024 / 1024);
-  return VIDEO_EXTS.has(ext)
+  return isVideo(ext)
     ? `The video is larger than ${mb} MB, which is the most this server accepts (the web proxy in front of it refuses bigger uploads). Trim it, lower the resolution, or record a shorter clip.`
     : `The file is larger than ${mb} MB, which is the most this server accepts for this type of file.`;
 }
@@ -131,7 +80,7 @@ export class AttachmentsService {
     source: Readable,
     declaredBytes?: number,
   ): Promise<AttachmentMeta> {
-    const ext = extname(rawName).slice(1).toLowerCase();
+    const ext = extOf(rawName);
     const mime = mimeFor(ext);
     const dir = this.dir(taskId);
     const limit = limitFor(ext);
@@ -141,27 +90,14 @@ export class AttachmentsService {
     if (used + (declaredBytes ?? 0) > TASK_QUOTA_BYTES) throw new PayloadTooLargeException(`This task already holds ${Math.round(used / 1048576)} MB of files; the limit per task is ${TASK_QUOTA_BYTES / 1048576} MB.`);
 
     // written under a hidden `.part` name (never listed, never served), then moved into place without overwriting anything
-    const tmp = join(dir, `.${randomBytes(6).toString('hex')}.part`);
-    const out = createWriteStream(tmp, { flags: 'wx' });
-    let size = 0;
-    try {
-      for await (const chunk of source) {
-        size += (chunk as Buffer).length;
-        if (size > limit) throw new PayloadTooLargeException(tooBigMessage(ext, limit));
-        if (used + size > TASK_QUOTA_BYTES) throw new PayloadTooLargeException(`The task would exceed its ${TASK_QUOTA_BYTES / 1048576} MB limit of files.`);
-        if (!out.write(chunk)) await once(out, 'drain');
-      }
-      out.end();
-      await once(out, 'finish');
-    } catch (e) {
-      // wait for the stream to close first: destroying it before it has opened would create the file right after the rm
-      await new Promise<void>((resolve) => {
-        out.once('close', () => resolve());
-        out.destroy();
-      });
-      await rm(tmp, { force: true }).catch(() => undefined);
-      throw e;
-    }
+    const tmp = partName(join(dir, 'x'));
+    let size = await saveStream(source, tmp, {
+      limit,
+      tooBig: () => new PayloadTooLargeException(tooBigMessage(ext, limit)),
+      check: (n) => {
+        if (used + n > TASK_QUOTA_BYTES) throw new PayloadTooLargeException(`The task would exceed its ${TASK_QUOTA_BYTES / 1048576} MB limit of files.`);
+      },
+    });
     // A clip recorded in the browser (webm) has no length in its header: copy it into a proper webm (no re-encoding; skipped without ffmpeg).
     if (ext === 'webm') size = (await remuxWebm(tmp)) ?? size;
     const dest = await this.place(dir, tmp, sanitize(rawName)).catch(async (e) => {
@@ -175,7 +111,7 @@ export class AttachmentsService {
       if (r.changed) {
         const finalName = basename(r.path);
         this.logger.log(`Saved attachment ${taskId}/${finalName} (${r.size}B, was ${size}B)`);
-        return { name: finalName, size: r.size, mime: mimeFor(extname(finalName).slice(1).toLowerCase()) };
+        return { name: finalName, size: r.size, mime: mimeFor(finalName) };
       }
     }
     this.logger.log(`Saved attachment ${taskId}/${name} (${size}B)`);
@@ -207,8 +143,8 @@ export class AttachmentsService {
 
   /** Copy an existing picture (a generated image in the workspace, a library resource …) into the task's attachments so the chat can show it. Returns the stored name. */
   async adopt(taskId: string, srcPath: string): Promise<string> {
-    const ext = extname(srcPath).slice(1).toLowerCase();
-    if (!INLINE_MIME_BY_EXT[ext] || ext === 'pdf') throw new BadRequestException(`"${basename(srcPath)}" is not a picture I can show (png, jpg, webp, gif).`);
+    const ext = extOf(srcPath);
+    if (!isImage(ext)) throw new BadRequestException(`"${basename(srcPath)}" is not a picture I can show (png, jpg, webp, gif).`);
     const dir = this.dir(taskId);
     await mkdir(dir, { recursive: true });
     const stat0 = await lstat(srcPath); // not stat: a symlink (or a hard link to a file elsewhere) must never be followed into a copy of something private
@@ -228,8 +164,7 @@ export class AttachmentsService {
    */
   async writeImage(taskId: string, filename: string, base64: string): Promise<void> {
     const name = sanitize(filename);
-    const ext = extname(name).slice(1).toLowerCase();
-    if (!INLINE_MIME_BY_EXT[ext] || ext === 'pdf') throw new BadRequestException('unsupported image type');
+    if (!isImage(name)) throw new BadRequestException('unsupported image type');
     if (Math.floor((base64.length * 3) / 4) > MAX_BYTES) throw new PayloadTooLargeException(`image exceeds ${MAX_BYTES / 1024 / 1024}MB`); // before decoding: no big allocation for a refused image
     const buf = Buffer.from(base64, 'base64');
     if (buf.length > MAX_BYTES) throw new PayloadTooLargeException(`image exceeds ${MAX_BYTES / 1024 / 1024}MB`);
@@ -269,13 +204,8 @@ export class AttachmentsService {
   }
 
   /** The real path of a link target, only while it still is a file inside an allowed folder (checked again on every use). */
-  private async resolveLink(src: string): Promise<string | null> {
-    const real = await realpath(src).catch(() => null);
-    if (!real) return null;
-    const roots = await Promise.all(this.linkRoots().map((r) => realpath(r).catch(() => resolve(r))));
-    if (!roots.some((r) => real === r || real.startsWith(r.endsWith(sep) ? r : r + sep))) return null;
-    const st = await stat(real).catch(() => null);
-    return st?.isFile() ? real : null;
+  private resolveLink(src: string): Promise<string | null> {
+    return realInside(src, this.linkRoots(), { file: true });
   }
 
   private linkChain = new Map<string, Promise<unknown>>();
@@ -320,16 +250,16 @@ export class AttachmentsService {
     }
     const metas = await Promise.all(
       files.filter((n) => !n.startsWith('.')).map(async (name) => {
-        const ext = extname(name).slice(1).toLowerCase();
-        const s = await stat(join(this.dir(taskId), name)).catch(() => null);
-        return s && s.isFile() ? { name, size: s.size, mime: mimeFor(ext), mtime: s.mtimeMs } : null;
+        // lstat: a symlink dropped into the folder is not one of the task's files (it is never served either)
+        const s = await lstat(join(this.dir(taskId), name)).catch(() => null);
+        return s && s.isFile() ? { name, size: s.size, mime: mimeFor(name), mtime: s.mtimeMs } : null;
       }),
     );
     const linked = await Promise.all(
       Object.entries(await this.readLinks(taskId)).map(async ([name, src]) => {
         const real = await this.resolveLink(src);
         const s = real ? await stat(real).catch(() => null) : null;
-        return s ? { name, size: s.size, mime: mimeFor(extname(name).slice(1).toLowerCase()), mtime: s.mtimeMs } : null;
+        return s ? { name, size: s.size, mime: mimeFor(name), mtime: s.mtimeMs } : null;
       }),
     );
     const own = new Set(metas.filter((m): m is NonNullable<typeof m> => m !== null).map((m) => m.name));
@@ -339,30 +269,25 @@ export class AttachmentsService {
       .map(({ mtime: _mtime, ...m }) => m);
   }
 
-  /** Resolve a safe absolute path for serving a single file. `inline` tells
-   *  the controller whether it's safe to render directly (image/PDF) or must
-   *  be forced to download (everything else — see INLINE_MIME_BY_EXT above).
-   *  `name` is the sanitized filename actually on disk — always safe to embed
-   *  in a Content-Disposition header, unlike the raw request param. */
+  /** Resolve a safe absolute path for serving a single file, with how to serve it (`mime`, `inline` — the shared file-types policy).
+   *  `name` is the sanitized filename actually on disk — always safe to embed in a Content-Disposition header, unlike the raw request param. */
   async filePath(
     taskId: string,
     rawName: string,
   ): Promise<{ path: string; mime: string; inline: boolean; name: string }> {
     if (basename(rawName).startsWith('.')) throw new BadRequestException('attachment not found'); // `.links.json` is never a downloadable attachment
     const name = sanitize(rawName);
-    const ext = extname(name).slice(1).toLowerCase();
-    let path = join(this.dir(taskId), name);
-    try {
-      // a name like ".." must never resolve to a folder: only regular files are served
-      if (!(await stat(path)).isFile()) throw new Error('not a file');
-    } catch {
+    const dir = this.dir(taskId);
+    // a name like ".." must never resolve to a folder, and a symlink placed in the folder must never lead out of it: only regular files of the task
+    let path = await realInside(join(dir, name), [dir], { file: true });
+    if (!path) {
       // not one of its own files: a linked one?
       const src = (await this.readLinks(taskId))[name];
-      const real = src ? await this.resolveLink(src) : null;
-      if (!real) throw new BadRequestException('attachment not found');
-      path = real;
+      path = src ? await this.resolveLink(src) : null;
+      if (!path) throw new BadRequestException('attachment not found');
     }
-    return { path, mime: mimeFor(ext), inline: isInlineSafe(ext), name };
+    const { mime, inline } = servePolicy(name);
+    return { path, mime, inline, name };
   }
 
   /** Remove all of a task's attachments (called on task delete). */
@@ -397,10 +322,5 @@ export class AttachmentsService {
   }
 }
 
-/** Reduce an upload name to a safe basename (no path traversal, ascii-ish). */
-export function sanitize(rawName: string): string {
-  // letters / digits / marks of ANY script are kept (a photo called "кухня 2.jpg" or "写真.jpg" must stay readable); only path/odd characters go
-  // no leading dot: a user file can never be `.links.json` or hide as a dotfile
-  const base = basename(rawName).normalize('NFC').replace(/[^\p{L}\p{N}\p{M}.\-_ ]+/gu, '_').trim().replace(/^[.\s]+/, '');
-  return base.length ? base.slice(0, 120) : 'file';
-}
+/** Reduce an upload name to a safe basename (unicode kept, no path, no leading dot) — `safeName` of fs-safe. */
+export const sanitize = safeName;

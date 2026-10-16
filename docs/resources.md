@@ -3,7 +3,7 @@
 A simple knowledge base made of plain files. Everything in it is available to **every agent of the project**.
 
 ## What goes in
-Text notes (Markdown), images (png/jpg/webp/gif), PDFs, **videos** (mp4/mov/webm/mkv, ≤ 300 MB each — see `docs/media.md`) and any other file (≤ 25 MB each, text notes ≤ 1 MB, ≤ 500 resources, ≤ 2 GB in total).
+Text notes (Markdown), images (png/jpg/webp/gif), PDFs, **videos** (mp4/mov/m4v/webm, and mkv/avi/3gp — ≤ 300 MB each, see `docs/media.md`) and any other file (≤ 25 MB each, text notes ≤ 1 MB, ≤ 500 resources, ≤ 2 GB in total).
 Typical: house measurements and reference photos, a learner's profile and vocabulary, a style guide, a price list, meeting notes.
 
 ## How to add
@@ -21,7 +21,7 @@ Typical: house measurements and reference photos, a learner's profile and vocabu
 ## Where it lives
 `<agent dir>/resources/` — `files/` and `index.json`. In the docker dev stack that is `./agent/resources/` (git-ignored, never baked into images);
 in the minimal image and on bare metal it is `<data dir>/agent/resources/`, so it is part of your normal backup (see `docs/workspace-layout.md`).
-Images and PDFs open inline in the dashboard; everything else downloads (an uploaded `.html` can never run as a page).
+Images, PDFs, playable video (mp4/mov/webm, with byte ranges) and plain text (shown as text/plain) open inline in the dashboard; everything else downloads under its original name (an uploaded `.html`/`.svg` can never run as a page) — the same policy as task attachments and the workspace (`apps/orchestrator/src/files/file-types.ts`).
 
 ## Not (yet) included
 Semantic search and automatic chunking of large documents — that is the optional *knowledge base* module (`docs/knowledge-base.md`; resources can be imported into a base there), which does not read these files by itself.

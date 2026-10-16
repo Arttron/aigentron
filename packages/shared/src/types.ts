@@ -26,18 +26,6 @@ export type TaskStatus =
   | 'blocked'
   | 'stalled';
 
-export const TASK_STATUSES: readonly TaskStatus[] = [
-  'queued',
-  'running',
-  'needs_approval',
-  'review',
-  'done',
-  'failed',
-  'cancelled',
-  'blocked',
-  'stalled',
-] as const;
-
 /** Terminal states — a task in one of these will never change again. */
 export const TERMINAL_TASK_STATUSES: readonly TaskStatus[] = [
   'review',

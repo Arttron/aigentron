@@ -30,7 +30,8 @@ const skillsOk = ['admin-tools', 'dashboard-guide'].every((s) => skillsLine.incl
 
 let bad = false;
 for (const f of readdirSync(ADMIN_SKILLS_DIR).filter((n) => n.endsWith('.md')).sort()) {
-  const chars = [...readFileSync(`${ADMIN_SKILLS_DIR}/${f}`, 'utf8')].length;
+  // String#length (UTF-16 units) is what the runtime cuts by — an emoji counts 2
+  const chars = readFileSync(`${ADMIN_SKILLS_DIR}/${f}`, 'utf8').length;
   if (chars > SKILL_FILE_CAP) {
     bad = true;
     console.error(`${ADMIN_SKILLS_DIR}/${f} is ${chars} characters, over the ${SKILL_FILE_CAP}-character per-file cap (SKILL_FILE_CAP) - the agent would not see the last ${chars - SKILL_FILE_CAP}. Trim it or split it into another file.`);

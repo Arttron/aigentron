@@ -18,8 +18,8 @@ import {
   type SessionTotals,
   type SubagentDefinition,
 } from '@lds/agent-runner';
-import { resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
-import { LitellmService, defaultKind, routeName, stripSelfPrefix } from '../litellm/litellm.service';
+import { isListedMarkdown, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
+import { LitellmService, routeName, routeParams, stripSelfPrefix } from '../litellm/litellm.service';
 import { AppConfigService } from '../config/app-config.service';
 import { encodeAttachments } from '../prisma/agent-event-attachments';
 import { PrismaService } from '../prisma/prisma.service';
@@ -41,7 +41,7 @@ import { stripMark } from '../discussion/discussion-core';
 import { describeNow } from './clock';
 import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
-import { isVideoName } from '../media/media-core';
+import { isImageName, isVideoName } from '../media/media-core';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -656,7 +656,7 @@ export class RealAgentExecutor extends AgentExecutor {
                   async (dest) => {
                     // the result shows up in THIS task's attachments (gallery, chat, channels) as a link to the workspace file — no copy
                     const name = await this.attachments.link(ctx.taskId, dest);
-                    if (/\.(png|jpe?g|webp|gif)$/i.test(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
+                    if (isImageName(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
                     return `It is listed in the task's attachments as "${name}" (the person sees it there — no need to copy it).`;
                   },
                   this.attachments.dir(ctx.taskId), // only THIS task's attachments are a source (X-NEW-2)
@@ -969,7 +969,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const block = inlineBlock(files);
     if (block) parts.push(`The person attached text file(s); their contents follow (data from the person, to work with):\n\n${block}`);
     if (others.length) {
-      const list = others.map((p) => `- ${basename(p)}${isVideoName(p) ? ' (video — use video_digest, then look_at)' : /\.(png|jpe?g|webp|gif)$/i.test(p) ? ' (picture — use look_at)' : ' (read it with read_document)'}`).join('\n');
+      const list = others.map((p) => `- ${basename(p)}${isVideoName(p) ? ' (video — use video_digest, then look_at)' : isImageName(p) ? ' (picture — use look_at)' : ' (read it with read_document)'}`).join('\n');
       parts.push(`Other attached files:\n${list}`);
     }
     if (earlier.length) parts.push(`Other files attached to this task (read with read_document, just the name): ${earlier.join(', ')}`);
@@ -1094,13 +1094,7 @@ export class RealAgentExecutor extends AgentExecutor {
           ANTHROPIC_AUTH_TOKEN: masterKey,
         };
       }
-      await this.litellm.ensureRoute(provider.name, model, {
-        kind: provider.kind || defaultKind(provider.baseUrl),
-        apiBase: provider.baseUrl,
-        apiKey: provider.secret ?? '',
-        rpm: provider.rpm,
-        tpm: provider.tpm,
-      });
+      await this.litellm.ensureRoute(provider.name, model, routeParams(provider));
       return {
         ANTHROPIC_MODEL: routeName(provider.name, model),
         ANTHROPIC_BASE_URL: this.config.litellmBaseUrl,
@@ -1241,13 +1235,7 @@ export class RealAgentExecutor extends AgentExecutor {
     if (!model) return null;
     if (this.config.litellmMasterKey) {
       if (this.litellm.servesVerbatim(provider)) return stripSelfPrefix(provider.name, model);
-      await this.litellm.ensureRoute(provider.name, model, {
-        kind: provider.kind || defaultKind(provider.baseUrl),
-        apiBase: provider.baseUrl,
-        apiKey: provider.secret ?? '',
-        rpm: provider.rpm,
-        tpm: provider.tpm,
-      });
+      await this.litellm.ensureRoute(provider.name, model, routeParams(provider));
       return routeName(provider.name, model);
     }
     return model;
@@ -1285,7 +1273,7 @@ export class RealAgentExecutor extends AgentExecutor {
       // Recursive so the core/ + learned/ split is picked up; match by basename
       // since agents reference skills by bare name (e.g. `nestjs`).
       let files = (await readdir(skillsDir, { recursive: true })).filter(
-        (f) => f.endsWith('.md') && basename(f).toLowerCase() !== 'readme.md',
+        (f) => isListedMarkdown(f),
       );
       if (agent?.skills) {
         const want = new Set(agent.skills.map((s) => (s.endsWith('.md') ? s : `${s}.md`)));
@@ -1489,15 +1477,12 @@ function extForMedia(mediaType: string): string {
 
 /** Extract a single-line YAML frontmatter field (e.g. `description`) if present. */
 function frontmatterField(raw: string, field: string): string | null {
-  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!fm) return null;
-  const m = fm[1].match(new RegExp(`^${field}:\\s*(.+)$`, 'm'));
-  return m ? m[1].trim().replace(/^["']|["']$/g, '') : null;
+  return parseFrontmatter(raw)?.fields[field] ?? null;
 }
 
 /** First non-empty, non-frontmatter, non-heading line — a fallback summary. */
 function firstProseLine(raw: string): string | null {
-  const body = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  const body = parseFrontmatter(raw)?.body ?? raw;
   for (const line of body.split('\n')) {
     const t = line.trim();
     if (t && !t.startsWith('#') && !t.startsWith('---')) return t.slice(0, 160);

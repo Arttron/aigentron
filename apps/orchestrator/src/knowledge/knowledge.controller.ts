@@ -1,23 +1,14 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { Roles } from '../identity/roles.decorator';
 import { RolesGuard } from '../identity/roles.guard';
+import { readBodyLimited } from '../files/file-io';
 import type { ChunkingConfig } from './kb-core';
 import { KnowledgeService } from './knowledge.service';
 
 const MAX_UPLOAD = 20 * 1024 * 1024;
 
-async function readBody(req: Request): Promise<Buffer> {
-  const parts: Buffer[] = [];
-  let n = 0;
-  for await (const chunk of req) {
-    const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
-    n += b.length;
-    if (n > MAX_UPLOAD) throw new BadRequestException(`The file is too large (limit ${MAX_UPLOAD / 1048576} MB).`);
-    parts.push(b);
-  }
-  return Buffer.concat(parts);
-}
+const readBody = (req: Request): Promise<Buffer> => readBodyLimited(req, MAX_UPLOAD, (limit) => new BadRequestException(`The file is too large (limit ${limit / 1048576} MB).`));
 
 /** Knowledge bases: manage them, add documents, try a search. (Agents use them through the kb_* tools.) */
 @Controller('knowledge')
@@ -69,15 +60,22 @@ export class KnowledgeController {
     return this.kb.listDocs(name);
   }
 
+  /** Answers 202 `{id, status: 'processing'}` at once; the note is cut and stored in the background (see `GET …/docs` for its state). */
   @Post(':name/docs/note')
+  @HttpCode(202)
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
   note(@Param('name') name: string, @Body() body: { title?: string; text?: string }) {
-    return this.kb.addDocument(name, { title: body?.title, text: String(body?.text ?? ''), source: 'note', kind: 'note' });
+    return this.kb.addNote(name, { title: body?.title, text: String(body?.text ?? '') });
   }
 
-  /** One file as the raw body (`x-filename`, URL-encoded; optional `x-title`). */
+  /**
+   * One file as the raw body (`x-filename`, URL-encoded; optional `x-title`). The body is read, then the request ends with 202
+   * `{id, status: 'processing'}`: reading the PDF / Word file, cutting and storing happen in the background — a big file no longer
+   * holds the request longer than a web proxy waits. `GET …/docs` shows `processing` → `ready` (or `error` with the reason).
+   */
   @Post(':name/docs/upload')
+  @HttpCode(202)
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
   async upload(@Param('name') name: string, @Req() req: Request) {
@@ -92,7 +90,9 @@ export class KnowledgeController {
     return this.kb.addFile(name, dec('x-filename') ?? 'upload.txt', await readBody(req), dec('x-title'));
   }
 
+  /** 202 as well: the resource is read and indexed in the background. */
   @Post(':name/import/resource')
+  @HttpCode(202)
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
   importResource(@Param('name') name: string, @Body() body: { id?: string }) {
@@ -106,6 +106,7 @@ export class KnowledgeController {
     return this.kb.importResearch(name);
   }
 
+  /** Removes a stored document, or dismisses a failed background import. */
   @Delete('docs/:docId')
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')

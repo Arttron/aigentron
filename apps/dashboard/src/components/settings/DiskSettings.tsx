@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAction } from '@/lib/use-settings-resource';
 import { api } from '@/lib/api';
 import { formatBytes } from '@/lib/format-bytes';
 import { Button, Card, ErrorText, Muted, Row, SectionTitle } from '@/components/ui';
@@ -10,8 +11,7 @@ type Report = Awaited<ReturnType<typeof api.maintenanceReport>>;
 export function DiskSettings() {
   const [disk, setDisk] = useState<Disk>(null);
   const [report, setReport] = useState<Report | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const { busy, msg, setMsg, run } = useAction();
 
   const load = () => {
     void api.diskStatus().then(setDisk).catch(() => undefined);
@@ -21,17 +21,11 @@ export function DiskSettings() {
 
   const relieve = async () => {
     if (!window.confirm('Delete the regenerable caches now (all video digests, fetched web pages older than 30 days, run folders older than 3 days)? Your files, tasks and notes are not touched.')) return;
-    setBusy(true);
-    setMsg(null);
-    try {
+    await run(async () => {
       const r = await api.relieveDisk();
-      setMsg({ ok: true, text: `Freed ${formatBytes(r.bytes)}: ${r.digests} video digest(s), ${r.research} cached page(s), ${r.runs} run folder(s).` });
       load();
-    } catch (e) {
-      setMsg({ ok: false, text: (e as Error).message });
-    } finally {
-      setBusy(false);
-    }
+      return `Freed ${formatBytes(r.bytes)}: ${r.digests} video digest(s), ${r.research} cached page(s), ${r.runs} run folder(s).`;
+    });
   };
 
   const used = disk ? disk.usedPercent : 0;

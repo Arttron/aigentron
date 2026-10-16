@@ -1,7 +1,11 @@
 /** Photos and video for agents — pure helpers (unit-tested). */
+import { IMAGE_EXTS, VIDEO_EXTS, imageMime, isImage, isVideo } from '../files/file-types';
+import { insideRoot, isSecretPath } from '../files/fs-safe';
 
-export const VIDEO_EXTS = ['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi', '3gp'] as const;
-export const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'webp', 'gif'] as const;
+// The file-type table and the path checks live in `files/`; re-exported here for the agent runtime and the question routes.
+export { IMAGE_EXTS, VIDEO_EXTS, imageMime, insideRoot, isSecretPath };
+export const isVideoName = (name: string): boolean => isVideo(name);
+export const isImageName = (name: string): boolean => isImage(name);
 
 export const MAX_VIDEO_BYTES = 300 * 1024 * 1024; // what a digest will process (a file already on disk)
 export const MAX_VIDEO_SECONDS = 20 * 60;
@@ -88,12 +92,6 @@ export function mergeMoments(moments: readonly Moment[], durationSec: number, ma
   return out.length > max ? Array.from({ length: max }, (_, i) => out[Math.round((i * (out.length - 1)) / (max - 1))]!) : out;
 }
 
-const ext = (name: string): string => (name.split('.').pop() ?? '').toLowerCase();
-export const isVideoName = (name: string): boolean => (VIDEO_EXTS as readonly string[]).includes(ext(name));
-export const isImageName = (name: string): boolean => (IMAGE_EXTS as readonly string[]).includes(ext(name));
-
-export const imageMime = (name: string): string => ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' })[ext(name)] ?? 'image/jpeg';
-
 export interface ProbeResult {
   durationSec: number;
   width: number;
@@ -179,25 +177,6 @@ export function buildDigest(d: DigestInput): string {
   else if (d.transcript) lines.push('What was said (speech recognition):', d.transcript.trim(), '');
   else lines.push(d.transcriptNote ? `Sound: ${d.transcriptNote}` : 'Sound: none recognised.', '');
   return lines.join('\n');
-}
-
-/** Files that hold secrets (sign-in tokens, env files): never readable through the agents' media tools, wherever they sit. */
-export function isSecretPath(path: string): boolean {
-  const parts = path.split('/').filter(Boolean);
-  if (parts.some((s) => s === 'auth.json' || s === '.codex-home' || /^\.env(\.|$)/.test(s))) return true;
-  const i = parts.indexOf('codex-home');
-  return i >= 0 && parts[i + 1] !== 'generated_images';
-}
-
-/** A path an agent gave us is only usable inside one of the allowed roots (no `..`, no other folders). */
-export function insideRoot(path: string, roots: readonly string[]): boolean {
-  const norm = (p: string) => p.replace(/\/+$/, '');
-  const p = norm(path);
-  if (p.split('/').includes('..')) return false;
-  return roots.some((r) => {
-    const n = norm(r);
-    return n !== '' && (p === n || p.startsWith(`${n}/`)); // an empty root must never allow everything
-  });
 }
 
 // ------------------------------------------------------------- image sizes

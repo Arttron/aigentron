@@ -497,7 +497,8 @@ timeout → `permissionDecision: 'deny'`. Always exits 0 with the SDK's JSON dec
 
 ## 8. `@lds/shared`
 
-Files: `types.ts`, `events.ts`, `routing.ts`, `classify.ts`, `dto.ts`, `index.ts`.
+Files: `types.ts`, `events.ts`, `routing.ts`, `classify.ts`, `frontmatter.ts` (`parseFrontmatter`, `isListedMarkdown`), `dto.ts`, `index.ts`.
+Internal tools: the specs in agent-runner `internal-tools.ts` are the source of truth; the `allowedTools` whitelist (`internalToolNames` in `run.ts`) is derived from them, and `internal-tools.test.ts` fails if a spec lacks a `*_TOOL` constant in `classify.ts` (or the reverse).
 
 - **types.ts** — `Task`, `TaskStatus`, `TERMINAL_TASK_STATUSES` + `isTerminalStatus()`,
   `AgentSession`, `ApprovalRequest` (wire shapes, dates as ISO strings).

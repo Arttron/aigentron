@@ -15,7 +15,6 @@ export interface LitellmRoute {
 
 /** Upstream API family → LiteLLM backend prefix. */
 export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'codex';
-export const PROVIDER_KINDS: ProviderKind[] = ['anthropic', 'openai', 'deepseek', 'ollama', 'codex'];
 
 /** litellm_params that strip the agent's extended-thinking for non-Anthropic models. */
 const NO_REASONING = {
@@ -41,6 +40,22 @@ export function stripSelfPrefix(name: string, model: string): string {
   let m = model;
   while (m.startsWith(prefix)) m = m.slice(prefix.length);
   return m;
+}
+
+/** Effective kind of a provider row: the stored kind, else a guess from its base URL. */
+export function kindOf(p: { kind?: string | null; baseUrl?: string | null }): string {
+  return p.kind || defaultKind(p.baseUrl);
+}
+
+/** The route-registration parameters of a provider row (one place, used by every ensureRoute caller). */
+export function routeParams(p: {
+  kind?: string | null;
+  baseUrl?: string | null;
+  secret?: string | null;
+  rpm?: number | null;
+  tpm?: number | null;
+}): { kind: string; apiBase: string | null; apiKey: string; rpm?: number | null; tpm?: number | null } {
+  return { kind: kindOf(p), apiBase: p.baseUrl ?? null, apiKey: p.secret ?? '', rpm: p.rpm, tpm: p.tpm };
 }
 
 /** Best-effort default kind from a base URL (the form pre-fills, user can change). */
@@ -271,13 +286,4 @@ interface RawModel {
   model_name: string;
   litellm_params?: { model?: string; api_base?: string };
   model_info?: { id?: string; db_model?: boolean };
-}
-
-/**
- * Whether a provider needs LiteLLM to be usable by an agent: agents speak only
- * the Anthropic protocol, so OpenAI-native endpoints must be proxied. (DeepSeek
- * also serves Anthropic, so only api.openai.com is treated as needing a proxy.)
- */
-export function isOpenAiNative(baseUrl: string | null | undefined): boolean {
-  return /api\.openai\.com/i.test(baseUrl ?? '');
 }

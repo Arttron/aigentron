@@ -1,0 +1,9 @@
+/* visually hidden, NOT display:none — some mobile browsers refuse to open the chooser of a display:none file input */
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}

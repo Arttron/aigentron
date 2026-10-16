@@ -1,17 +1,18 @@
-Aigentron v0.1.62
+Aigentron v0.1.63
 
-For people who are not programmers: you can now run the agents as a separate, unprivileged user of the server, so that even an agent with a shell cannot read your passwords, the database or the secret keys. It is OFF by default — turn it on after trying it once on a test server.
+For people who are not programmers: mostly clean-up inside, plus smoother knowledge-base imports.
 
-What it does
-- Today the agents run as the same user as the server, so an agent that can run shell commands could read the file with the sign-in signing key, the database and the .env file. With the new option the agents run as the user "agent" (id 1500): the folders secrets/, the database and .env are readable only by the server; the agents still read the skills and resources, write in their own working copy, the shared workspace, their attachments and their run folder.
-- If the option is on but something is missing (the helper program, the user, the permissions), an agent run stops with a clear error instead of quietly running with full rights, and the server checks itself at start.
+Knowledge base
+- Adding a document, a note or a library resource no longer makes you wait: the request returns at once and the document is processed in the background. On the Knowledge page each new document shows its state (processing → ready, or the error); a failed one can be dismissed. If the server restarts while a document is still being processed, add it again.
 
-How to turn it on
-- An existing installation: "sudo aigentron harden" (Docker: the container is re-created with the new setting; bare-metal: in place, then restart), or add AGENT_RUN_AS_UID=1500 and AGENT_RUN_AS_GID=1500 to the .env and restart. To turn it off remove the two lines and restart.
-- A new installation: set AGENT_ISOLATION=1 when you run the installer.
-- Please try it first on a test server: (1) ask the admin to "create a file in the workspace" — the file must appear in the Workspace page; (2) run an ordinary task that changes files in the project and commits; (3) if you use Codex, run any task. A follow-up to a task that was started before turning it on starts a new session (old sessions are not resumed).
+Files
+- Text files (Markdown, txt, csv, json …) open in the browser instead of downloading; videos in the workspace play with seeking; mkv/avi/3gp in the library are recognised as videos.
+- Video summaries (frames and transcript) are now kept in one cache folder (cache/digests) instead of next to the video — old ones are moved automatically. Cleaning them up is part of the disk tidy-up as before.
+- Optional: ATTACHMENTS_RETENTION_DAYS (off by default) deletes attachments of finished tasks after N days.
 
-Good to know
-- With the option on, the approval gate is a guard rail and the real protection of the secrets is the operating-system permissions. Agents can still reach the server's local API port (it is protected by the sign-in and the roles) and the git configuration of the project.
+Inside
+- One implementation of "is this path inside the allowed folder", one table of file types and one file upload/download code instead of several copies; one list of the agents' internal tools; one place for all dashboard requests (the dashboard code is a third shorter there) and one upload component. Behaviour is the same, there is less that can drift apart.
+- New check "make test-di" (about a minute) that fails if a module is not wired into the application — it would have caught the start-up problem found in 0.1.61.
+- The admin guide size check now counts the way the agent runtime does.
 
 Update note: no database changes.

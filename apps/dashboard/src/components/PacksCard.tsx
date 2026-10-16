@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type PackInfo, type PackInstallResult } from '@/lib/api';
+import { api, errMsg, type PackInfo, type PackInstallResult } from '@/lib/api';
 import { Button, Card, ErrorText, Muted, SectionTitle } from '@/components/ui';
 import styles from './PacksCard.module.css';
 
@@ -38,7 +38,7 @@ export function PacksCard() {
       setDone((d) => ({ ...d, [p.name]: r }));
       await refresh();
     } catch (e) {
-      setError((e as Error).message.replace(/^\d+ [^—]*— /, ''));
+      setError(errMsg(e));
     } finally {
       setBusy(null);
     }

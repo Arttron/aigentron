@@ -13,3 +13,4 @@ export { AppHeader } from './AppHeader';
 export { ConnStatus } from './ConnStatus';
 export { BackLink } from './BackLink';
 export { Muted, ErrorText } from './Text';
+export { UploadButton, HiddenFileInput, useFileDrop } from './Upload';

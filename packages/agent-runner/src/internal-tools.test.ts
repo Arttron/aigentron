@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import * as shared from '@lds/shared';
+import { INTERNAL_TOOL_PREFIX } from '@lds/shared';
 import { buildInternalToolSpecs } from './internal-tools';
+import { internalToolNames } from './run';
 
 describe('buildInternalToolSpecs', () => {
   it('only exposes tools that are wired', () => {
@@ -23,5 +26,32 @@ describe('buildInternalToolSpecs', () => {
     expect(names).not.toContain('workspace_save');
     await specs.find((s) => s.name === 'read_document')!.handler({ path: 'plan.md', from: 12000 });
     expect(read).toHaveBeenCalledWith({ path: 'plan.md', from: 12000 });
+  });
+});
+
+describe('internal tool registry', () => {
+  // Every callback wired; `admin` is a Proxy so every admin handler exists.
+  const noop = async () => '';
+  const full = {
+    onReportStatus: () => {}, onHeartbeat: () => {}, onCreateSubtask: noop, onCheckSubtasks: noop, onCompleteSubtask: noop,
+    onScheduleCheck: noop, onSearchResources: noop, onShowImages: noop, onCurrentTime: noop, onReadDocument: noop,
+    onAskUser: noop, onLookAt: noop, onVideoDigest: noop, onStartPreview: noop, onProposeLearnedSkill: noop,
+    workspace: { info: noop, files: noop, note: noop, save: noop },
+    kb: { list: noop, search: noop, read: noop, add: noop },
+    admin: new Proxy({}, { get: () => noop }),
+  } as unknown as Parameters<typeof buildInternalToolSpecs>[0];
+
+  it('run.ts whitelist is derived from the specs (nothing built is missing)', () => {
+    const specNames = buildInternalToolSpecs(full).map((s) => INTERNAL_TOOL_PREFIX + s.name);
+    expect(internalToolNames(full)).toEqual(specNames);
+    expect(new Set(specNames).size).toBe(specNames.length);
+  });
+  it('every spec name has a classify constant in @lds/shared, and vice versa', () => {
+    const consts = new Set(
+      Object.values(shared).filter((v): v is string => typeof v === 'string' && v.startsWith(INTERNAL_TOOL_PREFIX) && v !== INTERNAL_TOOL_PREFIX),
+    );
+    const specNames = new Set(buildInternalToolSpecs(full).map((s) => INTERNAL_TOOL_PREFIX + s.name));
+    expect([...specNames].filter((n) => !consts.has(n))).toEqual([]);
+    expect([...consts].filter((n) => !specNames.has(n))).toEqual([]);
   });
 });

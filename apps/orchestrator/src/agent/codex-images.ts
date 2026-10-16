@@ -1,7 +1,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isImageName } from '../media/media-core';
 
-const IMAGE = /\.(png|jpe?g|webp|gif)$/i;
 
 /** Where Codex puts the pictures it generates: inside the run's own CODEX_HOME. */
 export const codexImagesDir = (agentDir: string, taskId: string): string => join(agentDir, 'runs', taskId, 'codex-home', 'generated_images');
@@ -15,7 +15,7 @@ export async function listGeneratedImages(dir: string, cap = 200): Promise<strin
       const p = join(d, e.name);
       if (e.isDirectory()) {
         if (depth < 4) await visit(p, depth + 1);
-      } else if (e.isFile() && IMAGE.test(e.name)) {
+      } else if (e.isFile() && isImageName(e.name)) {
         const s = await stat(p).catch(() => null);
         if (s) found.push({ path: p, mtime: s.mtimeMs });
       }

@@ -1,4 +1,5 @@
 /** Knowledge base — pure helpers (unit-tested): tokenizer, chunking, BM25, vectors, rank fusion. */
+import { extOf, isTextLike } from '../files/file-types';
 
 // ---------------------------------------------------------------- tokens
 
@@ -296,12 +297,12 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-export const TEXT_EXTS = ['md', 'markdown', 'txt', 'text', 'csv', 'log', 'json', 'html', 'htm', 'rst', 'tsv', 'yaml', 'yml'] as const;
-export const isTextName = (name: string): boolean => (TEXT_EXTS as readonly string[]).includes((name.split('.').pop() ?? '').toLowerCase());
+/** Readable as text without a converter — the shared file-types table (plain text kinds plus HTML). */
+export const isTextName = (name: string): boolean => isTextLike(name);
 
 /** A file's bytes → text for the base, by extension. null = a type we cannot read (yet). */
 export function extractText(name: string, data: Buffer): string | null {
-  const ext = (name.split('.').pop() ?? '').toLowerCase();
+  const ext = extOf(name);
   if (!isTextName(name)) return null;
   const text = data.toString('utf8').replace(/^\uFEFF/, '');
   return ext === 'html' || ext === 'htm' ? htmlToText(text) : text;

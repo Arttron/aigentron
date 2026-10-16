@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAction } from '@/lib/use-settings-resource';
 import { api, type ProviderInfo } from '@/lib/api';
 import { ModelSelect } from '@/components/ModelSelect';
 import { Button, Card, Field, Muted, ErrorText, Row, SectionTitle } from '@/components/ui';
@@ -8,8 +9,7 @@ export function TitleSettings() {
   const [cfg, setCfg] = useState({ enabled: true, provider: '', model: '' });
   const [saved, setSaved] = useState(cfg);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const { busy, msg, setMsg, run } = useAction();
 
   useEffect(() => {
     void Promise.all([api.getTitleSettings(), api.listProviders().catch(() => [])])
@@ -24,17 +24,6 @@ export function TitleSettings() {
   const usable = providers.filter((p) => p.kind !== 'codex' && p.authMode !== 'oauth-token');
   const dirty = JSON.stringify(cfg) !== JSON.stringify(saved);
 
-  const run = async (fn: () => Promise<string>) => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      setMsg({ ok: true, text: await fn() });
-    } catch (e) {
-      setMsg({ ok: false, text: (e as Error).message });
-    } finally {
-      setBusy(false);
-    }
-  };
   const save = () =>
     run(async () => {
       setSaved(await api.saveTitleSettings(cfg));

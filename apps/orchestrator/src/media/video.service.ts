@@ -1,9 +1,11 @@
 import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
+import { AppConfigService } from '../config/app-config.service';
 import { VoiceService, type TimedSegment } from '../voice/voice.service';
 import { POINTING_PHRASES, MAX_VIDEO_BYTES, MAX_VIDEO_SECONDS, buildDigest, mergeMoments, momentsFromSpeech, parseProbe, planFrames, type FramePlan, type ProbeResult } from './media-core';
 
@@ -20,10 +22,25 @@ export interface Digest {
   durationSec: number;
 }
 
+/** The digest folder of a video: `<agentDir>/cache/digests/<sha256 of its path>` — one per file, wherever the file lives. */
+export const digestDirFor = (agentDir: string, file: string): string => join(agentDir, 'cache', 'digests', createHash('sha256').update(file).digest('hex').slice(0, 32));
+
+/** Where digests were kept before 0.1.63: next to the video. Read once as a fallback (then moved), never written again. */
+export const legacyDigestDir = (file: string): string => `${file}.digest`;
+
+interface Meta {
+  id: string;
+  plan: string;
+  /** The video this cache belongs to (for the disk report and for humans looking at the cache folder). */
+  file?: string;
+  durationSec?: number;
+}
+
 /**
  * Video → what an agent can use: a handful of frames (JPEG) and, when speech recognition is set up, a transcript of the sound. Needs
- * ffmpeg (installed by the installer / in the Docker image). The result is cached next to the video (`<video>.digest/`), so a video
- * is processed once, and an unchanged file is never redone.
+ * ffmpeg (installed by the installer / in the Docker image). The result is cached under `<agentDir>/cache/digests/<hash>` (one folder
+ * per video, wherever the video sits — never next to it, so a workspace or a git worktree is not littered), so a video is processed
+ * once, and an unchanged file is never redone.
  */
 @Injectable()
 export class VideoService {
@@ -33,7 +50,52 @@ export class VideoService {
   /** Builds of the same file never overlap (they share one folder, and a build clears it): the next plan waits for the previous. */
   private fileChain = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly voice: VoiceService) {}
+  constructor(
+    private readonly voice: VoiceService,
+    private readonly config: AppConfigService,
+  ) {}
+
+  /** The cache folder of a video. */
+  digestDir(file: string): string {
+    return digestDirFor(this.config.agentDir, file);
+  }
+
+  private async readMeta(dir: string): Promise<Meta | null> {
+    try {
+      const m = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as Meta;
+      return m && typeof m.id === 'string' && typeof m.plan === 'string' ? m : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A digest built by an older version sits next to the video: move it into the cache folder (same disk → a rename; the frame paths
+   * inside are rewritten) so nothing already processed is lost, and the old folder disappears from the user's files.
+   */
+  async adoptLegacy(file: string, dir = this.digestDir(file)): Promise<void> {
+    const old = legacyDigestDir(file);
+    if (!(await stat(old).then((s) => s.isDirectory(), () => false))) return;
+    if (await this.readMeta(dir)) {
+      await rm(old, { recursive: true, force: true }).catch(() => undefined); // the cache already has a newer one
+      return;
+    }
+    try {
+      await mkdir(join(dir, '..'), { recursive: true, mode: 0o700 });
+      await rm(dir, { recursive: true, force: true });
+      await rename(old, dir);
+      for (const name of ['frames.json', 'digest.md']) {
+        const text = await readFile(join(dir, name), 'utf8').catch(() => null);
+        if (text !== null) await writeFile(join(dir, name), text.split(old).join(dir));
+      }
+      this.logger.log(`moved the digest of ${basename(file)} into the cache folder`);
+    } catch (e) {
+      // another disk, or a half-written folder: rebuilding is cheaper than guessing
+      this.logger.warn(`could not move the old digest of ${basename(file)} (${(e as Error).message}); it is rebuilt`);
+      await rm(old, { recursive: true, force: true }).catch(() => undefined);
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
 
   async available(): Promise<boolean> {
     if (this.ffmpegOk === null) {
@@ -136,14 +198,18 @@ export class VideoService {
     const st = await stat(file).catch(() => null);
     if (!st?.isFile()) throw new Error('That video file was not found.');
     if (st.size > MAX_VIDEO_BYTES) throw new Error(`The video is too large (${Math.round(st.size / 1048576)} MB; the limit is ${MAX_VIDEO_BYTES / 1048576} MB).`);
-    const dir = `${file}.digest`;
+    const dir = this.digestDir(file);
+    await this.adoptLegacy(file, dir);
     const id = JSON.stringify({ v: DIGEST_VERSION, size: st.size, mtime: Math.round(st.mtimeMs), stt: this.voice.sttReady() });
-    const meta = JSON.stringify({ id, plan: planKey(opts) });
-    if (!opts.force) {
+    const plan = planKey(opts);
+    const cached = await this.readMeta(dir);
+    if (!opts.force && cached && cached.id === id && cached.plan === plan) {
       try {
-        if ((await readFile(join(dir, 'meta.json'), 'utf8')) === meta) return await this.load(dir);
+        const d = await this.load(dir, cached);
+        await utimes(dir, new Date(), new Date()).catch(() => undefined); // a digest in use stays young for the cache pruning
+        return d;
       } catch {
-        /* not cached yet */
+        /* incomplete: rebuilt below */
       }
     }
     const probe = await this.probe(file);
@@ -152,12 +218,7 @@ export class VideoService {
 
     await mkdir(dir, { recursive: true, mode: 0o700 });
     // A different video → start clean; the same video with another frame plan keeps its transcript.
-    try {
-      const old = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8')) as { id?: string };
-      if (old.id !== id || opts.force) await rm(join(dir, 'transcript.json'), { force: true });
-    } catch {
-      await rm(join(dir, 'transcript.json'), { force: true });
-    }
+    if (cached?.id !== id || opts.force) await rm(join(dir, 'transcript.json'), { force: true });
     for (const f of await readdir(dir)) if (f !== 'transcript.json') await rm(join(dir, f), { recursive: true, force: true });
 
     const tr = await this.transcript(file, dir, id, probe);
@@ -205,14 +266,15 @@ export class VideoService {
     });
     await writeFile(join(dir, 'digest.md'), text);
     await writeFile(join(dir, 'frames.json'), JSON.stringify(frames));
-    await writeFile(join(dir, 'meta.json'), meta); // written last: an interrupted run is never mistaken for a finished one
+    const meta: Meta = { id, plan, file, durationSec: probe.durationSec };
+    await writeFile(join(dir, 'meta.json'), JSON.stringify(meta)); // written last: an interrupted run is never mistaken for a finished one
     return { text, dir, frames, durationSec: probe.durationSec };
   }
 
-  private async load(dir: string): Promise<Digest> {
+  private async load(dir: string, meta: Meta): Promise<Digest> {
     const frames = JSON.parse(await readFile(join(dir, 'frames.json'), 'utf8')) as { t: number; path: string; why?: string }[];
     const names = new Set(await readdir(dir));
     if (!frames.every((f) => names.has(basename(f.path)))) throw new Error('cache incomplete');
-    return { text: await readFile(join(dir, 'digest.md'), 'utf8'), dir, frames, durationSec: 0 };
+    return { text: await readFile(join(dir, 'digest.md'), 'utf8'), dir, frames, durationSec: meta.durationSec ?? 0 };
   }
 }

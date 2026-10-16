@@ -3,8 +3,7 @@ import type { Request, Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
-import { pipeFile } from '../media/pipe-file';
-import { serveWithRanges } from '../media/serve-range';
+import { serveFile } from '../files/file-io';
 import { AttachmentsService } from './attachments.service';
 
 /** Attachments for a task, any file type (raw-body upload — no multer dependency). */
@@ -42,16 +41,8 @@ export class AttachmentsController {
 
   @Get(':file')
   async serve(@Param('id') id: string, @Param('file') file: string, @Req() req: Request, @Res() res: Response) {
-    const { path, mime, inline, name } = await this.attachments.filePath(id, file);
-    res.setHeader('content-type', mime);
-    res.setHeader('x-content-type-options', 'nosniff');
-    res.setHeader('cache-control', 'private, max-age=300');
-    // Anything outside the known-safe inline set (images/PDF) force-downloads
-    // instead of rendering — an uploaded .html/.svg/.js must never execute as
-    // same-origin script just because its URL was opened in a browser tab.
-    if (!inline) res.setHeader('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(name)}`); // names may be non-ASCII (кухня.docx): a raw value makes Node throw
-    // Video needs byte ranges (browsers seek, and iOS refuses to play without them).
-    if (mime.startsWith('video/')) return serveWithRanges(req, res, path);
-    pipeFile(res, path);
+    const { path, name } = await this.attachments.filePath(id, file);
+    // the shared policy: pictures / PDF / playable video inline, text as text/plain, anything else (html, svg, js …) a download; byte ranges for video
+    return serveFile(req, res, { path, name, cacheControl: 'private, max-age=300' });
   }
 }

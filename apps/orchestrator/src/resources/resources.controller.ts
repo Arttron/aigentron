@@ -1,9 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { pipeFile } from '../media/pipe-file';
-import { serveWithRanges } from '../media/serve-range';
+import { serveFile } from '../files/file-io';
 import { ResourcesService } from './resources.service';
-import { isInline } from './resources-core';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
 
@@ -52,13 +50,8 @@ export class ResourcesController {
   @Get(':id/file')
   async file(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const r = await this.resources.get(id);
-    res.setHeader('content-type', r.mime);
-    res.setHeader('cache-control', 'private, max-age=60');
-    res.setHeader('x-content-type-options', 'nosniff');
-    // Only images and PDFs render in the browser; everything else downloads (an uploaded .html must never run as script).
-    if (!isInline(r.kind)) res.setHeader('content-disposition', `attachment; filename="${encodeURIComponent(r.originalName)}"`);
-    if (r.kind === 'video') return serveWithRanges(req, res, this.resources.pathOf(r));
-    pipeFile(res, this.resources.pathOf(r));
+    // the shared policy: pictures / PDF / playable video inline, text as text/plain, everything else downloads under its original name
+    return serveFile(req, res, { path: this.resources.pathOf(r), name: r.originalName, cacheControl: 'private, max-age=60' });
   }
 
   @Put(':id')

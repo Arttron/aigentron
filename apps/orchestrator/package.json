@@ -8,6 +8,7 @@
     "build": "pnpm prisma:generate:all && nest build",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
+    "test:di": "tsc -p tsconfig.json --outDir .di-dist --noEmit false && DI_DIST=$PWD/.di-dist node scripts/di-graph.cjs",
     "dev": "nest start --watch",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -51,6 +52,7 @@
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
+    "@nestjs/testing": "11.1.27",
     "@types/express": "^5.0.0",
     "dotenv": "^17.0.0",
     "prisma": "^7.8.0"

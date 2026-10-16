@@ -21,13 +21,17 @@ interface Draft {
 
 const clean = (e: unknown) => (e as Error).message.replace(/^\d+ [^—]*— /, '');
 
+/** A document row: stored ones are `ready`; one just added is `processing` (read / cut / stored in the background) until it is, or `error`. */
+type Doc = KbDoc & { status?: 'processing' | 'ready' | 'error'; error?: string };
+const STATUS_LABEL: Record<NonNullable<Doc['status']>, string> = { processing: '⏳ processing', ready: '✓ ready', error: '⚠ failed' };
+
 /** Knowledge bases: big reference material agents search (BM25, plus meaning-based search when an embedding model is set). */
 export function KnowledgePage() {
   const [bases, setBases] = useState<KbInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
-  const [docs, setDocs] = useState<KbDoc[]>([]);
+  const [docs, setDocs] = useState<Doc[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,11 +69,19 @@ export function KnowledgePage() {
     void loadDocs(current);
   }, [current, loadDocs]);
 
-  // vectors are made in the background: keep the counters moving until they are all there
+  // vectors are made in the background, and so are documents just added (202 → processing): keep the counters and the rows moving until all is there
   const open = bases.find((b) => b.name === current) ?? null;
   const pending = open && open.embedProvider && open.embedded < open.chunks;
-  // only the counters move: re-read the bases, not the agents / providers as well
-  usePolling(() => void api.listKb().then(setBases).catch(() => undefined), 4000, Boolean(pending));
+  const processing = docs.some((d) => d.status === 'processing');
+  // only the counters and the document list move: re-read the bases and the docs, not the agents / providers as well
+  usePolling(
+    () => {
+      void api.listKb().then(setBases).catch(() => undefined);
+      if (processing) void loadDocs(current);
+    },
+    processing ? 2500 : 4000,
+    Boolean(pending) || processing,
+  );
 
   const run = async (fn: () => Promise<string | void>) => {
     setBusy(true);
@@ -87,7 +99,9 @@ export function KnowledgePage() {
     }
   };
 
-  const added = (r: { chunks: number; duplicate: boolean }, what: string) => (r.duplicate ? `“${what}” is already in the base.` : `Added “${what}” — ${r.chunks} passage(s).`);
+  // the server answers 202 at once: the document is read, cut and stored in the background and shows up below as "processing" until it is ready
+  const added = (r: { chunks: number; duplicate: boolean; status?: string }, what: string) =>
+    r.status === 'processing' ? `“${what}” is being added — it is processed in the background (see the list below).` : r.duplicate ? `“${what}” is already in the base.` : `Added “${what}” — ${r.chunks} passage(s).`;
 
   const upload = (files: FileList | File[]) =>
     run(async () => {
@@ -266,28 +280,42 @@ export function KnowledgePage() {
           <SectionTitle>Documents ({docs.length})</SectionTitle>
           {docs.length === 0 && <Muted>Empty — upload a document above.</Muted>}
           <ul className={styles.docs}>
-            {docs.map((d) => (
-              <li key={d.id} className={styles.doc}>
-                <div className={styles.docMain}>
-                  <div className={styles.docTitle}>{d.title}</div>
-                  <Muted>
-                    {d.kind} · {d.chunks} passages · {kb(d.size)}
-                    {d.source ? ` · ${d.source}` : ''}
-                  </Muted>
-                </div>
-                <Button
-                  variant="red"
-                  size="sm"
-                  disabled={busy}
-                  aria-label={`Remove ${d.title}`}
-                  onClick={() => {
-                    if (window.confirm(`Remove "${d.title}" from the base?`)) void run(() => api.deleteKbDoc(d.id).then(() => setHits(null)));
-                  }}
-                >
-                  ✕
-                </Button>
-              </li>
-            ))}
+            {docs.map((d) => {
+              const status = d.status ?? 'ready';
+              return (
+                <li key={d.id} className={styles.doc}>
+                  <div className={styles.docMain}>
+                    <div className={styles.docTitle}>{d.title}</div>
+                    <Muted>
+                      {d.kind} · {status === 'ready' ? `${d.chunks} passages · ` : ''}
+                      {kb(d.size)}
+                      {d.source ? ` · ${d.source}` : ''}
+                    </Muted>
+                    {status === 'error' && (
+                      <div className={styles.docError} role="alert">
+                        {d.error ?? 'It could not be added.'}
+                      </div>
+                    )}
+                  </div>
+                  {/* the chip is always there (same width) so a row does not jump when its state changes */}
+                  <span className={`${styles.status} ${status === 'processing' ? styles.statusProcessing : status === 'error' ? styles.statusError : styles.statusReady}`} aria-live={status === 'processing' ? 'polite' : undefined}>
+                    {STATUS_LABEL[status]}
+                  </span>
+                  <Button
+                    variant="red"
+                    size="sm"
+                    disabled={busy}
+                    aria-label={status === 'error' ? `Dismiss ${d.title}` : `Remove ${d.title}`}
+                    title={status === 'error' ? 'Dismiss' : 'Remove'}
+                    onClick={() => {
+                      if (status !== 'ready' || window.confirm(`Remove "${d.title}" from the base?`)) void run(() => api.deleteKbDoc(d.id).then(() => setHits(null)));
+                    }}
+                  >
+                    ✕
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
           {open.embedProvider && open.embedded < open.chunks && (
             <Row wrap>

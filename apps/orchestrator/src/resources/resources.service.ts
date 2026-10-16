@@ -1,11 +1,10 @@
-import { createWriteStream } from 'node:fs';
 import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { once } from 'node:events';
 import { basename, extname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
+import { saveUpload } from '../files/file-io';
 import { ImageOptimizer, RESOURCE_MAX_SIDE } from '../media/image-optimizer.service';
 import {
   maxBytesFor,
@@ -154,18 +153,10 @@ export class ResourcesService {
     const file = `${id}-${name}`;
     await mkdir(this.filesDir, { recursive: true });
     const dest = join(this.filesDir, file);
-    const out = createWriteStream(dest);
-    let size = 0;
     let storedFileOnDisk: string | null = null; // the optimiser may have written a different file (PNG → JPG): it must go too when we give up
     try {
-      for await (const chunk of source) {
-        size += (chunk as Buffer).length;
-        const limit = maxBytesFor(kindFor(ext));
-        if (size > limit) throw new PayloadTooLargeException(`the file exceeds ${limit / 1024 / 1024} MB`);
-        if (!out.write(chunk)) await once(out, 'drain');
-      }
-      out.end();
-      await once(out, 'finish');
+      // streamed to a hidden `.part` file and moved into place: a half-sent upload is never a resource
+      let size = await saveUpload(source, dest, { limit: maxBytesFor(kindFor(ext)), tooBig: (limit) => new PayloadTooLargeException(`the file exceeds ${limit / 1024 / 1024} MB`) });
       if (size === 0) throw new BadRequestException('the file is empty.');
       // library pictures: shrunk to what is needed (a PNG may become a JPEG — the stored name follows)
       let storedFile = file;
@@ -188,7 +179,6 @@ export class ResourcesService {
         return entry;
       });
     } catch (e) {
-      out.destroy();
       await rm(dest, { force: true }).catch(() => undefined);
       if (storedFileOnDisk) await rm(storedFileOnDisk, { force: true }).catch(() => undefined);
       throw e;

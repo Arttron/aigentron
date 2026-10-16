@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { API_BASE } from '@/lib/config';
+import { useState } from 'react';
+import { useSettingsResource } from '@/lib/use-settings-resource';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
 
 interface Listener {
@@ -28,39 +28,16 @@ interface WebStatus {
 
 /** Settings → General → Web server: which ports the server listens on, and its HTTPS certificate. */
 export function WebServerSettings() {
-  const [st, setSt] = useState<WebStatus | null>(null);
   const [httpPort, setHttpPort] = useState('80');
   const [httpsPort, setHttpsPort] = useState('443');
   const [redirect, setRedirect] = useState(true);
   const [cert, setCert] = useState('');
   const [key, setKey] = useState('');
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    const r = await fetch(`${API_BASE}/web-server`, { cache: 'no-store' }).catch(() => null);
-    if (!r?.ok) return;
-    const j = (await r.json()) as WebStatus;
-    setSt(j);
+  const { info: st, call, busy, msg } = useSettingsResource<WebStatus>('/web-server', (j) => {
     setHttpPort(String(j.config.httpPort));
     setHttpsPort(String(j.config.httpsPort));
     setRedirect(j.config.redirect);
-  }, []);
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const call = async (path: string, method: string, body?: unknown, ok = 'Saved.') => {
-    setBusy(true);
-    setMsg(null);
-    const r = await fetch(`${API_BASE}/web-server${path}`, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }).catch(() => null);
-    const j = (await r?.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-    setBusy(false);
-    if (!r?.ok || j.ok === false) return setMsg({ ok: false, text: j.error ?? 'Could not save.' });
-    setMsg({ ok: true, text: ok });
-    await load();
-    return true;
-  };
+  });
 
   if (!st) return null;
   const label = (l: Listener) => {

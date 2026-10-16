@@ -5,14 +5,14 @@ import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppConfigService } from '../config/app-config.service';
 import type { ImageOptimizer } from '../media/image-optimizer.service';
-import { MAX_VIDEO_UPLOAD_BYTES, TASK_QUOTA_BYTES, AttachmentsService, limitFor, tooBigMessage } from './attachments.service';
+import { MAX_VIDEO_UPLOAD_BYTES, TASK_QUOTA_BYTES, AttachmentsService, limitFor, sanitize, tooBigMessage } from './attachments.service';
 
 let base: string;
 let svc: AttachmentsService;
 beforeEach(async () => {
   base = await mkdtemp(join(tmpdir(), 'attsave-'));
   await mkdir(join(base, 'agent', 'resources'), { recursive: true });
-  svc = new AttachmentsService({ attachmentsDir: join(base, 'attachments'), workspaceDir: join(base, 'ws'), agentDir: join(base, 'agent') } as AppConfigService, {} as ImageOptimizer);
+  svc = new AttachmentsService({ attachmentsDir: join(base, 'attachments'), workspaceDir: join(base, 'ws'), agentDir: join(base, 'agent') } as AppConfigService, { optimize: async (path: string) => ({ path, changed: false, size: 0 }) } as unknown as ImageOptimizer);
 });
 afterEach(() => rm(base, { recursive: true, force: true }));
 
@@ -57,6 +57,56 @@ describe('save', () => {
   it('counts only own files in usedBytes', async () => {
     await svc.save('t1', 'a.txt', body('12345'));
     expect(await svc.usedBytes('t1')).toBe(5);
+  });
+});
+
+describe('names, types and limits', () => {
+  it('keeps unicode names, strips paths and odd characters, never a leading dot', async () => {
+    expect(sanitize('кухня 2.jpg')).toBe('кухня 2.jpg');
+    expect(sanitize('写真.PNG')).toBe('写真.PNG');
+    expect(sanitize('../../etc/passwd')).toBe('passwd');
+    expect(sanitize('..')).toBe('file');
+    expect(sanitize('.')).toBe('file');
+    expect(sanitize('a/b\\c:d*e.txt')).toBe('b_c_d_e.txt'); // only `/` is a separator; the rest becomes `_`
+    expect(sanitize('.links.json')).toBe('links.json');
+    expect(sanitize('')).toBe('file');
+    expect(sanitize('x'.repeat(200)).length).toBe(120);
+  });
+
+  it('looks up mime and limits by extension regardless of case', async () => {
+    expect(limitFor('MP4')).toBe(MAX_VIDEO_UPLOAD_BYTES);
+    expect(limitFor('pdf')).toBe(10 * 1024 * 1024);
+    const m = await svc.save('t1', 'Photo.PNG', body('notapng'));
+    expect(m.mime).toBe('image/png');
+    expect((await svc.list('t1'))[0]).toMatchObject({ name: 'Photo.PNG', mime: 'image/png', size: 7 });
+    expect(await svc.save('t1', 'notes.MD', body('x'))).toMatchObject({ mime: 'text/markdown' });
+    expect(await svc.save('t1', 'blob.xyz', body('x'))).toMatchObject({ mime: 'application/octet-stream' });
+  });
+
+  it('refuses a stream over the limit while reading it and leaves nothing behind', async () => {
+    const chunks = Array.from({ length: 11 }, () => Buffer.alloc(1024 * 1024));
+    await expect(svc.save('t1', 'big.pdf', Readable.from(chunks))).rejects.toThrow(/larger than 10 MB/);
+    expect(await readdir(svc.dir('t1'))).toEqual([]);
+  });
+
+  it('serves images/pdf/playable video inline, everything else as a download; `..` and dot names are not files', async () => {
+    await svc.save('t1', 'a.PDF', body('%PDF'));
+    await svc.save('t1', 'a.docx', body('x'));
+    await svc.save('t1', 'a.mkv', body('x'));
+    expect(await svc.filePath('t1', 'a.PDF')).toMatchObject({ inline: true, mime: 'application/pdf', name: 'a.PDF' });
+    expect(await svc.filePath('t1', 'a.docx')).toMatchObject({ inline: false });
+    expect(await svc.filePath('t1', 'a.mkv')).toMatchObject({ inline: false, mime: 'video/x-matroska' });
+    await expect(svc.filePath('t1', '..')).rejects.toThrow(/not found/);
+    await expect(svc.filePath('t1', '.')).rejects.toThrow(/not found/);
+    await expect(svc.filePath('t1', '../t1/a.docx')).resolves.toMatchObject({ name: 'a.docx' }); // the path part is dropped, the name stays
+  });
+
+  it('never serves a symlink that leads out of the task folder', async () => {
+    await writeFile(join(base, 'secret.txt'), 'x');
+    await mkdir(svc.dir('t1'), { recursive: true });
+    await symlink(join(base, 'secret.txt'), join(svc.dir('t1'), 'leak.txt'));
+    await expect(svc.filePath('t1', 'leak.txt')).rejects.toThrow(/not found/);
+    expect((await svc.list('t1')).map((m) => m.name)).toEqual([]);
   });
 });
 

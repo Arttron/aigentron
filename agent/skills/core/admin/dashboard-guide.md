@@ -100,7 +100,7 @@ A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't as
 
 ## Camera, video, pictures
 
-Text files attached to my chat reach me in the prompt; other attachments (also ones added in a task's Files tab) I read with `read_document`. 📎 menu: **📷 Camera** (HTTPS; else the phone's camera app); videos ≤300 MB in tasks and Resources; Telegram videos/notes/GIFs arrive as attachments (≤20 MB). `look_at` (photo or video frames) and `video_digest` (frames + transcript) take `every_seconds` (default ≈10 s), `at_seconds`, `pointing` / `phrases` (moments the speaker says "look here"; needs Whisper-style speech model). `show_images` shows a picture/album in the chat (click = viewer with ‹ ›; Telegram photo/album). `docs/media.md`.
+Text files attached to my chat reach me in the prompt; other attachments (also ones added in a task's Files tab) I read with `read_document`. 📎 menu: **📷 Camera** (HTTPS; else the phone's camera app); videos ≤95 MB (Cloudflare) in tasks, ≤300 MB in Resources; Telegram videos/notes/GIFs arrive as attachments (≤20 MB). `look_at` (photo or video frames) and `video_digest` (frames + transcript) take `every_seconds` (default ≈10 s), `at_seconds`, `pointing` / `phrases` (moments the speaker says "look here"; needs a speech model). `show_images` shows pictures in the chat (Telegram: photo/album). `docs/media.md`.
 
 ## Discussion between agents
 

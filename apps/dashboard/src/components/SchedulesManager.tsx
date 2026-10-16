@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { describeSchedule } from '@lds/shared';
-import { api, type AgentInfo, type ChannelInfo, type ScheduleInfo } from '@/lib/api';
+import { api, errMsg, type AgentInfo, type ChannelInfo, type ScheduleInfo } from '@/lib/api';
 import { DEFAULT_FORM, buildCron, parseCron, type Preset, type ScheduleFormState } from '@/lib/schedule-form';
 import { Button, Card, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
 import styles from './SchedulesManager.module.css';
@@ -95,7 +95,7 @@ export function SchedulesManager() {
       await fn();
       await refresh();
     } catch (e) {
-      setError((e as Error).message.replace(/^\d+ [^—]*— /, ''));
+      setError(errMsg(e));
     } finally {
       setBusy(false);
     }

@@ -5,7 +5,7 @@ import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { CameraCapture } from '@/components/CameraCapture';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
-import { Card, SectionTitle, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { Card, SectionTitle, Row, Button, Muted, ErrorText, HiddenFileInput } from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useLook } from '@/lib/transcript-look';
 import { useIsShort } from '@/lib/use-media';
@@ -120,8 +120,7 @@ export function FollowUpForm({
     el.style.height = `${Math.min(el.scrollHeight, 124)}px`;
   }, [text, compact, sheet]);
 
-  const pickFiles = async (files: FileList | File[] | null) => {
-    if (!files?.length) return;
+  const pickFiles = async (files: File[]) => {
     setUploading(true);
     setError(null);
     try {
@@ -133,7 +132,6 @@ export function FollowUpForm({
       setError((e as Error).message);
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
     }
   };
 
@@ -270,23 +268,9 @@ export function FollowUpForm({
   );
   const fileEl = (
     <>
-      <input
-        ref={fileRef}
-        type="file"
-        accept={ATTACH_ACCEPT}
-        multiple
-        className={styles.hidden}
-        onChange={(e) => pickFiles(e.target.files)}
-      />
+      <HiddenFileInput ref={fileRef} accept={ATTACH_ACCEPT} multiple onFiles={pickFiles} />
       {/* No live camera (plain HTTP): the phone's own camera app takes the shot. */}
-      <input
-        ref={camRef}
-        type="file"
-        accept="image/*,video/*"
-        capture="environment"
-        className={styles.hidden}
-        onChange={(e) => pickFiles(e.target.files)}
-      />
+      <HiddenFileInput ref={camRef} accept="image/*,video/*" capture onFiles={pickFiles} />
       {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void pickFiles(files)} />}
     </>
   );
