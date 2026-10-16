@@ -1,18 +1,13 @@
-Aigentron v0.1.63
+Aigentron v0.1.64
 
-For people who are not programmers: mostly clean-up inside, plus smoother knowledge-base imports.
+For people who are not programmers: files with Russian (or other non-Latin) names are now handled safely, and you still see their real names.
 
-Knowledge base
-- Adding a document, a note or a library resource no longer makes you wait: the request returns at once and the document is processed in the background. On the Knowledge page each new document shows its state (processing → ready, or the error); a failed one can be dismissed. If the server restarts while a document is still being processed, add it again.
+Attachment names
+- A file you attach to a task is now stored under a plain Latin name: Cyrillic and Greek are transliterated ("кухня 2.jpg" → "kukhnya-2.jpg", "Проект кухни №2.md" → "Proekt-kukhni-No2.md"), accents are removed, scripts that cannot be transliterated become "file.<ext>"; a name that is already taken gets -1, -2. This keeps agents, shell commands, git, links and different operating systems away from non-Latin file paths.
+- You keep seeing the real name: the Files tab shows it, a download is saved under it, Telegram gets the file under it. The agent sees both (the stored path and "uploaded as «…»").
+- Files attached before this update keep their old names. Library resources already worked this way (stored by id); files in the shared workspace keep the names they are given.
 
-Files
-- Text files (Markdown, txt, csv, json …) open in the browser instead of downloading; videos in the workspace play with seeking; mkv/avi/3gp in the library are recognised as videos.
-- Video summaries (frames and transcript) are now kept in one cache folder (cache/digests) instead of next to the video — old ones are moved automatically. Cleaning them up is part of the disk tidy-up as before.
-- Optional: ATTACHMENTS_RETENTION_DAYS (off by default) deletes attachments of finished tasks after N days.
-
-Inside
-- One implementation of "is this path inside the allowed folder", one table of file types and one file upload/download code instead of several copies; one list of the agents' internal tools; one place for all dashboard requests (the dashboard code is a third shorter there) and one upload component. Behaviour is the same, there is less that can drift apart.
-- New check "make test-di" (about a minute) that fails if a module is not wired into the application — it would have caught the start-up problem found in 0.1.61.
-- The admin guide size check now counts the way the agent runtime does.
+Tests
+- The ffmpeg-based tests no longer fail now and then when the whole suite runs in parallel (longer timeout).
 
 Update note: no database changes.

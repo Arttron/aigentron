@@ -41,8 +41,8 @@ export class AttachmentsController {
 
   @Get(':file')
   async serve(@Param('id') id: string, @Param('file') file: string, @Req() req: Request, @Res() res: Response) {
-    const { path, name } = await this.attachments.filePath(id, file);
+    const { path, downloadName } = await this.attachments.filePath(id, file);
     // the shared policy: pictures / PDF / playable video inline, text as text/plain, anything else (html, svg, js …) a download; byte ranges for video
-    return serveFile(req, res, { path, name, cacheControl: 'private, max-age=300' });
+    return serveFile(req, res, { path, name: downloadName, cacheControl: 'private, max-age=300' });
   }
 }

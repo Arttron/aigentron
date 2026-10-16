@@ -71,7 +71,7 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
               target="_blank"
               rel="noreferrer"
               className={styles.tile}
-              title={a.name}
+              title={a.originalName ?? a.name}
               onClick={(e) => {
                 if (!onAsk || !(a.mime.startsWith('video/') || a.mime.startsWith('image/'))) return;
                 e.preventDefault();
@@ -81,11 +81,11 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
               {a.mime.startsWith('video/') ? (
                 <video src={url} className={styles.thumb} preload="metadata" muted />
               ) : a.mime.startsWith('image/') ? (
-                <img src={url} alt={a.name} className={styles.thumb} />
+                <img src={url} alt={a.originalName ?? a.name} className={styles.thumb} />
               ) : (
                 <div className={styles.doc}>📄</div>
               )}
-              <span className={styles.name}>{a.name}</span>
+              <span className={styles.name}>{a.originalName ?? a.name}</span>
             </a>
           );
         })}

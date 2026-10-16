@@ -124,4 +124,26 @@ describe('adopt / writeImage', () => {
   it('writeImage refuses an oversized base64 string before decoding it', async () => {
     await expect(svc.writeImage('t1', 'shot.png', 'A'.repeat(15 * 1024 * 1024))).rejects.toThrow(/exceeds/);
   });
+
+  it('stores a non-Latin name as plain ASCII and keeps the original for display and download', async () => {
+    const meta = await svc.save('t1', 'кухня 2.jpg', body('jpg-bytes'));
+    expect(meta.name).toMatch(/^kukhnya-2/);
+    expect(meta.name).toMatch(/^[\x20-\x7e]+$/);
+    expect(meta.originalName).toMatch(/^кухня 2/);
+    const listed = (await svc.list('t1')).find((m) => m.name === meta.name);
+    expect(listed?.originalName).toMatch(/^кухня 2/);
+    const f = await svc.filePath('t1', meta.name);
+    expect(f.name).toBe(meta.name);
+    expect(f.downloadName).toMatch(/^кухня 2/);
+  });
+
+  it('a plain ASCII name has no separate original; two uploads of the same Cyrillic name do not clash', async () => {
+    const plain = await svc.save('t1', 'plan.txt', body('x'));
+    expect(plain.originalName).toBeUndefined();
+    const a = await svc.save('t1', 'отчёт.txt', body('1'));
+    const b = await svc.save('t1', 'отчёт.txt', body('2'));
+    expect(a.name).not.toBe(b.name);
+    expect(a.originalName).toBe('отчёт.txt');
+    expect(b.originalName).toBe('отчёт.txt');
+  });
 });

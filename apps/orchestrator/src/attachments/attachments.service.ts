@@ -7,6 +7,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { partName, saveStream } from '../files/file-io';
 import { extOf, isImage, isVideo, mimeFor, servePolicy } from '../files/file-types';
 import { realInside, safeName } from '../files/fs-safe';
+import { asciiFileName } from '../files/ascii-name';
 import { ImageOptimizer } from '../media/image-optimizer.service';
 import { remuxWebm } from '../media/media-fix';
 
@@ -36,6 +37,8 @@ const TASK_ID_RE = /^[\w-]+$/;
 
 export interface AttachmentMeta {
   name: string;
+  /** What the person called the file, when the stored name had to be turned into plain ASCII ("кухня 2.jpg" → "kukhnya-2.jpg"). */
+  originalName?: string;
   size: number;
   mime: string;
 }
@@ -100,7 +103,9 @@ export class AttachmentsService {
     });
     // A clip recorded in the browser (webm) has no length in its header: copy it into a proper webm (no re-encoding; skipped without ffmpeg).
     if (ext === 'webm') size = (await remuxWebm(tmp)) ?? size;
-    const dest = await this.place(dir, tmp, sanitize(rawName)).catch(async (e) => {
+    // what the person called it — for display and download only (never used as a path): no folders, no control characters
+    const original = basename(rawName.replace(/\\/g, '/')).normalize('NFC').split('').filter((c) => c.charCodeAt(0) > 31 && c.charCodeAt(0) !== 127).join('').trim().slice(0, 150) || 'file';
+    const dest = await this.place(dir, tmp, asciiFileName(original)).catch(async (e) => {
       await rm(tmp, { force: true }).catch(() => undefined);
       throw e;
     });
@@ -111,11 +116,48 @@ export class AttachmentsService {
       if (r.changed) {
         const finalName = basename(r.path);
         this.logger.log(`Saved attachment ${taskId}/${finalName} (${r.size}B, was ${size}B)`);
-        return { name: finalName, size: r.size, mime: mimeFor(finalName) };
+        // the optimizer may have changed the extension (a PNG photo became a JPEG): the shown name follows it
+        const shown = original.replace(/\.[^.]+$/, '') + extname(finalName);
+        const kept = await this.rememberOriginal(dir, finalName, shown);
+        return { name: finalName, size: r.size, mime: mimeFor(finalName), ...(kept ? { originalName: kept } : {}) };
       }
     }
     this.logger.log(`Saved attachment ${taskId}/${name} (${size}B)`);
-    return { name, size, mime };
+    const kept = await this.rememberOriginal(dir, name, original);
+    return { name, size, mime, ...(kept ? { originalName: kept } : {}) };
+  }
+
+  private namesFile(dir: string): string {
+    return join(dir, '.names.json');
+  }
+
+  /** stored name → the name the person gave (only for files whose stored name differs). */
+  private async readNames(dir: string): Promise<Record<string, string>> {
+    try {
+      const raw = JSON.parse(await readFile(this.namesFile(dir), 'utf8')) as unknown;
+      if (!raw || typeof raw !== 'object') return {};
+      return Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  private namesChain = new Map<string, Promise<unknown>>();
+
+  /** Remember the original name of a stored file when it differs; returns it (or null when there is nothing to remember). */
+  private async rememberOriginal(dir: string, stored: string, original: string): Promise<string | null> {
+    // only names that had to be converted to ASCII are remembered (a "-1" added to avoid a clash is not an original worth showing)
+    if (stored === original || asciiFileName(original) === original) return null;
+    const run = (this.namesChain.get(dir) ?? Promise.resolve()).then(async () => {
+      const names = await this.readNames(dir);
+      names[stored] = original;
+      const tmp = `${this.namesFile(dir)}.${process.pid}.${Date.now()}.tmp`;
+      await writeFile(tmp, JSON.stringify(names));
+      await rename(tmp, this.namesFile(dir));
+    });
+    this.namesChain.set(dir, run.catch(() => undefined));
+    await run.catch(() => undefined);
+    return original;
   }
 
   /** Move a finished temp file to `<dir>/<wanted>` (or `-1`, `-2` … when taken), never replacing an existing file — also not when two uploads race. */
@@ -248,11 +290,12 @@ export class AttachmentsService {
     } catch {
       return [];
     }
+    const names = await this.readNames(this.dir(taskId));
     const metas = await Promise.all(
       files.filter((n) => !n.startsWith('.')).map(async (name) => {
         // lstat: a symlink dropped into the folder is not one of the task's files (it is never served either)
         const s = await lstat(join(this.dir(taskId), name)).catch(() => null);
-        return s && s.isFile() ? { name, size: s.size, mime: mimeFor(name), mtime: s.mtimeMs } : null;
+        return s && s.isFile() ? { name, size: s.size, mime: mimeFor(name), mtime: s.mtimeMs, ...(names[name] ? { originalName: names[name] } : {}) } : null;
       }),
     );
     const linked = await Promise.all(
@@ -274,7 +317,7 @@ export class AttachmentsService {
   async filePath(
     taskId: string,
     rawName: string,
-  ): Promise<{ path: string; mime: string; inline: boolean; name: string }> {
+  ): Promise<{ path: string; mime: string; inline: boolean; name: string; downloadName: string }> {
     if (basename(rawName).startsWith('.')) throw new BadRequestException('attachment not found'); // `.links.json` is never a downloadable attachment
     const name = sanitize(rawName);
     const dir = this.dir(taskId);
@@ -287,13 +330,20 @@ export class AttachmentsService {
       if (!path) throw new BadRequestException('attachment not found');
     }
     const { mime, inline } = servePolicy(name);
-    return { path, mime, inline, name };
+    // downloads keep the name the person gave the file
+    const downloadName = (await this.readNames(dir))[name] ?? name;
+    return { path, mime, inline, name, downloadName };
   }
 
   /** Remove all of a task's attachments (called on task delete). */
   async remove(taskId: string): Promise<void> {
     if (!TASK_ID_RE.test(taskId)) return;
     await rm(this.dir(taskId), { recursive: true, force: true }).catch(() => undefined);
+  }
+
+  /** stored name → the name the person gave it (only for converted names), for prompts and display. */
+  async originalNames(taskId: string): Promise<Record<string, string>> {
+    return this.readNames(this.dir(taskId));
   }
 
   /** Absolute paths of a task's attachments, for prompting the agent. */

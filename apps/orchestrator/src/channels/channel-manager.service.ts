@@ -493,9 +493,9 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         const { path } = await this.attachments.filePath(taskId, meta.name);
         const data = await readFile(path);
         if (meta.mime.startsWith('image/') && adapter.sendImage) {
-          await this.gateway.withActivity(channelId, chatId, 'upload_photo', () => adapter.sendImage!(chatId, { data, filename: meta.name }));
+          await this.gateway.withActivity(channelId, chatId, 'upload_photo', () => adapter.sendImage!(chatId, { data, filename: meta.originalName ?? meta.name }));
         } else {
-          await this.gateway.withActivity(channelId, chatId, meta.mime.startsWith('video/') ? 'upload_video' : 'upload_document', async () => adapter.sendDocument?.(chatId, { data, filename: meta.name, mime: meta.mime }));
+          await this.gateway.withActivity(channelId, chatId, meta.mime.startsWith('video/') ? 'upload_video' : 'upload_document', async () => adapter.sendDocument?.(chatId, { data, filename: meta.originalName ?? meta.name, mime: meta.mime }));
         }
       } catch (err) {
         this.logger.warn(`send attachment ${meta.name} failed: ${(err as Error).message}`);

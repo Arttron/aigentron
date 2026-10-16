@@ -148,6 +148,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const researchCfg = mcpServers['research'] as { url?: string; headers?: Record<string, string> } | undefined;
     if (researchCfg?.url) researchCfg.headers = { ...(researchCfg.headers ?? {}), Authorization: `Bearer ${this.researchMcp.register().token}` };
     const attachmentPaths = await this.attachments.paths(ctx.taskId).catch(() => []);
+    const attachmentOriginals = await this.attachments.originalNames(ctx.taskId).catch(() => ({}) as Record<string, string>);
     // Which attachments belong to THIS message (inline thumbnails): the ones
     // explicitly sent, else — on the first run — all (uploaded with the opener).
     const messageAttachments = ctx.attachments?.length
@@ -249,6 +250,7 @@ export class RealAgentExecutor extends AgentExecutor {
       mcpServers,
       chat,
       attachmentPaths,
+      attachmentOriginals,
       messageAttachments,
       isolation,
     };
@@ -427,6 +429,8 @@ export class RealAgentExecutor extends AgentExecutor {
     isolation: AgentIsolation | null;
     /** Every file of the task (chat agents read some of them inline). */
     attachmentPaths: string[];
+    /** stored name → the name the person gave the file (shown to the agent next to the stored path) */
+    attachmentOriginals: Record<string, string>;
     /** The ones the prompt lists for a working agent: all on a fresh run, only this message's on a resume (E-06). */
     listedAttachments: string[];
     messageAttachments: string[];
@@ -957,8 +961,8 @@ export class RealAgentExecutor extends AgentExecutor {
    * The message plus its attachments. A chat agent (the admin, a discussion participant) has no file-reading tool, so the text of this
    * message's text files (md/txt/csv/json …) is put into the prompt itself (bounded); everyone else gets the paths to Read.
    */
-  private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; listedAttachments: string[]; messageAttachments: string[] }): Promise<string> {
-    if (!opts.chat) return withAttachments(prompt, opts.listedAttachments);
+  private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; attachmentOriginals: Record<string, string>; listedAttachments: string[]; messageAttachments: string[] }): Promise<string> {
+    if (!opts.chat) return withAttachments(prompt, opts.listedAttachments, opts.attachmentOriginals);
     const mine = new Set(opts.messageAttachments);
     const files = await readInlineFiles(opts.attachmentPaths.filter((p) => mine.has(basename(p))));
     const others = opts.attachmentPaths.filter((p) => mine.has(basename(p)) && !files.some((f) => f.name === basename(p)));
@@ -1493,10 +1497,12 @@ function firstProseLine(raw: string): string | null {
 /** Append attachment paths to the prompt so the agent views them via Read. */
 const READ_DOCUMENT_CHARS = 12_000;
 
-function withAttachments(prompt: string, paths: string[]): string {
+function withAttachments(prompt: string, paths: string[], originals: Record<string, string> = {}): string {
   if (!paths.length) return prompt;
   const isVideo = (p: string) => isVideoName(p);
-  const list = paths.map((p) => `- ${p}${isVideo(p) ? '  (video — use video_digest, then look_at if you need to see it)' : ''}`).join('\n');
+  const list = paths
+    .map((p) => `- ${p}${originals[basename(p)] ? `  (uploaded as «${originals[basename(p)]}»)` : ''}${isVideo(p) ? '  (video — use video_digest, then look_at if you need to see it)' : ''}`)
+    .join('\n');
   const lead = prompt.trim() ? prompt : 'Review the attached file(s).';
   const hasVideo = paths.some(isVideo);
   return `${lead}\n\nAttached files (use the Read tool to view photos, documents and text${hasVideo ? '; for a video call the video_digest tool — frames and what was said — and look_at to ask a question about what is shown' : ''}):\n${list}`;

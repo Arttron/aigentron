@@ -340,6 +340,8 @@ export interface ChannelTestResult {
 /** A task attachment (image/PDF). */
 export interface AttachmentMeta {
   name: string;
+  /** what the person called the file, when the stored name was converted to plain ASCII */
+  originalName?: string;
   size: number;
   mime: string;
 }
