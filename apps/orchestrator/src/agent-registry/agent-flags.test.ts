@@ -11,3 +11,15 @@ describe('agent file flags', () => {
     expect(parseAgentMarkdown('---\ncreateTasks: yes\n---\nbody', 'pm').createTasks).toBe(true);
   });
 });
+
+import { parseMaxTurns } from './agent-registry.service';
+
+describe('maxTurns', () => {
+  it('reads a whole number from 5 to 500 and ignores anything else', () => {
+    expect(parseAgentMarkdown('---\ndescription: x\nmaxTurns: 80\n---\nbody', 'pm').maxTurns).toBe(80);
+    for (const bad of ['', 'abc', '4', '501', '12.5', '-3', '1000']) expect(parseMaxTurns(bad)).toBeUndefined();
+    expect(parseMaxTurns('5')).toBe(5);
+    expect(parseMaxTurns('500')).toBe(500);
+    expect(parseAgentMarkdown('---\ndescription: x\n---\nbody', 'pm').maxTurns).toBeUndefined();
+  });
+});

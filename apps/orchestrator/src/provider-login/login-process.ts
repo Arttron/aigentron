@@ -65,7 +65,8 @@ export function claudeBin(): string {
 
 /** The environment a sign-in CLI runs with: ours, minus credentials that would make it skip or confuse the sign-in. */
 export function loginEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extra, NO_COLOR: '1', BROWSER: 'none' };
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  // Ours are removed first; what the caller passes on purpose (e.g. the token being tested) is then applied on top.
   for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) delete env[k];
-  return env;
+  return { ...env, ...extra, NO_COLOR: '1', BROWSER: 'none' };
 }

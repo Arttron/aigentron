@@ -93,6 +93,8 @@ export const AGENT_GET_TOOL = `${INTERNAL_TOOL_PREFIX}agent_get`;
 export const TASK_DIAGNOSE_TOOL = `${INTERNAL_TOOL_PREFIX}task_diagnose`;
 /** Where the person is in the dashboard (read-only): their current task / project / page. */
 export const CURRENT_CONTEXT_TOOL = `${INTERNAL_TOOL_PREFIX}current_context`;
+/** Read-only: approvals / task outcomes / per-agent numbers / the settings that drive them, as tables. */
+export const METRICS_REPORT_TOOL = `${INTERNAL_TOOL_PREFIX}metrics_report`;
 export const USAGE_REPORT_TOOL = `${INTERNAL_TOOL_PREFIX}usage_report`;
 /** Platform management by the admin agent: reading tasks is free; every mutation is a gated proposal. */
 export const TASKS_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}tasks_list`;
@@ -208,7 +210,8 @@ const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string }> = 
   { re: /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/i, reason: 'recursive force remove (rm -rf)' },
   { re: /\brm\s+-[a-z]*r[a-z]*\b/i, reason: 'recursive remove (rm -r)' },
   { re: /\bgit\s+push\b/i, reason: 'git push (publishes commits to a remote)' },
-  { re: /--force\b|\s-f\b/i, reason: 'force flag' },
+  // `--force` anywhere; the short `-f` only where it is destructive (git / docker / kubectl / helm / rm), not `tail -f`, `grep -f`, `curl -f`, `cp -f`.
+  { re: /--force\b|\b(git|docker|kubectl|helm|rm)\b[^\n;&|]*\s-[a-z]*f\b/i, reason: 'force flag' },
   { re: /\bgit\s+reset\s+--hard\b/i, reason: 'git hard reset (discards work)' },
   { re: /\bgit\s+clean\b/i, reason: 'git clean (deletes untracked files)' },
   { re: /\b(npm|pnpm|yarn)\s+publish\b/i, reason: 'package publish' },
@@ -406,6 +409,32 @@ function isInside(child: string, parent: string): boolean {
   const c = normalize(child);
   const p = normalize(parent);
   return c === p || c.startsWith(p.endsWith('/') ? p : `${p}/`);
+}
+
+/** The reasons of the shell rules that a plain `rm` inside the agent's own write roots does not trigger. */
+const RM_REASONS = new Set(['recursive force remove (rm -rf)', 'recursive remove (rm -r)', 'force flag']);
+
+/**
+ * `rm [-rfivdR] path…` as ONE simple command whose every target is a real path (no globs, no `~`, no quotes, no `$`, no `..` that leaves
+ * the roots) strictly INSIDE the agent's own write roots (never a root itself, never a protected or credentials path). Clearing out
+ * its own `work/` folder is routine; the card is kept for anything that could reach beyond it.
+ */
+export function isSafeRmInRoots(command: string, opts: ClassifyOptions): boolean {
+  if (!opts.workspaceRoot) return false;
+  const c = command.trim();
+  if (/[;&|<>`$()\\"'*?[\]{}~]/.test(c)) return false;
+  const tokens = c.split(/\s+/);
+  if (tokens[0] !== 'rm') return false;
+  let i = 1;
+  while (i < tokens.length && /^-[rRfivd]+$/.test(tokens[i]!)) i++;
+  const targets = tokens.slice(i);
+  if (!targets.length || targets.some((t) => t.startsWith('-'))) return false;
+  const roots = [opts.workspaceRoot, ...(opts.extraWriteRoots ?? [])].filter(Boolean).map((r) => normalize(r));
+  return targets.every((t) => {
+    const abs = normalize(t.startsWith('/') ? t : `${opts.workspaceRoot!.replace(/\/$/, '')}/${t}`);
+    if (isSecretPath(abs) || isProtectedPath(abs) || abs.split('/').some((seg) => seg === '.git' || seg === '.github')) return false;
+    return roots.some((r) => abs !== r && isInside(abs, r)) && !roots.includes(abs);
+  });
 }
 
 /** Inside the write boundary: the task root or any extra write root. */
@@ -651,7 +680,9 @@ export function classifyToolCall(
   if (SHELL_TOOLS.has(name)) {
     const command = extractCommand(toolInput);
     const summary = command ? `$ ${command}` : `${toolName} (no command)`;
+    const safeRm = isSafeRmInRoots(command, opts);
     for (const { re, reason } of DANGEROUS_SHELL_PATTERNS) {
+      if (safeRm && RM_REASONS.has(reason)) continue;
       if (re.test(command)) {
         return { dangerous: true, summary, reason };
       }

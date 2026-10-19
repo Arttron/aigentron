@@ -24,6 +24,7 @@ function toDef(dto: AgentBodyDto) {
     allowedTools: split(dto.allowedTools),
     disallowedTools: split(dto.disallowedTools),
     mcp: split(dto.mcp),
+    maxTurns: dto.maxTurns,
     instructions: dto.instructions,
   };
 }

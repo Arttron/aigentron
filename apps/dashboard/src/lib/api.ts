@@ -212,6 +212,8 @@ export interface AgentInfo {
   allowedTools?: string[];
   disallowedTools?: string[];
   mcp?: string[];
+  /** Steps one run may take (blank = the server default). */
+  maxTurns?: number;
 }
 
 /** Full agent definition (with system-prompt body) from GET /api/agents/:name. */
@@ -229,6 +231,7 @@ export type AgentBody = {
   allowedTools?: string;
   disallowedTools?: string;
   mcp?: string;
+  maxTurns?: number;
   instructions: string;
 };
 

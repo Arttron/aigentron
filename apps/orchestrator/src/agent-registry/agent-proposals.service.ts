@@ -8,7 +8,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AdminAuditService } from './admin-audit.service';
-import { isBuiltinAgent, parseAgentMarkdown } from './agent-registry.service';
+import { isBuiltinAgent, parseAgentMarkdown, parseMaxTurns } from './agent-registry.service';
 
 const MAX_AGENT_BYTES = 20 * 1024;
 const MAX_SKILL_BYTES = 16 * 1024;
@@ -73,6 +73,9 @@ export class AgentProposalsService {
     }
     if (parsed.mode) return 'remove the `mode:` line — chat mode is reserved for built-in agents (it runs outside the project, in the platform config dir).';
     if (!parsed.description) return 'add a one-line `description:` to the frontmatter.';
+    // A `maxTurns:` line that is not a whole number in 5–500 would be silently ignored: say so before the card.
+    const mt = /^maxTurns:\s*(.*)$/m.exec(content.split(/^---\s*$/m)[1] ?? '');
+    if (mt && parseMaxTurns(mt[1]) === undefined) return '`maxTurns:` must be a whole number from 5 to 500 (e.g. `maxTurns: 80`).';
     return null;
   }
 

@@ -239,7 +239,7 @@ export class TaskWorkerService implements OnModuleInit {
               this.logger.warn(`Task ${taskId} hit step limit — handed back to lead to decompose`);
               return;
             }
-            const why = `hit the step limit ${priorContinuations + 1}× without finishing — stopping (raise AGENT_MAX_TURNS or split the task)`;
+            const why = `hit the step limit ${priorContinuations + 1}× without finishing — stopping (raise the agent's maxTurns / AGENT_MAX_TURNS or split the task)`;
             await this.tasks.setStatus(taskId, 'stalled', why);
             this.logger.warn(`Task ${taskId} stalled: ${why}`);
             return;

@@ -293,6 +293,8 @@ export interface AdminToolsWiring {
   currentContext: () => Promise<string>;
   /** Token / request / cost usage per provider over the last N days. */
   usageReport: (input: { days?: number }) => Promise<string>;
+  /** Approvals / tasks / agents / config numbers over the last N days, as Markdown tables. Read-only. */
+  metricsReport: (input: { topic: string; days?: number; project?: string; agent?: string }) => Promise<string>;
   /** Ask the human to enter a secret in a secure field; resolves with whether it was saved (never the value). */
   requestSecret: (input: { target: 'provider' | 'github_token' | 'channel'; name?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Disk-usage report of what runs leave behind (run folders, old worktrees, agent branches). */

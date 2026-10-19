@@ -1,4 +1,4 @@
-import { IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 export class AgentBodyDto {
   @IsOptional()
@@ -16,6 +16,13 @@ export class AgentBodyDto {
   @IsString()
   @MaxLength(300)
   fallbackProviders?: string;
+
+  /** Steps one run may take (5–500); blank = the installation default (AGENT_MAX_TURNS, 40). */
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(500)
+  maxTurns?: number;
 
   /** Model to run on; blank uses the provider's default model. */
   @IsOptional()

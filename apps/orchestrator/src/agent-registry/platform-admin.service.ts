@@ -35,6 +35,7 @@ import { isSameWork } from '../tasks/subtask-dedupe';
 import { AdminAuditService, type AuditEntry } from './admin-audit.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AdminContextService } from './admin-context.service';
+import { METRIC_TOPICS, clampDays, groupTop, humanSeconds, mdTable, normalizeText, pct, percentile, secondsBetween, type MetricTopic } from './metrics-core';
 import { parsePage } from './admin-context-core';
 import type { SchedulesService } from '../schedules/schedules.service';
 import { ChannelsService } from '../channels/channels.service';
@@ -1121,6 +1122,167 @@ export class PlatformAdminService {
       return [head, '', `Project "${p.name}" (${p.slug}) — ${p.kind}${p.archivedAt ? ', archived' : ''}`, p.repoUrl ? `Repository: ${p.repoUrl} (${p.repoBranch})` : null, `Isolation: ${p.isolation ?? 'follows the installation default'}`, p.defaultAgent ? `Default agent: ${p.defaultAgent}` : null, `Open tasks: ${open}`].filter((l): l is string => l !== null).join('\n');
     }
     return head;
+  }
+
+  /**
+   * `metrics_report`: the numbers behind "how often / why / for whom", as Markdown tables (the chat renders them). Read-only; rows are capped
+   * (20 000) so a busy server answers fast, and the output says when it was capped.
+   */
+  async metricsReport(input: { topic: string; days?: number; project?: string; agent?: string }): Promise<string> {
+    const topic = input.topic as MetricTopic;
+    if (!METRIC_TOPICS.includes(topic)) return `Unknown topic "${input.topic}". Use one of: ${METRIC_TOPICS.join(', ')}.`;
+    const days = clampDays(input.days);
+    const from = new Date(Date.now() - days * 86_400_000);
+    const CAP = 20_000;
+    let projectId: string | undefined;
+    if (input.project) {
+      const p = await this.prisma.project.findUnique({ where: { slug: input.project }, select: { id: true } });
+      if (!p) return `No project "${input.project}".`;
+      projectId = p.id;
+    }
+    const capNote = (n: number) => (n >= CAP ? `\n\n(Only the newest ${CAP} rows were read.)` : '');
+    const scope = `${input.project ? `project ${input.project}` : 'all projects'}${input.agent ? `, agent ${input.agent}` : ''}, last ${days} day(s)`;
+    const taskWhere = { createdAt: { gte: from }, ...(projectId ? { projectId } : {}), ...(input.agent ? { agentName: input.agent } : {}) };
+
+    if (topic === 'approvals') {
+      const rows = await this.prisma.approvalRequest.findMany({
+        where: { createdAt: { gte: from }, task: { ...(projectId ? { projectId } : {}), ...(input.agent ? { agentName: input.agent } : {}) } },
+        select: { taskId: true, agentSessionId: true, toolName: true, summary: true, reason: true, status: true, resolvedBy: true, createdAt: true, resolvedAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: CAP,
+      });
+      if (!rows.length) return `No approval cards (${scope}).`;
+      const sessions = await this.prisma.agentSession.count({ where: { startedAt: { gte: from }, task: { ...(projectId ? { projectId } : {}), ...(input.agent ? { agentName: input.agent } : {}) } } });
+      const waits = rows.map((r) => secondsBetween(r.createdAt, r.resolvedAt)).filter((x): x is number => x !== null);
+      const tool = (n: string) => n.split('__').pop() ?? n;
+      const byStatus = groupTop(rows, (r) => r.status);
+      const lines = [
+        `**Approval cards — ${scope}**`,
+        '',
+        `${rows.length} cards over ${sessions} agent runs (${sessions ? (rows.length / sessions).toFixed(1) : '—'} per run). Wait for a decision: median ${humanSeconds(percentile(waits, 50))}, 90th percentile ${humanSeconds(percentile(waits, 90))}.`,
+        '',
+        mdTable(['Outcome', 'Cards', 'Share'], byStatus.map((g) => [g.key, g.count, pct(g.share)])),
+        '',
+        '**Why a card was opened (top reasons)**',
+        '',
+        mdTable(['Reason', 'Cards', 'Share'], groupTop(rows, (r) => normalizeText(r.reason, 80), 10).map((g) => [g.key, g.count, pct(g.share)])),
+        '',
+        '**Tools**',
+        '',
+        mdTable(['Tool', 'Cards', 'Share'], groupTop(rows, (r) => tool(r.toolName), 8).map((g) => [g.key, g.count, pct(g.share)])),
+        '',
+        '**Most repeated requests**',
+        '',
+        mdTable(['Request', 'Times'], groupTop(rows, (r) => normalizeText(r.summary, 90), 10).map((g) => [g.key, g.count])),
+        '',
+        '**Who decided**',
+        '',
+        mdTable(['Decided by', 'Cards'], groupTop(rows, (r) => r.resolvedBy ?? '(still pending)', 6).map((g) => [g.key, g.count])),
+        '',
+        '**Tasks that asked most**',
+        '',
+        mdTable(['Task', 'Cards'], groupTop(rows, (r) => r.taskId, 5).map((g) => [g.key, g.count])),
+      ];
+      return lines.join('\n') + capNote(rows.length);
+    }
+
+    if (topic === 'tasks') {
+      const rows = await this.prisma.task.findMany({
+        where: taskWhere,
+        select: { id: true, status: true, error: true, agentName: true, parentId: true, createdAt: true, updatedAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: CAP,
+      });
+      if (!rows.length) return `No tasks (${scope}).`;
+      const bad = rows.filter((r) => r.error && ['failed', 'stalled', 'blocked'].includes(r.status));
+      const durations = rows.filter((r) => r.status === 'done' || r.status === 'review').map((r) => secondsBetween(r.createdAt, r.updatedAt)).filter((x): x is number => x !== null);
+      const stepLimit = rows.filter((r) => /maximum number of turns|step limit/i.test(r.error ?? '')).length;
+      const noResult = rows.filter((r) => /without a status report|ended abnormally/i.test(r.error ?? '')).length;
+      return (
+        [
+          `**Tasks — ${scope}**`,
+          '',
+          `${rows.length} tasks (${rows.filter((r) => r.parentId).length} subtasks). Created→finished for done / ready tasks: median ${humanSeconds(percentile(durations, 50))}, 90th percentile ${humanSeconds(percentile(durations, 90))}. Step-limit hits: ${stepLimit}. Ended without a result: ${noResult}.`,
+          '',
+          mdTable(['Status', 'Tasks', 'Share'], groupTop(rows, (r) => r.status).map((g) => [g.key, g.count, pct(g.share)])),
+          '',
+          '**Why failed / stalled / blocked tasks stopped (top)**',
+          '',
+          bad.length ? mdTable(['Error', 'Tasks'], groupTop(bad, (r) => normalizeText(r.error ?? '', 100), 10).map((g) => [g.key, g.count])) : 'None.',
+          '',
+          '**By agent**',
+          '',
+          mdTable(
+            ['Agent', 'Tasks', 'Failed or stalled'],
+            groupTop(rows, (r) => r.agentName ?? '(none)', 10).map((g) => [g.key, g.count, rows.filter((r) => (r.agentName ?? '(none)') === g.key && ['failed', 'stalled'].includes(r.status)).length]),
+          ),
+        ].join('\n') + capNote(rows.length)
+      );
+    }
+
+    if (topic === 'agents') {
+      const rows = await this.prisma.agentSession.findMany({
+        where: { startedAt: { gte: from }, task: { ...(projectId ? { projectId } : {}), ...(input.agent ? { agentName: input.agent } : {}) } },
+        select: { id: true, status: true, provider: true, numTurns: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, costUsd: true, task: { select: { agentName: true } } },
+        orderBy: { startedAt: 'desc' },
+        take: CAP,
+      });
+      if (!rows.length) return `No agent runs (${scope}).`;
+      const approvals = await this.prisma.approvalRequest.findMany({ where: { createdAt: { gte: from }, agentSessionId: { not: null } }, select: { agentSessionId: true }, take: CAP });
+      const perSession = new Map<string, number>();
+      for (const a of approvals) perSession.set(a.agentSessionId!, (perSession.get(a.agentSessionId!) ?? 0) + 1);
+      const n = (x: number) => x.toLocaleString('en-US');
+      const sum = (xs: (number | null)[]) => xs.reduce<number>((a, b) => a + (b ?? 0), 0);
+      const names = groupTop(rows, (r) => r.task?.agentName ?? '(none)', 12).map((g) => g.key);
+      const body = names.map((name) => {
+        const mine = rows.filter((r) => (r.task?.agentName ?? '(none)') === name);
+        const turns = mine.map((r) => r.numTurns).filter((x): x is number => typeof x === 'number');
+        const cards = mine.reduce((a, r) => a + (perSession.get(r.id) ?? 0), 0);
+        return [
+          name,
+          mine.length,
+          turns.length ? Math.round(turns.reduce((a, b) => a + b, 0) / turns.length) : '—',
+          percentile(turns, 90) ?? '—',
+          pct(mine.filter((r) => r.status === 'errored').length / mine.length),
+          (cards / mine.length).toFixed(1),
+          n(sum(mine.map((r) => (r.inputTokens ?? 0) + (r.outputTokens ?? 0)))),
+          `$${sum(mine.map((r) => r.costUsd)).toFixed(2)}`,
+        ];
+      });
+      return (
+        [`**Agents — ${scope}**`, '', mdTable(['Agent', 'Runs', 'Avg steps', 'P90 steps', 'Errored', 'Cards / run', 'Tokens (in+out)', 'Est. cost'], body), '', 'Cost is an estimate at list prices (subscription providers are not charged per token).'].join('\n') + capNote(rows.length)
+      );
+    }
+
+    // config
+    const settings = this.moduleRef.get(SettingsService, { strict: false });
+    const [concurrency, timeout, defProvider] = await Promise.all([settings.concurrency(), settings.approvalTimeoutSeconds(), settings.defaultProvider().catch(() => null)]);
+    const projects = await this.prisma.project.findMany({ where: { archivedAt: null }, select: { slug: true, kind: true, isolation: true, defaultAgent: true, repoUrl: true }, orderBy: { slug: 'asc' } });
+    const agents = await this.agents.list().catch(() => []);
+    return [
+      '**Settings that shape behaviour**',
+      '',
+      mdTable(
+        ['Setting', 'Value'],
+        [
+          ['Step limit per run (default for every agent)', this.config.agentMaxTurns],
+          ['Parallel task runs', concurrency],
+          ['Approval timeout (s)', timeout],
+          ['Same request repeated before it is refused', this.config.approvalRepeatLimit],
+          ['Subtask limit (open) per task', process.env.SUBTASK_LIMIT ?? '25'],
+          ['Default provider', defProvider ?? '—'],
+          ['Installation default for projects', this.config.workspaceShared ? 'shared (one task at a time per project)' : 'worktree'],
+        ],
+      ),
+      '',
+      '**Projects**',
+      '',
+      mdTable(['Project', 'Kind', 'Mode', 'Default agent', 'Has repository'], projects.map((p) => [p.slug, p.kind, p.isolation ?? 'installation default', p.defaultAgent ?? '—', p.repoUrl ? 'yes' : 'no'])),
+      '',
+      '**Agents**',
+      '',
+      mdTable(['Agent', 'Provider', 'Fallbacks', 'Step limit'], agents.slice(0, 40).map((a) => [a.name, a.provider ?? 'default', (a.fallbackProviders ?? []).length, a.maxTurns ?? 'default'])),
+    ].join('\n');
   }
 
   async usageReport(input: { days?: number }): Promise<string> {

@@ -396,7 +396,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_agent',
         description:
-          'Propose creating or replacing an agent. `name`: lowercase letters/digits/-/_. `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, skills, allowedTools, disallowedTools, mcp, and `createTasks: true` to let a lead agent start new tasks in projects with the create_task tool — each one still approved by a person) followed by the system prompt. A human reviews the full content and must approve before anything is written; this call blocks until they decide. You cannot overwrite built-in agents.',
+          'Propose creating or replacing an agent. `name`: lowercase letters/digits/-/_. `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, skills, allowedTools, disallowedTools, mcp, `maxTurns: 80` (steps one run may take, 5–500; default 40 — give a lead that plans big work more), and `createTasks: true` to let a lead agent start new tasks in projects with the create_task tool — each one still approved by a person) followed by the system prompt. A human reviews the full content and must approve before anything is written; this call blocks until they decide. You cannot overwrite built-in agents.',
         shape: { name: z.string(), content: z.string() },
         handler: async (args) =>
           (await admin.proposeAgent({ name: String(args.name), content: String(args.content) })).message,
@@ -782,6 +782,19 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           "Where the person is in the dashboard right now, and what is there: on a task page → that task's status, error, agent, runs, approvals, subtasks and last messages; on a project page → the project; elsewhere → the page's name. Call it when they say 'this task', 'here', 'this page', 'why did it fail' without an id. Read-only.",
         shape: {},
         handler: () => admin.currentContext(),
+      },
+      {
+        name: 'metrics_report',
+        description:
+          "Numbers to CHECK a complaint or a setting against, as tables (read-only). `topic`: 'approvals' (how many approval cards, by reason / tool / most repeated command, per run, who decided, how long they waited, which tasks ask most), 'tasks' (outcomes, why they failed / stalled / hit the step limit / ended without a result, durations), 'agents' (per agent: runs, steps, failure rate, tokens, cost estimate, approvals per run), 'config' (the settings that shape behaviour: step limit, concurrency, approval timeout and repeat limit, project modes, per-agent limits and providers). `days` (default 7, max 365); `project` (slug) and `agent` (name) narrow approvals / tasks / agents. Use it before proposing a change (\"how often do cards come from rm?\") and again after, to show whether it helped. Cost figures for subscription providers are estimates at API list prices, not charges.",
+        shape: { topic: z.enum(['approvals', 'tasks', 'agents', 'config']), days: z.number().optional(), project: z.string().optional(), agent: z.string().optional() },
+        handler: (args) =>
+          admin.metricsReport({
+            topic: String(args.topic),
+            days: typeof args.days === 'number' ? args.days : undefined,
+            project: typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined,
+            agent: typeof args.agent === 'string' && args.agent.trim() ? args.agent.trim() : undefined,
+          }),
       },
       {
         name: 'usage_report',

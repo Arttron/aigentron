@@ -386,6 +386,7 @@ export class RealAgentExecutor extends AgentExecutor {
       taskDiagnose: (id) => this.platformAdmin.taskDiagnose(id),
       currentContext: () => this.platformAdmin.currentContext(taskId),
       usageReport: (input) => this.platformAdmin.usageReport(input),
+      metricsReport: (input) => this.platformAdmin.metricsReport(input),
       requestSecret: (input) => this.platformAdmin.requestSecret(taskId, sessionId, input),
       maintenanceReport: () => this.platformAdmin.maintenanceReport(),
       proposeCleanup: (input) => this.platformAdmin.proposeCleanup(taskId, sessionId, input),
@@ -858,7 +859,8 @@ export class RealAgentExecutor extends AgentExecutor {
           modelEnv,
           providerLabel: provider.name,
           modelLabel: model,
-          maxTurns: this.config.agentMaxTurns,
+          // An agent's own limit (its file's `maxTurns`) wins over the installation's AGENT_MAX_TURNS.
+          maxTurns: agentDef?.maxTurns ?? this.config.agentMaxTurns,
           resumeSessionId,
           appendSystemPrompt: opts.appendSystemPrompt,
           // A discussion participant only talks (and may look things up): no editing, no shell, no delegation.

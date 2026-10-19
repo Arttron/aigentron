@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException, type OnModule
 import type { Provider } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
+import { probeClaudeToken } from '../provider-login/claude-probe';
 import { CLAUDE_SUBSCRIPTION_MODELS, parseModelPage } from './model-list';
 import { LitellmService, defaultKind, kindOf, stripSelfPrefix } from '../litellm/litellm.service';
 import { CodexService } from '../codex/codex.service';
@@ -275,10 +276,10 @@ export class ProvidersService implements OnModuleInit {
       };
     }
     if (p.authMode === 'oauth-token') {
-      // The Claude Agent SDK handles this token's auth internally; we don't
-      // know its exact request shape, so don't guess at an HTTP probe — an
-      // agent run is the real test.
-      return { ok: false, error: 'OAuth/subscription tokens aren’t verified via HTTP probe — start a task on this provider to confirm it works.' };
+      // No HTTP probe (the token's request shape is the CLI's business): run the official Claude CLI once with this token — one tiny request.
+      if (!p.secret) return { ok: false, error: 'This provider is not signed in yet: open it and press “Sign in”.' };
+      const r = await probeClaudeToken(p.secret, p.model);
+      return r.ok ? { ok: true, model: p.model, reply: r.reply, latencyMs: r.latencyMs } : { ok: false, model: p.model, error: r.error ?? 'the sign-in did not work', latencyMs: r.latencyMs };
     }
 
     const kind = kindOf(p);

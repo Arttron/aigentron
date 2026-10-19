@@ -557,6 +557,8 @@ if [ -z "$ARCHIVE_URL" ]; then
   fi
 fi
 
+RELEASE_FRESH=0
+[ -d "$RELEASE_DIR" ] || RELEASE_FRESH=1  # a half-installed release of THIS run is removed again on failure (see discard_partial_release)
 mkdir -p "$RELEASE_DIR"
 log "Downloading $ARCHIVE_URL"
 fetch "$ARCHIVE_URL" "$ARCHIVE_PATH" || die "download failed — check REPO/S3_PREFIX/VERSION/ARCHIVE_URL"
@@ -698,6 +700,17 @@ else
   # when the new one does not become healthy - it is kept; everything older goes, but only AFTER the new release proved healthy
   # (each dir is a full monorepo checkout + node_modules + build output). Only when the disk is already tight do the oldest go before the build.
   PREV_RELEASE="$(basename "$(readlink "$CURRENT_LINK" 2>/dev/null || true)")"
+  # A failed update (a full disk, above all) must not leave its half-built release behind: it is a gigabyte that makes the next attempt fail too.
+  discard_partial_release() {
+    [ "${UPDATE_OK:-0}" = 1 ] && return 0
+    rm -f "$ARCHIVE_PATH" 2>/dev/null || true
+    [ "${RELEASE_FRESH:-0}" = 1 ] || return 0
+    [ "$(basename "$(readlink "$CURRENT_LINK" 2>/dev/null || true)")" != "$VERSION" ] || return 0
+    [ "$VERSION" != "${PREV_RELEASE:-}" ] || return 0
+    log "The update did not finish - removing the half-installed release $RELEASE_DIR to free its space"
+    rm -rf "$RELEASE_DIR" 2>/dev/null || true
+  }
+  trap discard_partial_release EXIT
   prune_releases() {
     for d in "$INSTALL_DIR"/releases/*/; do
       d="${d%/}"
@@ -814,7 +827,7 @@ EOF
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl start aigentron >/dev/null 2>&1 || true
   }
-  trap recover_service EXIT
+  trap 'recover_service; discard_partial_release' EXIT
   log "Stopping the running service (running agents get a graceful stop)"
   systemctl stop aigentron >/dev/null 2>&1 || true
   if [ -s "$DB_FILE" ]; then
@@ -890,6 +903,7 @@ SHIM
     die "release $VERSION did not start and there is no previous release to return to - see: journalctl -u aigentron -n 80"
   fi
 
+  UPDATE_OK=1
   prune_releases
   # The package store only grows: drop what no release uses any more (best effort), and the throw-away caches.
   pnpm store prune </dev/null >/dev/null 2>&1 || true

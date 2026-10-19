@@ -28,6 +28,8 @@ type Form = {
   allowedTools: string;
   disallowedTools: string;
   mcp: string[];
+  /** as typed; blank = the server default */
+  maxTurns: string;
   instructions: string;
 };
 
@@ -41,6 +43,7 @@ const emptyForm: Form = {
   allowedTools: '',
   disallowedTools: '',
   mcp: [],
+  maxTurns: '',
   instructions: '',
 };
 
@@ -146,6 +149,7 @@ export function AgentsPage() {
         provider: a.provider ?? '',
         fallbackProviders: a.fallbackProviders ?? [],
         model: a.model ?? '',
+        maxTurns: a.maxTurns ? String(a.maxTurns) : '',
         skills: a.skills ?? [],
         allowedTools: (a.allowedTools ?? []).join(', '),
         disallowedTools: (a.disallowedTools ?? []).join(', '),
@@ -218,6 +222,7 @@ export function AgentsPage() {
         allowedTools: form.allowedTools,
         disallowedTools: form.disallowedTools,
         mcp: form.mcp.join(', '),
+        maxTurns: form.maxTurns.trim() ? Number(form.maxTurns) : undefined,
         instructions: form.instructions,
       };
       if (isNew) await api.createAgent({ name: form.name, ...body });
@@ -389,6 +394,18 @@ export function AgentsPage() {
               ) : modelsError ? (
                 <Muted className={styles.modelHint}>could not load models: {modelsError}</Muted>
               ) : null}
+            </Field>
+            <Field label="Max steps per run (5–500; blank = the server default, 40)">
+              <input
+                type="number"
+                min={5}
+                max={500}
+                inputMode="numeric"
+                value={form.maxTurns}
+                onChange={(e) => setForm((f) => (f ? { ...f, maxTurns: e.target.value } : f))}
+                placeholder="40"
+              />
+              <Muted className={styles.modelHint}>When a run uses them all without finishing, you are asked whether to continue. Give a lead that plans big work more (e.g. 80).</Muted>
             </Field>
             <Field label="Fallback providers (tried in order if the primary run errors)">
               <CheckboxGroup

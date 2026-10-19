@@ -1,15 +1,15 @@
-Aigentron v0.1.74
+Aigentron v0.1.75
 
-For people who are not programmers: the admin can look at your screenshots, messages show up at once, tables look like tables.
+For people who are not programmers: fewer pointless approval cards, a step limit per agent, numbers the admin can show you, and a real test for a Claude subscription.
 
 New
-- The admin assistant can open attachments. Ask it about a screenshot from a task page and it finds that task's files; look_at / video_digest accept just the file name. (Before it said it could not find the picture, from the task page and from Telegram alike.)
-- A message you send appears in the conversation immediately ("sending…") instead of when the agent run starts — noticeable on a busy server.
-- Tables in chat are real tables: aligned columns, numbers lined up on the right, zebra rows, sideways scroll on a phone. The admin's answers are now rendered as formatted text (bold, lists, code, tables) instead of raw symbols.
-- The repository address is checked as you type: an SSH key needs an SSH address (git@github.com:org/repo.git), a token needs https, and a password never goes into the address. One button converts the address; Save is blocked while it is wrong.
-- The update dialog says the server is down for 2–4 minutes and not to restart it by hand; the installer log lines carry the time.
+- Step limit per agent. In the agent form (and as `maxTurns: 80` in the agent file) you can give an agent more steps per run — useful for a lead that plans big work. Blank = the server default (40).
+- Fewer approval cards for ordinary work. Removing files inside the agent's own folders (its work area, deliverables, the project folder) no longer asks (never the folder itself, never a wildcard, never anything outside, never .git or credentials), and the short `-f` flag only counts for git / docker / kubectl, not for `tail -f`, `grep -f`, `curl -f`, `cp -f`.
+- The admin can show numbers: ask it for metrics on approvals (why cards appear, which commands repeat, how long they wait), tasks (why they stop), agents (steps, failures, cost) or the settings that shape behaviour — as tables — before and after a change.
+- The Test button of a Claude subscription provider now really checks it (one tiny request through the official Claude CLI) and shows the API's own answer, instead of "tokens are not verified".
+- Chat tables are real tables; a message you send appears at once; the admin sees your screenshots (from 0.1.74, now together with the rest).
 
-Fixed
-- On a phone the bottom navigation bar covered the message box of the task screen; the screen now stops above the bar.
+Safer updates (bare-metal servers)
+- A failed update removes the half-installed release it created, so the next attempt does not fail on a full disk too; the service is brought back automatically; build caches live in <data dir>/cache.
 
-Update note: no database changes.
+Update note: no database changes. On a small server free some disk space first (see docs/updates.md).

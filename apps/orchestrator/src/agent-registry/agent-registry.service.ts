@@ -25,6 +25,8 @@ export interface AgentDef {
    * publish step or required status report, and each reply settles the task as done.
    */
   mode?: 'chat';
+  /** Steps (model turns) one run may take before it must report or ask to continue; blank = the installation's AGENT_MAX_TURNS (40). 5–500. */
+  maxTurns?: number;
   /** `createTasks: true` in the file: the agent may start NEW top-level tasks in a project (the `create_task` tool, each one approved by a person). */
   createTasks?: boolean;
   /** The agent's system-prompt body. */
@@ -87,7 +89,7 @@ export class AgentRegistryService {
     return defs
       .filter((d): d is AgentDef => d !== null)
       .map(
-        ({ name, description, provider, fallbackProviders, model, skills, allowedTools, disallowedTools, mcp, mode }) => ({
+        ({ name, description, provider, fallbackProviders, model, skills, allowedTools, disallowedTools, mcp, mode, maxTurns }) => ({
           name,
           description,
           provider,
@@ -98,6 +100,7 @@ export class AgentRegistryService {
           disallowedTools,
           mcp,
           mode,
+          maxTurns,
         }),
       );
   }
@@ -125,6 +128,7 @@ export class AgentRegistryService {
       disallowedTools?: string[];
       mcp?: string[];
       mode?: 'chat';
+      maxTurns?: number;
       createTasks?: boolean;
       instructions: string;
     },
@@ -209,9 +213,18 @@ export function parseAgentMarkdown(raw: string, fallbackName: string): AgentDef 
     disallowedTools: csv(meta.disallowedTools),
     mcp: csv(meta.mcp),
     mode: meta.mode === 'chat' ? 'chat' : undefined,
+    maxTurns: parseMaxTurns(meta.maxTurns),
     createTasks: /^(true|yes|on|1)$/i.test(String(meta.createTasks ?? '').trim()) ? true : undefined,
     instructions: body.trim(),
   };
+}
+
+/** `maxTurns: 80` from a file → 80; anything that is not a whole number in 5–500 → undefined (the installation default applies). */
+export function parseMaxTurns(raw: unknown): number | undefined {
+  const s = String(raw ?? '').trim();
+  if (!/^\d{1,3}$/.test(s)) return undefined;
+  const n = Number(s);
+  return n >= 5 && n <= 500 ? n : undefined;
 }
 
 /** Strip a single pair of surrounding single/double quotes, if present. */
@@ -249,6 +262,7 @@ function serializeAgent(def: {
   disallowedTools?: string[];
   mcp?: string[];
   mode?: 'chat';
+  maxTurns?: number;
   createTasks?: boolean;
   instructions: string;
 }): string {
@@ -265,6 +279,7 @@ function serializeAgent(def: {
     csvLine('disallowedTools', def.disallowedTools),
     csvLine('mcp', def.mcp),
     def.mode ? `mode: ${def.mode}` : null,
+    def.maxTurns ? `maxTurns: ${def.maxTurns}` : null,
     def.createTasks ? 'createTasks: true' : null,
   ].filter(Boolean);
   return `---\n${fm.join('\n')}\n---\n${def.instructions.trim()}\n`;
