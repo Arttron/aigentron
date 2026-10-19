@@ -62,10 +62,16 @@ function initialType(): TaskTypeFilter | '' {
   }
 }
 
+const PROJECT_KEY = 'lds.taskProject';
+
 function initialProject(): string {
   const fromUrl = new URLSearchParams(window.location.search).get('project');
   if (fromUrl) return fromUrl;
-  return '';
+  try {
+    return localStorage.getItem(PROJECT_KEY) ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export function TaskListPage() {
@@ -77,6 +83,18 @@ export function TaskListPage() {
   const [status, setStatus] = useState<TaskStatusFilter | ''>(initialStatus);
   const [project, setProject] = useState<string>(initialProject);
   const { projects } = useProjects({ archived: true });
+  // A remembered project that was deleted since must not leave the list empty behind a hidden filter.
+  useEffect(() => {
+    if (project && projects && !projects.some((x) => x.slug === project)) {
+      setProject('');
+      try {
+        localStorage.removeItem(PROJECT_KEY);
+      } catch {
+        /* ignore */
+      }
+      window.history.replaceState(null, '', withFilterParam(window.location.href, 'project', ''));
+    }
+  }, [project, projects]);
   const [statusCounts, setStatusCounts] = useState<Record<string, number> | null>(null);
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [connected, setConnected] = useState(false);
@@ -202,6 +220,12 @@ export function TaskListPage() {
   const pickProject = (next: string) => {
     setProject(next);
     setPage(1);
+    try {
+      if (next) localStorage.setItem(PROJECT_KEY, next);
+      else localStorage.removeItem(PROJECT_KEY);
+    } catch {
+      /* not remembered */
+    }
     window.history.replaceState(null, '', withFilterParam(window.location.href, 'project', next));
   };
   const onSearch = (value: string) => {

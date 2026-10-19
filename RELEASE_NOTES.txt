@@ -1,12 +1,13 @@
-Aigentron v0.1.68
+Aigentron v0.1.69
 
-For people who are not programmers: resources and knowledge bases can now belong to a single project.
+For people who are not programmers: fewer stuck tasks and a simple way to resume them.
 
-Scopes
-- A resource (note, photo, document) or a knowledge base is either GLOBAL — seen by the agents of every project, exactly as before — or belongs to ONE project and is seen only by the agents working on that project. Everything you have now stays global.
-- On the Resources and Knowledge pages a bar "All · Global · <projects>" filters the list; new notes, uploads and bases are created in the selected scope, and an item can be moved between global and a project in its edit dialog. With a single project nothing changes on screen.
-- An agent of project A sees the global resources and A's own, never another project's; the knowledge tools list their scope (global / project). The resource library of a project lives in its own folder.
-- Project page: counts of its resources and bases with links to the filtered lists. Deleting a project asks what to do with its knowledge bases and resources: by default they become global (nothing is lost); you can also delete them with the project.
-- The admin can propose a resource or a pack for a given project.
+What is new
+- ▶ Continue. A task that stopped (stalled, blocked or failed) now has a "Continue" button on its page; in Telegram the same is `/continue` (optionally with a note: `/continue use the second approach`). The agent resumes the same session and carries on.
+- Used-up limits. When a provider's plan, balance or 5-hour / weekly limit runs out, the task fails over to the agent's fallback provider, and for the next 30 minutes new runs start on the fallback straight away. A task that still stops explains what to do (add a fallback provider or wait for the reset).
+- The task list remembers the project you filtered by when you come back to it.
 
-Update note: the database gets a small migration (a project link on knowledge bases; existing bases stay global); a snapshot is taken first.
+Fixes
+- An approval or question card no longer hangs after you decided it in Telegram or another tab while the page was disconnected: the page re-reads the pending list on reconnect and every 30 seconds.
+
+Update note: no database changes.

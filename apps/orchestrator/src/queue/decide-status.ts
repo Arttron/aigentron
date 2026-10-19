@@ -1,3 +1,4 @@
+import { classifyProviderFailure } from '../agent/run-outcome';
 import type { AgentRunOutcome } from '../agent/agent-executor';
 
 /** What the worker does with a task after its run returned (E-33: one mapping for code and chat agents). */
@@ -56,7 +57,7 @@ export function decideStatus(outcome: AgentRunOutcome, ctx: RunDecisionContext):
     const base = outcome.timedOut
       ? 'run timed out without a status report'
       : outcome.errorText
-        ? `the provider failed: ${outcome.errorText}`
+        ? `the provider failed: ${outcome.errorText}${classifyProviderFailure(outcome.errorText) === 'quota' ? ' — its limit / plan looks used up: add a fallback provider to this agent (Agents → Fallback providers) or wait for the limit to reset, then send the task a message to continue' : ''}`
         : 'run ended abnormally without a status report';
     return { kind: 'settle', status: 'stalled', error: withQuestion(base, outcome.finalText) };
   }

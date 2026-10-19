@@ -20,7 +20,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Statuses: who sets "done"
 
-**done** is set only by a person. An agent that finishes makes the task **ready — confirm** (`review`). The person says **"done"** / **"готово"** (a short explicit message; longer text is a normal follow-up), presses **✅ Mark as done** (task header; Telegram: write "done") or sends `/done`. Anything else continues the task. Blocked / stalled / failed can be accepted as is (write "done"). Subtasks are accepted by their lead and simply end *done*. Chip *Done* = confirmed by a person; *Ready* = waiting.
+**done** is set only by a person. An agent that finishes makes the task **ready — confirm** (`review`). The person says **"done"** / **"готово"** (a short explicit message; longer text is a normal follow-up), presses **✅ Mark as done** (task header; Telegram: write "done") or sends `/done`. Else it continues the task. Blocked / stalled / failed can be accepted as is (write "done"). Subtasks are accepted by their lead and simply end *done*. Chip *Done* = confirmed by a person; *Ready* = waiting.
 
 ## Subtasks
 
@@ -92,7 +92,7 @@ I can change only: default agent, verification gate, concurrency, approval timeo
 ## Channels (Telegram)
 
 Settings → **Channels** (**+ Add channel**): needs a bot (@BotFather) and its token (secure field, never chat). Only allow-listed chats work. A message from a non-allowed chat gets its id back and the dashboard shows a yellow "is this you?" line with **Allow / Dismiss**. I set it up via `propose_channel`, `request_secret`, `channels_list`. Key requests via Telegram arrive as a one-time link (needs `PUBLIC_URL`; works once, 10 min, one value).
-Quiet by default: answers and anything needing the person; `/progress on|off` toggles live notes. **Quoting** a message addresses the task that wrote it; a plain one continues the active task. `/agents` lists agents; `/pm text` or `@pm text` writes to one. `/done`, `/discuss pm architect: topic`.
+Quiet by default: answers and what needs the person; `/progress on|off` toggles live notes. **Quoting** a message addresses the task that wrote it; a plain one continues the active task. `/agents` lists them; `/pm text` or `@pm text` writes to one. `/done`, `/continue [text]` (dashboard: ▶ Continue), `/discuss pm architect: topic`.
 
 ## Schedules
 

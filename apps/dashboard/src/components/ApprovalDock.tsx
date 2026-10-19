@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { SERVER_EVENT, CLIENT_EVENT, type AgentQuestion, type ApprovalRequest } from '@lds/shared';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { usePolling } from '@/lib/use-polling';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { QuestionCard } from '@/components/QuestionCard';
 import styles from './ApprovalDock.module.css';
@@ -37,6 +38,23 @@ export function ApprovalDock() {
       socket.off(SERVER_EVENT.taskDeleted, onTaskGone);
     };
   }, []);
+
+  // The truth is the server's list of pending items. Socket events keep it live, but an event is lost whenever the connection is
+  // (a laptop that slept, a phone tab in the background, an idle WebSocket closed by a proxy such as Cloudflare): a card whose
+  // approval was decided elsewhere (Telegram, another tab, a timeout) would then hang here until a reload. So the list is re-read on
+  // every (re)connect, when the tab comes back, and every 30 s while it is visible.
+  const refresh = useCallback(() => {
+    api.listApprovals('pending').then(setApprovals).catch(() => undefined);
+    api.listQuestions('pending').then(setQuestions).catch(() => undefined);
+  }, []);
+  usePolling(refresh, 30_000);
+  useEffect(() => {
+    const socket = getSocket();
+    socket.on('connect', refresh);
+    return () => {
+      socket.off('connect', refresh);
+    };
+  }, [refresh]);
 
   // Pending approvals + live updates.
   useEffect(() => {

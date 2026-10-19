@@ -166,6 +166,15 @@ export class ChannelCommandService {
         if (!id) return 'No active task. Use /tasks.';
         return this.tasks.markDone(id).then(() => '✅ Marked as done.').catch((e) => `⚠️ ${(e as Error).message}`);
       }
+      case '/continue': {
+        const id = await this.activeTaskId(ctx);
+        if (!id) return 'No active task. Use /tasks.';
+        const text = arg.trim() || 'Continue the task from where you left off. Finish the remaining work, then report your status.';
+        return this.tasks
+          .followUp(id, text)
+          .then((r) => (r.queued ? '📥 Queued — will run once the current turn finishes.' : '▶ Continuing the task.'))
+          .catch((e) => `⚠️ ${(e as Error).message}`);
+      }
       case '/discuss':
         return this.discuss(ctx, arg);
       case '/agents':

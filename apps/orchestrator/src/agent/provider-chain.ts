@@ -29,7 +29,7 @@ export interface ChainEntry {
  * primary alone; a provider failure ends the run with the error text instead.
  */
 export async function resolveProviderChain(
-  input: { agent: ChainAgent | null; defaultProvider: string; override?: string | null; noFailover?: boolean },
+  input: { agent: ChainAgent | null; defaultProvider: string; override?: string | null; noFailover?: boolean; /** providers that just failed with a used-up quota / rate limit / bad credentials */ cooling?: (name: string) => boolean },
   lookup: (name: string) => Promise<Provider | null>,
   warn: (message: string) => void = () => undefined,
 ): Promise<ChainEntry[]> {
@@ -55,6 +55,13 @@ export async function resolveProviderChain(
       continue;
     }
     chain.push({ provider, model });
+  }
+  // A provider that just ran out of quota (or was refused) goes to the END of the chain: the run starts on a fallback instead of
+  // failing first on the same provider. If every provider is cooling, the order stays as declared. A pinned override/follow-up
+  // (a single provider) is never reordered.
+  if (input.cooling && chain.length > 1 && !override) {
+    const cool = chain.filter((c) => input.cooling!(c.provider.name));
+    if (cool.length && cool.length < chain.length) return [...chain.filter((c) => !cool.includes(c)), ...cool];
   }
   return chain;
 }

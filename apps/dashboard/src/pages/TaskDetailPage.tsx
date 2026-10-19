@@ -33,6 +33,8 @@ import {
 import styles from './TaskDetailPage.module.css';
 
 /** Keyed by the route id: parent → subtask navigation remounts the page, so no state (lines, form draft, staged files) leaks between tasks. */
+const CONTINUE_PROMPT = 'Continue the task from where you left off. Finish the remaining work, then report your status.';
+
 export function TaskDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   return <TaskDetailView key={id} id={id} />;
@@ -143,12 +145,15 @@ function TaskDetailView({ id }: { id: string }) {
     socket.on(SERVER_EVENT.taskStatus, onStatus);
     socket.on(SERVER_EVENT.approvalCreated, onApproval);
     socket.on(SERVER_EVENT.approvalResolved, onApproval);
+    // events are lost while the connection is: re-read the task (and its approvals) when it comes back
+    socket.on('connect', onApproval);
 
     return () => {
       active = false;
       socket.off(SERVER_EVENT.taskStatus, onStatus);
       socket.off(SERVER_EVENT.approvalCreated, onApproval);
       socket.off(SERVER_EVENT.approvalResolved, onApproval);
+      socket.off('connect', onApproval);
     };
   }, [id, refreshTask]);
 
@@ -191,6 +196,18 @@ function TaskDetailView({ id }: { id: string }) {
   const sendFollowUp = async (prompt: string, attachments: string[], references: string[]) => {
     await api.followUp(id, prompt, attachments, references);
     refreshTask();
+  };
+
+  const resumable = ['blocked', 'stalled', 'failed'].includes(task?.status ?? '');
+  const continueTask = async () => {
+    setBusy(true);
+    try {
+      await sendFollowUp(CONTINUE_PROMPT, [], []);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const phone = useIsPhone();
@@ -261,6 +278,7 @@ function TaskDetailView({ id }: { id: string }) {
                   Pushed ↗
                 </ButtonLink>
               )}
+              {resumable && <Button onClick={continueTask} disabled={busy}>▶ Continue</Button>}
               {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && <Button onClick={markDone}>✅ Mark as done</Button>}
               {terminal && <Button onClick={() => setDiscussing(true)}>💬 Discuss</Button>}
               {!terminal && (
@@ -355,6 +373,11 @@ function TaskDetailView({ id }: { id: string }) {
                   <ButtonLink href={task.pushedTo} target="_blank" rel="noreferrer">
                     Pushed ↗
                   </ButtonLink>
+                )}
+                {resumable && (
+                  <Button variant="primary" onClick={continueTask} disabled={busy} title="Resume the same session: the agent picks up where it stopped">
+                    ▶ Continue
+                  </Button>
                 )}
                 {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && (
                   <Button variant={task.status === 'review' ? 'primary' : undefined} onClick={markDone} disabled={busy} title="Accept the result — the task becomes “done”">

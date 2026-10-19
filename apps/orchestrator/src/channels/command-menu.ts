@@ -17,6 +17,7 @@ export const COMMAND_MENU: CommandDef[] = [
   { command: 'status', description: 'Active task status' },
   { command: 'subtasks', description: 'Subtasks of the active task' },
   { command: 'done', description: 'Mark the active task as done' },
+  { command: 'continue', description: 'Resume a stopped task', usage: '/continue [text]' },
   { command: 'cancel', description: 'Stop the active task' },
   { command: 'clear', description: 'Forget the active task' },
   { command: 'approve', description: 'Approve a pending request' },

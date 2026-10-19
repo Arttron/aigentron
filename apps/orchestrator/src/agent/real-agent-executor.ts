@@ -51,7 +51,8 @@ import { PreviewService } from '../preview/preview.service';
 import { budgetExceeded, isIdleStuck } from './run-guards';
 import { assemblePromptLayers, withRunContext } from './prompt-layers';
 import { AgentExecutor, type AgentRunOutcome, type TaskRunContext } from './agent-executor';
-import { errorTextOf, isFailoverWorthy, reportText, shortReason, tagSessionId, untagSessionId } from './run-outcome';
+import { classifyProviderFailure, errorTextOf, isFailoverWorthy, reportText, shortReason, tagSessionId, untagSessionId } from './run-outcome';
+import { ProviderCooldown } from './provider-cooldown';
 import { resolveProviderChain } from './provider-chain';
 import { accountRunUsage, addTotals, budgetTokens, emptyTotals, reportingResumeUsage, startOfLocalDay, totalsAfter } from './usage-accounting';
 import { RunDeadline } from './run-watchdogs';
@@ -234,7 +235,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // failure there ends the run with the provider's error instead of handing
     // another provider just the follow-up text.
     const chain = await resolveProviderChain(
-      { agent: agentDef, defaultProvider, override: ctx.discussion ? null : task.providerOverride, noFailover: followUp },
+      { agent: agentDef, defaultProvider, override: ctx.discussion ? null : task.providerOverride, noFailover: followUp, cooling: (n) => this.cooldown.isCooling(n) },
       (name) => this.providers.get(name),
       (m) => this.logger.warn(m),
     );
@@ -301,6 +302,12 @@ export class RealAgentExecutor extends AgentExecutor {
         leadingNote: note,
       });
       last = r.outcome;
+      // A used-up quota, a rate limit or a refused key: remember it, so the next runs start on a fallback right away.
+      if (r.failoverWorthy) {
+        const kind = classifyProviderFailure(r.outcome.errorText ?? r.reason);
+        const ms = this.cooldown.mark(provider.name, kind);
+        if (ms > 0) this.logger.warn(`Provider "${provider.name}" looks ${kind === 'quota' ? 'out of quota / plan' : kind === 'rate' ? 'rate limited' : 'unauthorised'} — runs prefer its fallbacks for ${Math.round(ms / 60_000)} min`);
+      }
       // A clean finish (or a non-provider error) is final. Only a provider-level
       // failure with another provider left triggers failover.
       if (!r.failoverWorthy || isLast) return r.outcome;
@@ -426,6 +433,9 @@ export class RealAgentExecutor extends AgentExecutor {
     const text = last?.text?.trim();
     return text ? text.slice(0, 1000) : undefined;
   }
+
+  /** Providers that just failed with a used-up quota / rate limit / bad credentials (in memory — a hint for ordering, not state). */
+  private readonly cooldown = new ProviderCooldown();
 
   /**
    * One agent run on a single provider. Streams+persists the transcript and the
