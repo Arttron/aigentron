@@ -4,13 +4,13 @@ import { usePolling } from '@/lib/use-polling';
 import { Button, Muted, ErrorText, Row } from '@/components/ui';
 import styles from './ProviderSignIn.module.css';
 
-const ACTIVE = ['starting', 'awaiting_browser', 'awaiting_code', 'finishing'];
+const ACTIVE = ['installing', 'starting', 'awaiting_browser', 'awaiting_code', 'finishing'];
 
 /**
  * “Sign in” for a subscription provider (Codex / Claude): the server runs the provider's own sign-in, this shows the link, the
  * one-time code (or a box for the code the page returns) and the result. The credential never reaches the browser.
  */
-export function ProviderSignIn({ name, onChanged }: { name: string; onChanged?: () => void }) {
+export function ProviderSignIn({ name, onChanged, autoStart = false }: { name: string; onChanged?: () => void; autoStart?: boolean }) {
   const [status, setStatus] = useState<LoginStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -30,6 +30,13 @@ export function ProviderSignIn({ name, onChanged }: { name: string; onChanged?: 
   }, [name, onChanged]);
 
   useEffect(refresh, [refresh]);
+  // Just created: start at once (installs the CLI first when it is missing), so the person only has to sign in.
+  const started = useRef(false);
+  useEffect(() => {
+    if (!autoStart || started.current || !status || !status.supported || status.loggedIn || status.session) return;
+    started.current = true;
+    api.providerLoginStart(name).then(refresh, (e: Error) => setError(e.message));
+  }, [autoStart, status, name, refresh]);
   const session = status?.session ?? null;
   const active = Boolean(session && ACTIVE.includes(session.phase));
   usePolling(refresh, 1500, active);
@@ -55,7 +62,10 @@ export function ProviderSignIn({ name, onChanged }: { name: string; onChanged?: 
     <div className={styles.box}>
       <Row>
         <span className={status.loggedIn ? styles.ok : styles.off}>{status.loggedIn ? '● Signed in' : '○ Not signed in'}</span>
-        <Muted className={styles.grow}>{status.message}</Muted>
+        <Muted className={styles.grow}>
+          {status.runtime && status.runtime.installed && status.runtime.version ? `CLI ${status.runtime.version} · ` : ''}
+          {status.message}
+        </Muted>
         {!active && (
           <Button variant="primary" onClick={() => run(() => api.providerLoginStart(name))} disabled={busy}>
             {status.loggedIn ? 'Sign in again' : 'Sign in'}
@@ -75,7 +85,7 @@ export function ProviderSignIn({ name, onChanged }: { name: string; onChanged?: 
 
       {session && (active || session.phase === 'failed') && (
         <div className={styles.steps}>
-          <Muted>{session.message}</Muted>
+          <Muted>{session.phase === 'installing' ? `⏳ ${session.message}` : session.message}</Muted>
           {session.url && (
             <div className={styles.step}>
               <b>1.</b>{' '}

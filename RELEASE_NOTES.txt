@@ -1,15 +1,10 @@
-Aigentron v0.1.75
+Aigentron v0.1.76
 
-For people who are not programmers: fewer pointless approval cards, a step limit per agent, numbers the admin can show you, and a real test for a Claude subscription.
+For people who are not programmers: choosing Codex now installs it for you and takes you straight to signing in.
 
 New
-- Step limit per agent. In the agent form (and as `maxTurns: 80` in the agent file) you can give an agent more steps per run — useful for a lead that plans big work. Blank = the server default (40).
-- Fewer approval cards for ordinary work. Removing files inside the agent's own folders (its work area, deliverables, the project folder) no longer asks (never the folder itself, never a wildcard, never anything outside, never .git or credentials), and the short `-f` flag only counts for git / docker / kubectl, not for `tail -f`, `grep -f`, `curl -f`, `cp -f`.
-- The admin can show numbers: ask it for metrics on approvals (why cards appear, which commands repeat, how long they wait), tasks (why they stop), agents (steps, failures, cost) or the settings that shape behaviour — as tables — before and after a change.
-- The Test button of a Claude subscription provider now really checks it (one tiny request through the official Claude CLI) and shows the API's own answer, instead of "tokens are not verified".
-- Chat tables are real tables; a message you send appears at once; the admin sees your screenshots (from 0.1.74, now together with the rest).
+- Codex is installed on demand. Create a Codex provider (or press "Sign in" on one) and, if the Codex program is not on the server yet, the server installs it first (about 330 MB, needs 500 MB free and npm), then starts the sign-in: open the link, enter the code. Nothing to do in a terminal. Claude's program ships with the server, so for a Claude subscription you go straight to signing in.
+- A newly created Codex / Claude-subscription provider opens directly into this flow.
+- The location can be moved with CLI_DIR; a Codex you installed yourself (CODEX_BIN) or one baked into the Docker image is used as before.
 
-Safer updates (bare-metal servers)
-- A failed update removes the half-installed release it created, so the next attempt does not fail on a full disk too; the service is brought back automatically; build caches live in <data dir>/cache.
-
-Update note: no database changes. On a small server free some disk space first (see docs/updates.md).
+Update note: no database changes.

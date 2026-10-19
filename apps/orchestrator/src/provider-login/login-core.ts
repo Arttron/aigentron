@@ -3,7 +3,7 @@
  * This file is the pure part — parsing what a login CLI prints and the state a person sees. Nothing here touches processes or secrets.
  */
 
-export type LoginPhase = 'starting' | 'awaiting_browser' | 'awaiting_code' | 'finishing' | 'done' | 'failed' | 'cancelled';
+export type LoginPhase = 'installing' | 'starting' | 'awaiting_browser' | 'awaiting_code' | 'finishing' | 'done' | 'failed' | 'cancelled';
 
 /** What the dashboard gets. Never contains a token or any output of the CLI beyond the link and the short device code. */
 export interface LoginView {
@@ -20,7 +20,7 @@ export interface LoginView {
   finishedAt: string | null;
 }
 
-export const ACTIVE_PHASES: readonly LoginPhase[] = ['starting', 'awaiting_browser', 'awaiting_code', 'finishing'];
+export const ACTIVE_PHASES: readonly LoginPhase[] = ['installing', 'starting', 'awaiting_browser', 'awaiting_code', 'finishing'];
 
 /** What a driver learns from the CLI's output so far. */
 export interface LoginHints {

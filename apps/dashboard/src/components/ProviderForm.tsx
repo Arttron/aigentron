@@ -35,10 +35,13 @@ function defaultKind(url: string): ProviderKind {
 /** Add/edit form for a provider; reused inside the Providers modal. */
 export function ProviderForm({
   initial,
+  autoSignIn = false,
   onSubmit,
   onCancel,
 }: {
   initial?: ProviderInfo;
+  /** open straight into sign-in (a subscription provider that was just created) */
+  autoSignIn?: boolean;
   onSubmit: (values: ProviderFormValues) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -175,7 +178,7 @@ export function ProviderForm({
         )}
         {(values.authMode === 'codex-login' || values.authMode === 'oauth-token') &&
           (initial && initial.authMode === values.authMode ? (
-            <ProviderSignIn name={initial.name} />
+            <ProviderSignIn name={initial.name} autoStart={autoSignIn} />
           ) : (
             <Muted className={styles.note}>Save the provider first — then a “Sign in” button appears here.</Muted>
           ))}

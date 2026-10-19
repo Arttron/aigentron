@@ -25,3 +25,7 @@ Other kinds (API key providers) have nothing to sign in to.
 - The token is never returned by the API, never logged, and the admin agent does not see it (it only sees "signed in").
 
 Using a subscription token outside interactive personal use of the vendor's tool is the operator's own call against the vendor's usage policy.
+
+## The CLI itself is installed on demand (Codex)
+Pressing **Sign in** on a Codex provider whose CLI is not on the server installs it first (`npm install --prefix <data dir>/cli @openai/codex@<pinned version>`, ~330 MB, needs npm and 500 MB free; one install at a time), then goes straight on to the device-code sign-in. A newly created Codex / Claude-subscription provider opens directly into this flow. Claude's CLI ships inside the Agent SDK, so nothing is installed for it. `CLI_DIR` moves the install location; `CODEX_BIN` still points at a CLI you installed yourself, and a CLI baked into the Docker image (or on the PATH) is used as before. The pinned versions live in `apps/orchestrator/src/cli-runtime/runtime-registry.ts` — a new runtime is one more row there plus its sign-in driver.
+

@@ -24,6 +24,7 @@ import { McpHostModule } from './mcp-host/mcp-host.module';
 import { InternalMcpModule } from './internal-mcp/internal-mcp.module';
 import { CodexModule } from './codex/codex.module';
 import { ProviderLoginModule } from './provider-login/provider-login.module';
+import { CliRuntimeModule } from './cli-runtime/cli-runtime.module';
 import { ResearchModule } from './research/research.module';
 import { SecurityModule } from './security/security.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
@@ -93,6 +94,7 @@ import { HealthController } from './health/health.controller';
     McpHostModule,
     InternalMcpModule,
     CodexModule,
+    CliRuntimeModule,
     ProviderLoginModule,
     ResearchModule,
     SecurityModule,

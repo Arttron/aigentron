@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
+import { CLI_RUNTIMES, cliDirOf, localBinPath } from '../cli-runtime/runtime-registry';
 
 const pexec = promisify(execFile);
 
@@ -39,7 +40,10 @@ export class CodexService implements OnModuleInit {
   constructor(private readonly config: AppConfigService) {}
 
   get bin(): string {
-    return process.env.CODEX_BIN?.trim() || 'codex';
+    if (process.env.CODEX_BIN?.trim()) return process.env.CODEX_BIN.trim();
+    // A copy installed on demand from the dashboard (CliRuntimeService) wins over nothing on the PATH; a baked-in / global `codex` is used otherwise.
+    const local = localBinPath(cliDirOf(this.config.secretsDir), CLI_RUNTIMES.codex);
+    return existsSync(local) ? local : 'codex';
   }
 
   /** Where the shared ChatGPT sign-in lives: `CODEX_AUTH_HOME`, else `<secretsDir>/codex` (outside the agent tree). */

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { CliRuntimeService, type RuntimeStatus } from '../cli-runtime/cli-runtime.service';
 import { CodexService } from '../codex/codex.service';
 import { ProvidersService } from '../providers/providers.service';
 import { claudeDriver, codexDriver } from './login-drivers';
@@ -24,6 +25,8 @@ export interface LoginStatus {
   message: string;
   /** The attempt in progress (or the last one), if any. */
   session: LoginView | null;
+  /** The agent runtime's program: installed? (Codex is installed from here on demand; Claude's ships with the server.) */
+  runtime: Pick<RuntimeStatus, 'installed' | 'version' | 'installable'> | null;
 }
 
 /**
@@ -43,7 +46,12 @@ export class ProviderLoginService {
   constructor(
     private readonly providers: ProvidersService,
     private readonly codex: CodexService,
+    private readonly runtimes: CliRuntimeService,
   ) {}
+
+  /** Providers whose CLI is being installed right now, then signed in; and the reason an install failed. */
+  private readonly installing = new Set<string>();
+  private readonly installFailed = new Map<string, string>();
 
   private async flavorOf(name: string): Promise<{ flavor: LoginFlavor | null; row: Awaited<ReturnType<ProvidersService['getRow']>> }> {
     const row = await this.providers.getRow(name).catch(() => null);
@@ -55,11 +63,13 @@ export class ProviderLoginService {
 
   async status(name: string): Promise<LoginStatus> {
     const { flavor, row } = await this.flavorOf(name);
-    const session = this.sessions.get(name)?.view() ?? null;
-    if (!flavor) return { supported: false, flavor, loggedIn: false, message: 'This provider uses an API key — there is nothing to sign in to.', session: null };
+    const session = this.installView(name) ?? this.sessions.get(name)?.view() ?? null;
+    if (!flavor) return { supported: false, flavor, loggedIn: false, message: 'This provider uses an API key — there is nothing to sign in to.', session: null, runtime: null };
     if (flavor === 'codex') {
+      const rt = await this.runtimes.status('codex');
       const s = await this.codex.status();
-      return { supported: true, flavor, loggedIn: s.loggedIn, message: s.message, session };
+      const runtime = { installed: rt.installed, version: rt.version, installable: rt.installable };
+      return { supported: true, flavor, loggedIn: s.loggedIn, message: rt.installed ? s.message : `The ${rt.label} is not installed on this server yet — “Sign in” installs it first.`, session, runtime };
     }
     return {
       supported: true,
@@ -67,6 +77,7 @@ export class ProviderLoginService {
       loggedIn: Boolean(row.secret),
       message: row.secret ? `Signed in (token …${row.secret.slice(-4)}, valid about a year).` : 'Not signed in.',
       session,
+      runtime: { installed: true, version: null, installable: false },
     };
   }
 
@@ -75,6 +86,28 @@ export class ProviderLoginService {
     if (!flavor) throw new BadRequestException('This provider uses an API key — there is nothing to sign in to.');
     const running = this.sessions.get(name);
     if (running?.active) return running.view();
+    if (this.installing.has(name)) return this.installView(name)!;
+
+    // Codex's program is installed on demand, then the sign-in starts by itself.
+    if (flavor === 'codex') {
+      const rt = await this.runtimes.status('codex');
+      if (!rt.installed) {
+        this.installFailed.delete(name);
+        this.installing.add(name);
+        void this.runtimes
+          .install('codex')
+          .then(async (r) => {
+            this.installing.delete(name);
+            if (r.phase === 'done') await this.start(name).catch((e: Error) => this.installFailed.set(name, e.message));
+            else this.installFailed.set(name, r.message);
+          })
+          .catch((e: Error) => {
+            this.installing.delete(name);
+            this.installFailed.set(name, e.message);
+          });
+        return this.installView(name)!;
+      }
+    }
 
     const driver = await this.driverFor(flavor, name);
     const session = new LoginSession(
@@ -87,6 +120,16 @@ export class ProviderLoginService {
     session.start();
     this.logger.log(`Sign-in started for provider "${name}" (${flavor})`);
     return session.view();
+  }
+
+  /** The "installing the CLI" step as a login view (null when no install is going on or failed for this provider). */
+  private installView(name: string): LoginView | null {
+    const now = new Date().toISOString();
+    if (this.installing.has(name)) {
+      return { phase: 'installing', url: null, userCode: null, needsCode: false, message: this.runtimes.view().message || 'Installing the CLI…', startedAt: now, finishedAt: null };
+    }
+    const failed = this.installFailed.get(name);
+    return failed ? { phase: 'failed', url: null, userCode: null, needsCode: false, message: failed, startedAt: now, finishedAt: now } : null;
   }
 
   async submit(name: string, code: string): Promise<LoginView> {

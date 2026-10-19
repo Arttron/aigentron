@@ -5,7 +5,7 @@ import { Card, SectionTitle, Field, Row, Button, Modal, Badge, Muted, ErrorText 
 import { ProviderForm, type ProviderFormValues } from './ProviderForm';
 import styles from './ProvidersManager.module.css';
 
-type ModalState = { mode: 'add' } | { mode: 'edit'; provider: ProviderInfo } | null;
+type ModalState = { mode: 'add' } | { mode: 'edit'; provider: ProviderInfo; autoSignIn?: boolean } | null;
 
 export function ProvidersManager() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
@@ -45,7 +45,7 @@ export function ProvidersManager() {
         ...(values.secret.trim() ? { secret: values.secret.trim() } : {}),
       });
     } else {
-      await api.createProvider({
+      const created = await api.createProvider({
         name: values.name.trim(),
         kind: values.kind,
         baseUrl: values.baseUrl.trim() || undefined,
@@ -55,6 +55,12 @@ export function ProvidersManager() {
         ...(tpm ? { tpm } : {}),
         secret: values.secret.trim() || undefined,
       });
+      // A subscription provider (Codex / Claude): straight on to its sign-in — the CLI is installed first when it is missing.
+      if (values.authMode === 'codex-login' || (values.authMode === 'oauth-token' && !values.secret.trim())) {
+        setModal({ mode: 'edit', provider: created, autoSignIn: true });
+        await refresh();
+        return;
+      }
     }
     setModal(null);
     await refresh();
@@ -184,7 +190,9 @@ export function ProvidersManager() {
           onClose={() => setModal(null)}
         >
           <ProviderForm
+            key={modal.mode === 'edit' ? modal.provider.name : 'new'}
             initial={modal.mode === 'edit' ? modal.provider : undefined}
+            autoSignIn={modal.mode === 'edit' && modal.autoSignIn}
             onSubmit={submitForm}
             onCancel={() => setModal(null)}
           />

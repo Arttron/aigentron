@@ -122,7 +122,7 @@ export interface WorkspaceListing {
 }
 
 /** An AI model endpoint (from GET /api/providers; secret masked). */
-export type LoginPhase = 'starting' | 'awaiting_browser' | 'awaiting_code' | 'finishing' | 'done' | 'failed' | 'cancelled';
+export type LoginPhase = 'installing' | 'starting' | 'awaiting_browser' | 'awaiting_code' | 'finishing' | 'done' | 'failed' | 'cancelled';
 export interface LoginView {
   phase: LoginPhase;
   url: string | null;
@@ -138,6 +138,8 @@ export interface LoginStatus {
   loggedIn: boolean;
   message: string;
   session: LoginView | null;
+  /** the agent runtime's program: installed here? (Codex is installed on demand by “Sign in”) */
+  runtime: { installed: boolean; version: string | null; installable: boolean } | null;
 }
 
 export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'codex';
