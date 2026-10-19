@@ -8,11 +8,12 @@
 
 | Thing | What it is |
 |---|---|
-| **Project** (`WORKSPACE_REPO_PATH`) | The repository the agents work on. Real checkout of *your* project (e.g. `tesla-info`). |
-| **Shared workspace** (`WORKSPACE_DIR`) | Non-code results of the agents, one folder next to the repo and the agent dir (`/workspace/workspace` dev — bind-mounted from host `./workspace` via `WORKSPACE_HOST_PATH`; `/data/workspace` minimal; `$DATA_DIR/workspace` bare). Created automatically, never overwritten: `WORKSPACE.md` (brief — a person edits it), `memory/` (`decisions.md`, `questions.md`, `facts.md`, `plan.md`, `status.md` — written with `workspace_note`), `work/` (drafts, data), `deliverables/` (results via `workspace_save`, the newest 5 older versions of each file in `.versions/`, none older than 90 days). Design and the later per-project plan: `docs/plan-projects-workspace.md`. |
+| **Default project** (`WORKSPACE_REPO_PATH`) | The repository the agents work on when no other project is chosen. Real checkout of *your* project (e.g. `tesla-info`). It is the checkout of the project `default` (`Project.repoPath`, adopted in place at every boot). |
+| **Shared workspace** (`WORKSPACE_DIR`) | Non-code results of the agents, one folder next to the repo and the agent dir (`/workspace/workspace` dev — bind-mounted from host `./workspace` via `WORKSPACE_HOST_PATH`; `/data/workspace` minimal; `$DATA_DIR/workspace` bare). Created automatically, never overwritten: `WORKSPACE.md` (brief — a person edits it), `memory/` (`decisions.md`, `questions.md`, `facts.md`, `plan.md`, `status.md` — written with `workspace_note`), `work/` (drafts, data), `deliverables/` (results via `workspace_save`, the newest 5 older versions of each file in `.versions/`, none older than 90 days). It is the folder of the project `default`. Design: `docs/plan-projects-workspace.md`. |
+| **Projects dir** (`PROJECTS_DIR`) | Every other project: `<PROJECTS_DIR>/<slug>/` with the same layout as the shared workspace (`PROJECT.md` as the brief, `memory/`, `work/`, `deliverables/`) plus its checkout in `repo/` (unless `Project.repoPath` points elsewhere). A docs project has no checkout: its tasks work in `work/`. Sibling of the agent dir by default: `/workspace/projects` (compose), `/data/projects` (minimal), `$DATA_DIR/projects` (bare). |
 | **Agent dir** (`AGENT_DIR`) | The platform's own files: `agents/` (live agents), `skills/`, `catalog/` (templates), `builtin/` (admin), `packs/` (starter packs), `resources/` (the shared library, `docs/resources.md`), `runs/<taskId>/` (per-task working files), `attachments/<taskId>/`, `cache/digests/<hash>/` (video frames + transcripts, regenerable), `research-cache/`, `research.json`, `admin-audit.jsonl`, `.sync/`, `.snapshots/`. Knowledge bases (`docs/knowledge-base.md`) live in the database, not here. |
 | **Secrets dir** (`SECRETS_DIR`, default sibling `…/secrets`) | Credentials and access settings that must not sit in the agent tree: the shared Codex sign-in (`secrets/codex/auth.json`), `auth.json` (password hashes + session key, `docs/authentication.md`), `access.json` (allowed domains), `cloudflare-access.json`, `web-server.json` + `tls/` (`docs/remote-access.md`), `voice.json` (`docs/voice.md`). |
-| **Worktrees root** (`WORKTREES_ROOT`) | Per-task git worktrees — only used when `WORKSPACE_SHARED=false` (the old mode). |
+| **Worktrees root** (`WORKTREES_ROOT`) | Per-task git worktrees, nested per project: `<root>/<slug>/<taskId>` — only for projects in worktree isolation (`Project.isolation = worktree`, or `WORKSPACE_SHARED=false` when the project follows the installation). Flat `<root>/<taskId>` folders from before projects are understood by the cleanup. |
 | **Database** | Postgres (full/dev) or one SQLite file (minimal/bare). |
 
 ## 2. Paths per deployment mode
@@ -46,20 +47,41 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 
 ## 3. How agents see the project
 
-- **Shared mode** (`WORKSPACE_SHARED=true`, default in all profiles): every task works directly in the project checkout, one
-  task at a time (concurrency is forced to 1 even if Settings says more). No per-task branch or PR; the agents edit whatever
-  branch is currently checked out. If a repo URL + token are configured the orchestrator can push the current branch.
-- **Workspace tools and boundary.** Besides the project, every working agent may write inside the shared workspace (an extra write root in the approval hook, `LDS_EXTRA_WRITE_ROOTS`); the prompt gets a short block with the folders plus a memory digest (brief, status, last 15 decisions, open questions; ≤ ~6 KB, last in the prompt). Tools (`workspace_info`, `workspace_files`, `workspace_note`, `workspace_save`) are free; discussion participants only get info/files. A file saved with `workspace_save` is also listed in the task's attachments as a **link** (no copy: `<attachments>/<taskId>/.links.json` maps the listed name to the file; only files of the workspace or the resource library, re-checked on every read; the entry vanishes if the source is deleted; deleting the task removes the link, never the file). Answers to `ask_user` are appended to `decisions.md` automatically. Existing installs need no migration — the folder simply appears. A person sees it on the dashboard page **📁 Workspace** (`/workspace`): browse, preview Markdown/text/images/PDF, download, upload into `work/`, delete in `work/`/`deliverables/`, edit the brief; API `GET /api/workspace`, `GET /api/workspace/files?path=`, `GET|PUT|DELETE /api/workspace/file?path=` (writes only in `work/` and `WORKSPACE.md`, operator/admin; no symlink out; html/svg/js only download). Its size is in Settings → General → Disk & cleanup and is never cleaned automatically.
-- **Worktree mode** (`WORKSPACE_SHARED=false`): each task gets `agent/task-<id>` in its own worktree under `WORKTREES_ROOT`;
-  on success the branch is pushed and a PR opened.
-- The agent's working directory is the project root, or the *Project subdirectory* from Settings → General (a **relative folder
-  inside the repo**, validated; empty = root). Chat agents (the admin) run in the agent dir instead and have no file tools.
+- **One project per task.** Every task belongs to a project (`Task.projectId`; the default project unless another slug was given,
+  a subtask follows its lead). The worker resolves the task's project ONCE per job (`ProjectsService.contextFor`) and everything
+  below — checkout, mode, cwd, verify commands and attempts, write roots, the `workspace_*` folder, the default lead, the
+  escalation chat — comes from that project. The global Settings → General repository fields are the default project's
+  (a write there is mirrored into the project row). Git credentials are the project's (`docs/projects.md`: token / SSH key files
+  in the secrets dir, `GIT_CREDENTIALS` port) and travel in the env of EACH git command — clone/fetch (`RepoSyncService`),
+  worktree creation, push; nothing is written into a checkout's `.git/config`, so agents never hold a secret. Providers and
+  MCP servers are shared by all projects; the `github` MCP server's `GITHUB_TOKEN` for a run is the task's project's token
+  (the legacy global token, then the server's own config, as fallbacks).
+- **Shared mode** (`Project.isolation = shared`, or `WORKSPACE_SHARED=true` when the project follows the installation — the
+  default in all profiles): every task of the project works directly in the project's checkout, one task of that project at a
+  time (an in-process FIFO lock per project in the worker). Tasks of DIFFERENT projects run side by side under the global
+  concurrency cap (Settings → General): a task waiting for its project's lock lends its slot to the others, so a busy project
+  never starves the rest; a lead never holds the lock while it waits for its subtasks. No per-task branch or PR; the agents
+  edit whatever branch is currently checked out. If a repo URL + credentials are configured the orchestrator pushes the
+  current branch to the project's remote. With only the default project this is exactly the old behaviour (the seeded
+  concurrency is still 1 in shared mode — raise it in Settings to run projects in parallel).
+- **Workspace tools and boundary.** Besides the checkout, every working agent may write inside ITS project's folder (an extra write root in the approval hook, `LDS_EXTRA_WRITE_ROOTS`: the shared workspace for the default project, `<PROJECTS_DIR>/<slug>` for the others; never another project's); the prompt gets a short block with the folders plus a memory digest (brief, status, last 15 decisions, open questions; ≤ ~6 KB, last in the prompt) and names the project in the orientation. Tools (`workspace_info`, `workspace_files`, `workspace_note`, `workspace_save`) are free and bound to the task's project folder; discussion participants only get info/files. The media tools (`look_at`, `show_images`, `video_digest`, `read_document`, `ask_user` pictures) accept files of the task's attachments, the resource library, the task's checkout and its own project folder — not other projects'. A file saved with `workspace_save` is also listed in the task's attachments as a **link** (no copy: `<attachments>/<taskId>/.links.json` maps the listed name to the file; only files of the workspace, the projects dir or the resource library, re-checked on every read; the entry vanishes if the source is deleted; deleting the task removes the link, never the file). Answers to `ask_user` are appended to the project's `decisions.md` automatically. Existing installs need no migration — the folder simply appears. A person sees the default project's folder on the dashboard page **📁 Workspace** (`/workspace`): browse, preview Markdown/text/images/PDF, download, upload into `work/`, delete in `work/`/`deliverables/`, edit the brief; API `GET /api/workspace`, `GET /api/workspace/files?path=`, `GET|PUT|DELETE /api/workspace/file?path=` (writes only in `work/` and `WORKSPACE.md`, operator/admin; no symlink out; html/svg/js only download). Its size — and every project's folder and checkout — is in Settings → General → Disk & cleanup (`GET /api/maintenance/report` → `projects[]`) and is never cleaned automatically.
+- **Worktree mode** (`Project.isolation = worktree`, or `WORKSPACE_SHARED=false`): each task gets `agent/task-<id>` in its own worktree
+  under `WORKTREES_ROOT/<slug>/`; on success the branch is pushed to the project's remote and a PR opened (GitHub remotes; the PR
+  API still uses the installation's token). Tasks of such a project run in parallel.
+- **Docs projects** (`Project.kind = docs`): no checkout, no verify, no push; the agent's working directory is the project's `work/`.
+- The agent's working directory is the checkout root, or the project's *subdirectory* (`Project.repoSubdir`; the default project's
+  comes from *Project subdirectory* in Settings → General — a **relative folder inside the repo**, validated; empty = root). Chat
+  agents (the admin) run in the agent dir instead and have no file tools.
+- Verify commands and the number of fix attempts are the project's (`Project.verifyCommands` / `verifyMaxAttempts`; the default
+  project's are the Settings → General values). A task without an agent gets the project's `defaultAgent`, else the global one; a
+  blocked task without a chat thread escalates to the project's notification chat, else the global one (Settings → Escalations).
 - Approvals gate risky actions; reads of credential files (`.env*`, `auth.json`, `.git/config`, `/proc/*/environ`, `secrets/`, ssh/cloud keys)
   need approval. Note the project itself may contain such files (`.env.local`, `.env.production`…) — they are gated, not hidden.
 - With agent isolation on (`AGENT_RUN_AS_UID`, `docs/authentication.md`) the agent is a separate OS user: `secrets/`, the database,
-  `.env`, `backups/` and the LiteLLM routes file are closed to it by permissions; `repo/`, `worktrees/*`, `workspace/`,
-  `agent/attachments/` and `agent/runs/<task>/{home,codex-home}` belong to that user (the orchestrator re-applies this before every
-  run; `infra/harden.sh` on every start). Files an agent creates are owned by uid 1500 — root reads them as usual.
+  `.env`, `backups/` and the LiteLLM routes file are closed to it by permissions; `repo/`, `worktrees/*`, `workspace/`, `projects/*`
+  (each project's folder with its checkout), `agent/attachments/` and `agent/runs/<task>/{home,codex-home}` belong to that user (the
+  orchestrator re-applies this before every run for the task's own project; `infra/harden.sh` on every start). Files an agent creates
+  are owned by uid 1500 — root reads them as usual.
 
 ## 4. Environment files — who reads what
 
@@ -75,7 +97,7 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `WORKSPACE_REPO_PATH`, `WORKSPACE_DIR`, `WORKTREES_ROOT`, `AGENT_DIR`, `ATTACHMENTS_DIR`, `SECRETS_DIR` | see §2 (`WORKSPACE_DIR` default: next to the agent dir) | Container/process paths. |
+| `WORKSPACE_REPO_PATH`, `WORKSPACE_DIR`, `PROJECTS_DIR`, `WORKTREES_ROOT`, `AGENT_DIR`, `ATTACHMENTS_DIR`, `SECRETS_DIR` | see §2 (`WORKSPACE_DIR` / `PROJECTS_DIR` default: next to the agent dir) | Container/process paths. |
 | `PROJECT_HOST_PATH`, `AGENT_HOST_PATH`, `WORKSPACE_HOST_PATH` | `./project`, `./agent`, `./workspace` | Host side of the dev bind mounts. |
 | `WORKSPACE_SHARED` | `true` (set by compose and the minimal/bare profiles; the code default without it is `false`) | Shared vs worktree mode (§3). |
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface the **dev compose** ports are published on. `0.0.0.0` exposes dashboard, API, LiteLLM, Postgres, Redis — they have no authentication. Minimal/bare listen on all interfaces; protect them with a firewall/VPN. |
@@ -126,7 +148,11 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 
 ## 7. Known caveats
 
-- Concurrency shown in Settings is ignored in shared mode (effectively 1).
+- Concurrency in Settings is the cap for all projects together; tasks of one shared-mode project still run one at a time. Installs
+  made in shared mode were seeded with 1 — raise it to run several projects at once. Chat turns (the admin) no longer queue
+  behind a running task.
+- Settings → General still shows the repository / subdirectory / verify fields: they are the default project's (writes are
+  mirrored into the project row; a change made through `PATCH /api/projects/default` is not shown back there yet).
 - The project often carries its own `.env.*` files; they are inside the agents' working directory.
 - Dev stack, project repo: stale `agent/task-*` worktrees/branches from the former worktree mode may exist (see the report) —
   ask the admin to propose a cleanup, or call the endpoint with `dryRun` first.

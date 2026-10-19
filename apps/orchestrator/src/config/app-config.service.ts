@@ -129,6 +129,13 @@ export class AppConfigService {
   readonly attachmentsDir: string;
   /** The shared workspace (memory / work / deliverables) the agents write non-code results to. */
   readonly workspaceDir: string;
+  /**
+   * Where projects live (docs/plan-projects-workspace.md §2.1): `<PROJECTS_DIR>/<slug>/` holds a project's
+   * memory / work / deliverables and, unless `Project.repoPath` says otherwise, its checkout under `repo/`.
+   * Sibling of the agent dir by default: `/workspace/projects` (compose), `/data/projects` (minimal/bare).
+   * The default project is the exception: it adopts WORKSPACE_REPO_PATH and WORKSPACE_DIR in place.
+   */
+  readonly projectsDir: string;
 
   /** Host the MCP entry point (POST/GET /api/mcp) for external clients. */
   readonly mcpHostEnabled: boolean;
@@ -216,6 +223,7 @@ export class AppConfigService {
     this.dashboardBaseUrl = (process.env.DASHBOARD_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
     this.attachmentsDir = process.env.ATTACHMENTS_DIR ?? join(this.agentDir, 'attachments');
     this.workspaceDir = process.env.WORKSPACE_DIR?.trim() || join(this.agentDir, '..', 'workspace');
+    this.projectsDir = process.env.PROJECTS_DIR?.trim() || join(this.agentDir, '..', 'projects');
     this.mcpHostEnabled = !/^(0|false|no)$/i.test(process.env.MCP_HOST_ENABLED ?? 'true');
     this.mcpAllowedOrigins = (process.env.MCP_ALLOWED_ORIGINS ?? '')
       .split(',')

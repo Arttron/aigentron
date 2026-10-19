@@ -112,8 +112,12 @@ gets "permission denied". The classifier/approval gate stays as a guard rail aga
 it is a deny-list of patterns, not a boundary.
 
 Still shared with isolation on: the agent user is one for all tasks (a run can read another run's `codex-home`), the hook secret and
-the orchestrator's local HTTP port are in the agent's reach (the sign-in cookie is not — it only grants `approvals/check|wait`), and the
-project checkout's `.git/config` holds the GitHub token so the agent can push (as before).
+the orchestrator's local HTTP port are in the agent's reach (the sign-in cookie is not — it only grants `approvals/check|wait`).
+
+**Repository credentials** (tokens, SSH deploy keys, pinned host keys) are files under `<secrets dir>/projects/<slug>/` — 0700 /
+0600, read by the orchestrator only and handed to its own git as environment, never to agents (the project sync writes
+nothing into a checkout's `.git/config`). How to set them up per project, add a deploy key on GitHub / GitLab / Bitbucket and test the access:
+[docs/projects.md](projects.md).
 
 ## Honest limits
 

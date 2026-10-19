@@ -22,9 +22,21 @@ describe('safePath with a task id', () => {
     await expect(svc.safePath(join(base, 'attachments/tA/a.txt'), undefined, 'tA')).resolves.toContain('a.txt');
     await expect(svc.safePath(join(base, 'attachments/tB/b.txt'), undefined, 'tA')).rejects.toThrow(/not available/);
   });
-  it('still allows the workspace and extra roots', async () => {
+  it('allows the project folder the caller names (the task\'s own), as an extra root', async () => {
     await writeFile(join(base, 'ws/r.txt'), 'r');
-    await expect(svc.safePath(join(base, 'ws/r.txt'), undefined, 'tA')).resolves.toContain('r.txt');
+    await expect(svc.safePath(join(base, 'ws/r.txt'), [join(base, 'ws')], 'tA')).resolves.toContain('r.txt');
+  });
+  it('a task of one project cannot reach another project\'s folder, nor the shared workspace of the default project', async () => {
+    for (const d of ['projects/alpha/deliverables', 'projects/beta/deliverables']) await mkdir(join(base, d), { recursive: true });
+    await writeFile(join(base, 'projects/alpha/deliverables/a.png'), 'a');
+    await writeFile(join(base, 'projects/beta/deliverables/b.png'), 'b');
+    await writeFile(join(base, 'ws/w.png'), 'w');
+    const mine = [join(base, 'projects/alpha')];
+    await expect(svc.safePath(join(base, 'projects/alpha/deliverables/a.png'), mine, 'tA')).resolves.toContain('a.png');
+    await expect(svc.safePath(join(base, 'projects/beta/deliverables/b.png'), mine, 'tA')).rejects.toThrow(/not available/);
+    await expect(svc.safePath(join(base, 'ws/w.png'), mine, 'tA')).rejects.toThrow(/not available/);
+    // the HTTP endpoints (no task id) keep the shared workspace, as before
+    await expect(svc.safePath(join(base, 'ws/w.png'))).resolves.toContain('w.png');
   });
   it('rejects a task id that is a path', async () => {
     await expect(svc.safePath(join(base, 'attachments/tB/b.txt'), undefined, '../tB')).rejects.toThrow();

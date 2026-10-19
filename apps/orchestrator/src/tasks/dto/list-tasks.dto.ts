@@ -21,6 +21,12 @@ export class ListTasksDto {
   @MaxLength(20)
   type?: string;
 
+  /** Only tasks of this project (slug). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  project?: string;
+
   /** 1-based page number. */
   @IsOptional()
   @Type(() => Number)

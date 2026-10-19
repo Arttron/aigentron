@@ -5,6 +5,8 @@ import { TasksService } from '../tasks/tasks.service';
 import { ChannelsService } from '../channels/channels.service';
 import { ChannelManagerService } from '../channels/channel-manager.service';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
+import { ProjectsService } from '../projects/projects.service';
+import { knownProjectLabel } from '../projects/project-labels';
 import { describeSchedule, inQuietHours, isHM, isValidScheduleName, nextRun, validateCron } from './schedule-core';
 
 type ScheduleRow = NonNullable<Awaited<ReturnType<PrismaService['schedule']['findUnique']>>>;
@@ -23,6 +25,8 @@ export interface ScheduleInput {
   chatId?: string | null;
   quietStart?: string | null;
   quietEnd?: string | null;
+  /** slug of the project the scheduled task is created in (null / omitted = the default project) */
+  project?: string | null;
 }
 
 const TICK_MS = 30_000;
@@ -51,6 +55,8 @@ export function serializeSchedule(r: ScheduleRow) {
     chatId: r.chatId,
     quietStart: r.quietStart,
     quietEnd: r.quietEnd,
+    projectId: r.projectId,
+    project: r.projectId ? knownProjectLabel(r.projectId) : null,
     nextRunAt: r.nextRunAt?.toISOString() ?? null,
     lastRunAt: r.lastRunAt?.toISOString() ?? null,
     lastStatus: r.lastStatus,
@@ -75,6 +81,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     private readonly channels: ChannelsService,
     private readonly manager: ChannelManagerService,
     private readonly agents: AgentRegistryService,
+    private readonly projects: ProjectsService,
   ) {}
 
   onModuleInit(): void {
@@ -120,7 +127,19 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       if (!v.agentName) return 'a task needs an agent.';
       if (!(await this.agents.get(v.agentName).catch(() => null))) return `no agent named "${v.agentName}".`;
     }
+    if (input.project) {
+      const p = await this.projects.get(input.project).catch(() => null);
+      if (!p) return `no project "${input.project}".`;
+      if (p.archivedAt) return `project "${input.project}" is archived.`;
+    }
     return null;
+  }
+
+  /** The project id a slug stands for (null = the default project); validated above. */
+  private async projectIdOf(slug: string | null | undefined): Promise<string | null> {
+    if (!slug) return null;
+    const p = await this.projects.get(slug);
+    return p.isDefault ? null : p.id;
   }
 
   async create(input: ScheduleInput, by?: string): Promise<ScheduleRow> {
@@ -144,6 +163,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         chatId: input.chatId ? String(input.chatId) : null,
         quietStart: input.quietStart ?? null,
         quietEnd: input.quietEnd ?? null,
+        projectId: await this.projectIdOf(input.project),
         nextRunAt: nextRun(cron, tz, new Date()),
         createdBy: by ?? null,
       },
@@ -156,6 +176,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     if (bad) throw new BadRequestException(bad);
     const next = { ...cur, ...Object.fromEntries(Object.entries(input).filter(([, x]) => x !== undefined)) } as ScheduleRow;
     const cron = next.cron.trim().replace(/\s+/g, ' ');
+    const projectId = input.project === undefined ? cur.projectId : await this.projectIdOf(input.project);
     return this.prisma.schedule.update({
       where: { id },
       data: {
@@ -168,9 +189,10 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         agentName: next.kind === 'task' ? next.agentName : null,
         taskMode: next.kind === 'task' && next.taskMode === 'new' ? 'new' : 'same',
         // a different agent, chat or channel (or switching to "new") must not keep feeding the old conversation: its thread is bound to the old chat
-        ...(next.agentName !== cur.agentName || next.kind !== cur.kind || next.taskMode === 'new' || (next.channelId ?? null) !== cur.channelId || (next.chatId ? String(next.chatId) : null) !== cur.chatId
+        ...(next.agentName !== cur.agentName || next.kind !== cur.kind || next.taskMode === 'new' || (next.channelId ?? null) !== cur.channelId || (next.chatId ? String(next.chatId) : null) !== cur.chatId || projectId !== cur.projectId
           ? { taskId: null }
           : {}),
+        projectId,
         channelId: next.channelId,
         chatId: next.chatId ? String(next.chatId) : null,
         quietStart: next.quietStart || null,
@@ -261,7 +283,9 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
           }
         }
       }
-      const task = await this.tasks.create({ prompt: row.text, title: `⏰ ${row.name}`, agentName: row.agentName ?? undefined, createdByChannel: `schedule:${row.name}` });
+      // the task goes into the schedule's project (a deleted project has set the column to null = default)
+      const project = row.projectId ? (await this.projects.getById(row.projectId).catch(() => null))?.slug : undefined;
+      const task = await this.tasks.create({ prompt: row.text, title: `⏰ ${row.name}`, agentName: row.agentName ?? undefined, createdByChannel: `schedule:${row.name}`, project });
       if (row.taskMode !== 'new') await this.prisma.schedule.update({ where: { id: row.id }, data: { taskId: task.id } }).catch(() => undefined);
       if (row.channelId && row.chatId) {
         await this.channels.linkThread(row.channelId, task.id, row.chatId);

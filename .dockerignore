@@ -13,6 +13,7 @@ dist
 .env.*
 !.env.example
 .workspace
+projects
 *.log
 
 # live/runtime agent state must not be baked into images (templates live in agent/catalog)

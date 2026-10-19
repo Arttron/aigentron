@@ -5,7 +5,7 @@
 # image versions), install.sh (fresh bare-metal installs) and `aigentron harden`.
 #
 #   AGENT_RUN_AS_UID / AGENT_RUN_AS_GID   the agent user (default 1500/1500)
-#   DATA_DIR    (default /data)   secrets/, orchestrator.db, repo/, worktrees/, workspace/, agent/
+#   DATA_DIR    (default /data)   secrets/, orchestrator.db, repo/, worktrees/, workspace/, projects/, agent/
 #   APP_DIR     (default /app)    the release (hook script, shared dist, node_modules)
 #   ENV_FILE    (optional)        the .env the service reads (bare-metal) → 0600
 #
@@ -13,8 +13,8 @@
 #   1. creates the `agent` user/group with that uid/gid if no such uid exists
 #   2. closes what the agent must never read: secrets/ 0700, the SQLite db (+wal/shm)
 #      0600, litellm-config.generated.yaml 0600, backups/ 0700, update/ 0700, .env 0600
-#   3. hands the agent what it writes: repo/, worktrees/*, workspace/, agent/attachments/,
-#      agent/runs/*/{home,codex-home} → chown -R agent
+#   3. hands the agent what it writes: repo/, worktrees/*, workspace/, projects/* (each project's
+#      folder with its checkout), agent/attachments/, agent/runs/*/{home,codex-home} → chown -R agent
 #   4. lets root's git work in agent-owned checkouts: safe.directory=* in the system gitconfig
 #   5. self-check as the agent user through infra/agent-exec.sh (the very path the
 #      orchestrator uses): secrets unreadable, the hook/shared dist/node readable
@@ -31,6 +31,7 @@ REPO_DIR="${WORKSPACE_REPO_PATH:-$DATA_DIR/repo}"
 WORKTREES_DIR="${WORKTREES_ROOT:-$DATA_DIR/worktrees}"
 ATTACH_DIR="${ATTACHMENTS_DIR:-$AGENT_DIR/attachments}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-$DATA_DIR/workspace}"
+PROJECTS_DIR="${PROJECTS_DIR:-$DATA_DIR/projects}"
 SECRETS_DIR="${SECRETS_DIR:-$DATA_DIR/secrets}"
 DB_FILE="${DATABASE_URL#file:}"; case "${DATABASE_URL:-}" in file:*) ;; *) DB_FILE="$DATA_DIR/orchestrator.db" ;; esac
 
@@ -69,13 +70,14 @@ done
 say "closed: $SECRETS_DIR (0700), $DB_FILE (0600), $DATA_DIR/backups (0700)${ENV_FILE:+, $ENV_FILE (0600)}"
 
 # 3. what the agent writes (the orchestrator re-applies this per run for the task's own dirs; this is the one-time/boot pass)
-mkdir -p "$REPO_DIR" "$WORKTREES_DIR" "$WORKSPACE_DIR" "$ATTACH_DIR" "$AGENT_DIR/runs"
-chmod 755 "$DATA_DIR" "$AGENT_DIR" "$AGENT_DIR/runs" "$WORKTREES_DIR" 2>/dev/null || true
+mkdir -p "$REPO_DIR" "$WORKTREES_DIR" "$WORKSPACE_DIR" "$PROJECTS_DIR" "$ATTACH_DIR" "$AGENT_DIR/runs"
+chmod 755 "$DATA_DIR" "$AGENT_DIR" "$AGENT_DIR/runs" "$WORKTREES_DIR" "$PROJECTS_DIR" 2>/dev/null || true
 chown -R "$UID_:$GID_" "$REPO_DIR" "$WORKSPACE_DIR" "$ATTACH_DIR"
-for d in "$WORKTREES_DIR"/*/ "$AGENT_DIR"/runs/*/home/ "$AGENT_DIR"/runs/*/codex-home/; do
+# worktrees are nested per project (<root>/<slug>/<task>); a project folder holds its memory/work/deliverables and its checkout (repo/)
+for d in "$WORKTREES_DIR"/*/ "$PROJECTS_DIR"/*/ "$AGENT_DIR"/runs/*/home/ "$AGENT_DIR"/runs/*/codex-home/; do
   [ -d "$d" ] && chown -R "$UID_:$GID_" "$d"
 done
-say "owned by $AGENT_NAME: $REPO_DIR, $WORKSPACE_DIR, $ATTACH_DIR, $WORKTREES_DIR/*, $AGENT_DIR/runs/*/{home,codex-home}"
+say "owned by $AGENT_NAME: $REPO_DIR, $WORKSPACE_DIR, $PROJECTS_DIR/*, $ATTACH_DIR, $WORKTREES_DIR/*, $AGENT_DIR/runs/*/{home,codex-home}"
 
 # 4. root's git in agent-owned checkouts
 if command -v git >/dev/null 2>&1; then

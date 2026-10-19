@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, type ChannelInfo, type Settings, type SettingsUpdate } from '@/lib/api';
 import { Card, SectionTitle, Field, Row, Button, Muted, ErrorText } from '@/components/ui';
 import { resetAssistant } from '@/lib/float-position';
@@ -85,6 +86,9 @@ export function GeneralSettingsForm() {
     <form onSubmit={save}>
       <Card>
         <SectionTitle>Repository (GitHub)</SectionTitle>
+        <Muted className={styles.note}>
+          These are the settings of the Default project — manage all projects on the <Link to="/projects">Projects page</Link>.
+        </Muted>
         <Field label="Repo URL (leave blank to work in a local workspace, no remote)">
           <input
             value={form.repoUrl ?? ''}

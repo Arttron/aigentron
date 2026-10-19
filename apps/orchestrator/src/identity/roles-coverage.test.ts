@@ -9,13 +9,15 @@ import { AttachmentsController } from '../attachments/attachments.controller';
 import { UpdateController } from '../update/update.controller';
 import { McpController } from '../mcp/mcp.controller';
 import { ChannelsController } from '../channels/channels.controller';
+import { ProjectsController } from '../projects/projects.controller';
+import { ProjectRepoController } from '../projects/git/project-repo.controller';
 
 // Nest RequestMethod: GET 0, POST 1, PUT 2, DELETE 3, PATCH 4
 const MUTATING = new Set([1, 2, 3, 4]);
 
 const CONTROLLERS = [
   SettingsController, AgentRegistryController, ProvidersController, TasksController,
-  AttachmentsController, UpdateController, McpController, ChannelsController,
+  AttachmentsController, UpdateController, McpController, ChannelsController, ProjectsController, ProjectRepoController,
 ];
 
 /** Mutating handlers deliberately open to any signed-in user (reviewer may act on them). Keep this list short. */

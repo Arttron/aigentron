@@ -1,8 +1,7 @@
-import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
+import { DEFAULT_PROJECT_ID, normalizeSubdir } from '../projects/project-core';
 
 const SINGLETON_ID = 'singleton';
 
@@ -27,13 +26,6 @@ export interface SettingsPatch {
   notifyChatId?: string | null;
 }
 
-/** Source-repository configuration for the workspace provisioner. */
-export interface WorkspaceConfig {
-  repoUrl: string | null;
-  repoBranch: string;
-  githubToken: string | null;
-}
-
 /**
  * How long a loaded row is served from memory (E-10). Every accessor used to be
  * a `findUnique`: ≈ 8 queries at the start of one run plus the worker's poll
@@ -47,6 +39,12 @@ const CACHE_TTL_MS = 3000;
  * Runtime configuration store. Seeded from environment on first use, then the
  * DB row is authoritative — the orchestrator reads it at agent-spawn time, so
  * the dashboard can change routing/keys without recreating the container.
+ *
+ * Projects (round 1): the repository, subdirectory, verify and escalation fields of this row are the DEFAULT
+ * project's — the runtime reads them from the Project row (ProjectsService.contextFor), never from here. A write
+ * through this service (Settings → General, the admin's propose_settings) is mirrored into the default project so
+ * the legacy screen keeps working until it points at the project itself. The GitHub token stays here only until
+ * GitAccessService migrates it into the default project's secret file (it reads it as the fallback meanwhile).
  */
 @Injectable()
 export class SettingsService {
@@ -109,7 +107,17 @@ export class SettingsService {
     });
     this.cache = { row: updated, at: Date.now() };
     this.logger.log('Settings updated');
+    await this.mirrorToDefaultProject(patch);
     return updated;
+  }
+
+  /** The legacy repository / verify / escalation fields are the default project's: keep its row in step (see the class doc). */
+  private async mirrorToDefaultProject(patch: SettingsPatch): Promise<void> {
+    const data = defaultProjectPatch(patch);
+    if (!Object.keys(data).length) return;
+    await this.prisma.project
+      .updateMany({ where: { id: DEFAULT_PROJECT_ID }, data })
+      .catch((err) => this.logger.warn(`could not mirror the settings into the default project: ${(err as Error).message}`));
   }
 
   async approvalTimeoutSeconds(): Promise<number> {
@@ -130,27 +138,13 @@ export class SettingsService {
     this.cache = { row: updated, at: Date.now() };
   }
 
-  /** Verification commands (one per line) run in the worktree after a run. */
-  async verifyCommands(): Promise<string[]> {
-    return ((await this.load()).verifyCommands ?? '')
-      .split('\n')
-      .map((c) => c.trim())
-      .filter(Boolean);
-  }
-
-  async verifyMaxAttempts(): Promise<number> {
-    return (await this.load()).verifyMaxAttempts;
-  }
-
   /**
-   * Max agent runs processed in parallel — polled live by the queue worker.
-   * Shared-workspace mode (one worktree for every task) hard-caps this at 1
-   * regardless of the stored value: concurrent agents writing into the same
-   * checkout would corrupt each other's work, not just run slower.
+   * Max agent runs processed in parallel — polled live by the queue worker. The cap for ALL projects together;
+   * tasks of one shared-mode project take turns in its checkout through the worker's per-project lock, so the
+   * value no longer has to be 1 in shared mode (it still is, by the seed, until a person raises it).
    */
   async concurrency(): Promise<number> {
-    if (this.config.workspaceShared) return 1;
-    return (await this.load()).concurrency;
+    return Math.max(1, (await this.load()).concurrency);
   }
 
   /** Whether to persist verbose intermediate transcript events (see AgentEvent). */
@@ -168,57 +162,30 @@ export class SettingsService {
     return (await this.load()).defaultProvider ?? 'ollama-local';
   }
 
-  /** Named agent used as the lead for tasks that don't pick one (e.g. pm). */
+  /** Named agent used as the lead for tasks that don't pick one (e.g. pm) — the global fallback behind `Project.defaultAgent`. */
   async defaultAgent(): Promise<string | null> {
     return (await this.load()).defaultAgent ?? null;
   }
 
-  /** Source-repository config for the workspace provisioner. */
-  async workspaceConfig(): Promise<WorkspaceConfig> {
-    const s = await this.load();
-    return {
-      repoUrl: s.repoUrl ?? null,
-      repoBranch: s.repoBranch,
-      githubToken: s.githubToken ?? null,
-    };
-  }
-
-  /** Normalized project subdirectory ('' = repo root). */
-  async workspaceSubdir(): Promise<string> {
-    return normalizeSubdir((await this.load()).workspaceSubdir);
-  }
-
-  /**
-   * Effective working directory (cwd) for a task's worktree: the worktree root
-   * joined with the configured subdirectory. Falls back to the worktree root if
-   * no subdir is set or the subdir doesn't exist in this worktree (so a stale
-   * config can't wedge every task) — the caller keeps the worktree root as the
-   * write boundary regardless.
-   */
-  async workDir(worktreePath: string): Promise<string> {
-    const sub = await this.workspaceSubdir();
-    if (!sub) return worktreePath;
-    const dir = join(worktreePath, sub);
-    try {
-      if ((await stat(dir)).isDirectory()) return dir;
-      this.logger.warn(`workspaceSubdir "${sub}" is not a directory — using worktree root`);
-    } catch {
-      this.logger.warn(`workspaceSubdir "${sub}" not found in worktree — using worktree root`);
-    }
-    return worktreePath;
+  /** The installation's GitHub token (Settings → General): the transitional git credential and the GitHub MCP / PR API token. */
+  async githubToken(): Promise<string | null> {
+    return (await this.load()).githubToken ?? null;
   }
 }
 
-/**
- * Normalize a configured project subdir to a safe relative path. Strips leading/
- * trailing slashes and rejects absolute paths or any `..` traversal (→ '' = root)
- * so it can never escape the worktree.
- */
-function normalizeSubdir(raw?: string | null): string {
-  const v = (raw ?? '').trim().replace(/^\/+|\/+$/g, '');
-  if (!v) return '';
-  if (v.split('/').some((seg) => seg === '..' || seg === '.')) return '';
-  return v;
+/** The default project's columns a legacy settings patch maps to (only the keys present in the patch). */
+export function defaultProjectPatch(patch: SettingsPatch): Record<string, string | number | null> {
+  const data: Record<string, string | number | null> = {};
+  if ('repoUrl' in patch) data.repoUrl = patch.repoUrl?.trim() || null;
+  if (patch.repoBranch !== undefined && patch.repoBranch.trim()) data.repoBranch = patch.repoBranch.trim();
+  if ('workspaceSubdir' in patch) data.repoSubdir = normalizeSubdir(patch.workspaceSubdir) || null;
+  if ('githubToken' in patch) data.repoAuth = patch.githubToken ? 'token' : 'none';
+  if ('verifyCommands' in patch) data.verifyCommands = patch.verifyCommands?.replace(/\r/g, '').trim() || null;
+  if (patch.verifyMaxAttempts !== undefined && Number.isInteger(patch.verifyMaxAttempts)) data.verifyMaxAttempts = patch.verifyMaxAttempts;
+  if ('defaultAgent' in patch) data.defaultAgent = patch.defaultAgent?.trim() || null;
+  if ('notifyChannelId' in patch) data.notifyChannelId = patch.notifyChannelId?.trim() || null;
+  if ('notifyChatId' in patch) data.notifyChatId = patch.notifyChatId?.trim() || null;
+  return data;
 }
 
 /** Drop empty / obvious-placeholder env values so they don't seed as real. */

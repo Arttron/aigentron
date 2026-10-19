@@ -7,9 +7,9 @@
 # ----------------------------------------------------------------------
 FROM node:22-bookworm-slim AS dev
 
-# git -> per-task git worktrees; openssl -> Prisma engine; ca-certificates -> TLS
+# git -> per-task git worktrees; openssh-client -> git over ssh with a project's deploy key; openssl -> Prisma engine; ca-certificates -> TLS
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git openssl ca-certificates ffmpeg \
+  && apt-get install -y --no-install-recommends git openssh-client openssl ca-certificates ffmpeg \
   && rm -rf /var/lib/apt/lists/*
 
 # uv / uvx — runtime for stdio MCP servers like Serena (code-intel).

@@ -140,6 +140,47 @@ model Provider {
   updatedAt DateTime @updatedAt
 }
 
+// A project: a folder under PROJECTS_DIR with a known layout, a row of settings, and a scope for tasks and
+// schedules (docs/plan-projects-workspace.md §2). The `default` project adopts the pre-existing workspace
+// (WORKSPACE_REPO_PATH / WORKSPACE_DIR) in place; every other project keeps its checkout in its own folder.
+// Repository secrets (a token, a deploy key) live in FILES in the secrets dir, never in this table.
+model Project {
+  id        String  @id @default(cuid())
+  // folder name, immutable: ^[a-z0-9][a-z0-9-]{0,39}$; 'default' is reserved for the default project
+  slug      String  @unique
+  name      String
+  // code | docs — whether the checkout is provisioned as git and verify/push apply
+  kind      String  @default("code")
+  isDefault Boolean @default(false)
+
+  repoUrl    String?
+  repoBranch String  @default("main")
+  // subdirectory the agents work in (cwd); null = the repo root (was AppSettings.workspaceSubdir)
+  repoSubdir String?
+  // none | token | ssh — the secret itself is a file in the secrets dir
+  repoAuth   String  @default("none")
+  // absolute checkout path; null = <PROJECTS_DIR>/<slug>/repo
+  repoPath   String?
+  // shared | worktree; null = follow WORKSPACE_SHARED
+  isolation  String?
+
+  verifyCommands    String?
+  verifyMaxAttempts Int     @default(2)
+  // lead agent for the project's tasks (fallback: AppSettings.defaultAgent)
+  defaultAgent      String?
+  // escalations / notifications (fallback: AppSettings)
+  notifyChannelId   String?
+  notifyChatId      String?
+
+  archivedAt  DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tasks     Task[]
+  schedules Schedule[]
+}
+
 model Task {
   id           String     @id @default(cuid())
   prompt       String
@@ -164,6 +205,10 @@ model Task {
   parentId     String?
   parent       Task?      @relation("Subtasks", fields: [parentId], references: [id], onDelete: SetNull)
   subtasks     Task[]     @relation("Subtasks")
+  // The project the task belongs to (every task has one; the default project for everything created before projects).
+  // A project with tasks cannot be deleted — ProjectsService moves or refuses first.
+  projectId    String
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Restrict)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -196,6 +241,8 @@ model Task {
   // subtasks of a parent, in creation order (list(), subtaskStatuses, fan-in)
   @@index([parentId, createdAt])
   @@index([kind])
+  // a project's task list and its active count
+  @@index([projectId, status])
 }
 
 /// A follow-up message held for a task that's still running (not terminal) —
@@ -572,6 +619,9 @@ model Schedule {
   // the task that `same` mode keeps continuing (created on the first run); a deleted task is let go — the next run starts a new one
   taskId     String?
   task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  // the project the scheduled task is created in; null = the default project
+  projectId  String?
+  project    Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
   // optional quiet hours (HH:MM, in `timezone`): runs that fall inside are skipped
   quietStart String?
   quietEnd   String?
@@ -586,4 +636,5 @@ model Schedule {
 
   @@index([enabled, nextRunAt])
   @@index([taskId])
+  @@index([projectId])
 }

@@ -26,6 +26,7 @@ import { MAX_AUDIO_SECONDS } from '../voice/voice-core';
 import { SecretLinksService, secretLabel } from '../approvals/secret-links.service';
 import { ChannelGateway, type MessageRef } from './channel-gateway.service';
 import { ChatDestinationService } from './chat-destination.service';
+import { ProjectsService } from '../projects/projects.service';
 import { approvalOutcome, compactProcessLine, questionButtons, questionOutcome, questionText, reactionIcon, resultMessage, withQuote } from './chat-format';
 import { resolveTarget, spokenToTask, type RoutingFacts } from './inbound-routing';
 import type { IncomingEvent } from './channel-adapter';
@@ -104,6 +105,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     private readonly voice: VoiceService,
     private readonly gateway: ChannelGateway,
     private readonly dest: ChatDestinationService,
+    private readonly projects: ProjectsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -402,13 +404,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     error: string | null,
     status: TaskStatus,
   ): Promise<void> {
-    const settings = await this.prisma.appSettings.findUnique({
-      where: { id: 'singleton' },
-      select: { notifyChannelId: true, notifyChatId: true },
-    });
-    const channelId = settings?.notifyChannelId;
-    const chatId = settings?.notifyChatId;
-    if (!channelId || !chatId) return;
+    // The task's project's notification chat, else the global one (Settings → Escalations).
+    const target = await this.projects.notifyTargetFor(taskId);
+    if (!target) return;
+    const { channelId, chatId } = target;
     // Respect /mute on the default chat too.
     if ((await this.dest.prefs(channelId, chatId)).muted) return;
 

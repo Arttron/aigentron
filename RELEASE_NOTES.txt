@@ -1,14 +1,23 @@
-Aigentron v0.1.65
+Aigentron v0.1.67
 
-For people who are not programmers: a new optional "Browser" add-on — a real Chrome/Chromium on your server that you can watch and operate from the dashboard (and that agents will be able to drive in the next step).
+For people who are not programmers: PROJECTS. You can now work on several projects at the same time — each with its own repository, access, checks and working folder.
 
-Add-ons
-- New command on the server: "aigentron addon list | enable | disable | status | logs <name>" (add --dry-run to see what would happen). Enabling needs sudo and is always run by a person on the server — the dashboard only shows the exact command.
-- First add-on: "browser". On a stand-alone (systemd) server it installs a virtual screen, a light window manager and a browser (Google Chrome on x86, otherwise Chromium) under its own system user, everything listening on localhost only. On a Docker install it starts a separate container from the same installer script. Tested on Debian 12, Ubuntu 24.04 and Amazon Linux 2023 (systemd containers) and as a Docker image. Needs about 2 GB of memory and disk; idle it uses roughly 250 MB.
-- New page "🌐 Browser" in the header: a live desktop with the browser, only after you sign in and only for operators/admins, through your usual address (no extra ports are opened). Up to 3 viewers at a time and a session time limit (2 hours by default); who opened it is written to the log. If the add-on is not installed the page shows what it is, what it needs and the commands to run.
-- Important: in this first version there is ONE browser profile and agents do not drive it yet. Whatever you sign in to there is visible to the agents later — so sign in only to what you are fine sharing. A separate personal profile and a safe "go-between" for agents come next.
+What a project is
+- A project has its own git repository (address, branch, optional sub-folder), its own way to sign in to it, its own checks (the commands run after a task), mode (shared checkout or a separate worktree per task), default agent and notification chat. Providers and tools (MCP) stay shared by all projects.
+- Your existing setup became the "Default" project automatically (same repository, branch, checks, token and agent as before) and all existing tasks belong to it. Nothing changes until you add a project.
+- Every project also gets its own memory, work and deliverables folders (the shared workspace idea, per project).
 
-Developer stack
-- The dev server now receives all environment variables (the build tool used to hide the new ones).
+Repository access (Projects → a project → Repository)
+- Public, token, or SSH key. For SSH the server creates a key for the project and shows the public part with the steps to add it as a deploy key on GitHub / GitLab / Bitbucket; you can also import your own key. The first connection pins the host key for that project; a changed host key is reported as an error.
+- Secrets are stored in files in the secrets folder (secrets/projects/<project>/), not in the database; agents never receive them. The old token from Settings is moved to the Default project's file automatically at the first start.
+- "Test connection" checks address, network, sign-in, branch and (if you tick it) write access and tells you what is wrong in plain words — wrong token, key not added to the repository, host key changed, branch missing, repository not found, ssh client missing. "Sync now" clones or updates the project's copy.
 
-Update note: no database changes.
+Working in parallel
+- Tasks of different projects run at the same time; tasks of one project in shared mode run one after another (so they never trip over each other's files). In worktree mode every task has its own copy. The agent works inside its project's folder and can write only there.
+- New page "📁 Projects" (with "+ New project"); when you have more than one project, the New task form has a project selector and the task list a project filter and badges.
+
+Known changes
+- A task's own `git push` over https no longer works from inside the agent (the token is no longer written into the repository's git config; the server pushes and opens pull requests itself).
+- The ssh client (openssh) is now installed with the Docker images and by the bare-metal installer.
+
+Update note: the database gets a migration (a project table; every existing task is assigned to the Default project); a snapshot is taken first.

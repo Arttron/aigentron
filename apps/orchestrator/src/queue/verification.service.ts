@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Injectable, Logger } from '@nestjs/common';
-import { SettingsService } from '../settings/settings.service';
 
 const exec = promisify(execFile);
 
@@ -13,20 +12,13 @@ export interface VerifyResult {
   output: string;
 }
 
-/** Runs the configured verification commands in a task's worktree. */
+/** Runs a project's verification commands in a task's checkout (the cwd the agent worked in). */
 @Injectable()
 export class VerificationService {
   private readonly logger = new Logger(VerificationService.name);
 
-  constructor(private readonly settings: SettingsService) {}
-
-  async verify(worktreePath: string): Promise<VerifyResult> {
-    const commands = await this.settings.verifyCommands();
+  async verify(commands: readonly string[], cwd: string): Promise<VerifyResult> {
     if (!commands.length) return { ran: false, ok: true, output: '' };
-
-    // Run in the configured project subdir (e.g. a monorepo package), else the
-    // worktree root — the same cwd the agent worked in.
-    const cwd = await this.settings.workDir(worktreePath);
 
     for (const cmd of commands) {
       this.logger.log(`verify: ${cmd}`);

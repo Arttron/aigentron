@@ -27,3 +27,25 @@ export interface HookCheckResponse {
   approvalId?: string;
   reason?: string;
 }
+
+/** Body of POST /api/projects. Only operators / admins create projects; the slug is derived from the name when omitted. */
+export interface CreateProjectInput {
+  name: string;
+  slug?: string;
+  kind?: 'code' | 'docs';
+  repoUrl?: string | null;
+  repoBranch?: string;
+  repoSubdir?: string | null;
+  repoAuth?: 'none' | 'token' | 'ssh';
+  /** Absolute checkout path to adopt in place (null = `<PROJECTS_DIR>/<slug>/repo`). */
+  repoPath?: string | null;
+  isolation?: 'shared' | 'worktree' | null;
+  verifyCommands?: string | null;
+  verifyMaxAttempts?: number;
+  defaultAgent?: string | null;
+  notifyChannelId?: string | null;
+  notifyChatId?: string | null;
+}
+
+/** Body of PATCH /api/projects/:slug — any of the fields above except the slug (immutable). */
+export type UpdateProjectInput = Partial<Omit<CreateProjectInput, 'slug'>>;

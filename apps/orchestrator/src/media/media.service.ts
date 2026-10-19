@@ -30,12 +30,17 @@ export class MediaService {
     private readonly vision: VisionService,
   ) {}
 
-  /** A path an agent gave us, checked: it must really be inside this task's attachments, the resource library or its worktree. */
+  /**
+   * A path an agent gave us, checked: it must really be inside this task's attachments, the resource library or the
+   * extra roots the caller allows (its worktree, the folder of ITS project). With a task id the caller names the
+   * project folder itself — the shared workspace is never implied, so a task of one project cannot read another's;
+   * without a task id (the HTTP endpoints) the shared workspace is allowed, as before.
+   */
   async safePath(path: string, worktree?: string | string[], taskId?: string): Promise<string> {
     const extra = Array.isArray(worktree) ? worktree : worktree ? [worktree] : [];
     // With a task id only THAT task's attachments are readable (not other tasks' files); without one (the HTTP endpoints) the whole folder, as before.
     if (taskId !== undefined && !/^[\w-]+$/.test(taskId)) throw new Error('That path is not available.');
-    const roots = [taskId !== undefined ? join(this.config.attachmentsDir, taskId) : this.config.attachmentsDir, join(this.config.agentDir, 'resources'), this.config.workspaceDir, ...extra].filter(Boolean);
+    const roots = [taskId !== undefined ? join(this.config.attachmentsDir, taskId) : this.config.attachmentsDir, join(this.config.agentDir, 'resources'), ...(taskId === undefined ? [this.config.workspaceDir] : []), ...extra].filter(Boolean);
     if (!path.startsWith('/') || !insideRoot(path, roots)) throw new Error('That path is not available: give the full path of a photo or video from the task\'s attachments, the resource library, or the workspace.');
     const real = await realInside(path, roots); // symlinks followed on both sides: a link out of the roots is refused
     if (!real || isSecretPath(real) || isSecretPath(path)) throw new Error('That file was not found.');

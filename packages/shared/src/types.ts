@@ -103,6 +103,53 @@ export interface Task {
   createdById: string | null;
   /** Parent task when this is a subtask from decomposition (null = top-level). */
   parentId: string | null;
+  /** The project the task belongs to (every task has one; `default` for everything made before projects). */
+  projectId: string;
+  project: ProjectRef;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The project a task / schedule belongs to, as shown next to it. */
+export interface ProjectRef {
+  slug: string;
+  name: string;
+}
+
+/** code = a git checkout, verify / push apply; docs = drafts, notes and data, no git. */
+export type ProjectKind = 'code' | 'docs';
+/** How the project's repository is reached. The secret itself is a file in the secrets dir, never in the API. */
+export type ProjectRepoAuth = 'none' | 'token' | 'ssh';
+/** shared = every task in one checkout (serialised); worktree = a branch + worktree per task, then a PR. */
+export type ProjectIsolation = 'shared' | 'worktree';
+
+/** A project as the API returns it (docs/plan-projects-workspace.md §2.3). Never carries a secret. */
+export interface Project {
+  id: string;
+  /** Folder name, immutable; `default` is the default project. */
+  slug: string;
+  name: string;
+  kind: ProjectKind;
+  isDefault: boolean;
+  repo: {
+    url: string | null;
+    branch: string;
+    /** Subdirectory the agents work in (cwd); null = the repo root. */
+    subdir: string | null;
+    auth: ProjectRepoAuth;
+    /** Absolute checkout path (the default project adopts WORKSPACE_REPO_PATH; others get `<PROJECTS_DIR>/<slug>/repo`). */
+    path: string;
+  };
+  /** The configured isolation (null = follow WORKSPACE_SHARED) and what it resolves to. */
+  isolation: ProjectIsolation | null;
+  effectiveIsolation: ProjectIsolation;
+  verifyCommands: string | null;
+  verifyMaxAttempts: number;
+  defaultAgent: string | null;
+  notifyChannelId: string | null;
+  notifyChatId: string | null;
+  archivedAt: string | null;
+  counts: { active: number; total: number };
   createdAt: string;
   updatedAt: string;
 }

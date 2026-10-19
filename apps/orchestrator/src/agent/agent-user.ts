@@ -50,10 +50,11 @@ export interface ChownPlanInput {
   runDir: string;
   /** The task's checkout; null for a chat agent / discussion turn (they only read). */
   worktreePath: string | null;
-  /** WORKSPACE_REPO_PATH — the main repo (holds `.git` of every worktree). */
+  /** The project's checkout (the default project's is WORKSPACE_REPO_PATH) — the main repo (holds `.git` of every worktree). */
   repoPath: string;
-  /** Shared-workspace mode: the task works directly in the main repo. */
+  /** Shared mode (per project): the task works directly in the checkout. */
   shared: boolean;
+  /** The project's folder (memory / work / deliverables): WORKSPACE_DIR for the default project, `<PROJECTS_DIR>/<slug>` otherwise. */
   workspaceDir: string;
   attachmentsDir: string;
 }

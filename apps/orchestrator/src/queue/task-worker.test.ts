@@ -1,5 +1,11 @@
+import { existsSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AgentRunOutcome } from '../agent/agent-executor';
+import { KeyedMutex } from '../projects/project-mutex';
+import type { ProjectContext } from '../projects/project-context';
 import { TaskWorkerService } from './task-worker.service';
 
 interface Opts {
@@ -18,6 +24,30 @@ interface Opts {
   runThrows?: Error;
 }
 
+const project = (over: Partial<ProjectContext> = {}): ProjectContext => ({
+  id: 'proj_default',
+  slug: 'default',
+  name: 'Default',
+  kind: 'code',
+  isDefault: true,
+  repoPath: '/wt',
+  repoUrl: null,
+  repoBranch: 'main',
+  repoSubdir: '',
+  repoAuth: 'none',
+  isolation: 'worktree',
+  verifyCommands: ['true'],
+  verifyMaxAttempts: 0,
+  workspaceRoot: '/ws',
+  briefFile: 'WORKSPACE.md',
+  briefTemplate: '',
+  defaultAgent: null,
+  notifyChannelId: null,
+  notifyChatId: null,
+  git: { slug: 'default', repoUrl: null, repoAuth: 'none' },
+  ...over,
+});
+
 /** A worker over fakes: records every lifecycle call in order. */
 function make(o: Opts = {}) {
   const calls: string[] = [];
@@ -27,6 +57,7 @@ function make(o: Opts = {}) {
     status: o.status ?? 'running',
     agentName: 'a',
     parentId: o.parentId ?? null,
+    projectId: 'proj_default',
     worktreePath: '/wt',
     branch: 'b',
     title: 't',
@@ -36,8 +67,13 @@ function make(o: Opts = {}) {
   const svc = Object.create(TaskWorkerService.prototype) as TaskWorkerService & Record<string, unknown>;
   Object.assign(svc, {
     logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
-    config: { agentDir: '/agent', workspaceShared: false, requireStatusReport: o.requireStatusReport ?? false, maxContinuations: 1 },
+    config: { agentDir: '/agent', requireStatusReport: o.requireStatusReport ?? false, maxContinuations: 1 },
     decomposeHandedBack: new Set<string>(),
+    projectLocks: new KeyedMutex(),
+    waiting: 0,
+    lastConcurrency: 2,
+    queue: { setConcurrency: () => undefined },
+    projects: { contextFor: async () => project() },
     tasks: {
       startRunning: async (id: string) => {
         calls.push(`startRunning:${id}`);
@@ -77,7 +113,6 @@ function make(o: Opts = {}) {
     },
     preview: { stop: () => void calls.push('preview.stop') },
     verification: { verify: async () => o.verify ?? { ran: false, ok: true, output: '' } },
-    settings: { verifyMaxAttempts: async () => 0 },
     github: { publishResult: async () => null, pushSharedWorkspace: async () => null },
     worktrees: { createForTask: async () => ({ worktreePath: '/wt', branch: 'b' }), useSharedRepo: async () => ({ worktreePath: '/wt', branch: 'b' }) },
     approvals: {
@@ -170,5 +205,148 @@ describe('TaskWorkerService.process — run outcome → status', () => {
     await expect(process({ taskId: 'T' })).resolves.toBeUndefined();
     expect(statusWrites).toEqual([]);
     expect(calls).toContain('runSettled');
+  });
+});
+
+/**
+ * Projects and the per-project lock (docs/plan-projects-workspace.md §2.6): a worker over fakes where every run is
+ * a gate the test opens by hand, so the ORDER of runs is observable.
+ */
+function makeMulti(projectsById: Record<string, ProjectContext>, tasks: Record<string, { projectId: string; parentId?: string | null; chat?: boolean }>) {
+  const log: string[] = [];
+  const gates = new Map<string, () => void>();
+  const concurrency: number[] = [];
+  const checkouts: string[] = [];
+  const svc = Object.create(TaskWorkerService.prototype) as TaskWorkerService & Record<string, unknown>;
+  Object.assign(svc, {
+    logger: { log: () => undefined, warn: () => undefined, error: () => undefined },
+    config: { agentDir: '/agent', requireStatusReport: false, maxContinuations: 1 },
+    decomposeHandedBack: new Set<string>(),
+    projectLocks: new KeyedMutex(),
+    waiting: 0,
+    lastConcurrency: 2,
+    queue: { setConcurrency: (n: number) => void concurrency.push(n) },
+    projects: { contextFor: async (t: { projectId: string }) => projectsById[t.projectId]! },
+    tasks: {
+      startRunning: async () => 'started',
+      getLite: async (id: string) => ({ id, status: 'running', agentName: tasks[id]!.chat ? 'admin' : 'a', parentId: tasks[id]!.parentId ?? null, projectId: tasks[id]!.projectId, worktreePath: null, branch: null, title: id, prompt: 'p' }),
+      attachWorktree: async (id: string, branch: string, path: string) => void checkouts.push(`${id}:${path}@${branch}`),
+      attachPr: async () => undefined,
+      attachPushedTo: async () => undefined,
+      setStatus: async (id: string, status: string) => void log.push(`${id}:${status}`),
+      runSettled: async () => undefined,
+      fanInAfterSettle: async () => undefined,
+      createSubtask: async () => ({ id: 'S', title: 's' }),
+      subtaskStatuses: async () => [],
+      completeSubtask: async () => 'ok',
+      scheduleFollowUp: async () => undefined,
+    },
+    agents: { get: async (name: string) => ({ mode: name === 'admin' ? 'chat' : 'code' }) },
+    executor: {
+      run: async (ctx: { taskId: string }) => {
+        log.push(`${ctx.taskId}:run`);
+        await new Promise<void>((r) => gates.set(ctx.taskId, r));
+        log.push(`${ctx.taskId}:end`);
+        return { reported: 'done', errored: false, timedOut: false };
+      },
+    },
+    preview: { stop: () => undefined },
+    verification: { verify: async () => ({ ran: false, ok: true, output: '' }) },
+    github: { publishResult: async () => null, pushSharedWorkspace: async () => null },
+    worktrees: {
+      createForTask: async (p: ProjectContext, id: string) => ({ worktreePath: `/wt/${p.slug}/${id}`, branch: `agent/task-${id}` }),
+      useSharedRepo: async (p: ProjectContext) => ({ worktreePath: p.repoPath, branch: 'main' }),
+    },
+    approvals: { continuationCount: async () => 0, requestContinuation: async () => undefined },
+  });
+  const process = (svc as unknown as { process: (d: { taskId: string }) => Promise<void> }).process.bind(svc);
+  const settle = () => new Promise<void>((r) => setTimeout(r, 5));
+  const open = async (id: string) => {
+    gates.get(id)!();
+    gates.delete(id);
+    await settle();
+  };
+  return { process, log, open, settle, running: () => [...gates.keys()], concurrency, checkouts };
+}
+
+const shared = (id: string, slug: string): ProjectContext => project({ id, slug, name: slug, isDefault: slug === 'default', repoPath: `/repos/${slug}`, isolation: 'shared', workspaceRoot: `/ws/${slug}`, verifyCommands: [] });
+
+describe('TaskWorkerService — projects and the per-project lock', () => {
+  it('two tasks of one shared-mode project run one after the other, in arrival order', async () => {
+    const w = makeMulti({ A: shared('A', 'a') }, { t1: { projectId: 'A' }, t2: { projectId: 'A' } });
+    const p1 = w.process({ taskId: 't1' });
+    const p2 = w.process({ taskId: 't2' });
+    await w.settle();
+    expect(w.running()).toEqual(['t1']); // t2 waits for the lock
+    await w.open('t1');
+    expect(w.running()).toEqual(['t2']);
+    await w.open('t2');
+    await Promise.all([p1, p2]);
+    expect(w.log).toEqual(['t1:run', 't1:end', 't1:review', 't2:run', 't2:end', 't2:review']);
+  });
+
+  it('a waiting task lends its slot (concurrency +1) and takes it back once it holds the lock', async () => {
+    const w = makeMulti({ A: shared('A', 'a') }, { t1: { projectId: 'A' }, t2: { projectId: 'A' } });
+    const p1 = w.process({ taskId: 't1' });
+    const p2 = w.process({ taskId: 't2' });
+    await w.settle();
+    expect(w.concurrency).toEqual([3]); // base 2 + one waiter
+    await w.open('t1');
+    expect(w.concurrency).toEqual([3, 2]); // the waiter acquired: back to the base
+    await w.open('t2');
+    await Promise.all([p1, p2]);
+  });
+
+  it('tasks of two shared-mode projects run side by side', async () => {
+    const w = makeMulti({ A: shared('A', 'a'), B: shared('B', 'b') }, { t1: { projectId: 'A' }, t2: { projectId: 'B' } });
+    const p1 = w.process({ taskId: 't1' });
+    const p2 = w.process({ taskId: 't2' });
+    await w.settle();
+    expect([...w.running()].sort()).toEqual(['t1', 't2']);
+    expect(w.concurrency).toEqual([]); // nobody waited
+    await w.open('t2');
+    await w.open('t1');
+    await Promise.all([p1, p2]);
+  });
+
+  it('worktree-mode tasks of one project and chat turns never take the lock', async () => {
+    const wt = project({ id: 'W', slug: 'w', isolation: 'worktree', repoPath: '/repos/w', workspaceRoot: '/ws/w', verifyCommands: [] });
+    const w = makeMulti({ W: wt, A: shared('A', 'a') }, { t1: { projectId: 'W' }, t2: { projectId: 'W' }, t3: { projectId: 'A' }, c1: { projectId: 'A', chat: true } });
+    const all = ['t1', 't2', 't3', 'c1'].map((taskId) => w.process({ taskId }));
+    await w.settle();
+    expect([...w.running()].sort()).toEqual(['c1', 't1', 't2', 't3']);
+    for (const id of ['t1', 't2', 't3', 'c1']) await w.open(id);
+    await Promise.all(all);
+  });
+
+  it('a lead does not hold the lock while it waits for its subtasks: the subtask runs after the lead\'s run returned', async () => {
+    const w = makeMulti({ A: shared('A', 'a') }, { lead: { projectId: 'A' }, sub: { projectId: 'A', parentId: 'lead' } });
+    const pl = w.process({ taskId: 'lead' });
+    await w.settle();
+    const ps = w.process({ taskId: 'sub' }); // the lead created it mid-run
+    await w.settle();
+    expect(w.running()).toEqual(['lead']);
+    await w.open('lead'); // the lead's run returns (it would be awaiting subtasks) → the lock is free
+    expect(w.running()).toEqual(['sub']);
+    await w.open('sub');
+    await Promise.all([pl, ps]);
+    expect(w.log.filter((l) => l.endsWith(':run'))).toEqual(['lead:run', 'sub:run']);
+  });
+
+  it('checkouts: the project\'s repo in shared mode, a nested worktree per task otherwise, work/ for a docs project (no git)', async () => {
+    const docsRoot = await mkdtemp(join(tmpdir(), 'lds-docs-'));
+    try {
+      const docs = project({ id: 'D', slug: 'd', kind: 'docs', isolation: 'shared', workspaceRoot: docsRoot, verifyCommands: [] });
+      const wt = project({ id: 'W', slug: 'w', isolation: 'worktree', repoPath: '/repos/w', workspaceRoot: '/ws/w', verifyCommands: [] });
+      const w = makeMulti({ D: docs, W: wt, A: shared('A', 'a') }, { d1: { projectId: 'D' }, w1: { projectId: 'W' }, a1: { projectId: 'A' } });
+      const all = ['d1', 'w1', 'a1'].map((taskId) => w.process({ taskId }));
+      await w.settle();
+      for (const id of ['d1', 'w1', 'a1']) await w.open(id);
+      await Promise.all(all);
+      expect([...w.checkouts].sort()).toEqual([`a1:/repos/a@main`, `d1:${join(docsRoot, 'work')}@`, 'w1:/wt/w/w1@agent/task-w1']);
+      expect(existsSync(join(docsRoot, 'work'))).toBe(true);
+    } finally {
+      await rm(docsRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -28,6 +28,7 @@ import {
   resolveQuestion,
   safeRelative,
   type NoteKind,
+  type OrientationOptions,
 } from './workspace-core';
 
 /** Earlier versions of an overwritten deliverable: the newest few, and nothing older than this many days (the latest one is always kept). */
@@ -36,31 +37,44 @@ const VERSIONS_MAX_DAYS = 90;
 const FOLDERS = ['memory', 'work', 'deliverables'] as const;
 type Folder = (typeof FOLDERS)[number];
 
+/** What distinguishes one workspace folder from another besides its root. */
+export interface WorkspaceOptions {
+  /** The brief file (`WORKSPACE.md` for the shared workspace, `PROJECT.md` for a project folder). */
+  briefFile?: string;
+  /** Its untouched content (so an unedited brief stays out of the prompt). */
+  briefTemplate?: string;
+  /** A non-default project: named in the orientation block. */
+  project?: { name: string; slug: string } | null;
+}
+
 /**
- * The shared workspace: one folder with a standard structure (`memory/`, `work/`, `deliverables/`, `WORKSPACE.md`)
- * next to the project repository. Agents record decisions, keep drafts and save results here with the
- * `workspace_*` tools; the code repository is untouched. Later every project gets such a folder.
+ * One workspace folder with the standard structure (`memory/`, `work/`, `deliverables/`, the brief), bound to a root:
+ * the shared workspace (WORKSPACE_DIR) or a project's folder (`<PROJECTS_DIR>/<slug>`). Agents record decisions,
+ * keep drafts and save results here with the `workspace_*` tools; the code repository is untouched. Memory writes are
+ * serialised per root.
  */
-@Injectable()
-export class WorkspaceService implements OnModuleInit {
-  private readonly logger = new Logger(WorkspaceService.name);
+export class Workspace {
+  protected readonly logger = new Logger(Workspace.name);
   /** Memory files are appended/rewritten one operation at a time. */
   private chain: Promise<unknown> = Promise.resolve();
+  readonly briefFile: string;
+  readonly briefTemplate: string;
+  private readonly project: { name: string; slug: string } | null;
 
-  constructor(private readonly config: AppConfigService) {}
-
-  get root(): string {
-    return this.config.workspaceDir;
-  }
-
-  async onModuleInit(): Promise<void> {
-    await this.ensureLayout().catch((e) => this.logger.warn(`workspace folder not ready (${this.root}): ${(e as Error).message}`));
+  constructor(
+    readonly root: string,
+    private readonly attachmentsDir: string,
+    opts: WorkspaceOptions = {},
+  ) {
+    this.briefFile = opts.briefFile ?? BRIEF_FILE;
+    this.briefTemplate = opts.briefTemplate ?? BRIEF_TEMPLATE;
+    this.project = opts.project ?? null;
   }
 
   /** Creates what is missing; never overwrites. */
   async ensureLayout(): Promise<void> {
     for (const f of FOLDERS) await mkdir(join(this.root, f), { recursive: true });
-    await this.createIfMissing(join(this.root, 'WORKSPACE.md'), BRIEF_TEMPLATE);
+    await this.createIfMissing(join(this.root, this.briefFile), this.briefTemplate);
     for (const k of NOTE_KINDS) await this.createIfMissing(join(this.root, 'memory', MEMORY_FILES[k]), memoryHeader(k));
   }
 
@@ -80,24 +94,29 @@ export class WorkspaceService implements OnModuleInit {
     return readFile(path, 'utf8').catch(() => '');
   }
 
+  private get orientationOptions(): OrientationOptions {
+    return { briefFile: this.briefFile, project: this.project };
+  }
+
   /** The memory block for the prompt (empty when nothing has been written yet). */
   async digest(): Promise<string> {
     const m = (k: NoteKind) => this.read(join(this.root, 'memory', MEMORY_FILES[k]));
-    const [brief, status, decisions, questions] = await Promise.all([this.read(join(this.root, 'WORKSPACE.md')), m('status'), m('decision'), m('question')]);
-    const body = buildDigest({ brief, status, decisions, questions });
-    return body ? `## Workspace memory (what the team already knows — read before you start)\n${body}` : '';
+    const [brief, status, decisions, questions] = await Promise.all([this.read(join(this.root, this.briefFile)), m('status'), m('decision'), m('question')]);
+    const body = buildDigest({ brief, status, decisions, questions }, this.briefTemplate, this.briefFile);
+    const head = this.project ? `## Project memory (what the team already knows — read before you start)` : `## Workspace memory (what the team already knows — read before you start)`;
+    return body ? `${head}\n${body}` : '';
   }
 
   /** The orientation block of the prompt. */
   orientation(): string {
-    return orientationBlock(this.root);
+    return orientationBlock(this.root, this.orientationOptions);
   }
 
   async info(): Promise<string> {
     await this.ensureLayout();
     const digest = await this.digest();
     return [
-      orientationBlock(this.root),
+      orientationBlock(this.root, this.orientationOptions),
       '',
       digest || 'Memory is empty so far — record decisions and open questions with `workspace_note`.',
     ].join('\n');
@@ -166,7 +185,7 @@ export class WorkspaceService implements OnModuleInit {
     let bytes = 0;
     if (input.from !== undefined) {
       if (!input.from.startsWith('/')) throw new Error('`from` must be the full path of the file.');
-      const real = await realInside(input.from, [taskAttachmentsDir ?? this.config.attachmentsDir, this.root, ...allowFrom]);
+      const real = await realInside(input.from, [taskAttachmentsDir ?? this.attachmentsDir, this.root, ...allowFrom]);
       if (!real) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
       // a sign-in token or env file is never a deliverable, wherever it sits (a deliverable is served to everyone who can open the task)
       if (isSecretPath(real) || isSecretPath(input.from)) throw new Error('That file is not available: copy only files of this task (attachments, workspace, the project).');
@@ -242,7 +261,7 @@ export class WorkspaceService implements OnModuleInit {
     if (clean === null) throw new BadRequestException('Bad path.');
     if (clean !== '') {
       const top = clean.split('/')[0]!;
-      if (clean !== BRIEF_FILE && !(TOP_FOLDERS as readonly string[]).includes(top)) throw new NotFoundException('Not found.');
+      if (clean !== this.briefFile && !(TOP_FOLDERS as readonly string[]).includes(top)) throw new NotFoundException('Not found.');
     }
     const abs = join(this.root, clean);
     // the deepest existing ancestor must be inside the workspace for real (no symlink out)
@@ -261,7 +280,7 @@ export class WorkspaceService implements OnModuleInit {
     const entries: { name: string; dir: boolean; size: number; mtime: string }[] = [];
     for (const name of names) {
       if (name.startsWith('.')) continue;
-      if (clean === '' && name !== BRIEF_FILE && !(TOP_FOLDERS as readonly string[]).includes(name)) continue;
+      if (clean === '' && name !== this.briefFile && !(TOP_FOLDERS as readonly string[]).includes(name)) continue;
       const s = await stat(join(abs, name)).catch(() => null);
       if (s) entries.push({ name, dir: s.isDirectory(), size: s.isDirectory() ? 0 : s.size, mtime: s.mtime.toISOString() });
     }
@@ -282,9 +301,9 @@ export class WorkspaceService implements OnModuleInit {
   async writeUpload(rel: string, source: Readable): Promise<{ path: string; size: number }> {
     await this.ensureLayout();
     const { rel: clean, abs } = await this.resolve(rel, { mustExist: false });
-    if (!clean || !canWrite(clean)) throw new ForbiddenException('You can add or change files only in work/ (and edit WORKSPACE.md).');
+    if (!clean || !canWrite(clean, this.briefFile)) throw new ForbiddenException(`You can add or change files only in work/ (and edit ${this.briefFile}).`);
     if (clean === 'work') throw new BadRequestException('Give a file name.');
-    const limit = clean === BRIEF_FILE ? MAX_BRIEF_BYTES : MAX_SAVE_BYTES;
+    const limit = clean === this.briefFile ? MAX_BRIEF_BYTES : MAX_SAVE_BYTES;
     await mkdir(dirname(abs), { recursive: true });
     const size = await saveUpload(source, abs, { limit, tooBig: (l) => new PayloadTooLargeException(`The file is too large (limit ${human(l)}).`) });
     return { path: clean, size };
@@ -316,6 +335,37 @@ export class WorkspaceService implements OnModuleInit {
   /** Absolute folders agents may write to besides the task root. */
   get writeRoots(): string[] {
     return [resolve(this.root)];
+  }
+}
+
+/**
+ * The shared workspace (WORKSPACE_DIR — the default project's folder) as a Nest service, plus `at(root)` for the folder
+ * of any other project: the executor binds a task's `workspace_*` tools, memory digest and ask_user answers to the
+ * TASK's project folder (docs/plan-projects-workspace.md §2.5); the dashboard page and the disk report keep reading the
+ * default one.
+ */
+@Injectable()
+export class WorkspaceService extends Workspace implements OnModuleInit {
+  private readonly others = new Map<string, Workspace>();
+
+  constructor(private readonly config: AppConfigService) {
+    super(config.workspaceDir, config.attachmentsDir);
+  }
+
+  async onModuleInit(): Promise<void> {
+    await this.ensureLayout().catch((e) => this.logger.warn(`workspace folder not ready (${this.root}): ${(e as Error).message}`));
+  }
+
+  /** The workspace at a root: this service for the default workspace, a cached root-bound instance for any other folder. */
+  at(root: string, opts: WorkspaceOptions = {}): Workspace {
+    const key = resolve(root);
+    if (key === resolve(this.root)) return this;
+    let w = this.others.get(key);
+    if (!w) {
+      w = new Workspace(key, this.config.attachmentsDir, opts);
+      this.others.set(key, w);
+    }
+    return w;
   }
 }
 

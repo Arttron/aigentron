@@ -11,6 +11,7 @@ import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
 import { useIsPhone } from '@/lib/use-media';
 import { Tabs } from '@/components/ui/Tabs';
 import { StatusBadge } from '@/components/StatusBadge';
+import { ProjectBadge } from '@/components/ProjectBadge';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { Transcript, type LogLine } from '@/components/Transcript';
 import { DiscussionModal } from '@/components/DiscussionModal';
@@ -344,6 +345,7 @@ function TaskDetailView({ id }: { id: string }) {
             actions={
               <Row>
                 <StatusBadge status={task.status} />
+                <ProjectBadge project={task.project} link />
                 {task.prUrl && (
                   <ButtonLink href={task.prUrl} target="_blank" rel="noreferrer">
                     Pull Request ↗

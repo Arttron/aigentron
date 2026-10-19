@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SERVER_EVENT } from '@lds/shared';
+import { useProjects } from '@/lib/use-projects';
+import { selectableProjects } from '@/lib/projects';
 import { api, type TaskListItem, type TaskStatusFilter, type TaskTypeFilter } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { readFilterParam, withFilterParam } from '@/lib/url-filter';
@@ -60,6 +62,12 @@ function initialType(): TaskTypeFilter | '' {
   }
 }
 
+function initialProject(): string {
+  const fromUrl = new URLSearchParams(window.location.search).get('project');
+  if (fromUrl) return fromUrl;
+  return '';
+}
+
 export function TaskListPage() {
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -67,6 +75,8 @@ export function TaskListPage() {
   const [q, setQ] = useState('');
   const [type, setType] = useState<TaskTypeFilter | ''>(initialType);
   const [status, setStatus] = useState<TaskStatusFilter | ''>(initialStatus);
+  const [project, setProject] = useState<string>(initialProject);
+  const { projects } = useProjects({ archived: true });
   const [statusCounts, setStatusCounts] = useState<Record<string, number> | null>(null);
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [connected, setConnected] = useState(false);
@@ -82,7 +92,7 @@ export function TaskListPage() {
     const mine = ++reqId.current;
     const fresh = () => mine === reqId.current && !ctl.signal.aborted;
     api
-      .listTasks({ q: q.trim() || undefined, type: type || undefined, status: status || undefined, page, pageSize: PAGE_SIZE }, ctl.signal)
+      .listTasks({ q: q.trim() || undefined, type: type || undefined, status: status || undefined, project: project || undefined, page, pageSize: PAGE_SIZE }, ctl.signal)
       .then((r) => {
         if (!fresh()) return;
         setTasks(r.items);
@@ -94,7 +104,7 @@ export function TaskListPage() {
       });
     api.taskTypeCounts(ctl.signal).then((c) => fresh() && setCounts(c)).catch(() => undefined);
     api.taskStatusCounts(type || undefined, ctl.signal).then((c) => fresh() && setStatusCounts(c)).catch(() => undefined);
-  }, [q, type, status, page]);
+  }, [q, type, status, project, page]);
   useEffect(() => () => inflight.current?.abort(), []);
 
   const removeTask = useCallback(
@@ -189,6 +199,11 @@ export function TaskListPage() {
     }
     window.history.replaceState(null, '', withFilterParam(window.location.href, 'type', next));
   };
+  const pickProject = (next: string) => {
+    setProject(next);
+    setPage(1);
+    window.history.replaceState(null, '', withFilterParam(window.location.href, 'project', next));
+  };
   const onSearch = (value: string) => {
     setQ(value);
     setPage(1); // new query always starts from the first page
@@ -206,6 +221,7 @@ export function TaskListPage() {
             <Link to="/resources">📚 Resources</Link>
             <Link to="/knowledge">🧠 Knowledge</Link>
             <Link to="/workspace">📁 Workspace</Link>
+            <Link to="/projects">📁 Projects</Link>
             <Link to="/browser">🌐 Browser</Link>
             <Link to="/stats">📊 Stats</Link>
             <Link to="/settings">⚙ Settings</Link>
@@ -219,7 +235,7 @@ export function TaskListPage() {
         </Card>
       )}
 
-      <CreateTaskForm onCreated={refreshTasks} />
+      <CreateTaskForm onCreated={refreshTasks} projects={projects ? selectableProjects(projects) : []} />
 
       <Card>
         <div
@@ -306,6 +322,42 @@ export function TaskListPage() {
             );
           })}
         </div>
+
+        {(projects?.length ?? 0) > 1 && (
+          <div role="group" aria-label="Filter by project" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12, alignItems: 'center' }}>
+            <Muted style={{ fontSize: 11 }}>Project:</Muted>
+            {[{ slug: '', name: 'All' }, ...(projects ?? []).filter((x) => !x.archivedAt || x.slug === project)].map((x) => {
+              const on = project === x.slug;
+              return (
+                <button
+                  key={x.slug || 'all'}
+                  type="button"
+                  aria-pressed={on}
+                  title={x.slug ? `Only tasks of ${x.name}` : 'Tasks of every project'}
+                  onClick={() => pickProject(x.slug)}
+                  style={{
+                    border: 'none',
+                    borderRadius: 999,
+                    padding: '4px 12px',
+                    font: 'inherit',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    maxWidth: '14em',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    background: on ? 'linear-gradient(155deg, var(--accent-strong), var(--accent))' : 'var(--bg-elev-2)',
+                    color: on ? 'var(--on-accent)' : 'var(--text-dim)',
+                    fontWeight: on ? 600 : 400,
+                    boxShadow: on ? undefined : 'var(--raised-xs)',
+                  }}
+                >
+                  {x.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <TaskList tasks={tasks} onDelete={removeTask} />
 

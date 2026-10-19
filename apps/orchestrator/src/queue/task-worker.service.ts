@@ -1,3 +1,4 @@
+import { mkdir } from 'node:fs/promises';
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { isTerminalStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
@@ -9,6 +10,9 @@ import { SettingsService } from '../settings/settings.service';
 import { PreviewService } from '../preview/preview.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
+import { ProjectsService } from '../projects/projects.service';
+import { docsWorkDirOf, resolveWorkDir, type ProjectContext } from '../projects/project-context';
+import { KeyedMutex } from '../projects/project-mutex';
 import { VerificationService, type VerifyResult } from './verification.service';
 import { TaskQueue, type TaskJobData } from './queue.constants';
 import { decideStatus } from './decide-status';
@@ -23,12 +27,23 @@ const CONCURRENCY_SYNC_MS = 10_000;
  * Consumer side of the task queue. For each job it drives the task lifecycle:
  *   queued -> running -> (worktree) -> executor -> done | failed
  * and supervises the agent run via the injected AgentExecutor.
+ *
+ * Projects (docs/plan-projects-workspace.md §2.6): every job first resolves its task's project. A shared-mode
+ * project is a FIFO lock — its tasks take turns in the one checkout — while tasks of different projects run side
+ * by side under the global concurrency cap. A task waiting for its project's lock hands its slot to the others
+ * (the worker's effective concurrency is raised by one per waiter and restored once it has the lock), so a busy
+ * project never starves the rest. A lead never holds the lock while it waits for subtasks: its run has returned
+ * by then, and the lock goes with the job.
  */
 @Injectable()
 export class TaskWorkerService implements OnModuleInit {
   private readonly logger = new Logger(TaskWorkerService.name);
   /** Tasks already handed back to the lead once for decomposition (one-shot). */
   private readonly decomposeHandedBack = new Set<string>();
+  /** The per-project lock of shared mode. */
+  private readonly projectLocks = new KeyedMutex();
+  /** Jobs currently waiting for a project lock (each one lends its slot to the rest). */
+  private waiting = 0;
   private lastConcurrency = 0;
 
   constructor(
@@ -43,6 +58,7 @@ export class TaskWorkerService implements OnModuleInit {
     private readonly preview: PreviewService,
     private readonly approvals: ApprovalsService,
     private readonly agents: AgentRegistryService,
+    private readonly projects: ProjectsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -67,11 +83,54 @@ export class TaskWorkerService implements OnModuleInit {
     const n = await this.settings.concurrency().catch(() => this.lastConcurrency);
     if (n === this.lastConcurrency) return;
     this.lastConcurrency = n;
-    this.queue.setConcurrency(n);
+    this.applyConcurrency();
     this.logger.log(`Concurrency updated to ${n}`);
   }
 
+  /** The cap the queue runs with right now: the configured value plus one slot per job waiting for a project lock. */
+  private applyConcurrency(): void {
+    this.queue.setConcurrency(this.lastConcurrency + this.waiting);
+  }
+
+  /**
+   * Take the project's lock when its mode calls for one (shared mode: one task at a time in the checkout). While
+   * this job waits it lends its slot: the queue may start one more job — of another project, or of the same one,
+   * which then queues behind this one in FIFO order.
+   */
+  private async lockProject(project: ProjectContext | null, taskId: string): Promise<() => void> {
+    if (!project || project.isolation !== 'shared') return () => undefined;
+    return this.projectLocks.acquire(project.id, () => {
+      this.waiting++;
+      this.applyConcurrency();
+      this.logger.log(`Task ${taskId} waits for project "${project.slug}" (${this.projectLocks.pending(project.id) - 1} ahead) — its slot is lent out meanwhile`);
+      return () => {
+        this.waiting--;
+        this.applyConcurrency();
+      };
+    });
+  }
+
   private async process(data: TaskJobData): Promise<void> {
+    const { taskId } = data;
+    // What the job is about, before anything is claimed: the task's agent (a chat agent has no project lifecycle)
+    // and its project (its lock, checkout, mode). A task deleted since it was queued is simply dropped.
+    const pre = await this.tasks.getLite(taskId).catch(() => null);
+    if (!pre) {
+      this.logger.log(`Task ${taskId} is gone — dropping its job`);
+      return;
+    }
+    const agentDef = pre.agentName ? await this.agents.get(pre.agentName).catch(() => null) : null;
+    const chat = agentDef?.mode === 'chat';
+    const project = chat ? null : await this.projects.contextFor(pre);
+    const release = await this.lockProject(project, taskId);
+    try {
+      await this.processLocked(data, chat, project);
+    } finally {
+      release();
+    }
+  }
+
+  private async processLocked(data: TaskJobData, chat: boolean, project: ProjectContext | null): Promise<void> {
     const { taskId, followUpPrompt, attachments } = data;
     // Guarded transition: a job whose task was cancelled, accepted as done or
     // deleted since it was queued is dropped here — never `running` over that;
@@ -91,24 +150,20 @@ export class TaskWorkerService implements OnModuleInit {
       this.logger.log(`Task ${taskId} is cancelled, done or gone — dropping its job`);
       return;
     }
-    this.logger.log(`Processing task ${taskId}`);
+    this.logger.log(`Processing task ${taskId}${project && !project.isDefault ? ` [project=${project.slug}]` : ''}`);
 
     try {
-      const task = await this.tasks.getLite(taskId);
       // Chat agents (e.g. the built-in admin) have no repo/worktree/verify/publish
       // lifecycle: every turn just runs and settles as done.
-      const chatAgent = task.agentName ? await this.agents.get(task.agentName).catch(() => null) : null;
-      if (chatAgent?.mode === 'chat') {
+      if (chat || !project) {
         await this.processChat(taskId, followUpPrompt, attachments);
         return;
       }
-      // Shared mode: every task works in the main repo dir. Otherwise reuse an
-      // existing per-task worktree on follow-ups, or create one.
-      const wt = this.config.workspaceShared
-        ? await this.worktrees.useSharedRepo()
-        : task.worktreePath && task.branch
-          ? { worktreePath: task.worktreePath, branch: task.branch }
-          : await this.worktrees.createForTask(taskId);
+      const task = await this.tasks.getLite(taskId);
+      const shared = project.isolation === 'shared';
+      // Where the task works: a docs project's work/ folder (no git); in shared mode the project's checkout;
+      // otherwise an existing per-task worktree on follow-ups, or a new one.
+      const wt = await this.checkoutFor(project, task, shared);
       if (task.worktreePath !== wt.worktreePath || task.branch !== wt.branch) {
         await this.tasks.attachWorktree(taskId, wt.branch, wt.worktreePath);
       }
@@ -202,7 +257,7 @@ export class TaskWorkerService implements OnModuleInit {
         // Clean finish (reported 'done', or unreported with strict mode off).
         // Verification gate: run the project's checks and let the agent fix
         // failures (bounded) before we mark done / push.
-        const gate = await this.verifyWithFixes({ taskId, ...wt });
+        const gate = await this.verifyWithFixes({ taskId, ...wt, project });
         // The verify loop may have been cancelled while iterating.
         if (isTerminalStatus((await this.tasks.getLite(taskId)).status)) {
           this.logger.log(`Task ${taskId} settled during verification — not finalizing`);
@@ -216,13 +271,15 @@ export class TaskWorkerService implements OnModuleInit {
 
         // The agent is finished: the person accepts the result. (A subtask is accepted by its lead, so it is simply done.)
         await this.tasks.setStatus(taskId, decision.status);
-        // Publish (best-effort; never fails the task):
-        //  - shared mode: push the current branch straight to origin (no PR) if
+        // Publish (best-effort; never fails the task) — code projects only (a docs project has no repository):
+        //  - shared mode: push the current branch straight to the project's origin (no PR) if
         //    a repo is configured — the agent's commits go up as-is.
         //  - worktree mode: push the task branch + open/refresh a PR.
-        if (this.config.workspaceShared) {
+        if (project.kind !== 'code') {
+          // nothing to publish
+        } else if (shared) {
           // Shared mode: push straight to origin, no PR → record it as pushedTo.
-          const pushedTo = await this.github.pushSharedWorkspace(wt.branch).catch((err) => {
+          const pushedTo = await this.github.pushSharedWorkspace(project, wt.branch).catch((err) => {
             this.logger.warn(`shared push failed: ${(err as Error).message}`);
             return null;
           });
@@ -230,7 +287,7 @@ export class TaskWorkerService implements OnModuleInit {
         } else {
           // Worktree mode: push the task branch + open/refresh a real PR → prUrl.
           const prUrl = await this.github
-            .publishResult({
+            .publishResult(project, {
               branch: wt.branch,
               title: task.title,
               body: `Automated change by an agent for task \`${taskId}\`.\n\n${task.prompt}`,
@@ -274,6 +331,18 @@ export class TaskWorkerService implements OnModuleInit {
     }
   }
 
+  /** The folder (and branch) a task of the project works in. */
+  private async checkoutFor(project: ProjectContext, task: { worktreePath: string | null; branch: string | null; id: string }, shared: boolean): Promise<{ worktreePath: string; branch: string }> {
+    if (project.kind !== 'code') {
+      const dir = docsWorkDirOf(project);
+      await mkdir(dir, { recursive: true });
+      return { worktreePath: dir, branch: '' };
+    }
+    if (shared) return this.worktrees.useSharedRepo(project);
+    if (task.worktreePath && task.branch) return { worktreePath: task.worktreePath, branch: task.branch };
+    return this.worktrees.createForTask(project, task.id);
+  }
+
   /** One chat turn: run the agent in the agent-config dir and settle as done (or failed on a run error). */
   private async processChat(taskId: string, followUpPrompt?: string, attachments?: string[]): Promise<void> {
     const outcome = await this.executor.run({
@@ -297,18 +366,18 @@ export class TaskWorkerService implements OnModuleInit {
   }
 
   /**
-   * Run the verification gate; on failure, hand the output back to the agent for
-   * up to verifyMaxAttempts fix iterations, re-verifying each time.
+   * Run the project's verification gate; on failure, hand the output back to the agent for
+   * up to the project's verifyMaxAttempts fix iterations, re-verifying each time.
    */
-  private async verifyWithFixes(ctx: {
-    taskId: string;
-    worktreePath: string;
-    branch: string;
-  }): Promise<VerifyResult> {
-    let result = await this.verification.verify(ctx.worktreePath);
+  private async verifyWithFixes(ctx: { taskId: string; worktreePath: string; branch: string; project: ProjectContext }): Promise<VerifyResult> {
+    const { project } = ctx;
+    if (!project.verifyCommands.length) return { ran: false, ok: true, output: '' };
+    // The same cwd the agent worked in: the configured subdirectory (e.g. a monorepo package), else the checkout root.
+    const cwd = await resolveWorkDir(ctx.worktreePath, project.repoSubdir, (m) => this.logger.warn(m));
+    let result = await this.verification.verify(project.verifyCommands, cwd);
     if (!result.ran || result.ok) return result;
 
-    const maxAttempts = await this.settings.verifyMaxAttempts();
+    const maxAttempts = project.verifyMaxAttempts;
     for (let attempt = 1; attempt <= maxAttempts && !result.ok; attempt++) {
       // Stop launching fix runs if the task was cancelled/deleted between rounds.
       if (isTerminalStatus((await this.tasks.getLite(ctx.taskId)).status)) break;
@@ -321,7 +390,7 @@ export class TaskWorkerService implements OnModuleInit {
         // a fix run needs no extra "report your status" turn (the gate re-verifies anyway)
         skipReportingResume: true,
       });
-      result = await this.verification.verify(ctx.worktreePath);
+      result = await this.verification.verify(project.verifyCommands, cwd);
     }
     return result;
   }

@@ -1,11 +1,9 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { Injectable, Logger } from '@nestjs/common';
-import { AppConfigService } from '../config/app-config.service';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { GIT_CREDENTIALS, type GitAuth, type GitCredentialsProvider } from '../projects/git-credentials.port';
+import { runGit } from '../projects/git/git-runner';
+import type { ProjectContext } from '../projects/project-context';
 import { SettingsService } from '../settings/settings.service';
-import { gitAuthEnv, parseGithubRepo, redactUrl } from './git-auth';
-
-const exec = promisify(execFile);
+import { needsHttpCredentials, parseGithubRepo, redactUrl } from './git-auth';
 
 export interface PublishInput {
   branch: string;
@@ -15,11 +13,15 @@ export interface PublishInput {
   body: string;
 }
 
+/** The parts of a project the publisher needs. */
+export type PublishTarget = Pick<ProjectContext, 'slug' | 'repoPath' | 'repoUrl' | 'repoBranch' | 'git'>;
+
 /**
- * Publishes an agent's result branch back to GitHub: pushes the branch and
- * opens (or finds) a pull request against the configured base branch.
+ * Publishes an agent's result branch back to the project's remote: pushes the branch and
+ * opens (or finds) a pull request against the project's base branch (GitHub only).
+ * Every git command carries the project's GitAuth for that command only (env / args — never the checkout's config).
  *
- * Best-effort: any failure (no token, no write access, network) is logged and
+ * Best-effort: any failure (no credentials, no write access, network) is logged and
  * returns null — the task already succeeded locally, so we never fail it here.
  */
 @Injectable()
@@ -27,68 +29,89 @@ export class GitHubService {
   private readonly logger = new Logger(GitHubService.name);
 
   constructor(
-    private readonly config: AppConfigService,
+    @Inject(GIT_CREDENTIALS) private readonly credentials: GitCredentialsProvider,
     private readonly settings: SettingsService,
   ) {}
 
+  /** The project's auth, or null (logged) when its configuration cannot work (a missing token / key). */
+  private async authOf(project: PublishTarget, what: string): Promise<GitAuth | null> {
+    try {
+      return await this.credentials.authFor(project.git);
+    } catch (err) {
+      this.logger.warn(`[${project.slug}] Skipping ${what}: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
   /** Push the branch and open/find a PR. Returns the PR URL, or null if skipped. */
-  async publishResult(input: PublishInput): Promise<string | null> {
-    const cfg = await this.settings.workspaceConfig();
-    if (!cfg.repoUrl) return null; // no-repo mode — nothing to push to
-    if (!cfg.githubToken) {
-      this.logger.warn('Skipping push/PR: no GitHub token configured');
+  async publishResult(project: PublishTarget, input: PublishInput): Promise<string | null> {
+    const repoUrl = project.repoUrl;
+    if (!repoUrl) return null; // no-repo mode — nothing to push to
+    const auth = await this.authOf(project, 'push/PR');
+    if (!auth) return null;
+    if (auth.anonymous && needsHttpCredentials(repoUrl)) {
+      this.logger.warn(`[${project.slug}] Skipping push/PR: no GitHub token configured`);
       return null;
     }
-    const slug = parseGithubRepo(cfg.repoUrl);
+    const slug = parseGithubRepo(repoUrl);
     if (!slug) {
-      this.logger.warn(`Skipping PR: cannot parse owner/repo from ${redactUrl(cfg.repoUrl)}`);
+      this.logger.warn(`[${project.slug}] Skipping PR: cannot parse owner/repo from ${redactUrl(repoUrl)}`);
       return null;
     }
-    const repo = this.config.workspaceRepoPath;
+    const repo = project.repoPath;
 
     // Only publish if the branch actually has commits ahead of the base.
-    const ahead = await this.git(repo, [
-      'rev-list',
-      '--count',
-      `origin/${cfg.repoBranch}..${input.branch}`,
-    ]).catch(() => '0');
+    const ahead = await this.git(repo, ['rev-list', '--count', `origin/${project.repoBranch}..${input.branch}`]).catch(() => '0');
     if (ahead === '0') {
-      this.logger.log(`Branch ${input.branch} has no commits ahead of ${cfg.repoBranch} — skipping`);
+      this.logger.log(`[${project.slug}] Branch ${input.branch} has no commits ahead of ${project.repoBranch} — skipping`);
       return null;
     }
 
     try {
-      this.logger.log(`Pushing ${input.branch} (${ahead} commits) to origin`);
-      await this.git(repo, ['push', '--force-with-lease', 'origin', input.branch], cfg.githubToken);
+      this.logger.log(`[${project.slug}] Pushing ${input.branch} (${ahead} commits) to origin`);
+      await this.git(repo, ['push', '--force-with-lease', 'origin', input.branch], auth);
     } catch (err) {
-      this.logger.warn(`Push failed for ${input.branch}: ${(err as Error).message}`);
+      this.logger.warn(`[${project.slug}] Push failed for ${input.branch}: ${(err as Error).message}`);
       return null;
     }
 
-    return this.openPullRequest(slug, cfg.githubToken, {
+    // The PR goes through the GitHub API with the project's token (the installation's one until it is migrated).
+    const token = await this.apiToken(project);
+    if (!token) {
+      this.logger.warn(`[${project.slug}] Pushed ${input.branch}; no GitHub token for the PR API — open the pull request by hand`);
+      return null;
+    }
+    return this.openPullRequest(slug, token, {
       head: input.branch,
-      base: cfg.repoBranch,
+      base: project.repoBranch,
       title: input.title,
       body: input.body,
     });
   }
 
+  /** The project's HTTPS token for the GitHub API (the port), else the installation's legacy one. */
+  private async apiToken(project: PublishTarget): Promise<string | null> {
+    const own = await this.credentials.apiTokenFor?.(project.git).catch(() => null);
+    return own ?? (await this.settings.githubToken());
+  }
+
   /**
-   * Shared-workspace push: send the current branch straight to origin/<repoBranch>
-   * (no PR — the whole repo IS the working dir). Wires `origin` from the settings
-   * repo URL and authenticates with the token via http.extraHeader (never exposed
-   * to the agent). Returns a link to the pushed branch, or null if skipped/failed.
+   * Shared-mode push: send the current branch straight to origin/<repoBranch>
+   * (no PR — the whole checkout IS the working dir). Wires `origin` from the project's
+   * repo URL and authenticates through the credentials port (never exposed to the
+   * agent). Returns a link to the pushed branch, or null if skipped/failed.
    */
-  async pushSharedWorkspace(branch: string): Promise<string | null> {
-    const cfg = await this.settings.workspaceConfig();
-    const repoUrl = cfg.repoUrl;
+  async pushSharedWorkspace(project: PublishTarget, branch: string): Promise<string | null> {
+    const repoUrl = project.repoUrl;
     if (!repoUrl) return null; // no repo configured
-    if (!cfg.githubToken) {
-      this.logger.warn('Skipping push: no GitHub token configured');
+    const auth = await this.authOf(project, 'push');
+    if (!auth) return null;
+    if (auth.anonymous && needsHttpCredentials(repoUrl)) {
+      this.logger.warn(`[${project.slug}] Skipping push: no GitHub token configured`);
       return null;
     }
-    const repo = this.config.workspaceRepoPath;
-    // Point origin at the configured repo (add if missing, else update).
+    const repo = project.repoPath;
+    // Point origin at the project's repo (add if missing, else update).
     await this.git(repo, ['remote', 'set-url', 'origin', repoUrl]).catch(() =>
       this.git(repo, ['remote', 'add', 'origin', repoUrl]).catch(() => undefined),
     );
@@ -96,16 +119,14 @@ export class GitHubService {
     const head = await this.git(repo, ['rev-list', '--count', 'HEAD']).catch(() => '0');
     if (head === '0') return null;
     try {
-      this.logger.log(`Pushing ${branch} → origin/${cfg.repoBranch}`);
-      await this.git(repo, ['push', '-u', 'origin', `${branch}:${cfg.repoBranch}`], cfg.githubToken);
+      this.logger.log(`[${project.slug}] Pushing ${branch} → origin/${project.repoBranch}`);
+      await this.git(repo, ['push', '-u', 'origin', `${branch}:${project.repoBranch}`], auth);
     } catch (err) {
-      this.logger.warn(`Shared push failed: ${(err as Error).message}`);
+      this.logger.warn(`[${project.slug}] Shared push failed: ${(err as Error).message}`);
       return null;
     }
     const slug = parseGithubRepo(repoUrl);
-    return slug
-      ? `https://github.com/${slug.owner}/${slug.repo}/tree/${cfg.repoBranch}`
-      : redactUrl(repoUrl);
+    return slug ? `https://github.com/${slug.owner}/${slug.repo}/tree/${project.repoBranch}` : redactUrl(repoUrl);
   }
 
   private async openPullRequest(
@@ -169,12 +190,8 @@ export class GitHubService {
     return list[0]?.html_url ?? null;
   }
 
-  private async git(cwd: string, args: string[], token?: string): Promise<string> {
-    const { stdout } = await exec('git', args, {
-      cwd,
-      maxBuffer: 16 * 1024 * 1024,
-      env: gitAuthEnv(token),
-    });
+  private async git(cwd: string, args: string[], auth?: GitAuth): Promise<string> {
+    const { stdout } = await runGit(args, { cwd, auth, timeoutMs: 10 * 60_000 });
     return stdout.trim();
   }
 }

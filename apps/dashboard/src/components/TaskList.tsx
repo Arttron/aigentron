@@ -4,6 +4,7 @@ import { readCollapsed, statusSummary, writeCollapsed } from '@/lib/collapsed';
 import { cn } from '@/lib/cn';
 import type { TaskListItem } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
+import { ProjectBadge } from '@/components/ProjectBadge';
 import { Badge, Button, Muted } from '@/components/ui';
 import styles from './TaskList.module.css';
 
@@ -65,6 +66,7 @@ export function TaskList({
             </button>
           )}
           {(t._count?.approvals ?? 0) > 0 && <span className={styles.pill}>{t._count?.approvals} ⚠</span>}
+          <ProjectBadge project={t.project} />
           {t.agentName && <Badge tone="neutral">{t.agentName}</Badge>}
           <span className={styles.meta}>{new Date(t.createdAt).toLocaleTimeString()}</span>
           <Button variant="red" size="sm" title="Delete task" onClick={() => onDelete(t.id)}>

@@ -329,6 +329,17 @@ else
     log "git not found — installing"
     pkg_install git
   }
+  # git over ssh (a project's deploy key) needs the ssh client; best effort — without it https + token still works and the
+  # project's "Test connection" says exactly what is missing.
+  ensure_ssh_client() {
+    command -v ssh >/dev/null 2>&1 && return 0
+    [ "$AUTO_INSTALL_DEPS" = "1" ] || { log "ssh client not found — git over ssh (deploy keys) stays off (install openssh-client)"; return 0; }
+    log "ssh client not found — installing (for git over ssh)"
+    case "$PKG_MGR" in
+      apt|apk) pkg_install openssh-client || log "could not install openssh-client — use a token over https or install it manually" ;;
+      dnf|yum) pkg_install openssh-clients || log "could not install openssh-clients — use a token over https or install it manually" ;;
+    esac
+  }
   # Debian/Ubuntu split `python3 -m venv`'s ensurepip support into a separate
   # package — `python3` alone can be present and working while venv creation
   # still fails ("ensurepip is not available"). Check the actual capability,
@@ -414,6 +425,7 @@ else
 
   ensure_curl
   ensure_git
+  ensure_ssh_client
   ensure_python3
   ensure_node
   ensure_uv

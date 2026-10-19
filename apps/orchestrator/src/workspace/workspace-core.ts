@@ -27,6 +27,17 @@ export const BRIEF_TEMPLATE = `# Workspace brief
 - **Who decides:**
 `;
 
+/** The brief of a project folder (`PROJECT.md`, docs/plan-projects-workspace.md §2.2) — the same shape, headed by the project's name. */
+export const projectBriefTemplate = (name: string): string => `# ${name}
+
+<!-- The project brief. Fill in (a person, or the admin on request): agents read this at the start of every task of the project. Keep it short. -->
+
+- **Goal:**
+- **Constraints (budget, deadlines, standards, language):**
+- **Success criteria:**
+- **Who decides:**
+`;
+
 const HEADERS: Record<NoteKind, string> = {
   decision: '# Decisions\n\nWhat was decided, by whom and why (newest last).\n',
   question: '# Open questions\n\n`- [ ]` open, `- [x]` answered.\n',
@@ -89,10 +100,10 @@ export interface MemoryParts {
 }
 
 /** The memory block of the prompt (≤ ~6 KB): the brief (unless untouched), the status, the last decisions, the open questions. */
-export function buildDigest(p: MemoryParts, briefTemplate = BRIEF_TEMPLATE): string {
+export function buildDigest(p: MemoryParts, briefTemplate = BRIEF_TEMPLATE, briefFile = BRIEF_FILE): string {
   const untouched = (s: string, header: string) => !s.trim() || s.trim() === header.trim();
   const out: string[] = [];
-  if (!untouched(p.brief, briefTemplate)) out.push(`### Brief (WORKSPACE.md)\n${clip(p.brief.trim(), 3500)}`);
+  if (!untouched(p.brief, briefTemplate)) out.push(`### Brief (${briefFile})\n${clip(p.brief.trim(), 3500)}`);
   if (!untouched(p.status, HEADERS.status)) out.push(`### Status\n${clip(p.status.replace(/^# Status\n+/, '').trim(), 1400)}`);
   const decisions = p.decisions.split('\n').filter((l) => l.startsWith('- ')).slice(-15);
   if (decisions.length) out.push(`### Latest decisions\n${clip(decisions.join('\n'), 2000)}`);
@@ -101,15 +112,25 @@ export function buildDigest(p: MemoryParts, briefTemplate = BRIEF_TEMPLATE): str
   return out.join('\n\n');
 }
 
+/** What makes a project's folder differ from the default workspace in the prompt: its brief file and its name. */
+export interface OrientationOptions {
+  briefFile?: string;
+  /** A non-default project: the block is headed with its name and slug. */
+  project?: { name: string; slug: string } | null;
+}
+
 /** The short orientation block of the prompt (paths + where things go). */
-export function orientationBlock(root: string): string {
+export function orientationBlock(root: string, opts: OrientationOptions = {}): string {
+  const brief = opts.briefFile ?? BRIEF_FILE;
+  const head = opts.project ? `## Project workspace — ${opts.project.name} (\`${opts.project.slug}\`)` : '## Shared workspace';
+  const what = opts.project ? `The folder of this project's non-code work (notes, drafts, results)` : `A shared folder for the team's non-code work (notes, drafts, results)`;
   return [
-    '## Shared workspace',
-    `A shared folder for the team's non-code work (notes, drafts, results): \`${root}\` — your code stays where it is.`,
+    head,
+    `${what}: \`${root}\` — your code stays where it is.`,
     `- \`work/\` — drafts, research notes, data; write freely.`,
     `- \`deliverables/\` — finished results for the person: save with \`workspace_save\` (keeps older versions; it also shows the file in this task's attachments).`,
     `- \`memory/\` — decisions, open questions, facts, plan, status: record with \`workspace_note\`, do not edit by hand.`,
-    `- \`WORKSPACE.md\` — the brief (read-only for you; ask the person to change it).`,
+    `- \`${brief}\` — the brief (read-only for you; ask the person to change it).`,
     'Call `workspace_info` if unsure where something belongs; `workspace_files` lists what is there.',
   ].join('\n');
 }
@@ -130,8 +151,8 @@ export const BRIEF_FILE = 'WORKSPACE.md';
 export const MAX_BRIEF_BYTES = 64 * 1024;
 
 /** `work/` takes uploads; the brief is editable; deletions only in work/ and deliverables/. */
-export function canWrite(rel: string): boolean {
-  return rel === BRIEF_FILE || rel.startsWith('work/');
+export function canWrite(rel: string, briefFile = BRIEF_FILE): boolean {
+  return rel === briefFile || rel.startsWith('work/');
 }
 export function canDelete(rel: string): boolean {
   return rel.startsWith('work/') || rel.startsWith('deliverables/');

@@ -87,7 +87,7 @@ project's git repo. Everything runs asynchronously.
 - \`list_docs\` / \`read_doc(path)\` — read the project's docs for context.
 - \`list_agents\` / \`get_agent(name)\` — see the fleet's agents and their skills, to
   pick an \`agentName\` (or omit it for the default PM lead).
-- \`create_task(prompt, title?, agentName?, references?)\` — queue work.
+- \`create_task(prompt, title?, agentName?, references?, project?)\` — queue work (\`project\` = a project slug; default = the default project).
 - \`wait_for_task(id, timeoutSec?)\` — block until the task settles; the reliable
   way to learn the result.
 - \`get_task(id)\` — snapshot a task (status, summary, prUrl, subtasks, signals).
@@ -290,10 +290,11 @@ export class McpHostService implements OnModuleDestroy {
           title: z.string().max(200).optional().describe('Short title (else derived from the prompt).'),
           agentName: z.string().max(100).optional().describe('Named agent to lead (see list_agents; else the default lead / PM).'),
           references: z.array(z.string()).max(20).optional().describe('Ids of related tasks whose summaries fold into context.'),
+          project: z.string().max(40).optional().describe('Slug of the project the task belongs to (see GET /api/projects; else the default project).'),
         },
       },
-      async ({ prompt, title, agentName, references }) => {
-        const task = await this.tasks.create({ prompt, title, agentName, references, createdByChannel: 'mcp' });
+      async ({ prompt, title, agentName, references, project }) => {
+        const task = await this.tasks.create({ prompt, title, agentName, references, project, createdByChannel: 'mcp' });
         followed.add(taskUri(task.id));
         return this.json({
           id: task.id,

@@ -222,9 +222,9 @@ export class AttachmentsService {
 
   // ---- linked attachments: a task's attachment list may point at files that live elsewhere (no copy) ----
 
-  /** Folders a link may point into: the shared workspace and the resource library. */
+  /** Folders a link may point into: the shared workspace, the project folders and the resource library. */
   private linkRoots(): string[] {
-    return [this.config.workspaceDir, join(this.config.agentDir, 'resources')].filter(Boolean);
+    return [this.config.workspaceDir, this.config.projectsDir, join(this.config.agentDir, 'resources')].filter(Boolean);
   }
 
   private linksFile(taskId: string): string {

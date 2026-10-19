@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   runtimeForProviderKind,
   addUsage,
@@ -57,6 +57,10 @@ import { accountRunUsage, addTotals, budgetTokens, emptyTotals, reportingResumeU
 import { RunDeadline } from './run-watchdogs';
 import { getTaskLiteOrThrow } from './task-lite';
 import { AgentUserService } from './agent-user.service';
+import { ProjectsService } from '../projects/projects.service';
+import { extraWriteRootsFor, resolveWorkDir, type ProjectContext } from '../projects/project-context';
+import { GIT_CREDENTIALS, type GitCredentialsProvider } from '../projects/git-credentials.port';
+import type { Workspace } from '../workspace/workspace.service';
 
 /** Per-skill and total caps (chars) on skill content folded into the prompt. */
 const SKILL_FILE_CAP = 16_000;
@@ -127,12 +131,17 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly questions: QuestionsService,
     private readonly knowledge: KnowledgeService,
     private readonly agentUser: AgentUserService,
+    private readonly projects: ProjectsService,
+    @Inject(GIT_CREDENTIALS) private readonly credentials: GitCredentialsProvider,
   ) {
     super();
   }
 
   async run(ctx: TaskRunContext): Promise<AgentRunOutcome> {
     const task = await getTaskLiteOrThrow(this.prisma, ctx.taskId);
+    // The task's project decides where the agent works, which folder its workspace tools use, what it may write to.
+    const project = await this.projects.contextFor(task);
+    const workspace = this.workspace.at(project.workspaceRoot, { briefFile: project.briefFile, briefTemplate: project.briefTemplate, project: project.isDefault ? null : { name: project.name, slug: project.slug } });
     // A discussion turn runs the named participant, not the task's own agent.
     const agentName = ctx.discussion?.agent ?? task.agentName;
     const agentDef = agentName
@@ -141,7 +150,10 @@ export class RealAgentExecutor extends AgentExecutor {
     const defaultProvider = await this.settings.defaultProvider();
 
     // Setup that is the same across every failover attempt (provider-independent).
-    const { githubToken } = await this.settings.workspaceConfig();
+    // Providers and MCP servers are shared by all projects; the one per-run credential is the GITHUB_TOKEN the shared
+    // `github` server gets: the TASK'S PROJECT's token (the port), else the installation's legacy one, else whatever
+    // the server's own config says (a `${GITHUB_TOKEN}` placeholder becomes empty).
+    const githubToken = (await this.credentials.apiTokenFor?.(project.git).catch(() => null)) ?? (await this.settings.githubToken());
     // A discussion participant only talks: none of the agent's own MCP servers (their tools could write somewhere).
     const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(agentDef?.mcp ?? [], { GITHUB_TOKEN: githubToken });
     // The built-in research server lives in this process and only serves runs that carry a bearer (S-04): give this run its own.
@@ -159,21 +171,22 @@ export class RealAgentExecutor extends AgentExecutor {
     // Agent cwd: the worktree root, or the configured subdir within it. The
     // worktree root stays the write boundary (passed separately to the runner).
     const chat = agentDef?.mode === 'chat' || Boolean(ctx.discussion);
-    const workDir = chat ? ctx.worktreePath : await this.settings.workDir(ctx.worktreePath);
+    const docs = !chat && project.kind !== 'code';
+    const workDir = chat || docs ? ctx.worktreePath : await resolveWorkDir(ctx.worktreePath, project.repoSubdir, (m) => this.logger.warn(`[${project.slug}] ${m}`));
     // Orient every agent (lead AND delegated sub-agents share this cwd): its cwd
     // IS the project (a per-task worktree checkout), so none of them hunt for a
     // "main project" elsewhere or hedge about the location. The orientation is
     // static for a task (paths, branch) — it lives in the system append.
     const workspaceOn = !chat; // chat agents and discussion participants get the tools, not the prompt block
     const orientation =
-      (chat ? buildChatOrientation(workDir) : buildOrientation(workDir, ctx.worktreePath, task.branch, this.config.workspaceShared)) +
-      (workspaceOn ? `\n\n${this.workspace.orientation()}` : '');
+      (chat ? buildChatOrientation(workDir) : docs ? buildDocsOrientation(workDir, project) : buildOrientation(workDir, ctx.worktreePath, task.branch, project.isolation === 'shared', project)) +
+      (workspaceOn ? `\n\n${workspace.orientation()}` : '');
     // What changes between runs (the project map, the workspace memory) goes into
     // the run's MESSAGE, never into the system append: a changed system block
     // throws away the prompt cache of the whole conversation (see prompt-layers.ts).
-    const projectMap = chat ? '' : await buildProjectMap(workDir);
-    const memory = workspaceOn ? await this.workspace.digest().catch(() => '') : '';
-    const instructions = await this.buildInstructions(agentDef);
+    const projectMap = chat || docs ? '' : await buildProjectMap(workDir);
+    const memory = workspaceOn ? await workspace.digest().catch(() => '') : '';
+    const instructions = await this.buildInstructions(agentDef, project.repoPath);
     // Other registered agents become delegatable subagents (each on its own provider);
     // a chat agent talks to the user directly and delegates to no one. The map
     // depends on the LEAD's provider (an agent without a provider of its own runs
@@ -184,7 +197,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const prepare = async (leadProvider: string) => {
       const hit = prepared.get(leadProvider);
       if (hit) return hit;
-      const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation);
+      const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation, project.repoPath);
       if (Object.keys(agents).length) {
         this.logger.log(`Task ${task.id} subagents on ${leadProvider}: [${Object.keys(agents).join(', ')}]`);
       }
@@ -240,9 +253,18 @@ export class RealAgentExecutor extends AgentExecutor {
     // S-01: when AGENT_RUN_AS_UID is set, hand the agent user what it writes (its home, the checkout, the
     // workspace, this task's attachments) and run the runtime as that user. Off = unchanged. Throws (→ the
     // task fails with the reason) when it is on but broken — never a silent run as root.
-    const isolation = await this.agentUser.prepareRun({ taskId: ctx.taskId, worktreePath: chat ? null : ctx.worktreePath, attachmentsDir: this.attachments.dir(ctx.taskId) });
+    const isolation = await this.agentUser.prepareRun({
+      taskId: ctx.taskId,
+      worktreePath: chat ? null : ctx.worktreePath,
+      attachmentsDir: this.attachments.dir(ctx.taskId),
+      repoPath: project.repoPath,
+      shared: project.isolation === 'shared',
+      workspaceDir: project.workspaceRoot,
+    });
     const common = {
       ctx,
+      project,
+      workspace,
       workDir,
       refContext,
       basePrompt: task.prompt,
@@ -412,6 +434,9 @@ export class RealAgentExecutor extends AgentExecutor {
    */
   private async attempt(opts: {
     ctx: TaskRunContext;
+    /** The task's project (paths, mode, write roots) and its workspace folder (the `workspace_*` tools, memory). */
+    project: ProjectContext;
+    workspace: Workspace;
     workDir: string;
     refContext: string;
     basePrompt: string;
@@ -439,7 +464,7 @@ export class RealAgentExecutor extends AgentExecutor {
     firstAttempt: boolean;
     leadingNote?: string;
   }): Promise<{ outcome: AgentRunOutcome; failoverWorthy: boolean; reason: string }> {
-    const { ctx, agentDef, provider, model } = opts;
+    const { ctx, agentDef, provider, model, workspace } = opts;
     // Prepend referenced-task context (if any) to the message the agent sees.
     const rawPrompt = ctx.followUpPrompt ?? opts.basePrompt;
     const prompt = opts.refContext ? `${opts.refContext}\n${rawPrompt}` : rawPrompt;
@@ -628,10 +653,13 @@ export class RealAgentExecutor extends AgentExecutor {
     // Usage of a run that never reaches its result message (abort, timeout, transport error) — X-COST-3.
     let partial = emptyTotals();
 
-    // Folders an agent may hand to show_images / look_at / workspace_save besides the library: its worktree, and (Codex) the pictures it generated.
+    // Folders an agent may hand to show_images / look_at / workspace_save besides the library: its worktree, the folder of ITS project
+    // (never another project's), and (Codex) the pictures it generated.
     const generatedDir = codexImagesDir(this.config.agentDir, ctx.taskId);
     // A chat agent's "worktree" is the whole agent dir (it holds runs/*/codex-home with sign-in tokens): never an allowed root for it.
-    const mediaRoots = opts.chat ? [generatedDir] : [ctx.worktreePath, generatedDir];
+    const mediaRoots = opts.chat ? [generatedDir, opts.project.workspaceRoot] : [ctx.worktreePath, generatedDir, opts.project.workspaceRoot];
+    // What the agent may write to besides its task root: its project's folder (and, in shared mode, the checkout).
+    const extraWriteRoots = ctx.discussion ? undefined : extraWriteRootsFor(opts.project, ctx.worktreePath);
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
     const toolHandlers: InternalToolHandlers = {
       onReportStatus,
@@ -647,14 +675,14 @@ export class RealAgentExecutor extends AgentExecutor {
         ...(ctx.discussion ? {} : { add: (input: { kb: string; title: string; text: string; source?: string }) => this.knowledge.addReport(input, agentDef?.name ?? null) }),
       },
       workspace: {
-        info: () => this.workspace.info(),
-        files: (input) => this.workspace.files(input),
+        info: () => workspace.info(),
+        files: (input) => workspace.files(input),
         ...(ctx.discussion
           ? {}
           : {
-              note: (input: { kind: string; text: string; resolves?: string }) => this.workspace.note(input, agentDef?.name),
+              note: (input: { kind: string; text: string; resolves?: string }) => workspace.note(input, agentDef?.name),
               save: (input: { path: string; content?: string; from?: string; note?: string }) =>
-                this.workspace.save(
+                workspace.save(
                   input,
                   mediaRoots,
                   async (dest) => {
@@ -710,8 +738,8 @@ export class RealAgentExecutor extends AgentExecutor {
             // the picture shown with the question must be a real file of this task (never an arbitrary path)
             image: input.image ? await this.media.safePath(input.image, mediaRoots, ctx.taskId).catch(() => undefined) : undefined,
           });
-          // what the person decided is team knowledge: it goes to workspace memory (decisions.md) by itself
-          if (!opts.chat) void this.workspace.recordAnswer(input.question, answer);
+          // what the person decided is team knowledge: it goes to the project's memory (decisions.md) by itself
+          if (!opts.chat) void workspace.recordAnswer(input.question, answer);
           return answer;
         } finally {
           deadline.resume();
@@ -746,7 +774,7 @@ export class RealAgentExecutor extends AgentExecutor {
           prompt: withRunContext(await this.promptWithAttachments(prompt, opts), opts.runContext),
           cwd: opts.workDir,
           workspaceRoot: ctx.worktreePath,
-          extraWriteRoots: ctx.discussion ? undefined : this.workspace.writeRoots,
+          extraWriteRoots,
           modelEnv,
           providerLabel: provider.name,
           modelLabel: model,
@@ -816,6 +844,7 @@ export class RealAgentExecutor extends AgentExecutor {
           codex: codexOpts,
           workDir: opts.workDir,
           worktreePath: ctx.worktreePath,
+          extraWriteRoots,
           settingsDir: join(this.config.agentDir, 'runs', ctx.taskId),
           modelEnv,
           provider,
@@ -1006,6 +1035,7 @@ export class RealAgentExecutor extends AgentExecutor {
     codex?: CodexRunOptions;
     workDir: string;
     worktreePath: string;
+    extraWriteRoots?: string[];
     settingsDir: string;
     modelEnv: AgentModelEnv;
     provider: Provider;
@@ -1033,7 +1063,7 @@ export class RealAgentExecutor extends AgentExecutor {
           prompt: REPORTING_RESUME_PROMPT,
           cwd: opts.workDir,
           workspaceRoot: opts.worktreePath,
-          extraWriteRoots: this.workspace.writeRoots,
+          extraWriteRoots: opts.extraWriteRoots,
           modelEnv: opts.modelEnv,
           providerLabel: opts.provider.name,
           modelLabel: opts.model,
@@ -1169,6 +1199,7 @@ export class RealAgentExecutor extends AgentExecutor {
     leadName: string | null,
     leadProvider: string,
     orientation: string,
+    repoPath: string,
   ): Promise<{ map: Record<string, SubagentDefinition>; roster: string }> {
     const map: Record<string, SubagentDefinition> = {};
     const others: { name: string; description: string; how: string }[] = [];
@@ -1198,7 +1229,7 @@ export class RealAgentExecutor extends AgentExecutor {
       // so a delegated agent knows its working directory is the project.
       map[s.name] = {
         description: def.description || s.name,
-        prompt: `${orientation}\n\n${await this.buildInstructions(def)}`,
+        prompt: `${orientation}\n\n${await this.buildInstructions(def, repoPath)}`,
         model,
         ...(def.allowedTools?.length ? { tools: def.allowedTools } : {}),
       };
@@ -1248,18 +1279,18 @@ export class RealAgentExecutor extends AgentExecutor {
   /**
    * Build the system-prompt append, top to bottom:
    *   1. global SOUL  (<agentDir>/SOUL.md — fleet charter, all agents)
-   *   2. project SOUL (<workspace repo>/SOUL.md — project charter)
+   *   2. project SOUL (<the project's checkout>/SOUL.md — project charter)
    *   3. the chosen agent's body
    *   4. the global "Agent instructions" from Settings — appended for EVERY agent (E-21)
    *   5. skill files from <agentDir>/skills (all, or the subset the agent declares)
    */
-  private async buildInstructions(agent: AgentDef | null): Promise<string> {
+  private async buildInstructions(agent: AgentDef | null, repoPath: string): Promise<string> {
     const parts: string[] = [];
 
     // SOUL is always on, regardless of which agent/role runs.
     const globalSoul = (await this.readCached(join(this.config.agentDir, 'SOUL.md')))?.trim() || null;
     if (globalSoul) parts.push(globalSoul);
-    const projectSoul = (await this.readCached(join(this.config.workspaceRepoPath, 'SOUL.md')))?.trim() || null;
+    const projectSoul = (await this.readCached(join(repoPath, 'SOUL.md')))?.trim() || null;
     if (projectSoul) parts.push(projectSoul);
     if (globalSoul || projectSoul) {
       this.logger.log(`SOUL loaded (global=${!!globalSoul}, project=${!!projectSoul})`);
@@ -1408,12 +1439,13 @@ function buildChatOrientation(workDir: string): string {
  * Static for a task (no file list): the project map travels in the run's message
  * (prompt-layers.ts), and a sub-agent runs `git ls-files` itself.
  */
-function buildOrientation(workDir: string, worktreeRoot: string, branch: string | null, shared = false): string {
+function buildOrientation(workDir: string, worktreeRoot: string, branch: string | null, shared = false, project?: Pick<ProjectContext, 'name' | 'slug' | 'isDefault'>): string {
   const kind = shared
     ? 'the project repository (the shared main working directory)'
     : 'a dedicated git worktree (an isolated checkout of the project repository) created for this task';
   const lines = [
     '## Your workspace',
+    ...(project ? [`- project: **${project.name}** (\`${project.slug}\`${project.isDefault ? ', the default project' : ''})`] : []),
     `Your current working directory **is the project** — ${kind}:`,
     `- working directory: \`${workDir}\``,
   ];
@@ -1432,6 +1464,17 @@ function buildOrientation(workDir: string, worktreeRoot: string, branch: string 
     'render a page if you have it; otherwise report and let the lead preview.',
   );
   return lines.join('\n');
+}
+
+/** Orientation for a task of a docs project (docs/plan-projects-workspace.md §2.5): the cwd is the project's `work/` folder; no repository. */
+function buildDocsOrientation(workDir: string, project: Pick<ProjectContext, 'name' | 'slug'>): string {
+  return [
+    '## Your workspace',
+    `- project: **${project.name}** (\`${project.slug}\`) — a docs project: notes, drafts, data and results, no code repository`,
+    `- working directory: \`${workDir}\` — the project's \`work/\` folder; write freely here`,
+    'There is no git repository, branch or dev server here; do not run builds or tests. Finished results go to',
+    '`deliverables/` with `workspace_save`; decisions and open questions to memory with `workspace_note`.',
+  ].join('\n');
 }
 
 /**

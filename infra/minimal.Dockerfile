@@ -42,8 +42,9 @@ RUN pnpm --filter @lds/dashboard build
 
 # ---- runtime: node (both apps) + python (litellm child process) + uv (code-intel skill's Serena MCP) ----
 FROM node:22-bookworm-slim AS runtime
+# openssh-client: git over ssh with a project's deploy key (projects/git — GIT_SSH_COMMAND)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl git ca-certificates curl python3 python3-venv ffmpeg \
+    openssl git openssh-client ca-certificates curl python3 python3-venv ffmpeg \
   && rm -rf /var/lib/apt/lists/* \
   && python3 -m venv /opt/litellm-venv \
   && /opt/litellm-venv/bin/pip install --no-cache-dir 'litellm[proxy]' \

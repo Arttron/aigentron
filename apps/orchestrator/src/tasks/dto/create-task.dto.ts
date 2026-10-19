@@ -4,15 +4,23 @@ import {
   IsBoolean,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { SLUG_RE } from '../../projects/project-core';
 
 export class CreateTaskDto {
   @IsString()
   @MinLength(1)
   @MaxLength(20000)
   prompt!: string;
+
+  /** Slug of the project the task belongs to (default = the default project; a subtask follows its parent). */
+  @IsOptional()
+  @IsString()
+  @Matches(SLUG_RE, { message: 'project must be a project slug' })
+  project?: string;
 
   @IsOptional()
   @IsString()

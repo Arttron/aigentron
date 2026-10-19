@@ -4,13 +4,15 @@ import { ATTACH_ACCEPT, hasLiveCamera, prepareFile } from '@/lib/capture';
 import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { CameraCapture } from '@/components/CameraCapture';
 import { uploadSizeError } from '@/lib/upload-limits';
+import type { Project } from '@lds/shared';
 import { api, type AgentInfo } from '@/lib/api';
+import { pickProject, readProjectPref, writeProjectPref } from '@/lib/projects';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText, HiddenFileInput } from '@/components/ui';
 import { DiscussionModal } from '@/components/DiscussionModal';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import styles from './CreateTaskForm.module.css';
 
-export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
+export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () => void; projects?: Project[] }) {
   const [prompt, setPrompt] = useState('');
   const [agentName, setAgentName] = useState('');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -19,6 +21,7 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
   const [staged, setStaged] = useState<File[]>([]);
   const [references, setReferences] = useState<string[]>([]);
   const [showRefs, setShowRefs] = useState(false);
+  const [projectPick, setProjectPick] = useState<string>(() => readProjectPref() ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -65,6 +68,7 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
         agentName: agentName || undefined,
         autostart: staged.length === 0,
         references: references.length ? references : undefined,
+        project: projects.length > 1 ? project : undefined,
       });
       if (staged.length) {
         const names: string[] = [];
@@ -99,6 +103,8 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
     } else if (kind === 'task') setShowRefs(true);
   };
 
+  // only offered when there is a choice; the remembered one if it still exists, else the default project
+  const project = pickProject(projects, projectPick);
   const selected = agents.find((a) => a.name === agentName);
 
   return (
@@ -151,6 +157,24 @@ export function CreateTaskForm({ onCreated }: { onCreated?: () => void }) {
               <option key={a.name} value={a.name}>
                 {a.name}
                 {a.provider ? ` (${a.provider})` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        {projects.length > 1 && (
+          <select
+            className={styles.agentSelect}
+            aria-label="Project"
+            title="The project this task belongs to"
+            value={project}
+            onChange={(e) => {
+              setProjectPick(e.target.value);
+              writeProjectPref(e.target.value);
+            }}
+          >
+            {projects.map((p) => (
+              <option key={p.slug} value={p.slug}>
+                📁 {p.name}
               </option>
             ))}
           </select>

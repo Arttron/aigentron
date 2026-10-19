@@ -4,6 +4,10 @@ import type {
   ApprovalRequest,
   ChannelKind,
   PendingFollowUp,
+  Project,
+  ProjectIsolation,
+  ProjectKind,
+  ProjectRepoAuth,
   QuestionStatus,
   Task,
   TaskStatus,
@@ -70,6 +74,8 @@ export interface ListTasksParams {
   q?: string;
   type?: TaskTypeFilter;
   status?: TaskStatusFilter;
+  /** A project's slug (the default project is `default`). */
+  project?: string;
   page?: number;
   pageSize?: number;
 }
@@ -455,6 +461,59 @@ export interface KbHit {
   score: number;
 }
 
+/** Fields of POST /projects and PATCH /projects/:slug (all optional on update; `archived` is PATCH-only). */
+export interface ProjectInput {
+  name?: string;
+  slug?: string;
+  kind?: ProjectKind;
+  repoUrl?: string | null;
+  repoBranch?: string;
+  repoSubdir?: string | null;
+  isolation?: ProjectIsolation | null;
+  verifyCommands?: string | null;
+  verifyMaxAttempts?: number;
+  defaultAgent?: string | null;
+  notifyChannelId?: string | null;
+  notifyChatId?: string | null;
+  archived?: boolean;
+}
+
+export type RepoProviderKind = 'github' | 'gitlab' | 'bitbucket' | 'generic';
+
+/** One line of a connection test (ok null = skipped / not applicable). */
+export interface RepoTestStep {
+  id: 'url' | 'network' | 'auth' | 'branch' | 'write' | 'size';
+  label: string;
+  ok: boolean | null;
+  detail: string;
+  hint?: string;
+}
+export interface RepoTestResult {
+  ok: boolean;
+  provider: RepoProviderKind;
+  steps: RepoTestStep[];
+  defaultBranch?: string;
+  durationMs: number;
+}
+
+/** A project's repository settings (GET /projects/:slug/repo). Secrets are never returned: only whether one is set and its last characters. */
+export interface RepoInfo {
+  url: string | null;
+  branch: string;
+  subdir: string | null;
+  provider: RepoProviderKind;
+  auth: ProjectRepoAuth;
+  tokenSet: boolean;
+  tokenHint: string | null;
+  sshPublicKey: string | null;
+  sshFingerprint: string | null;
+  hostKeyTrusted: boolean | null;
+  lastTest: (RepoTestResult & { at?: string }) | null;
+}
+
+/** Credentials are sent once and never read back. */
+export type RepoCredentials = { auth: 'none' } | { auth: 'token'; token: string } | { auth: 'ssh'; action: 'generate' } | { auth: 'ssh'; action: 'import'; privateKey: string };
+
 /** An optional server component (docs/addons.md) — installed on the server with `aigentron addon enable`; the status is live. */
 export type AddonStatus = 'not-installed' | 'enabled-healthy' | 'enabled-unreachable' | 'disabled';
 export interface AddonInfo {
@@ -516,7 +575,7 @@ export const api = {
 
   listTasks: (params: ListTasksParams = {}, signal?: AbortSignal) =>
     request<TaskPage | TaskListItem[]>('GET', '/tasks', {
-      query: { q: params.q || undefined, type: params.type || undefined, status: params.status || undefined, page: params.page || undefined, pageSize: params.pageSize || undefined },
+      query: { q: params.q || undefined, type: params.type || undefined, status: params.status || undefined, project: params.project || undefined, page: params.page || undefined, pageSize: params.pageSize || undefined },
       signal,
     }).then((data): TaskPage => (Array.isArray(data) ? { items: data, total: data.length, page: 1, pageSize: data.length || 1 } : data)),
 
@@ -528,7 +587,7 @@ export const api = {
   markTaskDone: (id: string) => request<unknown>('POST', `/tasks/${e(id)}/done`),
   startTask: (id: string, attachments?: string[]) => request<Task>('POST', `/tasks/${e(id)}/start`, { body: { attachments } }),
 
-  createTask: (body: { prompt: string; title?: string; agentName?: string; attachments?: string[]; autostart?: boolean; parentId?: string; references?: string[] }) =>
+  createTask: (body: { prompt: string; title?: string; agentName?: string; attachments?: string[]; autostart?: boolean; parentId?: string; references?: string[]; project?: string }) =>
     request<Task>('POST', '/tasks', { body }),
   createSubtask: (parentId: string, body: { prompt: string; title?: string; agentName?: string }) => request<Task>('POST', `/tasks/${e(parentId)}/subtasks`, { body }),
 
@@ -597,6 +656,19 @@ export const api = {
   reembedKb: (name: string) => request<{ started: boolean }>('POST', `/knowledge/${e(name)}/reembed`),
 
   listSchedules: () => request<ScheduleInfo[]>('GET', '/schedules'),
+  /** The projects (docs/plan-projects-workspace.md); `archived` includes the archived ones. */
+  listProjects: (opts: { archived?: boolean } = {}) => request<Project[]>('GET', '/projects', { query: { archived: opts.archived ? '1' : undefined } }),
+  getProject: (slug: string) => request<Project>('GET', `/projects/${e(slug)}`),
+  createProject: (body: ProjectInput) => request<Project>('POST', '/projects', { body }),
+  updateProject: (slug: string, body: ProjectInput) => request<Project>('PATCH', `/projects/${e(slug)}`, { body }),
+  archiveProject: (slug: string) => request<Project>('POST', `/projects/${e(slug)}/archive`),
+  /** 409 (with the reason in the message) while the project has active tasks. */
+  deleteProject: (slug: string) => request<unknown>('DELETE', `/projects/${e(slug)}`),
+  getProjectRepo: (slug: string) => request<RepoInfo>('GET', `/projects/${e(slug)}/repo`),
+  setProjectRepo: (slug: string, body: { url?: string | null; branch?: string; subdir?: string | null }) => request<RepoInfo>('PUT', `/projects/${e(slug)}/repo`, { body }),
+  setProjectRepoCredentials: (slug: string, body: RepoCredentials) => request<RepoInfo>('PUT', `/projects/${e(slug)}/repo/credentials`, { body }),
+  testProjectRepo: (slug: string, checkWrite = false) => request<RepoTestResult>('POST', `/projects/${e(slug)}/repo/test`, { body: { checkWrite } }),
+  syncProjectRepo: (slug: string) => request<{ ok: boolean; message: string; head?: string }>('POST', `/projects/${e(slug)}/repo/sync`),
   createSchedule: (body: ScheduleInput) => request<ScheduleInfo>('POST', '/schedules', { body }),
   updateSchedule: (id: string, body: ScheduleInput) => request<ScheduleInfo>('PUT', `/schedules/${e(id)}`, { body }),
   deleteSchedule: (id: string) => request<{ id: string }>('DELETE', `/schedules/${e(id)}`),

@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProjectsService } from '../projects/projects.service';
 
 const pexec = promisify(execFile);
 const DAY = 86_400_000;
@@ -13,6 +14,20 @@ const DAY = 86_400_000;
 const DIGEST_IN_USE_MS = 10 * 60_000;
 const ACTIVE = ['queued', 'running', 'needs_approval'];
 const AGENT_BRANCH = /^agent\/task-([a-z0-9]+)$/;
+
+/** One project's footprint on disk. */
+export interface ProjectDiskReport {
+  slug: string;
+  name: string;
+  isDefault: boolean;
+  archived: boolean;
+  /** The project folder (memory / work / deliverables — the default project's is the shared workspace). */
+  dir: string;
+  bytes: number;
+  /** The checkout, when it lives outside the folder (the default project's WORKSPACE_REPO_PATH); 0 when it is inside `dir` (already counted). */
+  repoPath: string;
+  repoBytes: number;
+}
 
 export interface MaintenanceReport {
   retentionDays: number;
@@ -26,6 +41,8 @@ export interface MaintenanceReport {
   resources: { bytes: number };
   /** The shared workspace (memory / work / deliverables): people's and agents' results — never cleaned automatically. */
   workspace: { bytes: number };
+  /** Every project's folder and checkout (the default project's folder IS the shared workspace above) — never cleaned automatically. */
+  projects: ProjectDiskReport[];
   note: string;
 }
 
@@ -71,6 +88,7 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
   constructor(
     private readonly config: AppConfigService,
     private readonly prisma: PrismaService,
+    private readonly projects: ProjectsService,
   ) {}
 
   private num(name: string, def: number): number {
@@ -264,51 +282,91 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
     return out;
   }
 
-  private async git(args: string[]): Promise<string> {
-    const { stdout } = await pexec('git', args, { cwd: this.config.workspaceRepoPath, maxBuffer: 10 * 1024 * 1024, timeout: 60_000 });
+  private async git(repo: string, args: string[]): Promise<string> {
+    const { stdout } = await pexec('git', args, { cwd: repo, maxBuffer: 10 * 1024 * 1024, timeout: 60_000 });
     return stdout;
   }
 
-  /** Registered worktrees under worktreesRoot, plus their task ids and whether they are stale. */
-  private async worktreeState(days: number): Promise<{ path: string; id: string; stale: boolean; orphan: boolean }[]> {
-    let out = '';
-    try {
-      out = await this.git(['worktree', 'list', '--porcelain']);
-    } catch {
-      return [];
-    }
+  /** The checkouts of every project (the default first; archived ones too — their worktrees and branches are leftovers like any other). */
+  private async repos(): Promise<string[]> {
+    const rows = await this.projects.list({ includeArchived: true }).catch(() => []);
+    const paths = rows.map((r) => this.projects.repoPathOf(r));
+    if (!paths.length) paths.push(this.config.workspaceRepoPath);
+    return [...new Set(paths)];
+  }
+
+  /**
+   * Registered worktrees under worktreesRoot (of every project's checkout), plus their task ids and whether they are stale.
+   * Both layouts are understood: `<root>/<taskId>` (before projects) and `<root>/<slug>/<taskId>`.
+   */
+  private async worktreeState(days: number): Promise<{ path: string; id: string; repo: string; stale: boolean; orphan: boolean }[]> {
     const root = this.config.worktreesRoot.replace(/\/$/, '');
-    const paths = out.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice(9)).filter((p) => p.startsWith(`${root}/`));
-    const ids = paths.map((p) => p.slice(root.length + 1).split('/')[0]!);
-    const st = await this.statuses(ids);
-    const cutoff = Date.now() - days * DAY;
-    const rows: { path: string; id: string; stale: boolean; orphan: boolean }[] = [];
-    for (const [i, p] of paths.entries()) {
-      const id = ids[i]!;
-      const s = st.get(id);
-      const m = await stat(p).then((x) => x.mtimeMs, () => 0);
-      rows.push({ path: p, id, stale: !(s && ACTIVE.includes(s)) && m < cutoff, orphan: false });
+    const known: { path: string; repo: string }[] = [];
+    for (const repo of await this.repos()) {
+      const out = await this.git(repo, ['worktree', 'list', '--porcelain']).catch(() => '');
+      for (const p of out.split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice(9)).filter((p) => p.startsWith(`${root}/`))) known.push({ path: p, repo });
     }
-    // Directories under the worktrees root that git no longer knows about (a failed/forced removal, a reset
-    // of the repo): same staleness rule, removed as plain folders.
-    const known = new Set(paths);
-    const dirs = await readdir(root).catch(() => [] as string[]);
-    const orphanIds = dirs.filter((d) => !known.has(`${root}/${d}`));
-    const ost = await this.statuses(orphanIds);
-    for (const d of orphanIds) {
+    const idOf = (p: string) => p.slice(root.length + 1).split('/').filter(Boolean).pop()!;
+    const st = await this.statuses(known.map((k) => idOf(k.path)));
+    const cutoff = Date.now() - days * DAY;
+    const rows: { path: string; id: string; repo: string; stale: boolean; orphan: boolean }[] = [];
+    for (const k of known) {
+      const id = idOf(k.path);
+      const s = st.get(id);
+      const m = await stat(k.path).then((x) => x.mtimeMs, () => 0);
+      rows.push({ path: k.path, id, repo: k.repo, stale: !(s && ACTIVE.includes(s)) && m < cutoff, orphan: false });
+    }
+    // Directories under the worktrees root that no checkout knows about (a failed/forced removal, a reset of the
+    // repo, a deleted project): same staleness rule, removed as plain folders. A checkout has `.git` inside; an
+    // entry without one is a project's container of nested worktrees.
+    const knownPaths = new Set(known.map((k) => k.path));
+    const candidates: string[] = [];
+    for (const d of await readdir(root).catch(() => [] as string[])) {
       const p = `${root}/${d}`;
+      if ((await stat(p).catch(() => null))?.isDirectory() !== true) continue;
+      if (await stat(join(p, '.git')).then(() => true, () => false)) candidates.push(p);
+      else for (const c of await readdir(p).catch(() => [] as string[])) if ((await stat(`${p}/${c}`).catch(() => null))?.isDirectory()) candidates.push(`${p}/${c}`);
+    }
+    const orphans = candidates.filter((p) => !knownPaths.has(p));
+    const ost = await this.statuses(orphans.map(idOf));
+    for (const p of orphans) {
+      const id = idOf(p);
       const m = await stat(p).then((x) => x.mtimeMs, () => 0);
-      rows.push({ path: p, id: d, stale: !ACTIVE.includes(ost.get(d) ?? '') && m < cutoff, orphan: true });
+      rows.push({ path: p, id, repo: '', stale: !ACTIVE.includes(ost.get(id) ?? '') && m < cutoff, orphan: true });
     }
     return rows;
   }
 
-  private async agentBranches(): Promise<string[]> {
-    try {
-      return (await this.git(['branch', '--list', 'agent/task-*', '--format=%(refname:short)'])).split('\n').map((s) => s.trim()).filter((b) => AGENT_BRANCH.test(b));
-    } catch {
-      return [];
+  /** `agent/task-*` branches of every project's checkout. */
+  private async agentBranches(): Promise<{ repo: string; branch: string }[]> {
+    const out: { repo: string; branch: string }[] = [];
+    for (const repo of await this.repos()) {
+      const list = await this.git(repo, ['branch', '--list', 'agent/task-*', '--format=%(refname:short)']).catch(() => '');
+      for (const b of list.split('\n').map((s) => s.trim()).filter((b) => AGENT_BRANCH.test(b))) out.push({ repo, branch: b });
     }
+    return out;
+  }
+
+  /** Each project's folder and checkout on disk (people's and agents' results: reported, never cleaned). */
+  private async projectReports(): Promise<ProjectDiskReport[]> {
+    const rows = await this.projects.list({ includeArchived: true }).catch(() => []);
+    const out: ProjectDiskReport[] = [];
+    for (const r of rows) {
+      const dir = this.projects.dirOf(r);
+      const repoPath = this.projects.repoPathOf(r);
+      const inside = repoPath === dir || repoPath.startsWith(`${dir}/`);
+      out.push({
+        slug: r.slug,
+        name: r.name,
+        isDefault: r.isDefault,
+        archived: Boolean(r.archivedAt),
+        dir,
+        bytes: await this.dirBytes(dir),
+        repoPath,
+        repoBytes: inside ? 0 : await this.dirBytes(repoPath),
+      });
+    }
+    return out;
   }
 
   /**
@@ -360,8 +418,8 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
     const stale = this.retentionDays > 0 ? await this.staleRuns(this.retentionDays) : [];
     const wts = await this.worktreeState(this.worktreeRetentionDays);
     const branches = await this.agentBranches();
-    const st = await this.statuses(branches.map((b) => AGENT_BRANCH.exec(b)![1]!));
-    const staleBranches = branches.filter((b) => !ACTIVE.includes(st.get(AGENT_BRANCH.exec(b)![1]!) ?? ''));
+    const st = await this.statuses(branches.map((b) => AGENT_BRANCH.exec(b.branch)![1]!));
+    const staleBranches = branches.filter((b) => !ACTIVE.includes(st.get(AGENT_BRANCH.exec(b.branch)![1]!) ?? ''));
     return {
       retentionDays: this.retentionDays,
       worktreeRetentionDays: this.worktreeRetentionDays,
@@ -372,7 +430,8 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
       caches: { ...(await this.cacheReport()), digestRetentionDays: this.digestRetentionDays, researchRetentionDays: this.researchRetentionDays },
       resources: { bytes: await this.dirBytes(join(this.config.agentDir, 'resources')) },
       workspace: { bytes: this.config.workspaceDir ? await this.dirBytes(this.config.workspaceDir) : 0 },
-      note: 'Run folders hold per-task working files; worktrees/branches are leftovers of the old per-task worktree mode inside the project repository. Branches may contain commits that were never pushed.',
+      projects: await this.projectReports(),
+      note: 'Run folders hold per-task working files; worktrees/branches are leftovers of the per-task worktree mode inside a project checkout. Branches may contain commits that were never pushed. Project folders and checkouts are never cleaned automatically.',
     };
   }
 
@@ -400,18 +459,19 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
         result.worktreesRemoved += 1;
         if (dryRun) continue;
         if (w.orphan) await rm(w.path, { recursive: true, force: true }).catch((e) => this.logger.warn(`could not remove ${w.path}: ${(e as Error).message}`));
-        else await this.git(['worktree', 'remove', '--force', w.path]).catch((e) => this.logger.warn(`could not remove worktree ${w.path}: ${(e as Error).message}`));
+        else await this.git(w.repo, ['worktree', 'remove', '--force', w.path]).catch((e) => this.logger.warn(`could not remove worktree ${w.path}: ${(e as Error).message}`));
       }
-      if (!dryRun && stale.length) await this.git(['worktree', 'prune']).catch(() => undefined);
+      if (!dryRun && stale.length) for (const repo of new Set(stale.map((w) => w.repo).filter(Boolean))) await this.git(repo, ['worktree', 'prune']).catch(() => undefined);
       if (req.deleteBranches) {
         const branches = await this.agentBranches();
-        const st = await this.statuses(branches.map((b) => AGENT_BRANCH.exec(b)![1]!));
-        const current = await this.git(['rev-parse', '--abbrev-ref', 'HEAD']).then((s) => s.trim()).catch(() => '');
+        const st = await this.statuses(branches.map((b) => AGENT_BRANCH.exec(b.branch)![1]!));
+        const current = new Map<string, string>();
+        for (const repo of new Set(branches.map((b) => b.repo))) current.set(repo, await this.git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']).then((s) => s.trim()).catch(() => ''));
         for (const b of branches) {
-          const id = AGENT_BRANCH.exec(b)![1]!;
-          if (ACTIVE.includes(st.get(id) ?? '') || b === current) continue;
+          const id = AGENT_BRANCH.exec(b.branch)![1]!;
+          if (ACTIVE.includes(st.get(id) ?? '') || b.branch === current.get(b.repo)) continue;
           result.branchesDeleted += 1;
-          if (!dryRun) await this.git(['branch', '-D', b]).catch((e) => this.logger.warn(`could not delete branch ${b}: ${(e as Error).message}`));
+          if (!dryRun) await this.git(b.repo, ['branch', '-D', b.branch]).catch((e) => this.logger.warn(`could not delete branch ${b.branch}: ${(e as Error).message}`));
         }
       }
     }

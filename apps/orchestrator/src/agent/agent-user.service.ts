@@ -78,17 +78,18 @@ export class AgentUserService implements OnModuleInit {
    * otherwise the ownership pass is applied and the runner's params returned.
    * Throws (→ the task fails with this message) when isolation is on but broken.
    */
-  async prepareRun(p: Pick<ChownPlanInput, 'worktreePath' | 'attachmentsDir'> & { taskId: string }): Promise<AgentIsolation | null> {
+  async prepareRun(p: Pick<ChownPlanInput, 'worktreePath' | 'attachmentsDir' | 'repoPath' | 'shared' | 'workspaceDir'> & { taskId: string }): Promise<AgentIsolation | null> {
     const runAs = this.config.agentRunAs;
     if (!runAs) return null;
     if (this.broken) throw new Error(`agent isolation (AGENT_RUN_AS_UID) is enabled but not working — refusing to run the agent as root: ${this.broken}`);
     const runDir = join(this.config.agentDir, 'runs', p.taskId);
+    // The task's PROJECT decides the checkout, the mode and the folder (the default project's are the installation's own).
     const plan = chownPlan({
       runDir,
       worktreePath: p.worktreePath,
-      repoPath: this.config.workspaceRepoPath,
-      shared: this.config.workspaceShared,
-      workspaceDir: this.config.workspaceDir,
+      repoPath: p.repoPath,
+      shared: p.shared,
+      workspaceDir: p.workspaceDir,
       attachmentsDir: p.attachmentsDir,
     });
     await applyChownPlan(plan, runAs);

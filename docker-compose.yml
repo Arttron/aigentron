@@ -250,6 +250,8 @@ services:
       - ${AGENT_HOST_PATH:-./agent}:/workspace/agent
       # The shared workspace (memory / work / deliverables) agents write non-code results to; visible on the host at ./workspace.
       - ${WORKSPACE_HOST_PATH:-./workspace}:/workspace/workspace
+      # Projects (docs/projects.md): each project's folder (memory, work, deliverables, its checkout); visible on the host at ./projects.
+      - ${PROJECTS_HOST_PATH:-./projects}:/workspace/projects
       # Credentials (shared Codex sign-in…) live in a named volume, NOT in ./agent: agent runs can see their own
       # file tree, and ./agent sits inside the repo checkout.
       - secrets:/workspace/secrets

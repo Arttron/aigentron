@@ -41,7 +41,7 @@ function setup(tasks: { id: string; status: string; updatedAt: Date }[] = []) {
   age(join(root, 'ws', 'work', 'clip.webm.digest'), 60);
   age(join(agentDir, 'research-cache', 'old.json'), 400);
   const prisma = { task: { findMany: async ({ where, select }: { where: { id: { in: string[] } }; select: Record<string, boolean> }) => tasks.filter((t) => where.id.in.includes(t.id)).map((t) => (select.status ? { id: t.id, status: t.status } : { id: t.id, updatedAt: t.updatedAt })) } };
-  const svc = new MaintenanceService({ agentDir, attachmentsDir, workspaceDir: join(root, 'ws'), worktreesRoot: join(root, 'wt'), workspaceRepoPath: root } as never, prisma as never);
+  const svc = new MaintenanceService({ agentDir, attachmentsDir, workspaceDir: join(root, 'ws'), worktreesRoot: join(root, 'wt'), workspaceRepoPath: root } as never, prisma as never, { list: async () => [] } as never);
   return { root, agentDir, attachmentsDir, cache, svc };
 }
 

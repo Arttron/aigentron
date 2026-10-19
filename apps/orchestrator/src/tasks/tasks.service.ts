@@ -19,13 +19,16 @@ import { STATUS_FILTERS, isStatusFilter, statusesOf } from './task-status-filter
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { SettingsService } from '../settings/settings.service';
+import { ProjectsService } from '../projects/projects.service';
+import { projectLabel } from '../projects/project-labels';
+import { DEFAULT_PROJECT_ID } from '../projects/project-core';
 import type { CreateTaskDto } from './dto/create-task.dto';
 
 /** Prisma row shape for a task (dates as Date). */
 type TaskRow = Awaited<ReturnType<PrismaService['task']['create']>>;
 
 /** Serialize a Prisma task row into the wire-facing shared Task shape. */
-export function serializeTask(row: TaskRow): Task {
+export function serializeTask(row: TaskRow & { project?: { slug: string; name: string } | null }): Task {
   return {
     id: row.id,
     prompt: row.prompt,
@@ -39,10 +42,16 @@ export function serializeTask(row: TaskRow): Task {
     error: row.error,
     createdById: row.createdById,
     parentId: row.parentId,
+    projectId: row.projectId,
+    // the relation when the caller loaded it, else the label cache (ProjectsService keeps it current)
+    project: row.project ? { slug: row.project.slug, name: row.project.name } : projectLabel(row.projectId),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
+
+/** `project: { select: … }` for queries whose rows are returned to a client (list / get). */
+const PROJECT_SELECT = { select: { slug: true, name: true } } as const;
 
 /** Input for a subtask created by a lead agent's decomposition tool. */
 export interface SubtaskInput {
@@ -93,6 +102,7 @@ export class TasksService {
     private readonly settings: SettingsService,
     private readonly moduleRef: ModuleRef,
     private readonly titles: TitlesService,
+    private readonly projects: ProjectsService,
   ) {}
 
   /** Statuses a person may accept as finished: the agent's result is waiting, or the run ended without one and the person is content anyway. */
@@ -167,18 +177,23 @@ export class TasksService {
   }
 
   async create(dto: CreateTaskDto, createdById?: string) {
-    // Explicit agent 404s on a bad name; otherwise fall back to the configured
-    // default lead (e.g. pm), tolerating its absence.
+    // A subtask's parent must exist; reject a dangling parentId early. A subtask is in its parent's project
+    // (create_subtask does not change the project); otherwise the given slug (archived → 400), else the default.
+    const parent = dto.parentId ? await this.get(dto.parentId) : null;
+    const project = parent ? await this.projects.getById(parent.projectId) : await this.projects.forNewTask(dto.project);
+    const projectId = project.id;
+    // Explicit agent 404s on a bad name; otherwise fall back to the project's
+    // default lead, else the global one (e.g. pm), tolerating its absence.
     let agent = null;
     if (dto.agentName) {
       agent = await this.agents.get(await this.resolveAgentName(dto.agentName));
     } else {
-      const def = await this.settings.defaultAgent();
+      const def = await this.projects.defaultAgentFor(project);
       if (def) {
         agent = await this.agents.get(def).catch(() => null);
         if (!agent) {
           this.logger.warn(
-            `Default agent "${def}" does not exist — the task will run without an agent definition. Pick an existing default in Settings.`,
+            `Default agent "${def}" does not exist — the task will run without an agent definition. Pick an existing default in Settings or the project.`,
           );
         }
       }
@@ -187,8 +202,6 @@ export class TasksService {
     // generated from the context once the task starts (and again after the first answer when the request was too vague to name it).
     const given = dto.title?.trim();
     const title = given || fallbackTitle(dto.prompt);
-    // A subtask's parent must exist; reject a dangling parentId early.
-    if (dto.parentId) await this.get(dto.parentId);
 
     const task = await this.prisma.task.create({
       data: {
@@ -200,6 +213,7 @@ export class TasksService {
         agentName: agent?.name ?? null,
         createdById: createdById ?? null,
         parentId: dto.parentId ?? null,
+        projectId,
         createdByChannel: dto.createdByChannel ?? null,
         providerOverride: dto.provider?.trim() || null,
       },
@@ -207,6 +221,7 @@ export class TasksService {
     this.logger.log(
       `Created task ${task.id} [agent=${agent?.name ?? 'default'}]` +
         (task.parentId ? ` [parent=${task.parentId}]` : '') +
+        (projectId !== DEFAULT_PROJECT_ID ? ` [project=${projectLabel(projectId).slug}]` : '') +
         ` "${title}"`,
     );
     // Link referenced tasks so their summaries fold into this task's context.
@@ -658,13 +673,18 @@ export class TasksService {
     return out;
   }
 
-  async list(params: { q?: string; type?: string; status?: string; page?: number; pageSize?: number } = {}) {
+  async list(params: { q?: string; type?: string; status?: string; project?: string; page?: number; pageSize?: number } = {}) {
     const page = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 25));
     const q = params.q?.trim();
     const include = {
       _count: { select: { approvals: { where: { status: 'pending' } }, sessions: true } },
+      project: PROJECT_SELECT,
     } as const;
+    // A project filter (by slug): an unknown slug lists nothing rather than everything.
+    const byProject = params.project?.trim()
+      ? { projectId: (await this.projects.get(params.project.trim()).catch(() => null))?.id ?? '' }
+      : null;
 
     // `mode: 'insensitive'` isn't supported on SQLite (Prisma rejects the
     // argument outright) — SQLite's own `contains`/LIKE is already ASCII
@@ -682,8 +702,10 @@ export class TasksService {
     const status = isStatusFilter(params.status) ? params.status : null;
     const byStatus = status ? { status: { in: statusesOf(status) } } : null;
     // A status filter looks at ALL levels (a blocked subtask under a finished parent must be found), so it also lists tasks flat.
+    // The project filter narrows whichever shape the other filters chose (top-level only when it is alone).
     const parts = [typed, byStatus, q ? search : null].filter(Boolean);
-    const where = (parts.length ? (parts.length === 1 ? parts[0] : { AND: parts }) : { parentId: null }) as never;
+    const shape = parts.length ? (parts.length === 1 ? parts[0] : { AND: parts }) : { parentId: null };
+    const where = (byProject ? { AND: [shape, byProject] } : shape) as never;
 
     const [top, total] = await this.prisma.$transaction([
       this.prisma.task.findMany({
@@ -719,6 +741,7 @@ export class TasksService {
     const task = await this.prisma.task.findUnique({
       where: { id },
       include: {
+        project: PROJECT_SELECT,
         sessions: { orderBy: { startedAt: 'asc' } },
         approvals: { orderBy: { createdAt: 'desc' } },
         parent: { select: { id: true, title: true, status: true } },

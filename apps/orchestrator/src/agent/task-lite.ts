@@ -12,6 +12,7 @@ export const TASK_LITE_SELECT = {
   id: true,
   status: true,
   parentId: true,
+  projectId: true,
   agentName: true,
   worktreePath: true,
   branch: true,
@@ -24,6 +25,8 @@ export type TaskLite = {
   id: string;
   status: string;
   parentId: string | null;
+  /** The project the task belongs to (every task has one; the default project's id for the installation's own work). */
+  projectId: string;
   agentName: string | null;
   worktreePath: string | null;
   branch: string | null;
