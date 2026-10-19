@@ -61,7 +61,9 @@ export class GitHubService {
     const repo = project.repoPath;
 
     // Only publish if the branch actually has commits ahead of the base.
-    const ahead = await this.git(repo, ['rev-list', '--count', `origin/${project.repoBranch}..${input.branch}`]).catch(() => '0');
+    // (An empty remote has no origin/<base> yet: then every commit of the branch counts, and the branch is simply published.)
+    const baseExists = await this.git(repo, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${project.repoBranch}`]).then(() => true, () => false);
+    const ahead = await this.git(repo, ['rev-list', '--count', baseExists ? `origin/${project.repoBranch}..${input.branch}` : input.branch]).catch(() => '0');
     if (ahead === '0') {
       this.logger.log(`[${project.slug}] Branch ${input.branch} has no commits ahead of ${project.repoBranch} — skipping`);
       return null;
@@ -87,6 +89,37 @@ export class GitHubService {
       title: input.title,
       body: input.body,
     });
+  }
+
+  /**
+   * `push_branch` (an agent asked, a person approved): push the LOCAL branch `branch` of the project's checkout to `origin` as `to`.
+   * Never forced. Returns a sentence for the agent — success or the reason it did not work (credentials, rejected, no such branch).
+   */
+  async pushBranch(project: PublishTarget, branch: string, to: string): Promise<{ ok: boolean; message: string }> {
+    const repoUrl = project.repoUrl;
+    if (!repoUrl) return { ok: false, message: 'This project has no repository URL: there is nothing to push to (set it in the project settings).' };
+    const auth = await this.authOf(project, 'push');
+    if (!auth) return { ok: false, message: 'Push refused: the project has no usable credentials (open the project page and fix the repository access / test the repo).' };
+    if (auth.anonymous && needsHttpCredentials(repoUrl)) return { ok: false, message: 'Push refused: this project has no GitHub token or SSH key configured (project page → Repository → access).' };
+    const repo = project.repoPath;
+    const exists = await this.git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]).then(() => true, () => false);
+    if (!exists) return { ok: false, message: `There is no local branch "${branch}" in the project's repository. Commit your work on it first (git branch / git commit), then ask again.` };
+    // `origin` points at the project's URL (the sync does this; set it here too so a first push into a fresh checkout works).
+    await this.git(repo, ['remote', 'set-url', 'origin', repoUrl]).catch(() => this.git(repo, ['remote', 'add', 'origin', repoUrl]).catch(() => undefined));
+    try {
+      await this.git(repo, ['push', '-u', 'origin', `refs/heads/${branch}:refs/heads/${to}`], auth);
+    } catch (err) {
+      const full = auth.redact((err as Error).message);
+      const why = full.split('\n').find((l) => /rejected|denied|permission|fatal/i.test(l)) ?? full.split('\n')[0] ?? '';
+      this.logger.warn(`[${project.slug}] push_branch ${branch} → ${to} failed: ${why}`);
+      // A rejected non-fast-forward: the remote branch has commits this checkout lacks.
+      const behind = /rejected|non-fast-forward|fetch first|failed to push some refs/i.test(full) && !/permission|denied|authentication|could not read|host key/i.test(full);
+      return { ok: false, message: `The push failed: ${why.slice(0, 300)}. Nothing was changed on the remote.${behind ? ' The remote branch has commits this repository does not have — a push is never forced; push to another branch name (`to`) or ask the person to reconcile it.' : ''}` };
+    }
+    const slug = parseGithubRepo(repoUrl);
+    const link = slug ? `https://github.com/${slug.owner}/${slug.repo}/tree/${to}` : redactUrl(repoUrl);
+    this.logger.log(`[${project.slug}] push_branch: ${branch} → origin/${to}`);
+    return { ok: true, message: `Pushed "${branch}" to origin as "${to}" — ${link}` };
   }
 
   /** The project's HTTPS token for the GitHub API (the port), else the installation's legacy one. */
@@ -191,7 +224,8 @@ export class GitHubService {
   }
 
   private async git(cwd: string, args: string[], auth?: GitAuth): Promise<string> {
-    const { stdout } = await runGit(args, { cwd, auth, timeoutMs: 10 * 60_000 });
+    // safeDirectory: with agents on their own OS user (S-01) the checkout belongs to that user, which root's git would refuse.
+    const { stdout } = await runGit(args, { cwd, auth, safeDirectory: true, timeoutMs: 10 * 60_000 });
     return stdout.trim();
   }
 }

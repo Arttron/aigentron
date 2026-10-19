@@ -50,3 +50,8 @@ Daily timer (off by default): `sudo aigentron backup-timer on` (03:30, `systemd`
 
 **Postgres** (dev/full profile) is not part of the archive: `docker compose exec postgres pg_dump -U <user> <db> > aigentron.sql` and restore with `psql`.
 The LiteLLM routes file is now `<data>/litellm-config.generated.yaml` (inside the data dir; it is regenerated from the settings at start).
+
+## If the update fails half-way (bare-metal)
+The server is stopped at the start of the switch. Since 0.1.73 the installer (a) refuses to start the switch when `/opt/aigentron`, the data dir or `/etc/systemd/system` has less than 300 MB free — the running version is left alone — and (b) if anything fails after the stop (a full disk, a failed step) it brings the previous release back up: the previous release and unit file, and the database from the pre-update snapshot if migrations had already run. The unit file is written next to the real one and moved into place, so a full disk never leaves a truncated unit. Before 0.1.73 a failure after the migration step left the service stopped: `sudo aigentron restart` starts it again.
+
+Build caches (pnpm store, npm, corepack, `XDG_CACHE_HOME`) are kept in `<data dir>/cache` (`CACHE_DIR=<path>` to change it) since 0.1.73, so they follow the data directory you put on the big volume, and are cleaned after a successful update (`pnpm store prune`). Before, they went to the home directory of the user running the installer (`/root/.cache`, `/root/.npm`) — on a server with a small root disk and the install on another volume that filled `/` during an update.

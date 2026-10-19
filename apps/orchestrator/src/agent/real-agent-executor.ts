@@ -18,7 +18,7 @@ import {
   type SessionTotals,
   type SubagentDefinition,
 } from '@lds/agent-runner';
-import { isListedMarkdown, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
+import { PUSH_BRANCH_TOOL, isListedMarkdown, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
 import { LitellmService, routeName, routeParams, stripSelfPrefix } from '../litellm/litellm.service';
 import { AppConfigService } from '../config/app-config.service';
 import { encodeAttachments } from '../prisma/agent-event-attachments';
@@ -60,6 +60,8 @@ import { getTaskLiteOrThrow } from './task-lite';
 import { AgentUserService } from './agent-user.service';
 import { ProjectsService } from '../projects/projects.service';
 import { extraWriteRootsFor, resolveWorkDir, type ProjectContext } from '../projects/project-context';
+import { parsePushRefs } from '../projects/push-core';
+import { GitHubService } from '../worktrees/github.service';
 import { GIT_CREDENTIALS, type GitCredentialsProvider } from '../projects/git-credentials.port';
 import type { Workspace } from '../workspace/workspace.service';
 
@@ -136,6 +138,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly knowledge: KnowledgeService,
     private readonly agentUser: AgentUserService,
     private readonly projects: ProjectsService,
+    private readonly github: GitHubService,
     @Inject(GIT_CREDENTIALS) private readonly credentials: GitCredentialsProvider,
   ) {
     super();
@@ -461,6 +464,22 @@ export class RealAgentExecutor extends AgentExecutor {
     return text ? text.slice(0, 1000) : undefined;
   }
 
+  /** `push_branch`: validate, get a person's approval (fail-closed), then push the local branch with the project's credentials. */
+  private async pushBranchFor(taskId: string, sessionId: string, project: ProjectContext, input: { branch: string; to?: string; reason?: string }): Promise<string> {
+    const refs = parsePushRefs(input.branch, input.to);
+    if (!refs.ok) return refs.message;
+    const denied = await this.proposals.requireApproval(
+      taskId,
+      sessionId,
+      PUSH_BRANCH_TOOL,
+      { branch: input.branch, to: input.to, reason: input.reason },
+      (i) => String(i.branch ?? '').trim() === refs.branch && (String(i.to ?? '').trim() || refs.branch) === refs.to,
+    );
+    if (denied) return denied.message;
+    const r = await this.github.pushBranch(project, refs.branch, refs.to);
+    return r.message;
+  }
+
   /** Providers that just failed with a used-up quota / rate limit / bad credentials (in memory — a hint for ordering, not state). */
   private readonly cooldown = new ProviderCooldown();
 
@@ -702,6 +721,8 @@ export class RealAgentExecutor extends AgentExecutor {
     const toolHandlers: InternalToolHandlers = {
       onReportStatus,
       onHeartbeat,
+      // Publishing goes through the orchestrator (it holds the project's key/token; the agent holds none): a person approves each push.
+      onPushBranch: opts.project.kind === 'code' && opts.project.repoUrl && !ctx.discussion ? (input) => this.pushBranchFor(ctx.taskId, session.id, opts.project, input) : undefined,
       onCreateSubtask: ctx.onCreateSubtask,
       // A LEAD (a top-level task — the one that may create subtasks) whose file says `createTasks: true` may start new tasks in a project (each approved by a person).
       onCreateTask: (opts.agentDef?.createTasks || opts.agentDef?.skills?.includes('task-splitting')) && ctx.onCreateSubtask && !ctx.discussion ? (input) => this.platformAdmin.createTaskForLead(ctx.taskId, session.id, input) : undefined,

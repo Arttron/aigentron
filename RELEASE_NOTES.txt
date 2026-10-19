@@ -1,15 +1,17 @@
-Aigentron v0.1.72
+Aigentron v0.1.73
 
-For people who are not programmers: the project page no longer crashes, and the "agent splits work out" tools.
-
-Fixed
-- The project page crashed with "Unexpected Application Error" after you had tested the repository connection and reloaded the page. It now shows the last test result in one line (the full checklist returns with the next test).
-- A lead agent could no longer create subtasks once it had 25 in total, even when they were all finished. Now only the open ones count (25 by default; 100 in total as a safety ceiling).
+For people who are not programmers: agents can publish code safely, and a failed update no longer leaves the server stopped.
 
 New
-- Moving work out to its own task. A finished subtask that outgrew its lead can be moved to the top level with "⬆ To top level" on its page; it keeps its history and project and links back to the lead.
-- Agents can start new tasks in a project. An agent that has the skill "task-splitting" (or the line `createTasks: true` in its file) gets the tool create_task: each task it starts is approved by you on a card with a one-line reason, and a duplicate of an open task is not created. The skill explains when to split work out (3+ subtasks on one theme, or a subtask that needs its own breakdown).
-- Accepting a task that still has open subtasks asks what to do with them (cancel them and mark done / mark done, leave them).
-- The admin assistant now answers from its references only and says when something is not documented; it has a page on how agents create work.
+- push_branch for agents. An agent that has finished work in a project's repository can now ask to publish a branch (for example "develop" as "main" into an empty repository). You approve each push on a card; the server pushes with the project's own key, so agents still never hold any key or token. Pushes are never forced. A plain `git push` from an agent's shell cannot work by design, and the git skill now tells agents so.
+- Publishing a task result into an empty repository now works (it used to be skipped because there was no main branch yet).
 
-Update note: no database changes.
+Safer updates (bare-metal servers)
+- The updater checks free space (300 MB) before it stops the service and refuses to start when there is not enough, leaving the running version untouched.
+- If anything fails after the service was stopped (for example a full disk), the previous version is brought back up automatically, including the database snapshot if migrations had run. The service file is written atomically.
+- Build caches (pnpm store, npm, corepack) now live in <data dir>/cache (override with CACHE_DIR) instead of root's home directory, and are cleaned after a successful update. These protections apply from the update that installs this version onwards.
+
+Fixed
+- Checkboxes in the approval card (the "Don't ask again" options) showed up as long slider-like bars; they are normal checkboxes now.
+
+Update note: no database changes. If a previous update stopped half-way on a full disk, free some space first (see docs/updates.md).

@@ -56,6 +56,7 @@
 #                              or /opt/aigentron (bare). Also skips the interactive prompt.
 #   DATA_DIR=<path>            bare-metal only: sqlite db/agent/repo/worktrees (default
 #                              $INSTALL_DIR/data). Also skips the interactive prompt.
+#   CACHE_DIR=<path>           bare-metal: where the build caches (pnpm store, npm, corepack) live (default <DATA_DIR>/cache)
 #   MIN_FREE_DISK_MB=<n>       preflight disk-space floor per checked location, in MB (default 5120)
 #   AUTO_INSTALL_DEPS=0        don't auto-install missing prerequisites — just check and die (default: 1)
 #   REQUIRE_CHECKSUM=1         refuse to install when the release has no SHA256SUMS to verify the archive against
@@ -710,6 +711,16 @@ else
   tight=$(free_mb "$INSTALL_DIR")
   if [ -n "$tight" ] && [ "$tight" -lt 3072 ]; then log "Only ${tight}MB free - removing old releases before the build"; prune_releases; fi
 
+  # Every cache of the build (pnpm store, npm, corepack, XDG) lives in the DATA directory (CACHE_DIR to put it elsewhere), not in root's
+  # home: the data dir is the one you point at the big volume, and a small root disk used to fill up from ~/.cache and ~/.npm mid-update.
+  # pnpm links packages into node_modules; on another volume than the release dirs it copies instead (works, takes more room there).
+  BUILD_CACHE="${CACHE_DIR:-$DATA_DIR/cache}"
+  mkdir -p "$BUILD_CACHE/xdg" "$BUILD_CACHE/npm" "$BUILD_CACHE/pnpm-store" "$BUILD_CACHE/corepack"
+  if [ "$(df -P "$BUILD_CACHE" | awk 'NR==2{print $1}')" != "$(df -P "$INSTALL_DIR" | awk 'NR==2{print $1}')" ]; then
+    log "Note: the build cache ($BUILD_CACHE) is on another volume than $INSTALL_DIR - pnpm will copy packages instead of linking them"
+  fi
+  export XDG_CACHE_HOME="$BUILD_CACHE/xdg" npm_config_cache="$BUILD_CACHE/npm" npm_config_store_dir="$BUILD_CACHE/pnpm-store" COREPACK_HOME="$BUILD_CACHE/corepack"
+
   cd "$RELEASE_DIR"
   log "Installing dependencies + building from source (this can take a few minutes)"
   corepack enable >/dev/null 2>&1 || true
@@ -730,7 +741,9 @@ else
   SERVICE_FILE=/etc/systemd/system/aigentron.service
   # The unit for release $1 (also used to point the unit back at the previous release on a rollback).
   write_unit() {
-    cat > "$SERVICE_FILE" <<EOF
+    # Written next to the real file and moved into place, so a full disk (or any failure half-way) never leaves a truncated unit behind.
+    unit_tmp="$SERVICE_FILE.new"
+    cat > "$unit_tmp" <<EOF
 [Unit]
 Description=Aigentron (minimal profile)
 After=network-online.target
@@ -763,6 +776,7 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+    mv -f "$unit_tmp" "$SERVICE_FILE"
   }
 
   # Order: stop the old server -> snapshot the (now quiet) database -> migrate -> switch the release -> start -> wait for /api/health.
@@ -771,6 +785,36 @@ EOF
   . "$RELEASE_DIR/infra/db-snapshot.sh"
   DB_FILE="$DATA_DIR/orchestrator.db"
   DB_SNAPSHOT=
+  # Everything below happens with the service STOPPED: check the room it needs first, while the running version is still untouched.
+  for p in "$INSTALL_DIR" "$DATA_DIR" /etc/systemd/system; do
+    avail=$(free_mb "$p")
+    if [ -n "$avail" ] && [ "$avail" -lt 300 ]; then
+      die "only ${avail}MB free on $p - the update needs room to switch releases; nothing was stopped or changed (the running version stays in place). Free some space (old releases in $INSTALL_DIR/releases, docker/apt caches, logs) and update again."
+    fi
+  done
+
+  # From the stop until the new release is started, ANY failure (a full disk, a failed step) must bring the previous release back:
+  # previous release + unit file, and the database as it was if migrations had already run. Disarmed once the new one is started
+  # (the health check below has its own rollback).
+  RECOVER=1
+  MIGRATED=
+  recover_service() {
+    [ "${RECOVER:-0}" = 1 ] || return 0
+    RECOVER=0
+    log "The update stopped before the new release was started - bringing the previous release back up"
+    rm -f "${SERVICE_FILE:-/etc/systemd/system/aigentron.service}.new" 2>/dev/null || true
+    if [ -n "${MIGRATED:-}" ] && [ -n "${DB_SNAPSHOT:-}" ]; then
+      restore_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION" >/dev/null 2>&1 && log "Database restored from the pre-update snapshot." || log "WARNING: could not restore $DATA_DIR/backups/pre-$VERSION.db - restore it by hand."
+    fi
+    if [ -n "${PREV_RELEASE:-}" ] && [ -d "$INSTALL_DIR/releases/$PREV_RELEASE" ]; then
+      ln -sfn "$INSTALL_DIR/releases/$PREV_RELEASE" "$CURRENT_LINK" 2>/dev/null || true
+      (write_unit "$PREV_RELEASE") 2>/dev/null || true
+      rm -f "${SERVICE_FILE:-/etc/systemd/system/aigentron.service}.new" 2>/dev/null || true
+    fi
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl start aigentron >/dev/null 2>&1 || true
+  }
+  trap recover_service EXIT
   log "Stopping the running service (running agents get a graceful stop)"
   systemctl stop aigentron >/dev/null 2>&1 || true
   if [ -s "$DB_FILE" ]; then
@@ -796,6 +840,7 @@ EOF
     systemctl start aigentron >/dev/null 2>&1 || true
     die "database migration to $VERSION failed (no snapshot: there was no database yet); the previous release stays in place."
   fi
+  MIGRATED=1
 
   ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
   log "Writing $SERVICE_FILE"
@@ -824,6 +869,7 @@ SHIM
   systemctl daemon-reload
   systemctl enable aigentron
   systemctl restart aigentron
+  RECOVER=0
 
   log "Waiting for the new version to answer on /api/health (up to ${HEALTH_TIMEOUT:-120}s)…"
   if ! wait_health "${HEALTH_TIMEOUT:-120}"; then
@@ -845,6 +891,9 @@ SHIM
   fi
 
   prune_releases
+  # The package store only grows: drop what no release uses any more (best effort), and the throw-away caches.
+  pnpm store prune </dev/null >/dev/null 2>&1 || true
+  rm -rf "$BUILD_CACHE/xdg" "$BUILD_CACHE/npm" 2>/dev/null || true
 
   log "Aigentron $VERSION is running."
   log "Dashboard + API: http://localhost:3001"

@@ -31,6 +31,11 @@ export const CREATE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}create_subtask`;
  * like propose_task: a person approves each one on a card, and an equivalent open task is reused instead of duplicated.
  */
 export const CREATE_TASK_TOOL = `${INTERNAL_TOOL_PREFIX}create_task`;
+/**
+ * An agent asks the orchestrator to push a LOCAL branch of its project's repository to the project's remote. The agent never holds
+ * the credentials, so a `git push` from its shell cannot work; this is the way, and a person approves each push on a card.
+ */
+export const PUSH_BRANCH_TOOL = `${INTERNAL_TOOL_PREFIX}push_branch`;
 export const COMPLETE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}complete_subtask`;
 export const CHECK_SUBTASKS_TOOL = `${INTERNAL_TOOL_PREFIX}check_subtasks`;
 /** Sentinel toolName for a "run out of steps — continue?" approval (not a real tool). */
@@ -449,6 +454,15 @@ export function classifyToolCall(
       dangerous: true,
       summary: `propose_settings ${keys.join(',') || '(none)'} #${shortHash(JSON.stringify(ch))}`,
       reason: `admin agent proposing to change platform settings: ${show}${typeof toolInput.reason === 'string' && toolInput.reason ? ` — ${toolInput.reason.slice(0, 160)}` : ''}`,
+    };
+  }
+  if (name === PUSH_BRANCH_TOOL.toLowerCase()) {
+    const branch = typeof toolInput.branch === 'string' ? toolInput.branch : '?';
+    const to = typeof toolInput.to === 'string' && toolInput.to ? toolInput.to : branch;
+    return {
+      dangerous: true,
+      summary: `push_branch ${branch} → origin/${to} #${shortHash(`${branch}\n${to}`)}`,
+      reason: `agent proposing to PUBLISH the local branch "${branch}" to the project's remote as "${to}" (publishes commits to a remote; no force)${typeof toolInput.reason === 'string' && toolInput.reason ? ` — why: ${toolInput.reason.slice(0, 200)}` : ''}`,
     };
   }
   if (name === CREATE_TASK_TOOL.toLowerCase()) {

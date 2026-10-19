@@ -181,6 +181,39 @@ describe('per-project git', () => {
     expect(await github.publishResult(project('none', null), { branch: 'x', title: 't', body: 'b' })).toBeNull();
   });
 
+  it('push_branch: publishes a local branch under another name, never forces, and says why when it cannot', async () => {
+    const a = project('alpha', remotes.a);
+    await worktrees.useSharedRepo(a);
+    expect(await github.pushBranch(a, 'develop', 'main')).toMatchObject({ ok: false, message: expect.stringContaining('no local branch "develop"') });
+    await git(a.repoPath, 'checkout', '-q', '-b', 'develop');
+    await writeFile(join(a.repoPath, 'work.txt'), 'by an agent');
+    await git(a.repoPath, 'add', '.');
+    await git(a.repoPath, 'commit', '-q', '-m', 'work');
+    const head = await git(a.repoPath, 'rev-parse', 'HEAD');
+    const bare = remotes.a.replace('file://', '');
+    // develop → a NEW remote branch "release"
+    const ok = await github.pushBranch(a, 'develop', 'release');
+    expect(ok.ok).toBe(true);
+    expect(await git(base, '--git-dir', bare, 'rev-parse', 'release')).toBe(head);
+    // the remote moves on; the local branch is now behind: a push is refused, not forced
+    const other = join(base, 'other');
+    await git(base, 'clone', '-q', remotes.a, other);
+    await git(other, 'checkout', '-q', '-b', 'release', 'origin/release');
+    await writeFile(join(other, 'theirs.txt'), 'x');
+    await git(other, 'add', '.');
+    await git(other, 'commit', '-q', '-m', 'theirs');
+    await git(other, 'push', '-q', 'origin', 'release');
+    await writeFile(join(a.repoPath, 'work2.txt'), 'y');
+    await git(a.repoPath, 'add', '.');
+    await git(a.repoPath, 'commit', '-q', '-m', 'work 2');
+    const refused = await github.pushBranch(a, 'develop', 'release');
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toContain('never forced');
+    expect(await git(base, '--git-dir', bare, 'rev-parse', 'release')).not.toBe(await git(a.repoPath, 'rev-parse', 'develop'));
+    // no URL: nothing to push to
+    expect(await github.pushBranch(project('local', null), 'develop', 'develop')).toMatchObject({ ok: false });
+  });
+
   it('ensure() of one project is serialised; the other project is not waiting behind it', async () => {
     project('alpha', remotes.a);
     const b = project('beta', remotes.b);

@@ -160,7 +160,7 @@ Until a token file exists, the default project falls back to the database value,
   passed to *its* git processes as environment — `GIT_SSH_COMMAND` (a path to the key) and `GIT_CONFIG_*` (the header). Agents
   run as another OS user when agent isolation is on (`docs/authentication.md`), and the secrets directory is 0700, so the files
   are unreadable to them. The project checkout's `.git/config` is **not** given a credential by the sync; a push an agent makes
-  itself goes through the orchestrator's publishing step, which authenticates with `GIT_CREDENTIALS` the same way.
+  itself goes through the orchestrator's publishing step, which authenticates with `GIT_CREDENTIALS` the same way. Agents that want a branch published call the tool `push_branch {branch, to?, reason}`: a person approves each push on a card, the orchestrator pushes (`refs/heads/<branch>:refs/heads/<to>`, never forced) with the project's key — a `git push` from an agent's shell cannot work, by design.
 - **Nothing on the command line.** A token is never an argument of git (it would show in `ps` and `/proc/<pid>/cmdline`) and
   never part of the URL (it would land in `.git/config` and in error messages). Tests spawn a real git and check its argv and
   the process list.

@@ -22,6 +22,7 @@ export type InternalToolHandlers = Pick<
   | 'onHeartbeat'
   | 'onCreateSubtask'
   | 'onCreateTask'
+  | 'onPushBranch'
   | 'onCheckSubtasks'
   | 'onCompleteSubtask'
   | 'onScheduleCheck'
@@ -82,6 +83,21 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         params.onHeartbeat?.({ progress: typeof args.progress === 'string' ? args.progress : undefined });
         return 'Heartbeat noted.';
       },
+    });
+  }
+
+  if (params.onPushBranch) {
+    specs.push({
+      name: 'push_branch',
+      description:
+        "Publish a LOCAL branch of this project's git repository to its remote (origin). This is the ONLY way to push: a `git push` from Bash cannot work (you have no credentials and no SSH key — do not try it, and do not ask for a token). `branch`: the local branch (it must exist and be committed: commit first); `to` (optional): the branch name on the remote (default: the same name; use it e.g. to publish `develop` as `main` in an empty repository); `reason`: ONE plain line on why (shown to the person on the approval card). A person approves every push; it never forces (a rejected non-fast-forward is reported, not overwritten). Returns what happened.",
+      shape: { branch: z.string(), to: z.string().optional(), reason: z.string().optional() },
+      handler: (args) =>
+        params.onPushBranch!({
+          branch: String(args.branch ?? ''),
+          to: typeof args.to === 'string' && args.to.trim() ? args.to.trim() : undefined,
+          reason: typeof args.reason === 'string' ? args.reason : undefined,
+        }),
     });
   }
 

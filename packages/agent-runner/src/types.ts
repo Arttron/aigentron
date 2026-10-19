@@ -124,6 +124,11 @@ export interface RunAgentParams {
    */
   onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{ id: string; title: string; /** an equivalent open subtask already existed: nothing new was created */ reused?: boolean }>;
   /**
+   * When set (a code project with a remote), the agent gets a `push_branch` tool: publish a LOCAL branch to the project's remote through
+   * the orchestrator (the agent holds no credentials; a person approves each push). Resolves with a message for the model.
+   */
+  onPushBranch?: (input: { branch: string; to?: string; reason?: string }) => Promise<string>;
+  /**
    * When set (the agent's file says `createTasks: true`), the agent gets a `create_task` tool: start a NEW top-level task in a project.
    * Resolves with a message for the model (created / reused / refused).
    */

@@ -8,6 +8,16 @@ description: Commit message format, branch naming, and git workflow conventions 
 
 ---
 
+## Pushing: use `push_branch`, never `git push`
+
+You have no credentials and no SSH key — a `git push` from the shell always fails (`Host key verification failed`, `could not read Username`).
+Do not retry it, do not look for keys, do not ask for a token. Commit on a LOCAL branch, then call the tool `push_branch {branch, to?, reason}`:
+`to` is the branch name on the remote (default: the same; e.g. publish `develop` as `main` into an empty repository). A person approves every
+push; it is never forced. The orchestrator pushes with the project's own key. Finished runs are also published by the orchestrator (task
+branch / pull request), but only the branch of that task — work you merged into another branch needs `push_branch`.
+
+---
+
 ## Commit message format
 
 ```
