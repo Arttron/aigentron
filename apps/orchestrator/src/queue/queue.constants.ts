@@ -1,5 +1,9 @@
 /** Name of the BullMQ queue carrying agent task jobs. */
 export const TASK_QUEUE = 'agent-tasks';
+/** The reserved lane of conversational (chat-mode) agents, the built-in admin first: its own queue and its own slots, outside the Settings cap. */
+export const CHAT_QUEUE = 'agent-tasks-chat';
+/** How many chat turns run at once in the reserved lane. They are short, so a person talking to the admin never waits behind long task runs. */
+export const CHAT_LANE_CONCURRENCY = 2;
 
 /** Shape of a job payload on the task queue. */
 export interface TaskJobData {
@@ -8,6 +12,8 @@ export interface TaskJobData {
   followUpPrompt?: string;
   /** Attachment filenames sent with this message (for the prompt event). */
   attachments?: string[];
+  /** `chat` = a turn of a chat-mode agent: runs in the reserved lane, never behind the task runs that fill the Settings cap. */
+  lane?: 'chat';
 }
 
 /** The function the worker runs for each claimed job. */

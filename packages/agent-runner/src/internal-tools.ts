@@ -742,6 +742,13 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         handler: (args) => admin.taskDiagnose(String(args.taskId)),
       },
       {
+        name: 'current_context',
+        description:
+          "Where the person is in the dashboard right now, and what is there: on a task page → that task's status, error, agent, runs, approvals, subtasks and last messages; on a project page → the project; elsewhere → the page's name. Call it when they say 'this task', 'here', 'this page', 'why did it fail' without an id. Read-only.",
+        shape: {},
+        handler: () => admin.currentContext(),
+      },
+      {
         name: 'usage_report',
         description:
           'Token, request and estimated-cost usage per provider over the last N days (default 7, max 365) — the numbers behind the Stats page. Subscription-based providers (Codex/ChatGPT) record tokens but no cost.',

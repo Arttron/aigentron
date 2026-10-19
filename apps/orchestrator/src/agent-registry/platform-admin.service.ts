@@ -31,6 +31,8 @@ import { MaintenanceService } from '../maintenance/maintenance.service';
 import { DiskMonitorService } from '../maintenance/disk-monitor.service';
 import { StatsService } from '../stats/stats.service';
 import { AdminAuditService, type AuditEntry } from './admin-audit.service';
+import { AdminContextService } from './admin-context.service';
+import { parsePage } from './admin-context-core';
 import type { SchedulesService } from '../schedules/schedules.service';
 import { ChannelsService } from '../channels/channels.service';
 import { PairingService } from '../channels/pairing.service';
@@ -1079,6 +1081,33 @@ export class PlatformAdminService {
     ]
       .filter((l): l is string => l !== null)
       .join('\n');
+  }
+
+  /** Where the person is right now (the page the dashboard reported with their message) and what is there: a task → its diagnosis, a project → its summary. */
+  async currentContext(adminTaskId: string): Promise<string> {
+    const ref = this.moduleRef.get(AdminContextService, { strict: false }).get(adminTaskId);
+    if (!ref) return 'No page is known for this conversation (it was not started from the dashboard, or the page has not reported yet). Ask the person what they are looking at.';
+    const page = parsePage(ref.path);
+    const head = `The person is on ${page.name} — ${ref.path}${ref.title ? ` (tab title: "${ref.title}")` : ''}.`;
+    if (page.kind === 'task' && page.id) {
+      const t = await this.prisma.task.findUnique({ where: { id: page.id }, select: { id: true, agentName: true } });
+      if (!t) return `${head}
+No task with that id exists any more.`;
+      // This very conversation is a task too: say so instead of describing the chat to itself.
+      if (t.id === adminTaskId) return `${head}
+That is this chat itself — no other task is open.`;
+      return `${head}
+
+${await this.taskDiagnose(t.id)}`;
+    }
+    if (page.kind === 'project' && page.id) {
+      const p = await this.prisma.project.findUnique({ where: { slug: page.id }, select: { slug: true, name: true, kind: true, repoUrl: true, repoBranch: true, isolation: true, defaultAgent: true, archivedAt: true } });
+      if (!p) return `${head}
+No project with that slug.`;
+      const open = await this.prisma.task.count({ where: { project: { slug: p.slug }, status: { in: ['queued', 'running', 'needs_approval', 'review', 'blocked', 'stalled'] } } });
+      return [head, '', `Project "${p.name}" (${p.slug}) — ${p.kind}${p.archivedAt ? ', archived' : ''}`, p.repoUrl ? `Repository: ${p.repoUrl} (${p.repoBranch})` : null, `Isolation: ${p.isolation ?? 'follows the installation default'}`, p.defaultAgent ? `Default agent: ${p.defaultAgent}` : null, `Open tasks: ${open}`].filter((l): l is string => l !== null).join('\n');
+    }
+    return head;
   }
 
   async usageReport(input: { days?: number }): Promise<string> {

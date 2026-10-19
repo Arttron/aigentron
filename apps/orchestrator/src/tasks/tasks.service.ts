@@ -4,7 +4,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { getTaskLite, type TaskLite } from '../agent/task-lite';
 import { decodeAttachments } from '../prisma/agent-event-attachments';
-import { TaskQueue } from '../queue/queue.constants';
+import { TaskQueue, type TaskJobData } from '../queue/queue.constants';
 import { AgentEventBus } from '../bus/agent-event-bus';
 import { WorktreeService } from '../worktrees/worktree.service';
 import { AgentExecutor } from '../agent/agent-executor';
@@ -230,7 +230,7 @@ export class TasksService {
     // Defer queuing when the client will upload attachments first (avoids the
     // run reading the attachments dir before the files land); it then /start-s.
     if (dto.autostart !== false) {
-      await this.queue.enqueue({ taskId: task.id, attachments: dto.attachments });
+      await this.enqueueRun({ taskId: task.id, attachments: dto.attachments }, task.agentName);
       this.nameSoon(task, dto.attachments);
     }
     return task;
@@ -441,13 +441,19 @@ export class TasksService {
     });
   }
 
+  /** Queue a run; a turn of a chat-mode agent (the admin) goes to the reserved lane, outside the cap the task runs share. */
+  private async enqueueRun(data: TaskJobData, agentName: string | null | undefined, opts?: { delayMs?: number }): Promise<void> {
+    const agent = agentName ? await this.agents.get(agentName).catch(() => null) : null;
+    await this.queue.enqueue(agent?.mode === 'chat' ? { ...data, lane: 'chat' } : data, opts);
+  }
+
   /** Queue a task that was created with autostart=false (after its uploads). */
   async start(id: string, attachments?: string[]) {
     const task = await this.get(id);
     if (task.status !== 'queued') {
       throw new ConflictException(`Task ${id} is ${task.status}, cannot start`);
     }
-    await this.queue.enqueue({ taskId: id, attachments });
+    await this.enqueueRun({ taskId: id, attachments }, task.agentName);
     this.nameSoon(task, attachments);
     return task;
   }
@@ -499,7 +505,7 @@ export class TasksService {
       return this.enqueueFollowUp(id, prompt, attachments);
     }
     this.publishStatus(id, 'queued');
-    await this.queue.enqueue({ taskId: id, followUpPrompt: prompt, attachments });
+    await this.enqueueRun({ taskId: id, followUpPrompt: prompt, attachments }, (await this.getLite(id)).agentName);
     const queueLength = await this.prisma.pendingFollowUp.count({ where: { taskId: id } });
     return { ...(await this.get(id)), queued: false as const, queueLength };
   }
@@ -608,7 +614,7 @@ export class TasksService {
       return this.get(id);
     }
     this.publishStatus(id, 'queued');
-    await this.queue.enqueue({ taskId: id, followUpPrompt: prompt });
+    await this.enqueueRun({ taskId: id, followUpPrompt: prompt }, (await this.getLite(id)).agentName);
     return this.get(id);
   }
 
@@ -619,7 +625,7 @@ export class TasksService {
    */
   async scheduleFollowUp(id: string, prompt: string, delaySeconds: number): Promise<void> {
     const delayMs = Math.min(Math.max(Math.round(delaySeconds), 30), 3600) * 1000; // 30s..1h
-    await this.queue.enqueue({ taskId: id, followUpPrompt: prompt }, { delayMs });
+    await this.enqueueRun({ taskId: id, followUpPrompt: prompt }, (await this.getLite(id)).agentName, { delayMs });
     this.logger.log(`Scheduled follow-up for task ${id} in ${delayMs / 1000}s`);
   }
 

@@ -279,6 +279,8 @@ export interface AdminToolsWiring {
   proposeUndo: (input: { changeId: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Why did a task end the way it did: status, error, agent/provider, reported summary, approvals, last messages. */
   taskDiagnose: (taskId: string) => Promise<string>;
+  /** The dashboard page the person is on while talking to the admin (a task page → that task's details; a project page → the project). */
+  currentContext: () => Promise<string>;
   /** Token / request / cost usage per provider over the last N days. */
   usageReport: (input: { days?: number }) => Promise<string>;
   /** Ask the human to enter a secret in a secure field; resolves with whether it was saved (never the value). */

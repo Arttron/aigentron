@@ -1,6 +1,9 @@
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { TaskQueue, type TaskJobData, type TaskJobProcessor } from './queue.constants';
+import { CHAT_LANE_CONCURRENCY, TaskQueue, type TaskJobData, type TaskJobProcessor } from './queue.constants';
+
+/** The lane marker inside a job's JSON payload (the chat lane is told apart without a schema change). */
+const CHAT_MARK = '"lane":"chat"';
 
 /** How often the worker looks for due jobs. Local DB — a cheap indexed query. */
 const POLL_MS = 1000;
@@ -20,6 +23,7 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
   private processor?: TaskJobProcessor;
   private concurrency = 1;
   private inFlight = 0;
+  private chatInFlight = 0;
   private stopped = false;
 
   constructor(private readonly prisma: PrismaService) {
@@ -81,13 +85,23 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
   private async tick(): Promise<void> {
     if (!this.processor || this.stopped) return;
     try {
+      // Two lanes with their own slots: task runs (the Settings cap) and chat turns (reserved — the admin never waits behind them).
       while (this.inFlight < this.concurrency) {
-        const job = await this.claimNext();
-        if (!job) return;
+        const job = await this.claimNext(false);
+        if (!job) break;
         this.inFlight++;
         void this.run(job).finally(() => {
           this.inFlight--;
           // A slot just freed — a queued job may be due; don't wait for the poll.
+          if (!this.stopped) setImmediate(() => void this.tick());
+        });
+      }
+      while (this.chatInFlight < CHAT_LANE_CONCURRENCY) {
+        const job = await this.claimNext(true);
+        if (!job) break;
+        this.chatInFlight++;
+        void this.run(job).finally(() => {
+          this.chatInFlight--;
           if (!this.stopped) setImmediate(() => void this.tick());
         });
       }
@@ -97,9 +111,13 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
   }
 
   /** Atomically claim the oldest due job (updateMany count acts as the lock). */
-  private async claimNext(): Promise<{ id: string; payload: string } | null> {
+  private async claimNext(chat: boolean): Promise<{ id: string; payload: string } | null> {
     const due = await this.prisma.queueJob.findFirst({
-      where: { claimedAt: null, runAfter: { lte: new Date() } },
+      where: {
+        claimedAt: null,
+        runAfter: { lte: new Date() },
+        ...(chat ? { payload: { contains: CHAT_MARK } } : { NOT: { payload: { contains: CHAT_MARK } } }),
+      },
       orderBy: { createdAt: 'asc' },
       select: { id: true, payload: true },
     });
@@ -108,7 +126,7 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
       where: { id: due.id, claimedAt: null },
       data: { claimedAt: new Date() },
     });
-    return claimed.count === 1 ? due : this.claimNext(); // lost the (theoretical) race — next
+    return claimed.count === 1 ? due : this.claimNext(chat); // lost the (theoretical) race — next
   }
 
   private async run(job: { id: string; payload: string }): Promise<void> {

@@ -1,6 +1,5 @@
 import { PacksCard } from '@/components/PacksCard';
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api, type AgentInfo, type McpServerInfo, type ProviderInfo } from '@/lib/api';
 import {
   AppHeader,
@@ -256,7 +255,7 @@ export function AgentsPage() {
   return (
     <>
       <BackLink href="/">← all tasks</BackLink>
-      <AppHeader title="🧑‍💻 Agents" actions={<Link to="/settings">⚙ Settings</Link>} />
+      <AppHeader title="🧑‍💻 Agents" />
 
       {error && (
         <Card>

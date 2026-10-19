@@ -15,6 +15,13 @@ DATA_DIR="${DATA_DIR:-/data}"
 
 mkdir -p "$DATA_DIR/agent" "$DATA_DIR/repo" "$DATA_DIR/worktrees" "$(dirname "${DATABASE_URL#file:}")"
 
+# Claude's conversation store (~/.claude/projects/…) must outlive the container: without it every update/recreate loses the
+# sessions, and a follow-up on an older task fails with "No conversation found". Docker only (bare metal has a real home).
+if [ -f /.dockerenv ] && [ -n "${HOME:-}" ] && [ ! -e "$HOME/.claude" ]; then
+  mkdir -p "$DATA_DIR/claude"
+  ln -s "$DATA_DIR/claude" "$HOME/.claude"
+fi
+
 # The baked-in agent defs (agent/agents/*.md, skills) live at $APP_DIR/agent;
 # AGENT_DIR points at the persisted $DATA_DIR/agent so user edits survive a
 # container recreate / upgrade. Seed the defaults once — never overwrite on

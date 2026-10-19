@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { api, errMsg, type AddonInfo, type AddonStatus } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { usePolling } from '@/lib/use-polling';
@@ -104,7 +103,7 @@ export function BrowserPage() {
   return (
     <>
       <BackLink href="/">← all tasks</BackLink>
-      <AppHeader title="🌐 Browser" actions={<Link to="/settings">⚙ Settings</Link>} />
+      <AppHeader title="🌐 Browser" />
 
       {error && (
         <Card>

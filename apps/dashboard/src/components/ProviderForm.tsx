@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, type ProviderInfo, type ProviderKind, type ProviderAuthMode } from '@/lib/api';
 import { Field, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { ProviderSignIn } from './ProviderSignIn';
 import styles from './ProviderForm.module.css';
 
 export interface ProviderFormValues {
@@ -163,19 +164,21 @@ export function ProviderForm({
         </select>
         {values.authMode === 'codex-login' && (
           <Muted className={styles.note}>
-            Runs agents on the OpenAI Codex CLI using your ChatGPT subscription — no key stored here. Sign in
-            once on the server: <code>codex login --device-auth</code> (with <code>CODEX_HOME</code> set to the
-            shared auth dir, <code>agent/.codex-home</code> by default), then use “Test”.
+            Runs agents on the OpenAI Codex CLI using your ChatGPT subscription — no key stored here.
           </Muted>
         )}
         {values.authMode === 'oauth-token' && (
           <Muted className={styles.note}>
-            Run <code>claude setup-token</code> locally (or <code>scripts/cli-auth.sh &lt;name&gt;</code>) and
-            paste the printed token below. Bypasses LiteLLM — talks to Anthropic directly, so Base URL is
-            ignored; this provider also can’t be delegated to as a subagent. Expires after 1 year (no
-            auto-refresh) — rotate by repeating this with the same provider name.
+            Uses your Claude subscription (Pro/Max). Bypasses LiteLLM — talks to Anthropic directly, so Base URL is ignored; this
+            provider also can’t be delegated to as a subagent. The token lasts about a year — sign in again then.
           </Muted>
         )}
+        {(values.authMode === 'codex-login' || values.authMode === 'oauth-token') &&
+          (initial && initial.authMode === values.authMode ? (
+            <ProviderSignIn name={initial.name} />
+          ) : (
+            <Muted className={styles.note}>Save the provider first — then a “Sign in” button appears here.</Muted>
+          ))}
       </Field>
       {values.authMode !== 'codex-login' && (
       <Field

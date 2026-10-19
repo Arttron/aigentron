@@ -207,6 +207,26 @@ textarea {
   font-family: var(--mono);
 }
 
+/* Navigation (components/AppNav): a sidebar on wide screens, a bottom bar below. The floating widgets add these offsets. */
+:root {
+  --nav-w: 0px;
+  --nav-h: 0px;
+}
+@media (min-width: 901px) {
+  :root {
+    --nav-w: 216px;
+  }
+}
+@media (max-width: 900px) {
+  :root {
+    --nav-h: 62px;
+  }
+}
+.app-shell {
+  padding-left: var(--nav-w);
+  padding-bottom: var(--nav-h);
+}
+
 /* App-wide page container. */
 .app {
   max-width: 1100px;

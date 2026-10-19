@@ -1,7 +1,7 @@
 .top {
   position: fixed;
-  left: 16px;
-  bottom: 70px; /* above the theme switch on wide screens */
+  left: calc(16px + var(--nav-w, 0px));
+  bottom: calc(70px + var(--nav-h, 0px)); /* above the theme switch on wide screens */
   z-index: 880;
   width: 44px;
   height: 44px;

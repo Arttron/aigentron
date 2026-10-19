@@ -81,6 +81,8 @@ export const CATALOG_GET_TOOL = `${INTERNAL_TOOL_PREFIX}catalog_get`;
 export const AGENTS_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}agents_list`;
 export const AGENT_GET_TOOL = `${INTERNAL_TOOL_PREFIX}agent_get`;
 export const TASK_DIAGNOSE_TOOL = `${INTERNAL_TOOL_PREFIX}task_diagnose`;
+/** Where the person is in the dashboard (read-only): their current task / project / page. */
+export const CURRENT_CONTEXT_TOOL = `${INTERNAL_TOOL_PREFIX}current_context`;
 export const USAGE_REPORT_TOOL = `${INTERNAL_TOOL_PREFIX}usage_report`;
 /** Platform management by the admin agent: reading tasks is free; every mutation is a gated proposal. */
 export const TASKS_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}tasks_list`;

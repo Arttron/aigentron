@@ -1,7 +1,7 @@
 .toggle {
   position: fixed;
-  left: 16px;
-  bottom: 16px;
+  left: calc(16px + var(--nav-w, 0px));
+  bottom: calc(16px + var(--nav-h, 0px));
   z-index: 900;
   width: 44px;
   height: 44px;

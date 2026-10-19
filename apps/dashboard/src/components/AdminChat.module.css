@@ -1,7 +1,7 @@
 .float {
   position: fixed;
   right: 12px;
-  bottom: 12px;
+  bottom: calc(12px + var(--nav-h, 0px));
   z-index: 950;
   width: 104px;
   height: 104px;
@@ -46,7 +46,7 @@
 .panel {
   position: fixed;
   right: 16px;
-  bottom: 16px;
+  bottom: calc(16px + var(--nav-h, 0px));
   z-index: 960;
   width: min(380px, calc(100vw - 32px));
   height: min(560px, calc(100vh - 32px));
@@ -250,7 +250,7 @@
 .edgeTab {
   position: fixed;
   right: 0;
-  bottom: var(--tab-bottom, 24px);
+  bottom: calc(var(--tab-bottom, 24px) + var(--nav-h, 0px));
   z-index: 950;
   width: 22px;
   height: 52px;

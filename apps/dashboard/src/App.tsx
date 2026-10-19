@@ -4,12 +4,16 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { AdminChat } from '@/components/AdminChat';
 import { AuthGate } from '@/components/AuthGate';
 import { ScrollTopButton } from '@/components/ScrollTopButton';
+import { AppNav } from '@/components/AppNav';
 
 export function App() {
   return (
     <AuthGate>
-      <div className="app">
-        <Outlet />
+      <AppNav />
+      <div className="app-shell">
+        <div className="app">
+          <Outlet />
+        </div>
       </div>
       <ApprovalDock />
       <AdminChat />

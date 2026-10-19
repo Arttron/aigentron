@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { SERVER_EVENT } from '@lds/shared';
 import { useProjects } from '@/lib/use-projects';
 import { selectableProjects } from '@/lib/projects';
@@ -8,7 +7,6 @@ import { getSocket } from '@/lib/socket';
 import { readFilterParam, withFilterParam } from '@/lib/url-filter';
 import { CreateTaskForm } from '@/components/CreateTaskForm';
 import { TaskList } from '@/components/TaskList';
-import { UserSwitcher } from '@/components/UserSwitcher';
 import { AppHeader, Button, Card, SectionTitle, ConnStatus, ErrorText, Muted } from '@/components/ui';
 
 const PAGE_SIZE = 25;
@@ -239,16 +237,7 @@ export function TaskListPage() {
         title="🤖 Agent Fleet"
         actions={
           <>
-            <UserSwitcher />
             <ConnStatus connected={connected} />
-            <Link to="/agents">🧑‍💻 Agents</Link>
-            <Link to="/resources">📚 Resources</Link>
-            <Link to="/knowledge">🧠 Knowledge</Link>
-            <Link to="/workspace">📁 Workspace</Link>
-            <Link to="/projects">📁 Projects</Link>
-            <Link to="/browser">🌐 Browser</Link>
-            <Link to="/stats">📊 Stats</Link>
-            <Link to="/settings">⚙ Settings</Link>
           </>
         }
       />

@@ -91,6 +91,9 @@ const REPORTING_RESUME_PROMPT =
   'this task, or the user). Do not just wait; a question left in prose is lost.\n' +
   'Do not do any further work — just report your status accurately.';
 
+/** The Claude CLI's answer when the session it was asked to resume is not in its store. */
+const SESSION_GONE = /No conversation found with session ID/i;
+
 /**
  * Real executor: drives @lds/agent-runner for a task, persisting a transcript
  * (AgentEvent rows) and an AgentSession, and publishing every step to the event
@@ -288,19 +291,42 @@ export class RealAgentExecutor extends AgentExecutor {
       const isLast = i === chain.length - 1;
       const resume = i === 0 ? resumeSessionId : undefined;
       const { agents, systemAppend, runContext } = await prepare(provider.name);
-      const r = await this.attempt({
-        ...common,
-        provider,
-        model,
-        agents,
-        appendSystemPrompt: systemAppend,
-        runContext,
-        resumeSessionId: resume,
-        // A resumed session was already told about the task's files: list only the ones sent with THIS message (E-06).
-        listedAttachments: resume && !chat ? attachmentPaths.filter((p) => messageAttachments.includes(basename(p))) : attachmentPaths,
-        firstAttempt: i === 0,
-        leadingNote: note,
-      });
+      const run = (resumeId: string | undefined, refContext: string) =>
+        this.attempt({
+          ...common,
+          refContext,
+          provider,
+          model,
+          agents,
+          appendSystemPrompt: systemAppend,
+          runContext,
+          resumeSessionId: resumeId,
+          // A resumed session was already told about the task's files: list only the ones sent with THIS message (E-06).
+          listedAttachments: resumeId && !chat ? attachmentPaths.filter((p) => messageAttachments.includes(basename(p))) : attachmentPaths,
+          firstAttempt: i === 0,
+          leadingNote: note,
+        });
+      let r = await run(resume, refContext);
+      // The stored session cannot be resumed any more (the CLI's session store was reset — a rebuilt container, another data dir, a cleaned
+      // home): start a fresh session on the same task instead of ending the follow-up with the SDK's error.
+      if (resume && SESSION_GONE.test(r.outcome.errorText ?? r.reason ?? '')) {
+        this.logger.warn(`Task ${ctx.taskId}: session ${resume} is gone — continuing in a fresh session`);
+        const fresh = await this.buildReferencesContext(ctx.taskId, undefined);
+        // The model's own memory is gone, the transcript is not: hand over the last exchanges (messages and answers, no tool noise).
+        const past = await this.prisma.agentEvent.findMany({
+          where: { taskId: ctx.taskId, kind: { in: ['prompt', 'result'] }, text: { not: '' } },
+          orderBy: { createdAt: 'desc' },
+          take: 12,
+          select: { kind: true, text: true },
+        });
+        const history = past
+          .reverse()
+          .map((e) => `${e.kind === 'prompt' ? 'Person' : 'You'}: ${e.text.replace(/\s+/g, ' ').slice(0, 700)}`)
+          .join('\n')
+          .slice(-6000);
+        const lost = `(The earlier session of this task could not be resumed. Its original request: ${task.prompt.slice(0, 1500)}\nThe conversation so far, oldest first:\n${history}\nContinue from here with the person's new message below.)\n`;
+        r = await run(undefined, `${fresh ? `${fresh}\n` : ''}${lost}`);
+      }
       last = r.outcome;
       // A used-up quota, a rate limit or a refused key: remember it, so the next runs start on a fallback right away.
       if (r.failoverWorthy) {
@@ -355,6 +381,7 @@ export class RealAgentExecutor extends AgentExecutor {
       proposeSettings: (input) => this.platformAdmin.proposeSettings(taskId, sessionId, input),
       proposeUndo: (input) => this.platformAdmin.proposeUndo(taskId, sessionId, input),
       taskDiagnose: (id) => this.platformAdmin.taskDiagnose(id),
+      currentContext: () => this.platformAdmin.currentContext(taskId),
       usageReport: (input) => this.platformAdmin.usageReport(input),
       requestSecret: (input) => this.platformAdmin.requestSecret(taskId, sessionId, input),
       maintenanceReport: () => this.platformAdmin.maintenanceReport(),

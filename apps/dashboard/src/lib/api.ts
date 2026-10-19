@@ -122,6 +122,24 @@ export interface WorkspaceListing {
 }
 
 /** An AI model endpoint (from GET /api/providers; secret masked). */
+export type LoginPhase = 'starting' | 'awaiting_browser' | 'awaiting_code' | 'finishing' | 'done' | 'failed' | 'cancelled';
+export interface LoginView {
+  phase: LoginPhase;
+  url: string | null;
+  userCode: string | null;
+  needsCode: boolean;
+  message: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+export interface LoginStatus {
+  supported: boolean;
+  flavor: 'codex' | 'claude' | null;
+  loggedIn: boolean;
+  message: string;
+  session: LoginView | null;
+}
+
 export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'codex';
 // oauth-token: a CLI-minted subscription token (e.g. `claude setup-token`) —
 // bypasses LiteLLM; see @lds/shared resolveProvider().
@@ -607,6 +625,13 @@ export const api = {
 
   createTask: (body: { prompt: string; title?: string; agentName?: string; attachments?: string[]; autostart?: boolean; parentId?: string; references?: string[]; project?: string }) =>
     request<Task>('POST', '/tasks', { body }),
+  providerLogin: (name: string) => request<LoginStatus>('GET', `/providers/${e(name)}/login`),
+  providerLoginStart: (name: string) => request<LoginView>('POST', `/providers/${e(name)}/login/start`),
+  providerLoginCode: (name: string, code: string) => request<LoginView>('POST', `/providers/${e(name)}/login/code`, { body: { code } }),
+  providerLoginCancel: (name: string) => request<LoginView | null>('DELETE', `/providers/${e(name)}/login`),
+  providerLogout: (name: string) => request<LoginStatus>('POST', `/providers/${e(name)}/logout`),
+  /** Tell the admin chat which page the person is on (its `current_context` tool reads it). */
+  setAdminContext: (taskId: string, page: { path: string; title?: string }) => request<{ ok: true }>('PUT', `/admin-context/${e(taskId)}`, { body: page }),
   createSubtask: (parentId: string, body: { prompt: string; title?: string; agentName?: string }) => request<Task>('POST', `/tasks/${e(parentId)}/subtasks`, { body }),
 
   listAgents: () => request<AgentInfo[]>('GET', '/agents'),

@@ -255,6 +255,9 @@ services:
       # Credentials (shared Codex sign-in…) live in a named volume, NOT in ./agent: agent runs can see their own
       # file tree, and ./agent sits inside the repo checkout.
       - secrets:/workspace/secrets
+      # Claude's conversation store: a recreate of the container (an update, a changed setting) must not lose the sessions of
+      # earlier tasks — a follow-up resumes them ("No conversation found" otherwise).
+      - claude-home:/root/.claude
     depends_on:
       postgres:
         condition: service_healthy
@@ -328,6 +331,7 @@ networks:
 
 volumes:
   secrets:
+  claude-home:
   browser-profile:
   pgdata:
   redisdata:

@@ -252,6 +252,7 @@ export function AdminChat() {
     setSending(true);
     setError(null);
     try {
+      const page = { path: window.location.pathname, title: document.title };
       if (!taskId) {
         const t = await api.createTask({
           prompt: body,
@@ -259,9 +260,12 @@ export function AdminChat() {
           agentName: ADMIN,
           autostart: true,
         });
+        void api.setAdminContext(t.id, page).catch(() => undefined);
         writeId(t.id);
         setTaskId(t.id);
       } else {
+        // Before the message, so the admin's current_context answer is already about this page.
+        await api.setAdminContext(taskId, page).catch(() => undefined);
         await api.followUp(taskId, body);
       }
       if (override === undefined) setText('');

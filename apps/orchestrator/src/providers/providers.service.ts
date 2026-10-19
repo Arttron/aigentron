@@ -2,6 +2,7 @@ import { ConflictException, Injectable, Logger, NotFoundException, type OnModule
 import type { Provider } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
+import { CLAUDE_SUBSCRIPTION_MODELS, parseModelPage } from './model-list';
 import { LitellmService, defaultKind, kindOf, stripSelfPrefix } from '../litellm/litellm.service';
 import { CodexService } from '../codex/codex.service';
 import { isKeylessAudioHost } from './audio-endpoint';
@@ -408,8 +409,8 @@ export class ProvidersService implements OnModuleInit {
     const p = toProvider(await this.getRow(name));
     if (p.kind === 'codex') return { ok: true, models: await this.codex.models() };
     if (p.authMode === 'oauth-token') {
-      // Same reasoning as test(): don't guess at the OAuth token's request shape.
-      return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
+      // Same reasoning as test(): don't guess at the OAuth token's request shape — offer the known Claude models (any name can still be typed).
+      return { ok: true, models: [...CLAUDE_SUBSCRIPTION_MODELS] };
     }
     return this.fetchModels({ kind: kindOf(p), baseUrl: p.baseUrl, authMode: p.authMode === 'api-key' ? 'api-key' : 'auth-token', secret: p.secret });
   }
@@ -422,9 +423,7 @@ export class ProvidersService implements OnModuleInit {
     secret?: string | null;
   }): Promise<ProviderModelsResult> {
     if (input.kind === 'codex') return { ok: true, models: await this.codex.models() };
-    if (input.authMode === 'oauth-token') {
-      return { ok: false, models: [], error: 'model listing isn’t available for oauth-token providers — type the model name directly.' };
-    }
+    if (input.authMode === 'oauth-token') return { ok: true, models: [...CLAUDE_SUBSCRIPTION_MODELS] };
     return this.fetchModels({
       kind: kindOf(input),
       baseUrl: input.baseUrl || null,
@@ -451,7 +450,9 @@ export class ProvidersService implements OnModuleInit {
     const anthropic = p.kind === 'anthropic';
     const auth = authHeaders(p.kind, p);
     if (auth.error) return { ok: false, models: [], error: auth.error };
-    const url = anthropic ? `${anthropicBase(baseUrl)}/v1/models` : `${oaiBase(p.kind, baseUrl)}/models`;
+    const listUrl = anthropic ? `${anthropicBase(baseUrl)}/v1/models` : `${oaiBase(p.kind, baseUrl)}/models`;
+    // Anthropic pages its list (20 by default): ask for the most per page and follow the cursor.
+    const url = anthropic ? `${listUrl}?limit=1000` : listUrl;
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15_000);
@@ -489,11 +490,15 @@ export class ProvidersService implements OnModuleInit {
             : extractError(text) || `HTTP ${res.status}`;
         return { ok: false, models: [], error };
       }
-      const json = JSON.parse(text);
-      const rows: unknown[] = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : [];
-      const models = rows
-        .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
-        .filter((x): x is string => typeof x === 'string' && x.length > 0);
+      let page = parseModelPage(JSON.parse(text));
+      const models = [...page.ids];
+      // Follow the cursor (bounded: a misbehaving endpoint must not loop us forever).
+      for (let n = 0; anthropic && page.next && n < 10; n++) {
+        const more = await fetch(`${listUrl}?limit=1000&after_id=${encodeURIComponent(page.next)}`, { headers: auth.headers, signal: controller.signal });
+        if (!more.ok) break;
+        page = parseModelPage(JSON.parse(await more.text()));
+        models.push(...page.ids);
+      }
       return { ok: true, models: Array.from(new Set(models)).sort() };
     } catch (e) {
       const err = e as Error;
