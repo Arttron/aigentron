@@ -1,10 +1,13 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve, sep } from 'node:path';
 import { TERMINAL_TASK_STATUSES, type Project, type TaskStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MEMORY_FILES, NOTE_KINDS, memoryHeader, projectBriefTemplate } from '../workspace/workspace-core';
+import { ResourcesService } from '../resources/resources.service';
+import { KnowledgeService } from '../knowledge/knowledge.service';
 import { buildProjectContext, projectDirOf, projectRepoPathOf, type ProjectContext } from './project-context';
 import {
   DEFAULT_PROJECT_ID,
@@ -54,12 +57,28 @@ const ACTIVE_STATUSES: TaskStatus[] = (['queued', 'running', 'needs_approval', '
   (s) => !TERMINAL_TASK_STATUSES.includes(s),
 );
 
-const FOLDERS = ['memory', 'work', 'deliverables'] as const;
+/** `library/` is the project's own resource library (docs/resources.md); the dashboard uploads into it, agents only read. */
+const FOLDERS = ['memory', 'work', 'deliverables', 'library'] as const;
 const BRIEF_FILE = 'PROJECT.md';
 const briefTemplate = projectBriefTemplate;
 
 const MAX_NAME = 80;
 const MAX_VERIFY = 4000;
+
+/** Task counts plus the project's own library sizes (resources in `<dir>/library`, knowledge bases with its projectId). */
+export type ProjectCounts = { active: number; total: number; resources: number; knowledge: number };
+
+/** What happens to a project's own resources and knowledge bases when it is deleted (default: nothing is destroyed). */
+export interface DeleteProjectOptions {
+  knowledge?: 'keep' | 'delete';
+  resources?: 'keep' | 'delete';
+}
+
+const keepOrDelete = (v: unknown, what: string): 'keep' | 'delete' => {
+  if (v === undefined || v === null || v === '') return 'keep';
+  if (v === 'keep' || v === 'delete') return v;
+  throw new BadRequestException(`${what} must be "keep" or "delete"`);
+};
 
 /**
  * Projects (docs/plan-projects-workspace.md §2): a row of settings + a folder with a known layout. The default
@@ -74,7 +93,24 @@ export class ProjectsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /** Resolved lazily (the resources and knowledge services are global providers; tests may run without them). */
+  private get resources(): ResourcesService | null {
+    try {
+      return this.moduleRef.get(ResourcesService, { strict: false }) ?? null;
+    } catch {
+      return null;
+    }
+  }
+  private get knowledge(): KnowledgeService | null {
+    try {
+      return this.moduleRef.get(KnowledgeService, { strict: false }) ?? null;
+    } catch {
+      return null;
+    }
+  }
 
   async onModuleInit(): Promise<void> {
     await this.ensureDefault().catch((e) => this.logger.error(`default project not ready: ${(e as Error).message}`));
@@ -223,21 +259,27 @@ export class ProjectsService implements OnModuleInit {
     return p;
   }
 
-  /** How many tasks the project has, and how many are active (queued / running / waiting on a gate). */
-  async counts(id: string): Promise<{ active: number; total: number }> {
-    const [total, active] = await Promise.all([
-      this.prisma.task.count({ where: { projectId: id } }),
-      this.prisma.task.count({ where: { projectId: id, status: { in: ACTIVE_STATUSES } } }),
+  /** How many tasks the project has, how many are active (queued / running / waiting on a gate), and its own resources / knowledge bases. */
+  async counts(row: Pick<ProjectRow, 'id' | 'slug' | 'isDefault'>): Promise<ProjectCounts> {
+    const [total, active, knowledge, resources] = await Promise.all([
+      this.prisma.task.count({ where: { projectId: row.id } }),
+      this.prisma.task.count({ where: { projectId: row.id, status: { in: ACTIVE_STATUSES } } }),
+      this.prisma.knowledgeBase.count({ where: { projectId: row.id } }).catch(() => 0),
+      this.resourceCount(row),
     ]);
-    return { active, total };
+    return { active, total, resources, knowledge };
+  }
+
+  private async resourceCount(row: Pick<ProjectRow, 'slug' | 'isDefault'>): Promise<number> {
+    return (await this.resources?.countOf(row).catch(() => 0)) ?? 0;
   }
 
   /** Wire shape (docs/plan-projects-workspace.md §2.8) — never a secret. */
   async serialize(row: ProjectRow): Promise<Project> {
-    return this.serializeWith(row, await this.counts(row.id));
+    return this.serializeWith(row, await this.counts(row));
   }
 
-  serializeWith(row: ProjectRow, counts: { active: number; total: number }): Project {
+  serializeWith(row: ProjectRow, counts: ProjectCounts): Project {
     return {
       id: row.id,
       slug: row.slug,
@@ -268,15 +310,30 @@ export class ProjectsService implements OnModuleInit {
   async serializeAll(rows: ProjectRow[]): Promise<Project[]> {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
-    const grouped = await this.prisma.task.groupBy({ by: ['projectId', 'status'], where: { projectId: { in: ids } }, _count: { _all: true } });
-    const counts = new Map<string, { active: number; total: number }>();
+    const [grouped, kbs] = await Promise.all([
+      this.prisma.task.groupBy({ by: ['projectId', 'status'], where: { projectId: { in: ids } }, _count: { _all: true } }),
+      this.prisma.knowledgeBase.groupBy({ by: ['projectId'], where: { projectId: { in: ids } }, _count: { _all: true } }).catch(() => []),
+    ]);
+    const counts = new Map<string, ProjectCounts>();
+    const of = (id: string) => counts.get(id) ?? { active: 0, total: 0, resources: 0, knowledge: 0 };
     for (const g of grouped) {
-      const c = counts.get(g.projectId) ?? { active: 0, total: 0 };
+      const c = of(g.projectId);
       c.total += g._count._all;
       if (ACTIVE_STATUSES.includes(g.status as TaskStatus)) c.active += g._count._all;
       counts.set(g.projectId, c);
     }
-    return rows.map((r) => this.serializeWith(r, counts.get(r.id) ?? { active: 0, total: 0 }));
+    for (const g of kbs) {
+      if (!g.projectId) continue;
+      const c = of(g.projectId);
+      c.knowledge = g._count._all;
+      counts.set(g.projectId, c);
+    }
+    for (const r of rows) {
+      const c = of(r.id);
+      c.resources = await this.resourceCount(r);
+      counts.set(r.id, c);
+    }
+    return rows.map((r) => this.serializeWith(r, of(r.id)));
   }
 
   // ---- writes ---------------------------------------------------------------------------------------------
@@ -352,19 +409,26 @@ export class ProjectsService implements OnModuleInit {
 
   /**
    * Delete a project row. Refused for the default project and while the project has active tasks; its finished
-   * tasks move to the default project (history is kept), its schedules let go of it (FK set-null). The folder on
-   * disk is NOT removed in this round (a later round moves it to a trash folder).
+   * tasks move to the default project (history is kept), its schedules let go of it (FK set-null). Its own library and
+   * knowledge bases: `keep` (the default) makes the bases global (FK set-null) and moves the library's items into the
+   * global library under `files/<slug>/`; `delete` removes them. The folder on disk is NOT removed in this round
+   * (a later round moves it to a trash folder).
    */
-  async remove(slug: string): Promise<{ id: string; slug: string; movedTasks: number }> {
+  async remove(slug: string, opts: DeleteProjectOptions = {}): Promise<{ id: string; slug: string; movedTasks: number; knowledge: { released: number; deleted: number }; resources: { moved: number; deleted: number } }> {
+    const knowledgeMode = keepOrDelete(opts.knowledge, 'knowledge');
+    const resourcesMode = keepOrDelete(opts.resources, 'resources');
     const cur = await this.get(slug);
     if (cur.isDefault) throw new BadRequestException('the default project cannot be deleted');
-    const { active } = await this.counts(cur.id);
+    const { active } = await this.counts(cur);
     if (active) throw new ConflictException(`project "${slug}" still has ${active} active task(s) — finish or cancel them first`);
+    // the library first (files move while the row still exists), then the bases, then the row (SET NULL frees what is left)
+    const resources = (await this.resources?.releaseProject(cur, resourcesMode)) ?? { moved: 0, deleted: 0 };
+    const knowledge = (await this.knowledge?.releaseProject(cur.id, knowledgeMode)) ?? { released: 0, deleted: 0 };
     const moved = await this.prisma.task.updateMany({ where: { projectId: cur.id }, data: { projectId: DEFAULT_PROJECT_ID } });
     await this.prisma.project.delete({ where: { id: cur.id } });
     dropProjectLabel(cur.id);
-    this.logger.log(`Deleted project "${slug}" (${moved.count} finished task(s) moved to the default project; folder kept: ${this.dirOf(cur)})`);
-    return { id: cur.id, slug: cur.slug, movedTasks: moved.count };
+    this.logger.log(`Deleted project "${slug}" (${moved.count} finished task(s) moved to the default project; knowledge: ${knowledgeMode}, resources: ${resourcesMode}; folder kept: ${this.dirOf(cur)})`);
+    return { id: cur.id, slug: cur.slug, movedTasks: moved.count, knowledge, resources };
   }
 
   // ---- validation -----------------------------------------------------------------------------------------

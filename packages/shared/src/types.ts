@@ -149,7 +149,8 @@ export interface Project {
   notifyChannelId: string | null;
   notifyChatId: string | null;
   archivedAt: string | null;
-  counts: { active: number; total: number };
+  /** Tasks (active / all) and the project's OWN resources and knowledge bases (global ones are not counted). */
+  counts: { active: number; total: number; resources: number; knowledge: number };
   createdAt: string;
   updatedAt: string;
 }

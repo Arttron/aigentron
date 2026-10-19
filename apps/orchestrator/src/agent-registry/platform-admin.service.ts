@@ -69,6 +69,8 @@ export interface ResourceProposal {
   tags?: string[];
   agents?: string[];
   text?: string;
+  /** Scope of a NEW note: a project's slug for that project's library; omitted / `global` = the global library. */
+  project?: string;
   reason: string;
 }
 
@@ -257,7 +259,7 @@ export class PlatformAdminService {
       return null;
     }
     if (toolName === PROPOSE_PACK_INSTALL_TOOL) {
-      const why = await this.checkPack(str(toolInput.name), str(toolInput.timezone));
+      const why = await this.checkPack(str(toolInput.name), str(toolInput.timezone), str(toolInput.project));
       return why ? `Refused: ${why}` : null;
     }
     if (toolName === PROPOSE_RESOURCE_TOOL) {
@@ -460,9 +462,10 @@ export class PlatformAdminService {
       .join('\n');
   }
 
-  private async checkPack(name: string, timezone: string): Promise<string | null> {
+  private async checkPack(name: string, timezone: string, project = ''): Promise<string | null> {
     const packs = await (await this.packsSvc()).list();
     if (!packs.some((p) => p.name === name)) return `no pack named "${name}". Available: ${packs.map((p) => p.name).join(', ') || 'none'} (see packs_list).`;
+    if (project && project !== 'global' && !(await this.prisma.project.findUnique({ where: { slug: project }, select: { id: true } }))) return `no project with slug "${project}" (omit project for the global library).`;
     if (timezone) {
       const { isValidTimezone } = await import('../schedules/schedule-core');
       if (!isValidTimezone(timezone)) return `unknown time zone "${timezone}" (use e.g. Europe/Kyiv, America/New_York, UTC).`;
@@ -470,20 +473,20 @@ export class PlatformAdminService {
     return null;
   }
 
-  async proposePackInstall(currentTaskId: string, sessionId: string, input: { name: string; timezone?: string; reason: string }): Promise<ProposalResult> {
-    const why = await this.checkPack(input.name, input.timezone ?? '');
+  async proposePackInstall(currentTaskId: string, sessionId: string, input: { name: string; timezone?: string; project?: string; reason: string }): Promise<ProposalResult> {
+    const why = await this.checkPack(input.name, input.timezone ?? '', input.project ?? '');
     if (why) return { ok: false, message: `Rejected: ${why}` };
     const denied = await this.proposals.requireApproval(
       currentTaskId,
       sessionId,
       PROPOSE_PACK_INSTALL_TOOL,
       { ...input },
-      (i) => i.name === input.name && (i.timezone ?? '') === (input.timezone ?? ''),
+      (i) => i.name === input.name && (i.timezone ?? '') === (input.timezone ?? '') && (i.project ?? '') === (input.project ?? ''),
     );
     if (denied) return denied;
     const svc = await this.packsSvc();
     const { describeReport } = await import('../packs/packs.service');
-    const report = await svc.install(input.name, { timezone: input.timezone, by: 'admin agent' });
+    const report = await svc.install(input.name, { timezone: input.timezone, by: 'admin agent', project: input.project });
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_pack_install', summary: `Installed pack "${input.name}": ${report.added.agents.length} agent(s), ${report.added.skills.length} skill(s), ${report.added.resources.length} note(s), ${report.added.schedules.length} schedule(s)` });
     return { ok: report.problems.length === 0, message: describeReport(report) };
   }
@@ -498,6 +501,7 @@ export class PlatformAdminService {
       if (bad) return bad;
       if (!p.text?.trim()) return 'give the note text.';
       if (p.text.length > 200_000) return 'the note is too long (max ~200 000 characters).';
+      if (p.project && p.project !== 'global' && !(await this.prisma.project.findUnique({ where: { slug: p.project }, select: { id: true } }))) return `no project with slug "${p.project}" (omit project for the global library).`;
       return null;
     }
     if (!p.id) return 'give the resource id (from resources_search).';
@@ -535,9 +539,9 @@ export class PlatformAdminService {
       return { ok: true, message: `Resource "${r.title}" deleted.` };
     }
     if (input.action === 'create') {
-      const r = await this.resources.createNote({ title: input.title, description: input.description, tags: cleanTags(input.tags), agents: input.agents, text: input.text ?? '', source: 'note' });
-      await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Added note "${r.title}"` });
-      return { ok: true, message: `Note "${r.title}" added to the resource library (id ${r.id}). Agents will see it in their resource list.` };
+      const r = await this.resources.createNote({ title: input.title, description: input.description, tags: cleanTags(input.tags), agents: input.agents, text: input.text ?? '', source: 'note', project: input.project });
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Added note "${r.title}"${r.project ? ` to project "${r.project}"` : ''}` });
+      return { ok: true, message: `Note "${r.title}" added to the ${r.project ? `library of project "${r.project}"` : 'global resource library'} (id ${r.id}). Agents will see it in their resource list.` };
     }
     const r = await this.resources.update(input.id!, { title: input.title, description: input.description, tags: input.tags ? cleanTags(input.tags) : undefined, agents: input.agents, text: input.text });
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Changed note "${r.title}"` });

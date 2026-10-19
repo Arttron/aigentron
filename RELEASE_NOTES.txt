@@ -1,23 +1,12 @@
-Aigentron v0.1.67
+Aigentron v0.1.68
 
-For people who are not programmers: PROJECTS. You can now work on several projects at the same time — each with its own repository, access, checks and working folder.
+For people who are not programmers: resources and knowledge bases can now belong to a single project.
 
-What a project is
-- A project has its own git repository (address, branch, optional sub-folder), its own way to sign in to it, its own checks (the commands run after a task), mode (shared checkout or a separate worktree per task), default agent and notification chat. Providers and tools (MCP) stay shared by all projects.
-- Your existing setup became the "Default" project automatically (same repository, branch, checks, token and agent as before) and all existing tasks belong to it. Nothing changes until you add a project.
-- Every project also gets its own memory, work and deliverables folders (the shared workspace idea, per project).
+Scopes
+- A resource (note, photo, document) or a knowledge base is either GLOBAL — seen by the agents of every project, exactly as before — or belongs to ONE project and is seen only by the agents working on that project. Everything you have now stays global.
+- On the Resources and Knowledge pages a bar "All · Global · <projects>" filters the list; new notes, uploads and bases are created in the selected scope, and an item can be moved between global and a project in its edit dialog. With a single project nothing changes on screen.
+- An agent of project A sees the global resources and A's own, never another project's; the knowledge tools list their scope (global / project). The resource library of a project lives in its own folder.
+- Project page: counts of its resources and bases with links to the filtered lists. Deleting a project asks what to do with its knowledge bases and resources: by default they become global (nothing is lost); you can also delete them with the project.
+- The admin can propose a resource or a pack for a given project.
 
-Repository access (Projects → a project → Repository)
-- Public, token, or SSH key. For SSH the server creates a key for the project and shows the public part with the steps to add it as a deploy key on GitHub / GitLab / Bitbucket; you can also import your own key. The first connection pins the host key for that project; a changed host key is reported as an error.
-- Secrets are stored in files in the secrets folder (secrets/projects/<project>/), not in the database; agents never receive them. The old token from Settings is moved to the Default project's file automatically at the first start.
-- "Test connection" checks address, network, sign-in, branch and (if you tick it) write access and tells you what is wrong in plain words — wrong token, key not added to the repository, host key changed, branch missing, repository not found, ssh client missing. "Sync now" clones or updates the project's copy.
-
-Working in parallel
-- Tasks of different projects run at the same time; tasks of one project in shared mode run one after another (so they never trip over each other's files). In worktree mode every task has its own copy. The agent works inside its project's folder and can write only there.
-- New page "📁 Projects" (with "+ New project"); when you have more than one project, the New task form has a project selector and the task list a project filter and badges.
-
-Known changes
-- A task's own `git push` over https no longer works from inside the agent (the token is no longer written into the repository's git config; the server pushes and opens pull requests itself).
-- The ssh client (openssh) is now installed with the Docker images and by the bare-metal installer.
-
-Update note: the database gets a migration (a project table; every existing task is assigned to the Default project); a snapshot is taken first.
+Update note: the database gets a small migration (a project link on knowledge bases; existing bases stay global); a snapshot is taken first.

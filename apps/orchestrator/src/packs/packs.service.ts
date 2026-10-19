@@ -128,8 +128,11 @@ export class PacksService {
     return this.moduleRef.get(SchedulesService, { strict: false });
   }
 
-  async install(name: string, opts: { timezone?: string; by?: string } = {}): Promise<InstallReport> {
+  /** `project`: a slug puts the pack's starter resources into THAT project's library; omitted = the global library (agents and skills are always global). */
+  async install(name: string, opts: { timezone?: string; by?: string; project?: string | null } = {}): Promise<InstallReport> {
     const m = await this.manifest(name);
+    const project = opts.project?.trim() && opts.project.trim() !== 'global' ? opts.project.trim() : null;
+    if (project) await this.resources.library(project); // an unknown project is a 404 before anything is installed
     const tz = opts.timezone && isValidTimezone(opts.timezone) ? opts.timezone : 'UTC';
     if (opts.timezone && tz === 'UTC' && opts.timezone !== 'UTC') throw new BadRequestException(`unknown time zone "${opts.timezone}".`);
     const report: InstallReport = { pack: name, added: { agents: [], skills: [], resources: [], schedules: [] }, skipped: [], problems: [], after: m.after };
@@ -181,7 +184,7 @@ export class PacksService {
     // starter resources
     for (const r of m.resources ?? []) {
       try {
-        const added = await this.resources.addFromPath(join(packDir, r.file), { title: r.title, description: r.description, tags: r.tags, agents: r.agents, source: `pack:${name}` });
+        const added = await this.resources.addFromPath(join(packDir, r.file), { title: r.title, description: r.description, tags: r.tags, agents: r.agents, source: `pack:${name}` }, project);
         if (added) report.added.resources.push(r.title);
         else report.skipped.push(`resource "${r.title}"`);
       } catch (e) {
@@ -203,7 +206,7 @@ export class PacksService {
         report.problems.push(`schedule "${s.name}": ${(e as Error).message}`);
       }
     }
-    this.logger.log(`Pack "${name}" installed: ${JSON.stringify({ added: report.added, skipped: report.skipped.length, problems: report.problems.length })}`);
+    this.logger.log(`Pack "${name}" installed${project ? ` (resources → project "${project}")` : ''}: ${JSON.stringify({ added: report.added, skipped: report.skipped.length, problems: report.problems.length })}`);
     return report;
   }
 }

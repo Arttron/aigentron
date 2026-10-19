@@ -186,7 +186,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // throws away the prompt cache of the whole conversation (see prompt-layers.ts).
     const projectMap = chat || docs ? '' : await buildProjectMap(workDir);
     const memory = workspaceOn ? await workspace.digest().catch(() => '') : '';
-    const instructions = await this.buildInstructions(agentDef, project.repoPath);
+    const instructions = await this.buildInstructions(agentDef, project);
     // Other registered agents become delegatable subagents (each on its own provider);
     // a chat agent talks to the user directly and delegates to no one. The map
     // depends on the LEAD's provider (an agent without a provider of its own runs
@@ -197,7 +197,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const prepare = async (leadProvider: string) => {
       const hit = prepared.get(leadProvider);
       if (hit) return hit;
-      const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation, project.repoPath);
+      const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation, project);
       if (Object.keys(agents).length) {
         this.logger.log(`Task ${task.id} subagents on ${leadProvider}: [${Object.keys(agents).join(', ')}]`);
       }
@@ -658,6 +658,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const generatedDir = codexImagesDir(this.config.agentDir, ctx.taskId);
     // A chat agent's "worktree" is the whole agent dir (it holds runs/*/codex-home with sign-in tokens): never an allowed root for it.
     const mediaRoots = opts.chat ? [generatedDir, opts.project.workspaceRoot] : [ctx.worktreePath, generatedDir, opts.project.workspaceRoot];
+    const kbScope = { projectId: opts.project.id };
     // What the agent may write to besides its task root: its project's folder (and, in shared mode, the checkout).
     const extraWriteRoots = ctx.discussion ? undefined : extraWriteRootsFor(opts.project, ctx.worktreePath);
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
@@ -668,11 +669,12 @@ export class RealAgentExecutor extends AgentExecutor {
       onCheckSubtasks: ctx.onCheckSubtasks,
       onCompleteSubtask: ctx.onCompleteSubtask,
       onScheduleCheck: ctx.onScheduleCheck,
+      // Knowledge bases and resources a task may use: the global ones and its project's — never another project's.
       kb: {
-        list: () => this.knowledge.listReport(agentDef?.name ?? null),
-        search: (input) => this.knowledge.searchReport(input, agentDef?.name ?? null),
-        read: (input) => this.knowledge.readReport(input, agentDef?.name ?? null),
-        ...(ctx.discussion ? {} : { add: (input: { kb: string; title: string; text: string; source?: string }) => this.knowledge.addReport(input, agentDef?.name ?? null) }),
+        list: () => this.knowledge.listReport(agentDef?.name ?? null, kbScope),
+        search: (input) => this.knowledge.searchReport(input, agentDef?.name ?? null, kbScope),
+        read: (input) => this.knowledge.readReport(input, agentDef?.name ?? null, kbScope),
+        ...(ctx.discussion ? {} : { add: (input: { kb: string; title: string; text: string; source?: string }) => this.knowledge.addReport(input, agentDef?.name ?? null, kbScope) }),
       },
       workspace: {
         info: () => workspace.info(),
@@ -745,7 +747,7 @@ export class RealAgentExecutor extends AgentExecutor {
           deadline.resume();
         }
       },
-      onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name),
+      onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name, opts.project.slug),
       onLookAt: (input) => this.media.lookAt(input.path, input.question, mediaRoots, input, { provider: provider.name, model }, ctx.taskId),
       onVideoDigest: (input) => this.media.videoDigest(input.path, mediaRoots, input, ctx.taskId),
       onStartPreview: ctx.discussion ? undefined : () => this.preview.getOrStart(ctx.taskId, opts.workDir),
@@ -1199,7 +1201,7 @@ export class RealAgentExecutor extends AgentExecutor {
     leadName: string | null,
     leadProvider: string,
     orientation: string,
-    repoPath: string,
+    project: Pick<ProjectContext, 'id' | 'slug' | 'repoPath'>,
   ): Promise<{ map: Record<string, SubagentDefinition>; roster: string }> {
     const map: Record<string, SubagentDefinition> = {};
     const others: { name: string; description: string; how: string }[] = [];
@@ -1229,7 +1231,7 @@ export class RealAgentExecutor extends AgentExecutor {
       // so a delegated agent knows its working directory is the project.
       map[s.name] = {
         description: def.description || s.name,
-        prompt: `${orientation}\n\n${await this.buildInstructions(def, repoPath)}`,
+        prompt: `${orientation}\n\n${await this.buildInstructions(def, project)}`,
         model,
         ...(def.allowedTools?.length ? { tools: def.allowedTools } : {}),
       };
@@ -1283,9 +1285,11 @@ export class RealAgentExecutor extends AgentExecutor {
    *   3. the chosen agent's body
    *   4. the global "Agent instructions" from Settings — appended for EVERY agent (E-21)
    *   5. skill files from <agentDir>/skills (all, or the subset the agent declares)
+   *   6. the resource index (the task's project library first, then the global one) and the knowledge bases it may search
    */
-  private async buildInstructions(agent: AgentDef | null, repoPath: string): Promise<string> {
+  private async buildInstructions(agent: AgentDef | null, project: Pick<ProjectContext, 'id' | 'slug' | 'repoPath'>): Promise<string> {
     const parts: string[] = [];
+    const repoPath = project.repoPath;
 
     // SOUL is always on, regardless of which agent/role runs.
     const globalSoul = (await this.readCached(join(this.config.agentDir, 'SOUL.md')))?.trim() || null;
@@ -1368,13 +1372,13 @@ export class RealAgentExecutor extends AgentExecutor {
     } catch {
       // no skills directory — base instructions only
     }
-    // The project's shared resource library (an agent that cannot read files — the tools-only admin — gets the tool instead).
+    // The resource libraries — the task's project library first, then the global one (an agent that cannot read files — the tools-only admin — gets the tool instead).
     if (agent?.mode !== 'chat' && !(agent?.disallowedTools ?? []).some((t) => /^read$/i.test(t))) {
-      const block = await this.resources.promptIndex(agent?.name);
+      const block = await this.resources.promptIndex(agent?.name, project.slug);
       if (block) parts.push(block);
     }
-    // Knowledge bases: one line per base this agent may search (the content stays out of the prompt).
-    const kbBlock = await this.knowledge.promptBlock(agent?.name ?? null).catch(() => '');
+    // Knowledge bases: one line per base this agent may search here — global ones and the project's (the content stays out of the prompt).
+    const kbBlock = await this.knowledge.promptBlock(agent?.name ?? null, { projectId: project.id }).catch(() => '');
     if (kbBlock) parts.push(kbBlock.trim());
     return parts.join('\n\n');
   }

@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ProjectsService } from './projects.service';
+import { ProjectsService, type DeleteProjectOptions } from './projects.service';
 import { CreateProjectDto, UpdateProjectDto } from './dto/project.dto';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
@@ -53,11 +53,16 @@ export class ProjectsController {
     return this.projects.serialize(await this.projects.archive(slug));
   }
 
+  /**
+   * `{knowledge: 'keep'|'delete', resources: 'keep'|'delete'}` in the body or the query (default keep: the project's knowledge
+   * bases become global, its library moves into the global one under a folder named after the project). 409 while tasks are active.
+   */
   @Delete(':slug')
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
-  async remove(@Param('slug') slug: string) {
-    const r = await this.projects.remove(slug);
+  async remove(@Param('slug') slug: string, @Body() body?: DeleteProjectOptions, @Query('knowledge') knowledge?: string, @Query('resources') resources?: string) {
+    const opts: DeleteProjectOptions = { knowledge: (body?.knowledge ?? knowledge) as DeleteProjectOptions['knowledge'], resources: (body?.resources ?? resources) as DeleteProjectOptions['resources'] };
+    const r = await this.projects.remove(slug, opts);
     return { ...r, deleted: true };
   }
 }

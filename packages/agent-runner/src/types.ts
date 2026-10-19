@@ -242,8 +242,8 @@ export interface AdminToolsWiring {
   proposeCloudflareAccess: (input: { enabled: boolean; teamDomain: string; aud?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Content packs: read-only overview, and install one — human-approved (never overwrites; schedules arrive switched off). */
   packsList: () => Promise<string>;
-  proposePackInstall: (input: { name: string; timezone?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
-  /** Text notes in the project's resource library: create/update/delete — human-approved. (Reading/searching: the general resources_search tool.) */
+  proposePackInstall: (input: { name: string; timezone?: string; project?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
+  /** Text notes in a resource library (global, or a project's with `project`): create/update/delete — human-approved. (Reading/searching: the general resources_search tool.) */
   proposeResource: (input: {
     action: 'create' | 'update' | 'delete';
     id?: string;
@@ -252,6 +252,7 @@ export interface AdminToolsWiring {
     tags?: string[];
     agents?: string[];
     text?: string;
+    project?: string;
     reason: string;
   }) => Promise<{ ok: boolean; message: string }>;
   /** Chat channels: read-only overview (connectivity, allowed chats, chats waiting for approval) and create/change/delete — human-approved. */

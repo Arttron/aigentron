@@ -9,6 +9,16 @@ This page is about one part of it: **the repository and how the server is allowe
 it: access is set up per project; the preferred way is SSH with a deploy key; tokens and keys live in **files in the secrets
 directory**, not in the database; and the person can **test** the access before any task runs.
 
+## What belongs to a project
+
+Providers and MCP servers are global. **Resources and knowledge bases** are either global (visible to the tasks of every project — what
+everything made before projects is) or belong to one project (visible only to its tasks): the project's own resource library is
+`<project dir>/library/` (`docs/resources.md`), its bases carry `KnowledgeBase.projectId` (`docs/knowledge-base.md`). `GET /api/projects`
+and `GET /api/projects/:slug` count them in `counts.resources` / `counts.knowledge` (own items only, next to `active` / `total` tasks).
+`DELETE /api/projects/:slug` takes `{ knowledge: 'keep' | 'delete', resources: 'keep' | 'delete' }` (body or query; default keep: the
+bases become global, the library's items move into the global library under a folder named after the project); it is still a 409 while
+the project has active tasks, and the project's finished tasks move to the default project.
+
 ## Repository settings (per project)
 
 `GET /api/projects/:slug/repo` (any signed-in role):

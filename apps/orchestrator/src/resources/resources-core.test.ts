@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { titleFromName, appliesTo, cleanTags, kindFor, mimeFor, promptBlock, safeFileName, search, searchReport, validateMeta, type ResourceEntry } from './resources-core';
+import { titleFromName, appliesTo, byScopeThenNewest, cleanTags, kindFor, mimeFor, promptBlock, safeFileName, search, searchReport, validateMeta, type ResourceEntry } from './resources-core';
 
 const r = (over: Partial<ResourceEntry> = {}): ResourceEntry => ({
   id: 'r1',
@@ -13,6 +13,7 @@ const r = (over: Partial<ResourceEntry> = {}): ResourceEntry => ({
   size: 100,
   agents: [],
   source: 'note',
+  project: null,
   createdAt: '2026-10-01T00:00:00.000Z',
   updatedAt: '2026-10-01T00:00:00.000Z',
   ...over,
@@ -81,6 +82,11 @@ describe('scope and search', () => {
     expect(search(list, undefined, 'bathroom').map((x) => x.id)).toEqual(['r3']);
     expect(search(list)).toHaveLength(3);
   });
+  it('on an equal score the project\'s own items come before global ones, newest first within each', () => {
+    const mixed = [r({ id: 'g-new', updatedAt: '2026-10-09T00:00:00.000Z' }), r({ id: 'p-old', project: 'alpha', updatedAt: '2026-10-02T00:00:00.000Z' }), r({ id: 'p-new', project: 'alpha', updatedAt: '2026-10-05T00:00:00.000Z' }), r({ id: 'g-old' })];
+    expect([...mixed].sort(byScopeThenNewest).map((x) => x.id)).toEqual(['p-new', 'p-old', 'g-new', 'g-old']);
+    expect(search(mixed, 'kitchen').map((x) => x.id)).toEqual(['p-new', 'p-old', 'g-new', 'g-old']);
+  });
 });
 
 describe('promptBlock', () => {
@@ -101,11 +107,26 @@ describe('promptBlock', () => {
     expect(t).toContain('+5 more');
     expect(t).toContain('resources_search');
   });
+  it('project items are listed first and marked, the cap is shared with the global ones', () => {
+    const list = [r({ id: 'g', title: 'Global', updatedAt: '2026-10-09T00:00:00.000Z' }), r({ id: 'p', title: 'Mine', project: 'alpha', file: 'mine.md' })];
+    const t = promptBlock(list, path, 'a');
+    const lines = t.split('\n').filter((l) => l.startsWith('- '));
+    expect(lines[0]).toContain('Mine');
+    expect(lines[0]).toContain('(text, project)');
+    expect(lines[1]).toContain('Global');
+    expect(lines[1]).toContain('(text)');
+    const many = [...Array.from({ length: 20 }, (_, i) => r({ id: `g${i}`, updatedAt: '2026-10-09T00:00:00.000Z' })), ...Array.from({ length: 10 }, (_, i) => r({ id: `p${i}`, project: 'alpha' }))];
+    const capped = promptBlock(many, path, 'a', 25).split('\n').filter((l) => l.startsWith('- '));
+    expect(capped).toHaveLength(25);
+    expect(capped.filter((l) => l.includes(', project)'))).toHaveLength(10);
+  });
 });
 
 describe('searchReport', () => {
   it('says so when nothing matches, and lists paths otherwise', () => {
     expect(searchReport([], () => '')).toBe('No matching resources.');
+    expect(searchReport([r()], (x) => `/p/${x.file}`)).toContain('| text | global |');
     expect(searchReport([r()], (x) => `/p/${x.file}`)).toContain('/p/kitchen.md');
+    expect(searchReport([r({ project: 'alpha' })], (x) => `/p/${x.file}`)).toContain('| text | alpha |');
   });
 });

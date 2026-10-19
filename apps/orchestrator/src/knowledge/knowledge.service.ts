@@ -24,6 +24,8 @@ export interface KbInfo {
   id: string;
   name: string;
   description: string;
+  /** The slug of the project the base belongs to; null = global (visible to the tasks of every project). */
+  project: string | null;
   agents: string[];
   chunking: ChunkingConfig;
   embedProvider: string | null;
@@ -98,6 +100,33 @@ const EMBED_BATCH = 32;
 /** A failed import stays visible on the Knowledge page this long, then disappears by itself. */
 const JOB_ERROR_TTL_MS = 6 * 3_600_000;
 
+/** The scope a TASK searches in: the global bases plus those of its project. Absent = no restriction (the dashboard). */
+export interface KbScope {
+  projectId: string;
+}
+
+/** `?project=` of the list: `all`, `global`, or a project's slug. */
+export type KbListScope = 'all' | 'global' | string;
+
+/** The columns of a KnowledgeBase row the service reads, with the project relation when it was included. */
+interface KbRow {
+  id: string;
+  name: string;
+  description: string;
+  agents: unknown;
+  chunking: unknown;
+  embedProvider: string | null;
+  embedModel: string | null;
+  embedDim: number | null;
+  agentWrite: boolean;
+  projectId?: string | null;
+  createdAt: Date;
+  project?: { slug: string; name: string } | null;
+}
+
+/** Every query that returns a base brings its project's slug and name along (for `project` in the API and the scope in kb_list). */
+const KB_INCLUDE = { project: { select: { slug: true, name: true } } } as const;
+
 interface Row {
   chunkId: string;
   docId: string;
@@ -151,7 +180,7 @@ export class KnowledgeService {
 
   // ------------------------------------------------------------- bases
 
-  private async toInfo(row: Awaited<ReturnType<PrismaService['knowledgeBase']['findFirstOrThrow']>>): Promise<KbInfo> {
+  private async toInfo(row: KbRow): Promise<KbInfo> {
     const [docs, chunks, embedded] = await Promise.all([
       this.prisma.knowledgeDoc.count({ where: { kbId: row.id } }),
       this.prisma.knowledgeChunk.count({ where: { kbId: row.id } }),
@@ -161,6 +190,7 @@ export class KnowledgeService {
       id: row.id,
       name: row.name,
       description: row.description,
+      project: row.project?.slug ?? null,
       agents: Array.isArray(row.agents) ? (row.agents as unknown[]).map(String) : [],
       chunking: cleanChunking(row.chunking as Partial<ChunkingConfig>),
       embedProvider: row.embedProvider,
@@ -174,13 +204,24 @@ export class KnowledgeService {
     };
   }
 
-  async list(): Promise<KbInfo[]> {
-    const rows = await this.prisma.knowledgeBase.findMany({ orderBy: { name: 'asc' } });
+  /** All bases (`all`, the default), the global ones only, or one project's (by slug). */
+  async list(scope: KbListScope = 'all'): Promise<KbInfo[]> {
+    const where = scope === 'all' ? {} : scope === 'global' ? { projectId: null } : { projectId: await this.projectId(scope) };
+    const rows = await this.prisma.knowledgeBase.findMany({ where, orderBy: { name: 'asc' }, include: KB_INCLUDE });
     return Promise.all(rows.map((r) => this.toInfo(r)));
   }
 
+  /** The id behind a project slug (`global` / empty = null); an unknown slug is a 404. */
+  private async projectId(project: string | null | undefined): Promise<string | null> {
+    const slug = (project ?? '').trim();
+    if (!slug || slug === 'global') return null;
+    const row = await this.prisma.project.findUnique({ where: { slug }, select: { id: true } });
+    if (!row) throw new NotFoundException(`Project "${slug}" not found`);
+    return row.id;
+  }
+
   private async row(name: string) {
-    const r = await this.prisma.knowledgeBase.findFirst({ where: { OR: [{ name }, { id: name }] } });
+    const r = await this.prisma.knowledgeBase.findFirst({ where: { OR: [{ name }, { id: name }] }, include: KB_INCLUDE });
     if (!r) throw new NotFoundException(`No knowledge base named "${name}".`);
     return r;
   }
@@ -189,10 +230,12 @@ export class KnowledgeService {
     return this.toInfo(await this.row(name));
   }
 
-  async create(input: { name?: string; description?: string; agents?: unknown; chunking?: Partial<ChunkingConfig>; agentWrite?: boolean; embedProvider?: string; embedModel?: string }): Promise<KbInfo> {
+  /** `project`: a slug scopes the base to that project (its tasks only); omitted / `global` = a global base. Names are unique across all. */
+  async create(input: { name?: string; description?: string; agents?: unknown; chunking?: Partial<ChunkingConfig>; agentWrite?: boolean; embedProvider?: string; embedModel?: string; project?: string | null }): Promise<KbInfo> {
     const name = String(input.name ?? '').trim();
     if (!NAME_RE.test(name)) throw new BadRequestException('The name: letters (any language), digits, "-", "_" or a space (up to 40), e.g. building-codes or строительные нормы.');
     if (await this.prisma.knowledgeBase.findUnique({ where: { name } })) throw new ConflictException(`A knowledge base named "${name}" already exists.`);
+    const projectId = await this.projectId(input.project);
     const embed = await this.checkEmbedding(input.embedProvider, input.embedModel);
     const row = await this.prisma.knowledgeBase.create({
       data: {
@@ -201,15 +244,19 @@ export class KnowledgeService {
         agents: this.cleanAgents(input.agents),
         chunking: cleanChunking(input.chunking) as never,
         agentWrite: Boolean(input.agentWrite),
+        projectId,
         ...embed,
       },
+      include: KB_INCLUDE,
     });
     return this.toInfo(row);
   }
 
-  async update(name: string, input: { description?: string; agents?: unknown; chunking?: Partial<ChunkingConfig>; agentWrite?: boolean; embedProvider?: string | null; embedModel?: string | null }): Promise<KbInfo> {
+  /** `project: <slug> | null` moves the base to that project / makes it global (the documents stay as they are). */
+  async update(name: string, input: { description?: string; agents?: unknown; chunking?: Partial<ChunkingConfig>; agentWrite?: boolean; embedProvider?: string | null; embedModel?: string | null; project?: string | null }): Promise<KbInfo> {
     const cur = await this.row(name);
     const data: Record<string, unknown> = {};
+    if (input.project !== undefined) data.projectId = await this.projectId(input.project);
     if (input.description !== undefined) data.description = String(input.description).trim().slice(0, 500);
     if (input.agents !== undefined) data.agents = this.cleanAgents(input.agents);
     if (input.chunking !== undefined) data.chunking = cleanChunking(input.chunking);
@@ -229,10 +276,23 @@ export class KnowledgeService {
         reembed = Boolean(embed.embedProvider);
       }
     }
-    const row = await this.prisma.knowledgeBase.update({ where: { id: cur.id }, data });
+    const row = await this.prisma.knowledgeBase.update({ where: { id: cur.id }, data, include: KB_INCLUDE });
     this.invalidate(cur.id);
     if (reembed) void this.embedMissing(cur.id).catch((e) => this.logger.warn(`embedding "${cur.name}" failed: ${(e as Error).message}`));
     return this.toInfo(row);
+  }
+
+  /** The bases of a project that is being deleted: `delete` removes them (documents cascade); `keep` leaves them to the database's SET NULL — they become global. */
+  async releaseProject(projectId: string, mode: 'keep' | 'delete'): Promise<{ released: number; deleted: number }> {
+    const rows = await this.prisma.knowledgeBase.findMany({ where: { projectId }, select: { id: true, name: true } });
+    if (mode === 'delete') {
+      for (const r of rows) {
+        await this.prisma.knowledgeBase.delete({ where: { id: r.id } });
+        this.invalidate(r.id);
+      }
+      return { released: 0, deleted: rows.length };
+    }
+    return { released: rows.length, deleted: 0 };
   }
 
   async remove(name: string): Promise<void> {
@@ -421,7 +481,7 @@ export class KnowledgeService {
   async importResource(kbName: string, resourceId: string): Promise<KbAccepted> {
     const r = await this.resources.get(resourceId);
     return this.startDocument(kbName, { title: r.title, kind: 'resource', source: `resource:${r.id}`, size: r.size }, async () => {
-      const data = await readFile(this.resources.pathOf(r)).catch(() => null);
+      const data = await readFile(await this.resources.pathOf(r)).catch(() => null);
       if (!data) throw new NotFoundException('The resource file is missing.');
       try {
         return { text: r.kind === 'text' ? data.toString('utf8') : await extractDocument(r.originalName, data) };
@@ -542,13 +602,16 @@ export class KnowledgeService {
     return { rows, bm25, vectors };
   }
 
-  /** Search one or all visible bases. `agent`: undefined = no restriction (the dashboard); null / a name = that agent's view only. */
-  async search(query: string, opts: { kb?: string; agent?: string | null; limit?: number } = {}): Promise<{ hits: KbHit[]; note?: string }> {
+  /**
+   * Search one or all visible bases. `agent`: undefined = no restriction (the dashboard); null / a name = that agent's view only.
+   * `scope`: the task's project — only the global bases and that project's are searched.
+   */
+  async search(query: string, opts: { kb?: string; agent?: string | null; limit?: number; scope?: KbScope } = {}): Promise<{ hits: KbHit[]; note?: string }> {
     const q = String(query ?? '').trim();
     if (!q) throw new BadRequestException('Give a search query.');
     const asked = Number(opts.limit);
     const limit = Math.min(Math.max(Number.isFinite(asked) ? Math.round(asked) : 6, 1), 20);
-    const bases = await this.visible(opts.agent, opts.kb);
+    const bases = await this.visible(opts.agent, opts.kb, opts.scope);
     const picked: { kb: string; row: Row; score: number; chunkId: string }[] = [];
     let note: string | undefined;
     const queryVectors = new Map<string, Float32Array | null>(); // one embedding call per provider+model, not per base
@@ -588,33 +651,31 @@ export class KnowledgeService {
 
   /**
    * The bases an agent may use. `agent` undefined = no restriction (the dashboard's own search); null / empty = an agent we could not identify —
-   * only bases open to everyone; a name = bases open to everyone plus those that list it.
+   * only bases open to everyone; a name = bases open to everyone plus those that list it. `scope` (a task's project) keeps the global
+   * bases and that project's — never another project's (visibleBases, tested as a table in knowledge-scope.test.ts).
    */
-  private async visible(agent?: string | null, only?: string) {
-    const rows = await this.prisma.knowledgeBase.findMany({ orderBy: { name: 'asc' } });
-    return rows.filter((r) => {
-      const agents = Array.isArray(r.agents) ? (r.agents as unknown[]).map(String) : [];
-      if (only && r.name !== only && r.id !== only) return false;
-      if (agent === undefined) return true;
-      return agents.length === 0 || (typeof agent === 'string' && agent !== '' && agents.includes(agent));
-    });
+  private async visible(agent?: string | null, only?: string, scope?: KbScope) {
+    const rows = await this.prisma.knowledgeBase.findMany({ orderBy: { name: 'asc' }, include: KB_INCLUDE });
+    return visibleBases(rows, { agent, only, scope });
   }
 
   // -------------------------------------------------------- agent tools
 
-  /** `kb_list` — what the agent can search. */
-  async listReport(agent: string | null = null): Promise<string> {
-    const rows = await this.visible(agent);
+  /** `kb_list` — what the agent can search, with the scope of each base (global, or the project it belongs to). */
+  async listReport(agent: string | null = null, scope?: KbScope): Promise<string> {
+    const rows = await this.visible(agent, undefined, scope);
     if (!rows.length) return 'There are no knowledge bases for you.';
     const infos = await Promise.all(rows.map((r) => this.toInfo(r)));
-    return infos
-      .map((k) => `- ${k.name} — ${k.description || 'no description'} (${k.docs} documents, ${k.chunks} passages${k.embedProvider ? ', semantic search on' : ''}${k.agentWrite ? ', you may add notes with kb_add' : ''})`)
-      .join('\n');
+    const scopeOf = (i: number) => (rows[i]!.project ? `project "${rows[i]!.project!.name}"` : 'global');
+    return [
+      'name | scope | description | size',
+      ...infos.map((k, i) => `${k.name} | ${scopeOf(i)} | ${k.description || 'no description'} | ${k.docs} documents, ${k.chunks} passages${k.embedProvider ? ', semantic search on' : ''}${k.agentWrite ? ', you may add notes with kb_add' : ''}`),
+    ].join('\n');
   }
 
   /** `kb_search` — ranked passages with where to read more. */
-  async searchReport(input: { query?: string; kb?: string; limit?: number }, agent: string | null = null): Promise<string> {
-    const { hits, note } = await this.search(String(input.query ?? ''), { kb: input.kb, agent, limit: input.limit });
+  async searchReport(input: { query?: string; kb?: string; limit?: number }, agent: string | null = null, scope?: KbScope): Promise<string> {
+    const { hits, note } = await this.search(String(input.query ?? ''), { kb: input.kb, agent, limit: input.limit, scope });
     if (!hits.length) return `Nothing found for "${input.query}" in your knowledge bases${note ? `. ${note}` : ''}. Try other words, or kb_list to see what exists.`;
     const lines = hits.map((h, i) => {
       const where = [h.docTitle, h.heading].filter(Boolean).join(' — ');
@@ -625,10 +686,10 @@ export class KnowledgeService {
   }
 
   /** `kb_read` — a whole passage, or the outline of a document. */
-  async readReport(input: { doc?: string; chunk?: number }, agent: string | null = null): Promise<string> {
+  async readReport(input: { doc?: string; chunk?: number }, agent: string | null = null, scope?: KbScope): Promise<string> {
     const d = await this.prisma.knowledgeDoc.findUnique({ where: { id: String(input.doc ?? '') }, include: { kb: true } });
     if (!d) return 'No such document. Use kb_search to find ids.';
-    const allowed = (await this.visible(agent)).some((k) => k.id === d.kbId);
+    const allowed = (await this.visible(agent, undefined, scope)).some((k) => k.id === d.kbId);
     if (!allowed) return 'No such document. Use kb_search to find ids.';
     const chunks = await this.prisma.knowledgeChunk.findMany({ where: { docId: d.id }, orderBy: { idx: 'asc' }, select: { idx: true, heading: true, text: true } });
     const head = `${d.title}${d.source ? ` (source: ${d.source})` : ''} — ${chunks.length} passage(s)`;
@@ -643,8 +704,8 @@ export class KnowledgeService {
   }
 
   /** `kb_add` — an agent adds a note, only to a base that allows it. */
-  async addReport(input: { kb?: string; title?: string; text?: string; source?: string }, agent: string | null = null): Promise<string> {
-    const bases = await this.visible(agent, String(input.kb ?? ''));
+  async addReport(input: { kb?: string; title?: string; text?: string; source?: string }, agent: string | null = null, scope?: KbScope): Promise<string> {
+    const bases = await this.visible(agent, String(input.kb ?? ''), scope);
     const kb = bases[0];
     if (!kb) return `There is no knowledge base "${input.kb}" for you. Use kb_list.`;
     if (!kb.agentWrite) return `The base "${kb.name}" is read-only for agents (a person can switch on "agents may add notes" in the dashboard).`;
@@ -653,12 +714,28 @@ export class KnowledgeService {
   }
 
   /** The line block for an agent's system prompt ('' = no bases for it). */
-  async promptBlock(agent: string | null = null): Promise<string> {
-    const rows = await this.visible(agent);
+  async promptBlock(agent: string | null = null, scope?: KbScope): Promise<string> {
+    const rows = await this.visible(agent, undefined, scope);
     if (!rows.length) return '';
     const infos = await Promise.all(rows.map((r) => this.toInfo(r)));
-    const lines = infos.filter((k) => k.chunks > 0).map((k) => `- ${k.name}: ${k.description || 'no description'} (${k.docs} documents)`);
+    const lines = infos.filter((k) => k.chunks > 0).map((k) => `- ${k.name}${k.project ? ` (project ${k.project})` : ''}: ${k.description || 'no description'} (${k.docs} documents)`);
     if (!lines.length) return '';
     return `\n\n## Knowledge bases\nSearch these with kb_search {query} (and read more with kb_read); they hold reference material that is too big for the prompt. Prefer them over guessing, and cite the source.\n${lines.join('\n')}`;
   }
+}
+
+/**
+ * The visibility rule, pure (tested as a table): a base is visible when
+ *  - it is global (no project) or belongs to the scope's project — a task never sees another project's base; no scope = every base;
+ *  - and its `agents` list is empty, or the caller is undefined (the dashboard), or the agent's name is listed;
+ *  - and, with `only`, it is the one named (by name or id).
+ */
+export function visibleBases<T extends { id: string; name: string; agents: unknown; projectId?: string | null }>(rows: T[], f: { agent?: string | null; only?: string; scope?: KbScope }): T[] {
+  return rows.filter((r) => {
+    if (f.only && r.name !== f.only && r.id !== f.only) return false;
+    if (f.scope && (r.projectId ?? null) !== null && r.projectId !== f.scope.projectId) return false;
+    if (f.agent === undefined) return true;
+    const agents = Array.isArray(r.agents) ? (r.agents as unknown[]).map(String) : [];
+    return agents.length === 0 || (typeof f.agent === 'string' && f.agent !== '' && agents.includes(f.agent));
+  });
 }

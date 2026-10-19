@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { Roles } from '../identity/roles.decorator';
 import { RolesGuard } from '../identity/roles.guard';
@@ -10,14 +10,18 @@ const MAX_UPLOAD = 20 * 1024 * 1024;
 
 const readBody = (req: Request): Promise<Buffer> => readBodyLimited(req, MAX_UPLOAD, (limit) => new BadRequestException(`The file is too large (limit ${limit / 1048576} MB).`));
 
-/** Knowledge bases: manage them, add documents, try a search. (Agents use them through the kb_* tools.) */
+/**
+ * Knowledge bases: manage them, add documents, try a search. (Agents use them through the kb_* tools.) A base is global
+ * (`project: null`) or belongs to one project (`project: <slug>`): `POST` takes `project`, `PATCH` moves with `project: <slug> | null`.
+ */
 @Controller('knowledge')
 export class KnowledgeController {
   constructor(private readonly kb: KnowledgeService) {}
 
+  /** `?project=all|global|<slug>` (default all); every base carries `project: <slug> | null`. */
   @Get()
-  list() {
-    return this.kb.list();
+  list(@Query('project') project?: string) {
+    return this.kb.list(project?.trim() || 'all');
   }
 
   /** Dry run of the chunking settings on a sample text. */

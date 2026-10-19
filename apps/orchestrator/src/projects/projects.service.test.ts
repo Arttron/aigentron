@@ -46,15 +46,36 @@ function fakePrisma(projects: Row[], tasks: TaskRow[], settings: Record<string, 
         return [...out].map(([k, c]) => ({ projectId: k.split('|')[0], status: k.split('|')[1], _count: { _all: c } }));
       },
     },
+    knowledgeBase: {
+      count: async ({ where }: { where: { projectId: string } }) => kbs.filter((k) => k.projectId === where.projectId).length,
+      groupBy: async ({ where }: { where: { projectId: { in: string[] } } }) => {
+        const out = new Map<string, number>();
+        for (const k of kbs.filter((k) => k.projectId && where.projectId.in.includes(k.projectId))) out.set(k.projectId!, (out.get(k.projectId!) ?? 0) + 1);
+        return [...out].map(([projectId, c]) => ({ projectId, _count: { _all: c } }));
+      },
+    },
     appSettings: { findUnique: async () => settings },
     _match: matchWhere,
   };
   return prisma;
 }
+type KbRow = { id: string; projectId: string | null };
+let kbs: KbRow[] = [];
+/** What the lazily resolved ResourcesService / KnowledgeService get asked for (recorded, answered with fixed numbers). */
+const calls: string[] = [];
+const fakeModuleRef = {
+  get: (cls: { name: string }) => {
+    if (cls.name === 'ResourcesService') return { countOf: async (p: { slug: string }) => (p.slug === 'shop' ? 2 : 0), releaseProject: async (p: { slug: string }, mode: string) => (calls.push(`resources:${p.slug}:${mode}`), { moved: mode === 'keep' ? 2 : 0, deleted: mode === 'keep' ? 0 : 2 }) };
+    if (cls.name === 'KnowledgeService') return { releaseProject: async (id: string, mode: string) => (calls.push(`knowledge:${id}:${mode}`), { released: mode === 'keep' ? 1 : 0, deleted: mode === 'keep' ? 0 : 1 }) };
+    return null;
+  },
+};
 
 let dir: string;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'lds-projects-'));
+  kbs = [];
+  calls.length = 0;
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -63,7 +84,7 @@ function make(opts: { projects?: Row[]; tasks?: TaskRow[]; settings?: Record<str
   const tasks = opts.tasks ?? [];
   const prisma = fakePrisma(projects, tasks, opts.settings ?? null);
   const config = { workspaceRepoPath: join(dir, 'repo'), workspaceDir: join(dir, 'workspace'), projectsDir: join(dir, 'projects'), secretsDir: join(dir, 'secrets'), agentDir: join(dir, 'agent'), workspaceShared: opts.shared ?? true };
-  const svc = new ProjectsService(prisma as never, config as never);
+  const svc = new ProjectsService(prisma as never, config as never, fakeModuleRef as never);
   return { svc, projects, tasks, config };
 }
 
@@ -95,7 +116,7 @@ describe('ensureDefault', () => {
       id: DEFAULT_PROJECT_ID, slug: 'default', name: 'Default', kind: 'code', isDefault: true,
       repo: { url: null, branch: 'main', subdir: null, auth: 'none', path: config.workspaceRepoPath },
       isolation: null, effectiveIsolation: 'shared', verifyCommands: null, verifyMaxAttempts: 2, defaultAgent: null, notifyChannelId: null, notifyChatId: null,
-      archivedAt: null, counts: { active: 0, total: 0 }, createdAt: expect.any(String), updatedAt: expect.any(String),
+      archivedAt: null, counts: { active: 0, total: 0, resources: 0, knowledge: 0 }, createdAt: expect.any(String), updatedAt: expect.any(String),
     });
     expect(Object.keys(json)).not.toContain('githubToken');
   });
@@ -109,7 +130,7 @@ describe('create', () => {
     const b = await svc.create({ name: 'кухня 2', kind: 'docs' });
     expect(b.slug).toBe('kukhnya-2-2');
     const base = join(config.projectsDir, 'kukhnya-2');
-    for (const f of ['memory', 'work', 'deliverables']) expect(existsSync(join(base, f))).toBe(true);
+    for (const f of ['memory', 'work', 'deliverables', 'library']) expect(existsSync(join(base, f))).toBe(true);
     expect(readFileSync(join(base, 'PROJECT.md'), 'utf8')).toContain('# Кухня 2');
     expect(existsSync(join(base, 'memory', 'decisions.md'))).toBe(true);
     expect(svc.repoPathOf(a)).toBe(join(base, 'repo'));
@@ -171,28 +192,46 @@ describe('update / archive / remove', () => {
     expect((await svc.forNewTask('old')).slug).toBe('old');
     expect((await svc.forNewTask(undefined)).slug).toBe('default');
   });
-  it('remove: refused for the default and while tasks are active; finished tasks move to the default project', async () => {
+  it('remove: refused for the default and while tasks are active; finished tasks move to the default project; the library and bases are kept by default', async () => {
     const tasks: TaskRow[] = [];
     const { svc, projects } = make({ projects: [defaultRow()], tasks });
     const p = await svc.create({ name: 'Gone' });
+    kbs.push({ id: 'kb1', projectId: p.id });
     tasks.push({ id: 't1', projectId: p.id, status: 'running' }, { id: 't2', projectId: p.id, status: 'done' });
     await expect(svc.remove('default')).rejects.toThrow(/cannot be deleted/);
     await expect(svc.remove('gone')).rejects.toThrow(/1 active task/);
-    expect(await svc.counts(p.id)).toEqual({ active: 1, total: 2 });
+    expect(calls).toEqual([]); // nothing was touched by the refused delete
+    expect(await svc.counts(p)).toEqual({ active: 1, total: 2, resources: 0, knowledge: 1 });
     tasks[0]!.status = 'cancelled';
+    await expect(svc.remove('gone', { knowledge: 'maybe' as never })).rejects.toThrow(/keep.*delete/);
     const r = await svc.remove('gone');
-    expect(r).toEqual({ id: p.id, slug: 'gone', movedTasks: 2 });
+    expect(r).toEqual({ id: p.id, slug: 'gone', movedTasks: 2, knowledge: { released: 1, deleted: 0 }, resources: { moved: 2, deleted: 0 } });
+    expect(calls).toEqual([`resources:gone:keep`, `knowledge:${p.id}:keep`]);
     expect(tasks.every((t) => t.projectId === DEFAULT_PROJECT_ID)).toBe(true);
     expect(projects.map((x) => x.slug)).toEqual(['default']);
     expect(projectLabel(p.id).slug).toBe('unknown');
   });
-  it('serializeAll counts active and total tasks per project in one query', async () => {
+  it('remove with {knowledge: delete, resources: delete} hands both over for deletion', async () => {
+    const { svc } = make({ projects: [defaultRow()] });
+    const p = await svc.create({ name: 'Gone' });
+    const r = await svc.remove('gone', { knowledge: 'delete', resources: 'delete' });
+    expect(r).toMatchObject({ knowledge: { released: 0, deleted: 1 }, resources: { moved: 0, deleted: 2 } });
+    expect(calls).toEqual([`resources:gone:delete`, `knowledge:${p.id}:delete`]);
+  });
+  it('serializeAll counts active and total tasks per project in one query, plus the project\'s own resources and knowledge bases', async () => {
     const tasks: TaskRow[] = [{ id: 'a', projectId: DEFAULT_PROJECT_ID, status: 'queued' }, { id: 'b', projectId: DEFAULT_PROJECT_ID, status: 'done' }];
     const { svc } = make({ projects: [defaultRow()], tasks, shared: false });
     const p = await svc.create({ name: 'Two' });
+    const shop = await svc.create({ name: 'Shop' });
+    kbs.push({ id: 'k1', projectId: shop.id }, { id: 'k2', projectId: shop.id }, { id: 'k3', projectId: null });
     tasks.push({ id: 'c', projectId: p.id, status: 'needs_approval' });
     const all = await svc.serializeAll(await svc.list());
-    expect(all.map((x) => [x.slug, x.counts, x.effectiveIsolation])).toEqual([['default', { active: 1, total: 2 }, 'worktree'], ['two', { active: 1, total: 1 }, 'worktree']]);
+    expect(all.map((x) => [x.slug, x.counts, x.effectiveIsolation]).sort()).toEqual([
+      ['default', { active: 1, total: 2, resources: 0, knowledge: 0 }, 'worktree'],
+      ['shop', { active: 0, total: 0, resources: 2, knowledge: 2 }, 'worktree'],
+      ['two', { active: 1, total: 1, resources: 0, knowledge: 0 }, 'worktree'],
+    ]);
+    expect((await svc.serialize(shop)).counts).toEqual({ active: 0, total: 0, resources: 2, knowledge: 2 });
   });
   it('resolve: by slug, by task row, or the default', async () => {
     const { svc } = make({ projects: [defaultRow()] });

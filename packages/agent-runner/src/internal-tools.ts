@@ -148,7 +148,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'resources_search',
       description:
-        "Search the project's shared resource library (notes, images, PDFs, documents that people keep for all agents). Give a `query` (words that must all match title/description/tags) and/or a `tag`; with neither it lists the newest entries. Each result has the file path — READ that path to use the resource (images and PDFs are readable too). Use it when a task may be covered by project material the prompt's resource list did not show.",
+        "Search the resource libraries you can see: this task's project library and the global one (notes, images, PDFs, documents that people keep for agents). Give a `query` (words that must all match title/description/tags) and/or a `tag`; with neither it lists the newest entries. Each result has its scope (the project's slug or global) and the file path — READ that path to use the resource (images and PDFs are readable too). Use it when a task may be covered by material the prompt's resource list did not show.",
       shape: { query: z.string().optional(), tag: z.string().optional() },
       handler: (args) =>
         params.onSearchResources!({
@@ -460,13 +460,14 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_pack_install',
         description:
-          "Install a content pack by `name` (from packs_list): its agents, skills, starter notes in the project library and prepared schedules (the schedules are created SWITCHED OFF — nothing runs until the user turns them on and picks a chat). Anything that already exists is left untouched, so it is safe to re-run. Ask the user's time zone and pass it as `timezone` (IANA, e.g. Europe/Kyiv) so the prepared schedules match. `reason` is required. A human reviews and must approve; this call blocks until they decide. Afterwards tell the user the \"next steps\" from the result (usually: fill in the profile note, choose a chat for the schedules).",
-        shape: { name: z.string(), timezone: z.string().optional(), reason: z.string() },
+          "Install a content pack by `name` (from packs_list): its agents, skills, starter notes in the resource library and prepared schedules (the schedules are created SWITCHED OFF — nothing runs until the user turns them on and picks a chat). Anything that already exists is left untouched, so it is safe to re-run. Ask the user's time zone and pass it as `timezone` (IANA, e.g. Europe/Kyiv) so the prepared schedules match. `project` (a project's slug, optional): the starter notes go into THAT project's library instead of the global one (agents and skills are always global). `reason` is required. A human reviews and must approve; this call blocks until they decide. Afterwards tell the user the \"next steps\" from the result (usually: fill in the profile note, choose a chat for the schedules).",
+        shape: { name: z.string(), timezone: z.string().optional(), project: z.string().optional(), reason: z.string() },
         handler: async (args) =>
           (
             await admin.proposePackInstall({
               name: String(args.name),
               timezone: typeof args.timezone === 'string' && args.timezone.trim() ? args.timezone.trim() : undefined,
+              project: typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined,
               reason: String(args.reason ?? ''),
             })
           ).message,
@@ -474,7 +475,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_resource',
         description:
-          "Add, change or delete a TEXT NOTE in the project's resource library — shared knowledge every agent reads (use it for things like a learner profile, house measurements, a style guide, a glossary). `action`: create | update | delete. create: `title`, `text` (Markdown), optional `description` (one line — shown to agents so they know when to read it), `tags`, `agents` (names of agents it is meant for; leave out for all). update: `id` (from resources_search) + the fields to change; `text` replaces the whole note. delete: `id`. Files and images are uploaded by the user in the dashboard (Resources) — you cannot create those. A human reviews and must approve; this call blocks until they decide. Search first (resources_search) to avoid duplicates.",
+          "Add, change or delete a TEXT NOTE in a resource library — shared knowledge agents read (use it for things like a learner profile, house measurements, a style guide, a glossary). `action`: create | update | delete. create: `title`, `text` (Markdown), optional `description` (one line — shown to agents so they know when to read it), `tags`, `agents` (names of agents it is meant for; leave out for all), `project` (a project's slug: the note goes into THAT project's library and only its tasks see it; leave out for the global library every project shares). update: `id` (from resources_search) + the fields to change; `text` replaces the whole note. delete: `id`. Files and images are uploaded by the user in the dashboard (Resources) — you cannot create those. A human reviews and must approve; this call blocks until they decide. Search first (resources_search) to avoid duplicates.",
         shape: {
           action: z.enum(['create', 'update', 'delete']),
           id: z.string().optional(),
@@ -483,6 +484,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           tags: z.array(z.string()).optional(),
           agents: z.array(z.string()).optional(),
           text: z.string().optional(),
+          project: z.string().optional(),
           reason: z.string(),
         },
         handler: async (args) => {
@@ -497,6 +499,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
               tags: arr('tags'),
               agents: arr('agents'),
               text: str('text'),
+              project: str('project')?.trim() || undefined,
               reason: String(args.reason ?? ''),
             })
           ).message;

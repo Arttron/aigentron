@@ -269,6 +269,20 @@ export interface ResourceInfo {
   updatedAt: string;
   /** Only on the single-resource fetch of a text resource. */
   text?: string;
+  /** The project's slug when scoped to a project; null/absent = global (every agent of every project). */
+  project?: string | null;
+}
+
+/** Which items a list shows: `all` (default), `global` only, or one project's slug. */
+export type ScopeParam = string;
+export interface ProjectLibraryCounts {
+  resources?: number;
+  knowledge?: number;
+}
+/** What happens to a project's own library when the project is deleted (default `keep` = it becomes global). */
+export interface DeleteProjectOptions {
+  knowledge?: 'keep' | 'delete';
+  resources?: 'keep' | 'delete';
 }
 
 export interface ScheduleInfo {
@@ -426,6 +440,8 @@ export interface KbInfo {
   chunks: number;
   embedded: number;
   createdAt: string;
+  /** The project's slug when scoped to a project; null/absent = global. */
+  project?: string | null;
 }
 export interface KbInput {
   name?: string;
@@ -435,6 +451,8 @@ export interface KbInput {
   agentWrite?: boolean;
   embedProvider?: string;
   embedModel?: string;
+  /** Slug of the project to scope the base to; omitted = global. */
+  project?: string;
 }
 export interface KbDoc {
   id: string;
@@ -624,11 +642,13 @@ export const api = {
   getPack: (name: string) => request<PackInfo>('GET', `/packs/${e(name)}`),
   installPack: (name: string, timezone?: string) => request<PackInstallResult>('POST', `/packs/${e(name)}/install`, { body: { timezone } }),
 
-  listResources: () => request<{ items: ResourceInfo[]; usage: { count: number; bytes: number; maxCount: number; maxBytes: number } }>('GET', '/resources'),
+  listResources: (project?: ScopeParam) =>
+    request<{ items: ResourceInfo[]; usage: { count: number; bytes: number; maxCount: number; maxBytes: number } }>('GET', '/resources', { query: { project } }),
   getResource: (id: string) => request<ResourceInfo>('GET', `/resources/${e(id)}`),
-  createNote: (body: { title: string; description?: string; tags?: string[]; agents?: string[]; text: string }) => request<ResourceInfo>('POST', '/resources', { body }),
-  uploadResource: (file: File) => request<ResourceInfo>('POST', '/resources/upload', { raw: file, headers: octet(file) }),
-  updateResource: (id: string, body: { title?: string; description?: string; tags?: string[]; agents?: string[]; text?: string }) => request<ResourceInfo>('PUT', `/resources/${e(id)}`, { body }),
+  createNote: (body: { title: string; description?: string; tags?: string[]; agents?: string[]; text: string; project?: string }) => request<ResourceInfo>('POST', '/resources', { body }),
+  uploadResource: (file: File, project?: string) =>
+    request<ResourceInfo>('POST', '/resources/upload', { raw: file, headers: { ...octet(file), ...(project ? { 'x-project': project } : {}) } }),
+  updateResource: (id: string, body: { title?: string; description?: string; tags?: string[]; agents?: string[]; text?: string; project?: string | null }) => request<ResourceInfo>('PUT', `/resources/${e(id)}`, { body }),
   deleteResource: (id: string) => request<{ id: string }>('DELETE', `/resources/${e(id)}`),
   resourceUrl: (id: string) => `${API_BASE}/resources/${e(id)}/file`,
 
@@ -640,9 +660,9 @@ export const api = {
   concludeDiscussion: (taskId: string) => request<{ ok: boolean }>('POST', `/discussions/${e(taskId)}/conclude`),
   stopDiscussion: (taskId: string) => request<{ ok: boolean }>('POST', `/discussions/${e(taskId)}/stop`),
 
-  listKb: () => request<KbInfo[]>('GET', '/knowledge'),
+  listKb: (project?: ScopeParam) => request<KbInfo[]>('GET', '/knowledge', { query: { project } }),
   createKb: (body: KbInput) => request<KbInfo>('POST', '/knowledge', { body }),
-  updateKb: (name: string, body: Omit<Partial<KbInput>, 'embedProvider' | 'embedModel'> & { embedProvider?: string | null; embedModel?: string | null }) =>
+  updateKb: (name: string, body: Omit<Partial<KbInput>, 'embedProvider' | 'embedModel' | 'project'> & { embedProvider?: string | null; embedModel?: string | null; project?: string | null }) =>
     request<KbInfo>('PATCH', `/knowledge/${e(name)}`, { body }),
   deleteKb: (name: string) => request<{ name: string }>('DELETE', `/knowledge/${e(name)}`),
   listKbDocs: (name: string) => request<KbDoc[]>('GET', `/knowledge/${e(name)}/docs`),
@@ -658,12 +678,12 @@ export const api = {
   listSchedules: () => request<ScheduleInfo[]>('GET', '/schedules'),
   /** The projects (docs/plan-projects-workspace.md); `archived` includes the archived ones. */
   listProjects: (opts: { archived?: boolean } = {}) => request<Project[]>('GET', '/projects', { query: { archived: opts.archived ? '1' : undefined } }),
-  getProject: (slug: string) => request<Project>('GET', `/projects/${e(slug)}`),
+  getProject: (slug: string) => request<Project & { counts: ProjectLibraryCounts }>('GET', `/projects/${e(slug)}`),
   createProject: (body: ProjectInput) => request<Project>('POST', '/projects', { body }),
   updateProject: (slug: string, body: ProjectInput) => request<Project>('PATCH', `/projects/${e(slug)}`, { body }),
   archiveProject: (slug: string) => request<Project>('POST', `/projects/${e(slug)}/archive`),
   /** 409 (with the reason in the message) while the project has active tasks. */
-  deleteProject: (slug: string) => request<unknown>('DELETE', `/projects/${e(slug)}`),
+  deleteProject: (slug: string, opts?: DeleteProjectOptions) => request<unknown>('DELETE', `/projects/${e(slug)}`, opts ? { body: opts } : {}),
   getProjectRepo: (slug: string) => request<RepoInfo>('GET', `/projects/${e(slug)}/repo`),
   setProjectRepo: (slug: string, body: { url?: string | null; branch?: string; subdir?: string | null }) => request<RepoInfo>('PUT', `/projects/${e(slug)}/repo`, { body }),
   setProjectRepoCredentials: (slug: string, body: RepoCredentials) => request<RepoInfo>('PUT', `/projects/${e(slug)}/repo/credentials`, { body }),

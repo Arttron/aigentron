@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type AgentInfo, type KbChunking, type KbDoc, type KbHit, type KbInfo, type ProviderInfo, type ResourceInfo } from '@/lib/api';
 import { usePolling } from '@/lib/use-polling';
 import { AppHeader, BackLink, Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
 import { ModelSelect } from '@/components/ModelSelect';
+import { AddToSelect, ScopeBadge, ScopeBar, ScopeField } from '@/components/ScopeBar';
+import { useScope } from '@/lib/use-scope';
+import { filterByScope, scopeHelp, targetProject } from '@/lib/scope';
 import styles from './KnowledgePage.module.css';
 
 const kb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -17,6 +20,8 @@ interface Draft {
   agentWrite: boolean;
   embedProvider: string;
   embedModel: string;
+  /** The project's slug; null = global. */
+  project: string | null;
 }
 
 const clean = (e: unknown) => (e as Error).message.replace(/^\d+ [^—]*— /, '');
@@ -27,10 +32,15 @@ const STATUS_LABEL: Record<NonNullable<Doc['status']>, string> = { processing: '
 
 /** Knowledge bases: big reference material agents search (BM25, plus meaning-based search when an embedding model is set). */
 export function KnowledgePage() {
-  const [bases, setBases] = useState<KbInfo[]>([]);
+  const sc = useScope('knowledge');
+  const [addTo, setAddTo] = useState('');
+  const [allBases, setBases] = useState<KbInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [current, setCurrent] = useState<string | null>(null);
+  const [picked, setCurrent] = useState<string | null>(null);
+  const bases = useMemo(() => filterByScope(allBases, sc.scope), [allBases, sc.scope]);
+  // the picked base if the scope shows it, else the first one shown
+  const current = bases.find((b) => b.name === picked)?.name ?? bases[0]?.name ?? null;
   const [docs, setDocs] = useState<Doc[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -51,7 +61,6 @@ export function KnowledgePage() {
       setBases(b);
       setAgents(a);
       setProviders(p);
-      setCurrent((c) => (c && b.some((x) => x.name === c) ? c : (b[0]?.name ?? null)));
     } catch (e) {
       setError(clean(e));
     }
@@ -120,8 +129,8 @@ export function KnowledgePage() {
   const edit = (b?: KbInfo) =>
     setDraft(
       b
-        ? { name: b.name, isNew: false, description: b.description, agents: b.agents, chunking: b.chunking, agentWrite: b.agentWrite, embedProvider: b.embedProvider ?? '', embedModel: b.embedModel ?? '' }
-        : { name: '', isNew: true, description: '', agents: [], chunking: DEFAULT_CHUNKING, agentWrite: false, embedProvider: '', embedModel: '' },
+        ? { name: b.name, isNew: false, description: b.description, agents: b.agents, chunking: b.chunking, agentWrite: b.agentWrite, embedProvider: b.embedProvider ?? '', embedModel: b.embedModel ?? '', project: b.project ?? null }
+        : { name: '', isNew: true, description: '', agents: [], chunking: DEFAULT_CHUNKING, agentWrite: false, embedProvider: '', embedModel: '', project: targetProject(sc.scope, addTo) },
     );
 
   const save = () =>
@@ -129,10 +138,10 @@ export function KnowledgePage() {
       if (!draft) return;
       const body = { description: draft.description, agents: draft.agents, chunking: draft.chunking, agentWrite: draft.agentWrite };
       if (draft.isNew) {
-        const created = await api.createKb({ ...body, name: draft.name, ...(draft.embedProvider ? { embedProvider: draft.embedProvider, embedModel: draft.embedModel || undefined } : {}) });
+        const created = await api.createKb({ ...body, name: draft.name, ...(draft.project ? { project: draft.project } : {}), ...(draft.embedProvider ? { embedProvider: draft.embedProvider, embedModel: draft.embedModel || undefined } : {}) });
         setCurrent(created.name);
       } else {
-        await api.updateKb(draft.name, { ...body, embedProvider: draft.embedProvider || null, embedModel: draft.embedProvider ? draft.embedModel || undefined : null });
+        await api.updateKb(draft.name, { ...body, ...(draft.project !== (allBases.find((b) => b.name === draft.name)?.project ?? null) ? { project: draft.project } : {}), embedProvider: draft.embedProvider || null, embedModel: draft.embedProvider ? draft.embedModel || undefined : null });
       }
       setDraft(null);
     });
@@ -161,13 +170,15 @@ export function KnowledgePage() {
         <Muted>
           Large reference material — regulations, manuals, textbooks, saved web pages — that agents <strong>search</strong> instead of carrying in the prompt. Documents are cut into passages; agents find them with
           keyword search (works offline, no key needed) and, if you give the base an embedding model, also by meaning. Short notes and photos that every agent should always see belong in{' '}
-          <a href="/resources">Resources</a>.
+          <a href="/resources">Resources</a>. A <strong>global</strong> base is searched by every agent of every project; one scoped to a project only by agents working on it.
         </Muted>
         <Row wrap>
           <Button variant="primary" onClick={() => edit()}>
             + New base
           </Button>
+          <AddToSelect state={sc} value={addTo} onChange={setAddTo} />
         </Row>
+        <ScopeBar state={sc} />
         {bases.length > 0 && (
           <div className={styles.list}>
             {bases.map((b) => (
@@ -180,12 +191,14 @@ export function KnowledgePage() {
                   </span>
                   <span>{b.embedProvider ? (b.embedded < b.chunks ? `🧠 semantic ${b.embedded}/${b.chunks}…` : '🧠 semantic on') : '🔤 keyword'}</span>
                   <span>{b.agents.length ? `for: ${b.agents.join(', ')}` : 'for all agents'}</span>
+                  <ScopeBadge project={b.project} state={sc} />
                 </span>
               </button>
             ))}
           </div>
         )}
-        {bases.length === 0 && <Muted>No knowledge bases yet — create one, then upload documents (PDF, Word, Markdown, text, HTML, CSV).</Muted>}
+        {bases.length === 0 && allBases.length > 0 && <Muted>No knowledge bases in this scope.</Muted>}
+        {allBases.length === 0 && <Muted>No knowledge bases yet — create one, then upload documents (PDF, Word, Markdown, text, HTML, CSV).</Muted>}
         {error && <ErrorText>{error}</ErrorText>}
         {info && <Muted>{info}</Muted>}
       </Card>
@@ -386,6 +399,7 @@ export function KnowledgePage() {
           <Field label="What is in it — one line (agents read this to decide when to search it)">
             <textarea rows={2} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
           </Field>
+          {!draft.isNew && <ScopeField state={sc} value={draft.project} onChange={(project) => setDraft({ ...draft, project })} help={scopeHelp(draft.project, sc.projects)} />}
           <Field label="Which agents use it (none ticked = all)">
             <CheckboxGroup options={agents.map((a) => a.name)} selected={draft.agents} onChange={(sel) => setDraft({ ...draft, agents: sel })} empty="no agents yet" />
           </Field>

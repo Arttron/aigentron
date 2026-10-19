@@ -1,5 +1,6 @@
 /**
- * The project's shared library ("resources"): notes, images, PDFs and files every agent of the project may use as knowledge.
+ * The resource libraries ("resources"): notes, images, PDFs and files agents may use as knowledge. The GLOBAL library is seen by
+ * the tasks of every project; a PROJECT library (`<project dir>/library/`) only by the tasks of that project.
  * Pure helpers only (kinds, validation, search, the block that goes into an agent's prompt) — unit-tested.
  */
 
@@ -23,9 +24,15 @@ export interface ResourceEntry {
   agents: string[];
   /** Where it came from: upload | note | pack:<name>. */
   source: string;
+  /** The project's slug when the item is in a project's library; null = the global library. Stamped by the library that holds it. */
+  project: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Project items before global ones (the task's own material first), newest first within each. */
+export const byScopeThenNewest = (a: Pick<ResourceEntry, 'project' | 'updatedAt'>, b: Pick<ResourceEntry, 'project' | 'updatedAt'>): number =>
+  Number(b.project !== null) - Number(a.project !== null) || b.updatedAt.localeCompare(a.updatedAt);
 
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 /** A video may be much bigger (a walk-through of a room…). */
@@ -80,7 +87,7 @@ export function safeFileName(name: string): string {
 /** Does this resource apply to the agent? (Empty scope = everyone.) */
 export const appliesTo = (r: Pick<ResourceEntry, 'agents'>, agentName?: string): boolean => r.agents.length === 0 || (!!agentName && r.agents.includes(agentName));
 
-/** Simple relevance search over title, description, tags, name: every query word must hit; title hits rank first. */
+/** Simple relevance search over title, description, tags, name: every query word must hit; title hits rank first, then the project's own items. */
 export function search(list: ResourceEntry[], query?: string, tag?: string): ResourceEntry[] {
   const words = (query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
   const t = tag?.trim().toLowerCase();
@@ -98,21 +105,22 @@ export function search(list: ResourceEntry[], query?: string, tag?: string): Res
     }
     if (ok) scored.push({ r, score });
   }
-  return scored.sort((a, b) => b.score - a.score || b.r.updatedAt.localeCompare(a.r.updatedAt)).map((s) => s.r);
+  return scored.sort((a, b) => b.score - a.score || byScopeThenNewest(a.r, b.r)).map((s) => s.r);
 }
 
 /**
- * The block added to an agent's prompt: what the library contains and where to read it. Only entries that apply to this
- * agent; capped so a big library cannot flood the context (the agent can ask `resources_search` for the rest).
+ * The block added to an agent's prompt: what the libraries contain and where to read it. Only entries that apply to this
+ * agent; the task's project library first, then the global one; one shared cap so a big library cannot flood the context
+ * (the agent can ask `resources_search` for the rest).
  */
 export function promptBlock(list: ResourceEntry[], pathOf: (r: ResourceEntry) => string, agentName?: string, limit = 25): string {
-  const mine = list.filter((r) => appliesTo(r, agentName)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const mine = list.filter((r) => appliesTo(r, agentName)).sort(byScopeThenNewest);
   if (!mine.length) return '';
   const shown = mine.slice(0, limit);
-  const lines = shown.map((r) => `- ${r.title}${r.description ? ` — ${r.description.replace(/\s+/g, ' ').slice(0, 160)}` : ''}${r.tags.length ? ` [${r.tags.join(', ')}]` : ''} (${r.kind}) → ${pathOf(r)}${r.kind === 'video' ? '  (video — use video_digest / look_at)' : ''}`);
+  const lines = shown.map((r) => `- ${r.title}${r.description ? ` — ${r.description.replace(/\s+/g, ' ').slice(0, 160)}` : ''}${r.tags.length ? ` [${r.tags.join(', ')}]` : ''} (${r.kind}${r.project ? ', project' : ''}) → ${pathOf(r)}${r.kind === 'video' ? '  (video — use video_digest / look_at)' : ''}`);
   return [
     '## Project resources',
-    'The project keeps a shared library of notes, images and documents. Treat it as the source of truth for this project\'s facts, preferences, measurements and reference material: BEFORE answering from memory or guessing, check this list, and when an entry is relevant READ it (Read the path; images and PDFs are readable too) and follow it. Never invent what a resource would say. Never modify these files.',
+    'The project keeps a shared library of notes, images and documents (its own items are marked "project" and listed first; the rest is the global library every project shares). Treat it as the source of truth for this project\'s facts, preferences, measurements and reference material: BEFORE answering from memory or guessing, check this list, and when an entry is relevant READ it (Read the path; images and PDFs are readable too) and follow it. Never invent what a resource would say. Never modify these files.',
     ...lines,
     mine.length > shown.length ? `(+${mine.length - shown.length} more — call the \`resources_search\` tool with a query or tag to find them.)` : '',
   ]
@@ -123,6 +131,6 @@ export function promptBlock(list: ResourceEntry[], pathOf: (r: ResourceEntry) =>
 /** Text answer for the `resources_search` tool. */
 export function searchReport(found: ResourceEntry[], pathOf: (r: ResourceEntry) => string, limit = 20): string {
   if (!found.length) return 'No matching resources.';
-  const lines = found.slice(0, limit).map((r) => `${r.id} | ${r.title} | ${r.kind} | ${r.tags.join(',') || '-'} | ${r.description.replace(/\s+/g, ' ').slice(0, 120)} | ${pathOf(r)}`);
-  return `${found.length} match(es)${found.length > limit ? ` (showing ${limit})` : ''} — id | title | kind | tags | description | path (Read it):\n${lines.join('\n')}`;
+  const lines = found.slice(0, limit).map((r) => `${r.id} | ${r.title} | ${r.kind} | ${r.project ?? 'global'} | ${r.tags.join(',') || '-'} | ${r.description.replace(/\s+/g, ' ').slice(0, 120)} | ${pathOf(r)}`);
+  return `${found.length} match(es)${found.length > limit ? ` (showing ${limit})` : ''} — id | title | kind | scope (project slug or global) | tags | description | path (Read it):\n${lines.join('\n')}`;
 }

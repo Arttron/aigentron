@@ -3,6 +3,9 @@ import { api, errMsg, type AgentInfo, type ResourceInfo } from '@/lib/api';
 import { AppHeader, BackLink, Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle, UploadButton, useFileDrop } from '@/components/ui';
 import { hasLiveCamera, prepareFile } from '@/lib/capture';
 import { CameraCapture } from '@/components/CameraCapture';
+import { AddToSelect, ScopeBadge, ScopeBar, ScopeField } from '@/components/ScopeBar';
+import { useScope } from '@/lib/use-scope';
+import { filterByScope, scopeHelp, targetProject } from '@/lib/scope';
 import styles from './ResourcesPage.module.css';
 
 const kb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -16,10 +19,14 @@ interface Draft {
   tags: string;
   agents: string[];
   text: string;
+  /** The project's slug; null = global. */
+  project: string | null;
 }
 
-/** The project's resource library: notes, images and documents every agent can use as knowledge. */
+/** The resource library: notes, images and documents agents can use as knowledge — global, or scoped to one project. */
 export function ResourcesPage() {
+  const sc = useScope('resources');
+  const [addTo, setAddTo] = useState('');
   const [items, setItems] = useState<ResourceInfo[]>([]);
   const [usage, setUsage] = useState<{ count: number; bytes: number; maxBytes: number } | null>(null);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
@@ -44,11 +51,11 @@ export function ResourcesPage() {
     void refresh();
   }, [refresh]);
 
-  const tags = useMemo(() => Array.from(new Set(items.flatMap((i) => i.tags))).sort(), [items]);
+  const tags = useMemo(() => Array.from(new Set(filterByScope(items, sc.scope).flatMap((i) => i.tags))).sort(), [items, sc.scope]);
   const shown = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-    return items.filter((i) => (!tag || i.tags.includes(tag)) && words.every((w) => `${i.title} ${i.description} ${i.tags.join(' ')} ${i.originalName}`.toLowerCase().includes(w)));
-  }, [items, q, tag]);
+    return filterByScope(items, sc.scope).filter((i) => (!tag || i.tags.includes(tag)) && words.every((w) => `${i.title} ${i.description} ${i.tags.join(' ')} ${i.originalName}`.toLowerCase().includes(w)));
+  }, [items, q, tag, sc.scope]);
 
   const fail = (e: unknown) => setError(errMsg(e));
 
@@ -57,7 +64,7 @@ export function ResourcesPage() {
     setError(null);
     let last: ResourceInfo | null = null;
     try {
-      for (const f of Array.from(files)) last = await api.uploadResource(await prepareFile(f));
+      for (const f of Array.from(files)) last = await api.uploadResource(await prepareFile(f), targetProject(sc.scope, addTo) ?? undefined);
       await refresh();
       // One file: let the person add the description right away — agents decide what to read by it.
       if (last && Array.from(files).length === 1) await edit(last);
@@ -79,7 +86,7 @@ export function ResourcesPage() {
   const edit = async (r: ResourceInfo) => {
     let text = '';
     if (r.kind === 'text') text = (await api.getResource(r.id).catch(() => null))?.text ?? '';
-    setDraft({ id: r.id, kind: r.kind, title: r.title, description: r.description, tags: r.tags.join(', '), agents: r.agents, text });
+    setDraft({ id: r.id, kind: r.kind, title: r.title, description: r.description, tags: r.tags.join(', '), agents: r.agents, text, project: r.project ?? null });
   };
 
   const save = async () => {
@@ -89,9 +96,10 @@ export function ResourcesPage() {
     try {
       const tagsArr = draft.tags.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean);
       if (draft.id) {
-        await api.updateResource(draft.id, { title: draft.title, description: draft.description, tags: tagsArr, agents: draft.agents, ...(draft.kind === 'text' ? { text: draft.text } : {}) });
+        const old = items.find((i) => i.id === draft.id);
+        await api.updateResource(draft.id, { title: draft.title, description: draft.description, tags: tagsArr, agents: draft.agents, ...(draft.kind === 'text' ? { text: draft.text } : {}), ...(draft.project !== (old?.project ?? null) ? { project: draft.project } : {}) });
       } else {
-        await api.createNote({ title: draft.title, description: draft.description, tags: tagsArr, agents: draft.agents, text: draft.text });
+        await api.createNote({ title: draft.title, description: draft.description, tags: tagsArr, agents: draft.agents, text: draft.text, ...(draft.project ? { project: draft.project } : {}) });
       }
       setDraft(null);
       await refresh();
@@ -107,9 +115,9 @@ export function ResourcesPage() {
       <BackLink href="/">← all tasks</BackLink>
       <AppHeader title="📚 Resources" />
       <Card>
-        <SectionTitle>Project library</SectionTitle>
+        <SectionTitle>Library</SectionTitle>
         <Muted>
-          Notes, images and documents that <strong>every agent of this project</strong> can use as knowledge — house measurements, a style guide, a learner's
+          Notes, images and documents that agents can use as knowledge — <strong>global</strong> ones are seen by every agent of every project, ones scoped to a project by agents working on that project — house measurements, a style guide, a learner's
           profile, reference photos, a price list. Agents see the titles and descriptions and read what is relevant, so write a clear one-line description.
           {usage && ` ${usage.count} item(s), ${kb(usage.bytes)} of ${kb(usage.maxBytes)} used.`}
         </Muted>
@@ -121,13 +129,15 @@ export function ResourcesPage() {
             <UploadButton disabled={busy} multiple={false} accept="image/*,video/*" capture intercept={openLiveCamera} onFiles={upload}>
               📷 Camera
             </UploadButton>
-            <Button disabled={busy} onClick={() => setDraft({ id: null, kind: 'text', title: '', description: '', tags: '', agents: [], text: '' })}>
+            <Button disabled={busy} onClick={() => setDraft({ id: null, kind: 'text', title: '', description: '', tags: '', agents: [], text: '', project: targetProject(sc.scope, addTo) })}>
               📝 New note
             </Button>
+            <AddToSelect state={sc} value={addTo} onChange={setAddTo} />
             <Muted>or drop files here (up to 25 MB each, videos up to 300 MB — images, video, PDF, text, anything)</Muted>
           </Row>
           {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void upload(files)} />}
         </div>
+        <ScopeBar state={sc} />
         <Row wrap>
           <input className={styles.search} placeholder="🔎 Search the library…" value={q} onChange={(e) => setQ(e.target.value)} />
         </Row>
@@ -166,6 +176,7 @@ export function ResourcesPage() {
                 <span>
                   {ICON[r.kind]} {r.kind} · {kb(r.size)}
                 </span>
+                <ScopeBadge project={r.project} state={sc} />
                 <span>{r.agents.length ? `for: ${r.agents.join(', ')}` : 'for all agents'}</span>
                 {r.tags.map((t) => (
                   <span key={t} className={styles.chip}>
@@ -201,6 +212,7 @@ export function ResourcesPage() {
           <Field label="Tags (comma-separated)">
             <input value={draft.tags} onChange={(e) => setDraft({ ...draft, tags: e.target.value })} placeholder="kitchen, measurements" />
           </Field>
+          <ScopeField state={sc} value={draft.project} onChange={(project) => setDraft({ ...draft, project })} help={scopeHelp(draft.project, sc.projects)} />
           <Field label="Which agents use it (none ticked = all)">
             <CheckboxGroup options={agents.map((a) => a.name)} selected={draft.agents} onChange={(agentsSel) => setDraft({ ...draft, agents: agentsSel })} empty="no agents yet" />
           </Field>

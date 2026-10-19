@@ -19,13 +19,13 @@ export class PacksController {
     return this.packs.info(name);
   }
 
-  /** Install a pack. Never overwrites what already exists; schedules arrive switched off. */
+  /** Install a pack. Never overwrites what already exists; schedules arrive switched off. `project` (a slug) puts the starter resources into that project's library. */
   @Post(':name/install')
   @HttpCode(200)
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
-  async install(@Param('name') name: string, @Body() body: { timezone?: string }, @CurrentUser() user: UserRow) {
-    const report = await this.packs.install(name, { timezone: body?.timezone, by: user?.displayName });
+  async install(@Param('name') name: string, @Body() body: { timezone?: string; project?: string }, @CurrentUser() user: UserRow) {
+    const report = await this.packs.install(name, { timezone: body?.timezone, by: user?.displayName, project: body?.project });
     return { ...report, summary: describeReport(report) };
   }
 }

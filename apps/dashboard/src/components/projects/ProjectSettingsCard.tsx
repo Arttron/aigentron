@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { Project, ProjectIsolation } from '@lds/shared';
-import { api, type AgentInfo, type ChannelInfo } from '@/lib/api';
+import { api, type AgentInfo, type ChannelInfo, type DeleteProjectOptions, type ProjectLibraryCounts } from '@/lib/api';
 import { ISOLATION_HELP, apiMessage } from '@/lib/projects';
-import { Button, Card, ErrorText, Field, Muted, SectionTitle } from '@/components/ui';
+import { Button, Card, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
 import styles from './projects.module.css';
 
 /** Name, checks, default agent, notifications and mode; plus archive / delete. */
-export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDeleted }: { project: Project; defaultIsolation: ProjectIsolation; onSaved: (p: Project) => void; onDeleted: () => void }) {
+export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDeleted }: { project: Project & { counts?: ProjectLibraryCounts }; defaultIsolation: ProjectIsolation; onSaved: (p: Project) => void; onDeleted: () => void }) {
   const [name, setName] = useState(project.name);
   const [verify, setVerify] = useState(project.verifyCommands ?? '');
   const [attempts, setAttempts] = useState(project.verifyMaxAttempts);
@@ -20,6 +20,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [dangerError, setDangerError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ knowledge: boolean; resources: boolean } | null>(null);
   const code = project.kind === 'code';
 
   useEffect(() => {
@@ -49,19 +50,20 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
     }
   };
 
-  const danger = async (what: 'archive' | 'delete') => {
+  const danger = async (what: 'archive' | 'delete', opts?: DeleteProjectOptions) => {
     const text =
       what === 'delete'
-        ? `Delete the project “${project.name}”? Its tasks and files are removed with it. This cannot be undone.`
+        ? ''
         : project.archivedAt
           ? `Restore the project “${project.name}”?`
           : `Archive the project “${project.name}”? It disappears from the lists and no new tasks can be started in it.`;
-    if (!window.confirm(text)) return;
+    if (what === 'archive' && !window.confirm(text)) return;
     setBusy(what);
     setDangerError(null);
     try {
       if (what === 'delete') {
-        await api.deleteProject(project.slug);
+        await api.deleteProject(project.slug, opts);
+        setConfirmDelete(null);
         onDeleted();
       } else {
         onSaved(await api.updateProject(project.slug, { archived: !project.archivedAt }));
@@ -147,7 +149,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
             <Button disabled={busy !== null} onClick={() => void danger('archive')}>
               {project.archivedAt ? 'Restore' : 'Archive'}
             </Button>
-            <Button variant="red" disabled={busy !== null} onClick={() => void danger('delete')}>
+            <Button variant="red" disabled={busy !== null} onClick={() => setConfirmDelete({ knowledge: false, resources: false })}>
               Delete project
             </Button>
           </div>
@@ -155,6 +157,35 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
             {dangerError && <ErrorText>{dangerError}</ErrorText>}
           </div>
         </>
+      )}
+      {confirmDelete && (
+        <Modal title={`Delete “${project.name}”?`} onClose={() => busy === null && setConfirmDelete(null)}>
+          <Muted className={styles.note}>Its tasks and files are removed with it. This cannot be undone.</Muted>
+          <label className={styles.check}>
+            <input type="checkbox" checked={confirmDelete.knowledge} onChange={(e) => setConfirmDelete({ ...confirmDelete, knowledge: e.target.checked })} /> Also delete its knowledge bases
+            {project.counts?.knowledge !== undefined && ` (${project.counts.knowledge})`}
+          </label>
+          <label className={styles.check}>
+            <input type="checkbox" checked={confirmDelete.resources} onChange={(e) => setConfirmDelete({ ...confirmDelete, resources: e.target.checked })} /> Also delete its resource library
+            {project.counts?.resources !== undefined && ` (${project.counts.resources})`}
+          </label>
+          <Muted className={styles.note} style={{ minHeight: '4.2em' }}>
+            Left unticked, they are kept and become global — every agent of every project sees them. The project’s library folder is kept under the global library.
+          </Muted>
+          {dangerError && <ErrorText>{dangerError}</ErrorText>}
+          <Row>
+            <Button
+              variant="red"
+              disabled={busy !== null}
+              onClick={() => void danger('delete', { knowledge: confirmDelete.knowledge ? 'delete' : 'keep', resources: confirmDelete.resources ? 'delete' : 'keep' })}
+            >
+              {busy === 'delete' ? 'Deleting…' : 'Delete project'}
+            </Button>
+            <Button disabled={busy !== null} onClick={() => setConfirmDelete(null)}>
+              Cancel
+            </Button>
+          </Row>
+        </Modal>
       )}
     </Card>
   );

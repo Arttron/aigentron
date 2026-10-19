@@ -48,7 +48,7 @@ Tabs **Agents** and **Starter packs** (`/agents?tab=packs`). Agents tab starts w
 
 ## 📚 Resources (`/resources`)
 
-Notes, images, PDFs, files; **every agent** sees the list (title, one-line description, tags) in its prompt and reads what is relevant — a clear description matters most. Upload (button/drag & drop, ≤25 MB each, 500 MB total; videos ≤300 MB) or write a Markdown note; tags; optionally limit to chosen agents (none = all). Agents never edit them; I add/change text notes (`propose_resource`) and search (`resources_search`).
+Notes, images, PDFs, files; agents see the list (title, one-line description, tags) in their prompt and read what is relevant — a clear description matters most. Upload (button/drag & drop, ≤25 MB each, 500 MB total; videos ≤300 MB) or write a Markdown note; tags; optionally limit to chosen agents (none = all). **Scope** (2+ projects: chips All · Global · projects, *Add to*/*Scope* selects): global = every agent of every project, project = only agents working on it. Agents never edit them; I add/change text notes (`propose_resource`) and search (`resources_search`).
 
 ## 🧠 Knowledge (`/knowledge`)
 
@@ -100,7 +100,7 @@ Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N 
 
 ## Approvals
 
-A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails (not mine): `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` (incl. cache) block a task. Approvals time out (deny) per Settings → General → Approvals.
+A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails: `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` block a task. Approvals time out (deny) per Settings → General → Approvals.
 
 ## Questions from agents
 
@@ -116,7 +116,7 @@ Text files attached to my chat reach me in the prompt; other attachments I read 
 
 ## Languages
 
-Dashboard text is English; the person's text, file/agent names, knowledge bases, voice (50 languages) and "done"/"готово"/"完成" (~20 languages) can be in any language. Agents talk terse English; the person gets answers in their own. `docs/languages.md`.
+Dashboard text is English; the person's text, names, knowledge bases, voice (50 languages) and "done"/"готово"/"完成" can be in any language. Agents talk terse English; the person gets answers in their own. `docs/languages.md`.
 
 ## Browser through a proxy
 
@@ -127,7 +127,6 @@ MCP server `playwright-proxy` sends ALL traffic through the operator's proxy (se
 **Provider with an API key.** Settings → Providers → **+ Add provider** → *Kind*, *Name*, *Default model* (**Load models**), *Auth mode*, key in *Secret* → save → **Test**. Write-only key. I pre-fill (`propose_provider`) and show a secure card (`request_secret`).
 **Local models (Ollama).** Kind *ollama*, *Base URL* (e.g. http://host.docker.internal:11434), no key; pick a model with tool-call support (Test reports it).
 **ChatGPT subscription (Codex).** Kind *codex*, Auth mode *codex-login*, model e.g. gpt-6.1-sol; once on the server: Docker `docker compose exec -it -e CODEX_HOME=/workspace/secrets/codex orchestrator codex login --device-auth`; bare-metal `CODEX_HOME=<data dir>/secrets/codex codex login --device-auth`; open the link, enter the code, **Test**. Such agents use the Codex runtime.
-**Credentials.** Keys: write-only in the database; Codex sign-in: the secrets dir (above).
 **Default provider** (the admin chat uses it): Settings → Providers → *Default provider*, or `makeDefault`. **Agent model:** Agents → Edit → *Provider*/*Model* (also for admin; a weak/local model may fumble tools).
 **Repository.** Settings → General → Repository: *Repo URL* (save), *GitHub token*, *Base branch*. **Checks after each run:** Verification gate, one command per line.
 **Disk.** Run folders are removed after 14 days (`RUNS_RETENTION_DAYS`, 0 = never); old worktrees only on request (ask me for a cleanup, or `CLEANUP_WORKTREES=true` + `WORKTREE_RETENTION_DAYS`).

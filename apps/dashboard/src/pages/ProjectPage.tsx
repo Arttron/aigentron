@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { Project } from '@lds/shared';
-import { api } from '@/lib/api';
+import { api, type ProjectLibraryCounts } from '@/lib/api';
+import { libraryLine, scopedHref } from '@/lib/scope';
 import { ISOLATION_HELP, apiMessage, relativeTime, repoLine } from '@/lib/projects';
 import { AppHeader, BackLink, Card, ErrorText, Muted, SectionTitle } from '@/components/ui';
 import { RepositoryCard } from '@/components/projects/RepositoryCard';
@@ -13,7 +14,7 @@ import styles from './ProjectPage.module.css';
 export function ProjectPage() {
   const { slug = '' } = useParams();
   const navigate = useNavigate();
-  const [project, setProject] = useState<Project | null>(null);
+  const [project, setProject] = useState<(Project & { counts: ProjectLibraryCounts }) | null>(null);
   const [defaultIsolation, setDefaultIsolation] = useState<'shared' | 'worktree'>('shared');
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +80,19 @@ export function ProjectPage() {
                   </>
                 )}
               </dd>
+              {libraryLine(project.counts) && (
+                <>
+                  <dt>Library</dt>
+                  <dd>
+                    <Link to={scopedHref('/resources', project.slug)}>Resources: {project.counts.resources ?? 0}</Link>
+                    {' · '}
+                    <Link to={scopedHref('/knowledge', project.slug)}>Knowledge bases: {project.counts.knowledge ?? 0}</Link>
+                    <Muted className={shared.note} style={{ margin: '2px 0 0' }}>
+                      Its own — only agents working on this project see them.
+                    </Muted>
+                  </dd>
+                </>
+              )}
               {project.kind === 'code' && (
                 <>
                   <dt>Mode</dt>
@@ -100,7 +114,7 @@ export function ProjectPage() {
             </dl>
           </Card>
           <RepositoryCard key={project.slug} project={project} onChanged={load} />
-          <ProjectSettingsCard key={project.slug} project={project} defaultIsolation={defaultIsolation} onSaved={setProject} onDeleted={() => navigate('/projects')} />
+          <ProjectSettingsCard key={project.slug} project={project} defaultIsolation={defaultIsolation} onSaved={(p) => setProject((cur) => ({ ...p, counts: { ...(cur?.counts ?? {}), ...p.counts } }))} onDeleted={() => navigate('/projects')} />
         </>
       )}
     </>

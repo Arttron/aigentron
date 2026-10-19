@@ -1,256 +1,218 @@
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
-import { basename, extname, join } from 'node:path';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { Readable } from 'node:stream';
-import { BadRequestException, Injectable, Logger, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
-import { saveUpload } from '../files/file-io';
-import { ImageOptimizer, RESOURCE_MAX_SIDE } from '../media/image-optimizer.service';
-import {
-  maxBytesFor,
-  MAX_RESOURCES,
-  MAX_TEXT_BYTES,
-  MAX_TOTAL_BYTES,
-  appliesTo,
-  cleanTags,
-  kindFor,
-  mimeFor,
-  promptBlock,
-  safeFileName,
-  titleFromName,
-  search,
-  searchReport,
-  validateMeta,
-  type ResourceEntry,
-} from './resources-core';
+import { ImageOptimizer } from '../media/image-optimizer.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { projectDirOf } from '../projects/project-context';
+import { ResourceLibrary, type LibraryUsage, type ResourceMeta } from './resource-library';
+import { appliesTo, promptBlock, search, searchReport, type ResourceEntry } from './resources-core';
 
-export interface ResourceMeta {
-  title?: string;
-  description?: string;
-  tags?: unknown;
-  agents?: unknown;
-  source?: string;
-}
+export type { LibraryUsage, ResourceMeta } from './resource-library';
+
+/** `all` = the global library and every project's; `global` = the global one only; a slug = that project's library only. */
+export type ResourceScope = 'all' | 'global' | string;
+
+/** The `project` of a request: a slug, or `global` / empty / null for the global library. */
+export const scopeOf = (v: unknown): string | null => {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return s && s !== 'global' ? s : null;
+};
 
 /**
- * The project's resource library — files kept under `<agentDir>/resources/` with a small index. Agents get the list in their
- * prompt and read the files with their normal Read tool; people manage them in the dashboard. A plain, file-based stand-in
- * for a knowledge base (a real one can read the same files later).
+ * The resource libraries. The GLOBAL one is `<agentDir>/resources` (every task of every project sees it); each project has its
+ * own under `<project dir>/library` (the default project's: `<WORKSPACE_DIR>/library`), seen only by that project's tasks.
+ * Items are addressed by id across all libraries (ids are random and never reused). Agents get the index in their prompt and
+ * read the files with their normal Read tool; people manage them in the dashboard.
  */
 @Injectable()
 export class ResourcesService {
   private readonly logger = new Logger(ResourcesService.name);
-  private queue: Promise<unknown> = Promise.resolve();
+  private readonly global: ResourceLibrary;
+  private readonly projectLibs = new Map<string, ResourceLibrary>();
 
   constructor(
     private readonly config: AppConfigService,
     private readonly images: ImageOptimizer,
-  ) {}
+    private readonly prisma: PrismaService,
+  ) {
+    this.global = new ResourceLibrary(join(config.agentDir, 'resources'), null, images);
+  }
 
-  private get root(): string {
-    return join(this.config.agentDir, 'resources');
+  /** The library folder of a project row (`<project dir>/library`). */
+  libraryDirOf(p: { slug: string; isDefault: boolean }): string {
+    return join(projectDirOf(p, this.config), 'library');
   }
-  private get filesDir(): string {
-    return join(this.root, 'files');
+
+  private forProject(p: { slug: string; isDefault: boolean }): ResourceLibrary {
+    const dir = this.libraryDirOf(p);
+    const have = this.projectLibs.get(p.slug);
+    if (have && have.root === dir) return have;
+    const lib = new ResourceLibrary(dir, p.slug, this.images);
+    this.projectLibs.set(p.slug, lib);
+    return lib;
   }
-  private get indexFile(): string {
-    return join(this.root, 'index.json');
+
+  /** The global library (null / `global`) or a project's (by slug; 404 for an unknown project). */
+  async library(project: string | null | undefined): Promise<ResourceLibrary> {
+    const slug = scopeOf(project);
+    if (!slug) return this.global;
+    const row = await this.prisma.project.findUnique({ where: { slug }, select: { slug: true, isDefault: true } });
+    if (!row) throw new NotFoundException(`Project "${slug}" not found`);
+    return this.forProject(row);
+  }
+
+  /** The libraries a scope covers: global + a project's (a task's view), `all`, `global`, or one slug. */
+  private async libraries(scope: ResourceScope): Promise<ResourceLibrary[]> {
+    if (scope === 'global') return [this.global];
+    if (scope === 'all') {
+      const rows = await this.prisma.project.findMany({ select: { slug: true, isDefault: true }, orderBy: { slug: 'asc' } });
+      return [this.global, ...rows.map((r) => this.forProject(r))];
+    }
+    return [await this.library(scope)];
+  }
+
+  /** What a task of a project sees: its project's library and the global one (never another project's). */
+  private async forTask(project: string | null | undefined): Promise<ResourceLibrary[]> {
+    const own = scopeOf(project) ? await this.library(project).catch(() => null) : null;
+    return own ? [own, this.global] : [this.global];
   }
 
   /** Absolute path of the stored file — what agents are told to Read. */
-  pathOf(r: Pick<ResourceEntry, 'file'>): string {
-    return join(this.filesDir, r.file);
+  async pathOf(r: Pick<ResourceEntry, 'file' | 'project'>): Promise<string> {
+    return (await this.library(r.project)).pathOf(r);
   }
 
-  /** Serialize index changes (read-modify-write) so concurrent requests cannot lose each other's edits. */
-  private locked<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.queue.then(fn, fn);
-    this.queue = run.catch(() => undefined);
-    return run;
-  }
-
-  private async read(): Promise<ResourceEntry[]> {
-    try {
-      const j = JSON.parse(await readFile(this.indexFile, 'utf8')) as { items?: ResourceEntry[] };
-      return Array.isArray(j.items) ? j.items : [];
-    } catch {
-      return [];
+  /** Where an id lives (searched across all libraries). */
+  private async locate(id: string): Promise<{ lib: ResourceLibrary; entry: ResourceEntry }> {
+    for (const lib of await this.libraries('all')) {
+      const entry = await lib.find(id);
+      if (entry) return { lib, entry };
     }
+    throw new NotFoundException(`Resource not found: ${id}`);
   }
 
-  private async write(items: ResourceEntry[]): Promise<void> {
-    await mkdir(this.root, { recursive: true });
-    const tmp = `${this.indexFile}.tmp`;
-    await writeFile(tmp, JSON.stringify({ items }, null, 2));
-    await rename(tmp, this.indexFile);
-  }
-
-  async list(): Promise<ResourceEntry[]> {
-    return (await this.read()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  /** Newest first; project items keep their `project` slug, global ones have null. */
+  async list(scope: ResourceScope = 'all'): Promise<ResourceEntry[]> {
+    const all = await Promise.all((await this.libraries(scope)).map((l) => l.list()));
+    return all.flat().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async get(id: string): Promise<ResourceEntry> {
-    const r = (await this.read()).find((x) => x.id === id);
-    if (!r) throw new NotFoundException(`Resource not found: ${id}`);
+    return (await this.locate(id)).entry;
+  }
+
+  /** The usage of ONE library (`all` → the global one, as before). */
+  async usage(scope: ResourceScope = 'global'): Promise<LibraryUsage> {
+    const lib = scope === 'all' || scope === 'global' ? this.global : await this.library(scope);
+    return lib.usage();
+  }
+
+  /** A text note written in the dashboard / by the admin (stored as Markdown), into the global library or a project's. */
+  async createNote(m: ResourceMeta & { text: string; project?: string | null }): Promise<ResourceEntry> {
+    const lib = await this.library(m.project);
+    const r = await lib.createNote(m);
+    this.logger.log(`Resource note "${r.title}" (${r.size}B${r.project ? `, project ${r.project}` : ''})`);
     return r;
   }
 
-  async usage(): Promise<{ count: number; bytes: number; maxCount: number; maxBytes: number }> {
-    const items = await this.read();
-    return { count: items.length, bytes: items.reduce((n, r) => n + r.size, 0), maxCount: MAX_RESOURCES, maxBytes: MAX_TOTAL_BYTES };
-  }
-
-  private async room(extraBytes: number): Promise<void> {
-    const u = await this.usage();
-    if (u.count >= MAX_RESOURCES) throw new BadRequestException(`The library is full (${MAX_RESOURCES} resources) — delete something first.`);
-    if (u.bytes + extraBytes > MAX_TOTAL_BYTES) throw new PayloadTooLargeException(`The library would exceed ${MAX_TOTAL_BYTES / 1024 / 1024} MB — delete something first.`);
-  }
-
-  private meta(m: ResourceMeta, fallbackTitle: string): { title: string; description: string; tags: string[]; agents: string[] } {
-    const title = (m.title ?? fallbackTitle).trim();
-    const bad = validateMeta({ title, description: m.description });
-    if (bad) throw new BadRequestException(bad);
-    return {
-      title,
-      description: (m.description ?? '').trim(),
-      tags: cleanTags(m.tags),
-      agents: Array.isArray(m.agents) ? Array.from(new Set(m.agents.map((a) => String(a).trim()).filter(Boolean))).slice(0, 30) : [],
-    };
-  }
-
-  private newId(): string {
-    return `r${randomBytes(4).toString('hex')}`;
-  }
-
-  /** A text note written in the dashboard / by the admin (stored as Markdown). */
-  async createNote(m: ResourceMeta & { text: string }): Promise<ResourceEntry> {
-    const text = String(m.text ?? '');
-    if (!text.trim()) throw new BadRequestException('the note is empty.');
-    if (Buffer.byteLength(text) > MAX_TEXT_BYTES) throw new PayloadTooLargeException('the note is too long (max 1 MB).');
-    const meta = this.meta(m, '');
-    return this.locked(async () => {
-      await this.room(Buffer.byteLength(text));
-      const id = this.newId();
-      const file = `${id}-${safeFileName(`${meta.title}.md`)}`;
-      await mkdir(this.filesDir, { recursive: true });
-      await writeFile(join(this.filesDir, file), text);
-      const now = new Date().toISOString();
-      const entry: ResourceEntry = { id, ...meta, kind: 'text', file, originalName: `${meta.title}.md`, mime: 'text/markdown', size: Buffer.byteLength(text), source: m.source ?? 'note', createdAt: now, updatedAt: now };
-      await this.write([...(await this.read()), entry]);
-      this.logger.log(`Resource note "${meta.title}" (${entry.size}B)`);
-      return entry;
-    });
-  }
-
   /** A file uploaded as the raw request body. */
-  async upload(rawName: string, source: Readable, m: ResourceMeta = {}, declaredBytes?: number): Promise<ResourceEntry> {
-    const ext = extname(rawName).slice(1).toLowerCase();
-    const name = safeFileName(rawName);
-    const meta = this.meta(m, titleFromName(rawName));
-    if (declaredBytes !== undefined && declaredBytes > maxBytesFor(kindFor(ext))) throw new PayloadTooLargeException(`the file exceeds ${maxBytesFor(kindFor(ext)) / 1024 / 1024} MB`);
-    await this.room(declaredBytes ?? 0); // refuse a full library before a byte is written
-    const id = this.newId();
-    const file = `${id}-${name}`;
-    await mkdir(this.filesDir, { recursive: true });
-    const dest = join(this.filesDir, file);
-    let storedFileOnDisk: string | null = null; // the optimiser may have written a different file (PNG → JPG): it must go too when we give up
-    try {
-      // streamed to a hidden `.part` file and moved into place: a half-sent upload is never a resource
-      let size = await saveUpload(source, dest, { limit: maxBytesFor(kindFor(ext)), tooBig: (limit) => new PayloadTooLargeException(`the file exceeds ${limit / 1024 / 1024} MB`) });
-      if (size === 0) throw new BadRequestException('the file is empty.');
-      // library pictures: shrunk to what is needed (a PNG may become a JPEG — the stored name follows)
-      let storedFile = file;
-      let storedExt = ext;
-      if (kindFor(ext) === 'image') {
-        const r = await this.images.optimize(dest, RESOURCE_MAX_SIDE);
-        if (r.changed) {
-          size = r.size;
-          storedFile = basename(r.path);
-          storedFileOnDisk = r.path;
-          storedExt = extname(r.path).slice(1).toLowerCase();
-        }
-      }
-      return await this.locked(async () => {
-        await this.room(size);
-        const now = new Date().toISOString();
-        const entry: ResourceEntry = { id, ...meta, kind: kindFor(storedExt), file: storedFile, originalName: storedExt === ext ? (rawName.split(/[\\/]/).pop() ?? name) : `${(rawName.split(/[\\/]/).pop() ?? name).replace(/\.[^.]+$/, '')}.${storedExt}`, mime: mimeFor(storedExt), size, source: m.source ?? 'upload', createdAt: now, updatedAt: now };
-        await this.write([...(await this.read()), entry]);
-        this.logger.log(`Resource "${meta.title}" uploaded (${size}B, ${entry.kind})`);
-        return entry;
-      });
-    } catch (e) {
-      await rm(dest, { force: true }).catch(() => undefined);
-      if (storedFileOnDisk) await rm(storedFileOnDisk, { force: true }).catch(() => undefined);
-      throw e;
-    }
+  async upload(rawName: string, source: Readable, m: ResourceMeta & { project?: string | null } = {}, declaredBytes?: number): Promise<ResourceEntry> {
+    const lib = await this.library(m.project);
+    const r = await lib.upload(rawName, source, m, declaredBytes);
+    this.logger.log(`Resource "${r.title}" uploaded (${r.size}B, ${r.kind}${r.project ? `, project ${r.project}` : ''})`);
+    return r;
   }
 
-  /** Copy a file from disk into the library (starter material of a pack). Skips when a resource with the same title exists. */
-  async addFromPath(srcPath: string, m: ResourceMeta): Promise<ResourceEntry | null> {
-    const ext = extname(srcPath).slice(1).toLowerCase();
-    const s = await stat(srcPath);
-    const stem = safeFileName(srcPath).replace(/\.[^.]+$/, '');
-    const meta = this.meta(m, stem);
-    return this.locked(async () => {
-      if ((await this.read()).some((r) => r.title === meta.title && r.source === (m.source ?? 'upload'))) return null;
-      await this.room(s.size);
-      const id = this.newId();
-      const file = `${id}-${safeFileName(srcPath)}`;
-      await mkdir(this.filesDir, { recursive: true });
-      await copyFile(srcPath, join(this.filesDir, file));
-      const now = new Date().toISOString();
-      const entry: ResourceEntry = { id, ...meta, kind: kindFor(ext), file, originalName: srcPath.split(/[\\/]/).pop() ?? file, mime: mimeFor(ext), size: s.size, source: m.source ?? 'upload', createdAt: now, updatedAt: now };
-      await this.write([...(await this.read()), entry]);
-      return entry;
-    });
+  /** Copy a file from disk into a library (starter material of a pack). Null when a resource with the same title and source exists there. */
+  async addFromPath(srcPath: string, m: ResourceMeta, project?: string | null): Promise<ResourceEntry | null> {
+    return (await this.library(project)).addFromPath(srcPath, m);
   }
 
-  async update(id: string, patch: ResourceMeta & { text?: string }): Promise<ResourceEntry> {
-    return this.locked(async () => {
-      const items = await this.read();
-      const i = items.findIndex((x) => x.id === id);
-      if (i < 0) throw new NotFoundException(`Resource not found: ${id}`);
-      const cur = items[i]!;
-      const meta = this.meta({ title: patch.title ?? cur.title, description: patch.description ?? cur.description, tags: patch.tags ?? cur.tags, agents: patch.agents ?? cur.agents }, cur.title);
-      let size = cur.size;
-      if (patch.text !== undefined) {
-        if (cur.kind !== 'text') throw new BadRequestException('only text resources can be edited here.');
-        if (Buffer.byteLength(patch.text) > MAX_TEXT_BYTES) throw new PayloadTooLargeException('the text is too long (max 1 MB).');
-        if (!patch.text.trim()) throw new BadRequestException('the text is empty.');
-        await writeFile(this.pathOf(cur), patch.text);
-        size = Buffer.byteLength(patch.text);
-      }
-      items[i] = { ...cur, ...meta, size, updatedAt: new Date().toISOString() };
-      await this.write(items);
-      return items[i]!;
-    });
+  /** Metadata / text changes; `project` (a slug or null = global) moves the item to another library. */
+  async update(id: string, patch: ResourceMeta & { text?: string; project?: string | null }): Promise<ResourceEntry> {
+    const { lib, entry } = await this.locate(id);
+    const { project, ...rest } = patch;
+    let cur = Object.keys(rest).length ? await lib.update(id, rest) : entry;
+    if (project !== undefined && scopeOf(project) !== cur.project) cur = await this.move(lib, cur, scopeOf(project));
+    return cur;
+  }
+
+  private async move(from: ResourceLibrary, r: ResourceEntry, to: string | null): Promise<ResourceEntry> {
+    const target = await this.library(to);
+    if (target === from) return r;
+    const moved = await target.adopt(from, r);
+    await from.remove(r.id); // the file is already gone from there; only the entry is dropped
+    this.logger.log(`Resource "${r.title}" moved ${r.project ?? 'global'} → ${moved.project ?? 'global'}`);
+    return moved;
   }
 
   async remove(id: string): Promise<void> {
-    await this.locked(async () => {
-      const items = await this.read();
-      const r = items.find((x) => x.id === id);
-      if (!r) throw new NotFoundException(`Resource not found: ${id}`);
-      await rm(this.pathOf(r), { force: true }).catch(() => undefined);
-      await this.write(items.filter((x) => x.id !== id));
-    });
+    const { lib } = await this.locate(id);
+    await lib.remove(id);
   }
 
   /** Text of a text resource (for the editor). */
   async text(id: string): Promise<string> {
-    const r = await this.get(id);
-    if (r.kind !== 'text') throw new BadRequestException('not a text resource.');
-    return readFile(this.pathOf(r), 'utf8');
+    const { lib } = await this.locate(id);
+    return lib.text(id);
   }
 
-  /** The block for an agent's system prompt ('' when there is nothing for it). */
-  async promptIndex(agentName?: string): Promise<string> {
-    return promptBlock(await this.list(), (r) => this.pathOf(r), agentName);
+  /** The items a task of `project` sees, with the library each came from (for paths). */
+  private async taskView(project: string | null | undefined): Promise<{ items: ResourceEntry[]; pathOf: (r: ResourceEntry) => string }> {
+    const libs = await this.forTask(project);
+    const items = (await Promise.all(libs.map((l) => l.list()))).flat();
+    const byScope = new Map(libs.map((l) => [l.project, l]));
+    return { items, pathOf: (r) => (byScope.get(r.project) ?? this.global).pathOf(r) };
   }
 
-  /** `resources_search` tool answer. Scoped to what the calling agent may see. */
-  async searchReport(input: { query?: string; tag?: string }, agentName?: string): Promise<string> {
-    const mine = (await this.list()).filter((r) => appliesTo(r, agentName));
-    return searchReport(search(mine, input.query, input.tag), (r) => this.pathOf(r));
+  /** The block for an agent's system prompt ('' when there is nothing for it): the task's project library first, then the global one. */
+  async promptIndex(agentName?: string, project?: string | null): Promise<string> {
+    const { items, pathOf } = await this.taskView(project);
+    return promptBlock(items, pathOf, agentName);
+  }
+
+  /** `resources_search` tool answer. Scoped to what the calling agent may see: its project's library and the global one. */
+  async searchReport(input: { query?: string; tag?: string }, agentName?: string, project?: string | null): Promise<string> {
+    const { items, pathOf } = await this.taskView(project);
+    const mine = items.filter((r) => appliesTo(r, agentName));
+    return searchReport(search(mine, input.query, input.tag), pathOf);
+  }
+
+  // ---- a project's library as a whole (project deletion) ----
+
+  /** How many items a project's library holds (0 when it has none yet). */
+  async countOf(p: { slug: string; isDefault: boolean }): Promise<number> {
+    return (await this.forProject(p).read()).length;
+  }
+
+  /**
+   * The project is being deleted: `keep` moves every item into the global library (the files under `files/<slug>/`, the
+   * project's slug added as a tag so they stay findable), `delete` removes the library. The folder is gone afterwards either way.
+   */
+  async releaseProject(p: { slug: string; isDefault: boolean }, mode: 'keep' | 'delete'): Promise<{ moved: number; deleted: number }> {
+    if (p.isDefault) throw new BadRequestException('the default project cannot be deleted');
+    const lib = this.forProject(p);
+    const items = await lib.read();
+    let moved = 0;
+    let failed = 0;
+    if (mode === 'keep') {
+      for (const r of items) {
+        const tags = r.tags.includes(p.slug) || r.tags.length >= 12 ? r.tags : [...r.tags, p.slug];
+        try {
+          await this.global.adopt(lib, { ...r, tags }, p.slug);
+          moved++;
+        } catch (e) {
+          failed++;
+          this.logger.warn(`resource "${r.title}" of project "${p.slug}" could not be moved: ${(e as Error).message}`);
+        }
+      }
+    }
+    // a file that could not be moved stays where it is (the folder is kept) — nothing is lost silently
+    if (!failed) await rm(lib.root, { recursive: true, force: true });
+    this.projectLibs.delete(p.slug);
+    this.logger.log(`Library of project "${p.slug}": ${mode === 'keep' ? `${moved} item(s) moved to the global library${failed ? `, ${failed} left in place` : ''}` : `${items.length} item(s) deleted`}`);
+    return { moved, deleted: mode === 'keep' ? 0 : items.length };
   }
 }
