@@ -81,7 +81,6 @@ export function RepositoryCard({ project, onChanged }: { project: Project; onCha
     setBranch(r.branch ?? 'main');
     setSubdir(r.subdir ?? '');
     setMode(r.auth);
-    setTest((t) => t ?? r.lastTest ?? null);
   }, []);
 
   useEffect(() => {
@@ -297,7 +296,17 @@ export function RepositoryCard({ project, onChanged }: { project: Project; onCha
       <div className={styles.status} style={{ marginTop: 6 }}>
         {sync && <span className={sync.ok ? styles.ok : styles.fail}>{sync.ok ? '✓ ' : '✕ '}{sync.message}</span>}
       </div>
-      {test ? <TestChecklist result={test} at={test.at} /> : <Muted className={styles.note}>{hasUrl ? 'Not tested yet.' : 'No repository to test.'}</Muted>}
+      {test ? (
+        <TestChecklist result={test} at={test.at} />
+      ) : repo?.lastTest ? (
+        // After a reload the server only keeps the verdict and one line; the full checklist comes back with the next test.
+        <p className={`${styles.summary} ${repo.lastTest.ok ? styles.ok : styles.fail}`} data-testid="last-test">
+          Last test: {repo.lastTest.ok ? '✓' : '✕'} {repo.lastTest.summary || (repo.lastTest.ok ? 'ok' : 'failed')}
+          <Muted> · {relativeTime(repo.lastTest.at)}</Muted>
+        </p>
+      ) : (
+        <Muted className={styles.note}>{hasUrl ? 'Not tested yet.' : 'No repository to test.'}</Muted>
+      )}
       {error && <ErrorText>{error}</ErrorText>}
     </Card>
   );

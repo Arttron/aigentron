@@ -20,6 +20,7 @@ import {
   PROPOSE_SKILL_TOOL,
   PROPOSE_TASK_ACTION_TOOL,
   PROPOSE_TASK_TOOL,
+  CREATE_TASK_TOOL,
   PROPOSE_UNDO_TOOL,
   REQUEST_SECRET_TOOL,
   type ApprovalRequest,
@@ -68,6 +69,7 @@ export function serializeApproval(row: ApprovalRow): ApprovalRequest {
  */
 /** Tools whose requests are pre-validated before any approval is opened. */
 const ADMIN_PROPOSAL_TOOLS = new Set<string>([
+  CREATE_TASK_TOOL,
   PROPOSE_TASK_ACTION_TOOL,
   PROPOSE_BATCH_TOOL,
   PROPOSE_TASK_TOOL,

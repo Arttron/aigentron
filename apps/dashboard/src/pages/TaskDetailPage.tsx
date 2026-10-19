@@ -204,6 +204,18 @@ function TaskDetailView({ id }: { id: string }) {
   };
 
   const resumable = ['blocked', 'stalled', 'failed'].includes(task?.status ?? '');
+  const promote = async () => {
+    if (!window.confirm('Move this subtask out of its lead to the top level? It keeps its history and project, gets its own subtasks and review, and links back to the lead.')) return;
+    setBusy(true);
+    try {
+      await api.promoteTask(id);
+      refreshTask();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const continueTask = async () => {
     setBusy(true);
     try {
@@ -307,6 +319,7 @@ function TaskDetailView({ id }: { id: string }) {
               )}
               {resumable && <Button onClick={continueTask} disabled={busy}>▶ Continue</Button>}
               {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && <Button onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())}>✅ Mark as done</Button>}
+              {task.parentId && terminal && <Button onClick={promote} disabled={busy}>⬆ To top level</Button>}
               {terminal && <Button onClick={() => setDiscussing(true)}>💬 Discuss</Button>}
               {!terminal && (
                 <Button variant="red" onClick={cancel} disabled={busy}>
@@ -410,6 +423,11 @@ function TaskDetailView({ id }: { id: string }) {
                 {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && (
                   <Button variant={task.status === 'review' ? 'primary' : undefined} onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())} disabled={busy} title="Accept the result — the task becomes “done”">
                     ✅ Mark as done
+                  </Button>
+                )}
+                {task.parentId && terminal && (
+                  <Button onClick={promote} disabled={busy} title="Move this subtask out of its lead: it becomes a top-level task of the same project">
+                    ⬆ To top level
                   </Button>
                 )}
                 {terminal && (

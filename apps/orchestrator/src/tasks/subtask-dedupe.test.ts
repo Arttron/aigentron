@@ -19,3 +19,17 @@ describe('isSameWork', () => {
     expect(REUSABLE_STATUSES).not.toContain('cancelled');
   });
 });
+
+import { subtaskCapError } from './subtask-dedupe';
+
+describe('subtaskCapError', () => {
+  const many = (status: string, n: number) => Array.from({ length: n }, () => status);
+  it('counts only open subtasks towards the cap', () => {
+    expect(subtaskCapError([...many('done', 20), ...many('cancelled', 4), ...many('failed', 4), 'running'], 25)).toBeNull();
+    expect(subtaskCapError([...many('running', 20), ...many('review', 5)], 25)).toContain('25 open subtasks');
+  });
+  it('still stops an endless create → finish loop with a total ceiling', () => {
+    expect(subtaskCapError(many('done', 99), 25)).toBeNull();
+    expect(subtaskCapError(many('done', 100), 25)).toContain('in total');
+  });
+});

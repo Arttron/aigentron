@@ -21,6 +21,7 @@ export type InternalToolHandlers = Pick<
   | 'onReportStatus'
   | 'onHeartbeat'
   | 'onCreateSubtask'
+  | 'onCreateTask'
   | 'onCheckSubtasks'
   | 'onCompleteSubtask'
   | 'onScheduleCheck'
@@ -81,6 +82,24 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         params.onHeartbeat?.({ progress: typeof args.progress === 'string' ? args.progress : undefined });
         return 'Heartbeat noted.';
       },
+    });
+  }
+
+  if (params.onCreateTask) {
+    specs.push({
+      name: 'create_task',
+      description:
+        "Start a NEW top-level task in a project — independent work for someone else, NOT a part of this task (for parts of this task use create_subtask: it stays in your project and is tracked under you). `project`: the project's slug (e.g. \"web\"; \"default\" for the default one); `prompt`: the full instruction, a complete brief in terse English; `title` (optional); `agent` (optional: the agent that should run it — otherwise the project's default agent); `reason`: ONE plain line on why this work is moved out (the person reads it first on the approval card); `related`: ids of the tasks it grows out of (they are linked, so their summaries fold into the new task's context). Write the brief so it stands on its own — the new task does not see this conversation. A person approves each one on a card, and if an equivalent task is already open in that project you get it back instead of a duplicate. Check what exists before you create: do not start the same work twice.",
+      shape: { project: z.string(), prompt: z.string(), title: z.string().optional(), agent: z.string().optional(), reason: z.string().optional(), related: z.array(z.string()).optional() },
+      handler: (args) =>
+        params.onCreateTask!({
+          project: String(args.project ?? '').trim(),
+          prompt: String(args.prompt ?? ''),
+          title: typeof args.title === 'string' ? args.title : undefined,
+          agent: typeof args.agent === 'string' && args.agent.trim() ? args.agent.trim() : undefined,
+          reason: typeof args.reason === 'string' ? args.reason : undefined,
+          related: Array.isArray(args.related) ? args.related.map(String) : undefined,
+        }),
     });
   }
 
@@ -361,7 +380,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_agent',
         description:
-          'Propose creating or replacing an agent. `name`: lowercase letters/digits/-/_. `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, skills, allowedTools, disallowedTools, mcp) followed by the system prompt. A human reviews the full content and must approve before anything is written; this call blocks until they decide. You cannot overwrite built-in agents.',
+          'Propose creating or replacing an agent. `name`: lowercase letters/digits/-/_. `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, skills, allowedTools, disallowedTools, mcp, and `createTasks: true` to let a lead agent start new tasks in projects with the create_task tool — each one still approved by a person) followed by the system prompt. A human reviews the full content and must approve before anything is written; this call blocks until they decide. You cannot overwrite built-in agents.',
         shape: { name: z.string(), content: z.string() },
         handler: async (args) =>
           (await admin.proposeAgent({ name: String(args.name), content: String(args.content) })).message,

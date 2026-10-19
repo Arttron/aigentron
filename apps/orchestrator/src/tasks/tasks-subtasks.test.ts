@@ -51,10 +51,14 @@ describe('an agent does not multiply subtasks', () => {
     await svc.createSubtask('P', { prompt: 'Compare prices of the DS18B20 sensor at five suppliers and make a table', agentName: 'researcher' });
     expect(rows.length).toBe(3);
   });
-  it('there is a cap per task', async () => {
-    const rows: Row[] = [P, ...Array.from({ length: 25 }, (_, i) => sub({ id: `s${i}`, prompt: `unrelated unit number ${i} of the work`, status: 'done', agentName: 'x' }))];
-    const { svc } = make(rows);
-    await expect(svc.createSubtask('P', { prompt: 'one more thing entirely different' }, undefined, { fromAgent: true })).rejects.toThrow(/limit 25/);
+  it('there is a cap per task, counted over the open subtasks', async () => {
+    const open: Row[] = [P, ...Array.from({ length: 25 }, (_, i) => sub({ id: `s${i}`, prompt: `unrelated unit number ${i} of the work`, status: 'running', agentName: 'x' }))];
+    await expect(make(open).svc.createSubtask('P', { prompt: 'one more thing entirely different' }, undefined, { fromAgent: true })).rejects.toThrow(/25 open subtasks/);
+  });
+  it('finished subtasks do not block a lead from creating a new one', async () => {
+    const over: Row[] = [P, ...Array.from({ length: 30 }, (_, i) => sub({ id: `s${i}`, prompt: `unrelated unit number ${i} of the work`, status: i % 2 ? 'done' : 'cancelled', agentName: 'x' }))];
+    const { svc } = make(over);
+    await expect(svc.createSubtask('P', { prompt: 'one more thing entirely different' }, undefined, { fromAgent: true })).resolves.not.toThrow();
   });
 });
 
@@ -68,5 +72,45 @@ describe('a lead closes its own subtasks', () => {
     expect(await svc.completeSubtask('P', 'd')).toContain('already done');
     expect(await svc.completeSubtask('P', 'x')).toContain('No subtask');
     expect(statuses).toEqual(['a:done']);
+  });
+});
+
+describe('a subtask moves to the top level', () => {
+  function makePromote(rows: Row[]) {
+    const { svc } = make(rows);
+    const calls: string[] = [];
+    Object.assign(svc as unknown as Record<string, unknown>, {
+      getLite: async (id: string) => rows.find((r) => r.id === id),
+      linkReferences: async (from: string, to: string[]) => void calls.push(`link:${from}->${to.join(',')}`),
+      wakeIfSubtasksDone: async (id: string) => void calls.push(`wake:${id}`),
+      bus: { publish: () => undefined },
+      // a full row: serializeTask reads the dates
+      get: async (id: string) => ({ ...rows.find((r) => r.id === id), createdAt: new Date(0), updatedAt: new Date(0), linksOut: [], subtasks: [] }),
+    });
+    const prismaTask = (svc as unknown as { prisma: { task: { findUnique: (a: { where: { id: string } }) => Promise<unknown> } } }).prisma.task;
+    prismaTask.findUnique = async ({ where }) => ({ ...rows.find((r) => r.id === where.id), createdAt: new Date(0), updatedAt: new Date(0) });
+    (svc as unknown as { prisma: { task: { update: (a: { where: { id: string }; data: { parentId: null } }) => Promise<unknown> } } }).prisma.task.update = async ({ where }) => {
+      const r = rows.find((x) => x.id === where.id);
+      if (r) r.parentId = null;
+      calls.push(`detach:${where.id}`);
+      return {};
+    };
+    return { svc, calls };
+  }
+
+  it('detaches a settled subtask, keeps a reference to the lead and re-checks the lead', async () => {
+    const rows = [P, sub({ id: 's1', status: 'blocked' })];
+    const { svc, calls } = makePromote(rows);
+    await svc.promoteToRoot('s1');
+    expect(rows[1]!.parentId).toBeNull();
+    expect(calls).toEqual(['detach:s1', 'link:s1->P', 'wake:P']);
+  });
+
+  it('refuses a running subtask and a task that is already top-level', async () => {
+    const rows = [P, sub({ id: 's1', status: 'running' })];
+    const { svc } = makePromote(rows);
+    await expect(svc.promoteToRoot('s1')).rejects.toThrow(/still running/);
+    await expect(svc.promoteToRoot('P')).rejects.toThrow(/already a top-level/);
+    expect(rows[1]!.parentId).toBe('P');
   });
 });

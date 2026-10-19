@@ -69,6 +69,14 @@ export class TasksController {
     return this.tasks.followUp(id, dto.prompt ?? '', dto.attachments, dto.references);
   }
 
+  /** Move a (settled) subtask out of its lead to the top level of the same project. */
+  @Post(':id/promote')
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
+  promote(@Param('id') id: string) {
+    return this.tasks.promoteToRoot(id);
+  }
+
   /** The task's pending-follow-up queue (messages held while it's still running). */
   @Get(':id/pending-follow-ups')
   listPendingFollowUps(@Param('id') id: string) {

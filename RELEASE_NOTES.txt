@@ -1,9 +1,15 @@
-Aigentron v0.1.71
+Aigentron v0.1.72
 
-For people who are not programmers: a safer "Mark as done" for tasks that have subtasks.
+For people who are not programmers: the project page no longer crashes, and the "agent splits work out" tools.
+
+Fixed
+- The project page crashed with "Unexpected Application Error" after you had tested the repository connection and reloaded the page. It now shows the last test result in one line (the full checklist returns with the next test).
+- A lead agent could no longer create subtasks once it had 25 in total, even when they were all finished. Now only the open ones count (25 by default; 100 in total as a safety ceiling).
 
 New
-- When you accept a task that still has unfinished subtasks, the dashboard now asks what to do with them: "Cancel them and mark done", "Mark done, leave them" or "Back". Accepting a task never accepts its subtasks by itself.
-- In Telegram, /done now tells you how many subtasks are still open.
+- Moving work out to its own task. A finished subtask that outgrew its lead can be moved to the top level with "⬆ To top level" on its page; it keeps its history and project and links back to the lead.
+- Agents can start new tasks in a project. An agent that has the skill "task-splitting" (or the line `createTasks: true` in its file) gets the tool create_task: each task it starts is approved by you on a card with a one-line reason, and a duplicate of an open task is not created. The skill explains when to split work out (3+ subtasks on one theme, or a subtask that needs its own breakdown).
+- Accepting a task that still has open subtasks asks what to do with them (cancel them and mark done / mark done, leave them).
+- The admin assistant now answers from its references only and says when something is not documented; it has a page on how agents create work.
 
 Update note: no database changes.

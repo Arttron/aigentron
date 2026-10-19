@@ -93,3 +93,10 @@ describe('apiMessage', () => {
     expect(apiMessage(new Error('x'))).toBe('x');
   });
 });
+
+describe('testSummary — a stored last test has no checklist', () => {
+  it('does not throw when the steps are missing', async () => {
+    const { testSummary } = await import('./projects');
+    expect(testSummary({ ok: false, durationMs: 1200 } as never)).toContain('Connection failed');
+  });
+});

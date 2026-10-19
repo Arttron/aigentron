@@ -124,6 +124,11 @@ export interface RunAgentParams {
    */
   onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{ id: string; title: string; /** an equivalent open subtask already existed: nothing new was created */ reused?: boolean }>;
   /**
+   * When set (the agent's file says `createTasks: true`), the agent gets a `create_task` tool: start a NEW top-level task in a project.
+   * Resolves with a message for the model (created / reused / refused).
+   */
+  onCreateTask?: (input: { project: string; prompt: string; title?: string; agent?: string; reason?: string; related?: string[] }) => Promise<string>;
+  /**
    * When set, the agent gets a `check_subtasks` tool that returns the current
    * status + latest result of this task's subtasks (so a lead can see progress).
    */

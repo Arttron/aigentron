@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCESS_STATUS_TOOL, classifyToolCall, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
+import { ACCESS_STATUS_TOOL, CREATE_TASK_TOOL, classifyToolCall, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
 
 const bash = (command: string) => classifyToolCall('Bash', { command });
 
@@ -117,6 +117,7 @@ describe('classifyToolCall — internal tools', () => {
   it.each([
     [PROPOSE_SETTINGS_TOOL, { changes: { concurrency: 2 } }],
     [PROPOSE_TASK_TOOL, { agentName: 'dev', prompt: 'do it' }],
+    [CREATE_TASK_TOOL, { project: 'web', prompt: 'build the landing page for the quiz funnel' }],
     [PROPOSE_BATCH_TOOL, { items: [{ kind: 'task_action' }] }],
     [PROPOSE_ALLOWED_DOMAINS_TOOL, { action: 'add', domains: ['dev.example.com'] }],
     [PROPOSE_CLOUDFLARE_ACCESS_TOOL, { enabled: true, teamDomain: 'acme.cloudflareaccess.com' }],

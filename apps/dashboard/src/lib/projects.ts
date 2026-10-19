@@ -118,9 +118,10 @@ export function formatDuration(ms: number): string {
 
 /** The summary line under the checklist. */
 export function testSummary(r: RepoTestResult): string {
-  const failed = r.steps.filter((s) => s.ok === false);
-  const done = r.steps.filter((s) => s.ok === true).length;
-  const head = r.ok ? `Connection works (${done} of ${r.steps.length} checks passed)` : `Connection failed at “${failed[0]?.label ?? 'a check'}”`;
+  const steps = Array.isArray(r.steps) ? r.steps : [];
+  const failed = steps.filter((s) => s.ok === false);
+  const done = steps.filter((s) => s.ok === true).length;
+  const head = r.ok ? `Connection works (${done} of ${steps.length} checks passed)` : `Connection failed at “${failed[0]?.label ?? 'a check'}”`;
   const branch = r.ok && r.defaultBranch ? ` · default branch ${r.defaultBranch}` : '';
   return `${head}${branch} · ${formatDuration(r.durationMs)}`;
 }

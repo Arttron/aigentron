@@ -703,6 +703,8 @@ export class RealAgentExecutor extends AgentExecutor {
       onReportStatus,
       onHeartbeat,
       onCreateSubtask: ctx.onCreateSubtask,
+      // A LEAD (a top-level task — the one that may create subtasks) whose file says `createTasks: true` may start new tasks in a project (each approved by a person).
+      onCreateTask: (opts.agentDef?.createTasks || opts.agentDef?.skills?.includes('task-splitting')) && ctx.onCreateSubtask && !ctx.discussion ? (input) => this.platformAdmin.createTaskForLead(ctx.taskId, session.id, input) : undefined,
       onCheckSubtasks: ctx.onCheckSubtasks,
       onCompleteSubtask: ctx.onCompleteSubtask,
       onScheduleCheck: ctx.onScheduleCheck,

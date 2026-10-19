@@ -23,3 +23,20 @@ export function isSameWork(a: string, b: string): boolean {
 
 /** Subtask statuses a repeat request is answered with instead of a new subtask (a failed / blocked / cancelled one may be retried). */
 export const REUSABLE_STATUSES = ['queued', 'running', 'needs_approval', 'review', 'done'] as const;
+
+/** Subtasks that are over (finished, cancelled or failed) do not count towards the cap — only the ones still open do. */
+export const SUBTASK_OVER: readonly string[] = ['done', 'cancelled', 'failed'];
+/** A hard ceiling on ALL subtasks ever created under one task (a multiple of the open cap), so an agent cannot loop create → finish forever. */
+export const TOTAL_SUBTASK_FACTOR = 4;
+
+/** Why an agent may not create another subtask under a task (null = it may). */
+export function subtaskCapError(statuses: readonly string[], limit: number): string | null {
+  const open = statuses.filter((s) => !SUBTASK_OVER.includes(s)).length;
+  if (open >= limit) {
+    return `This task already has ${open} open subtasks (limit ${limit}). Reuse or finish the existing ones (check_subtasks / complete_subtask) instead of splitting further.`;
+  }
+  if (statuses.length >= limit * TOTAL_SUBTASK_FACTOR) {
+    return `This task has had ${statuses.length} subtasks in total (ceiling ${limit * TOTAL_SUBTASK_FACTOR}). Ask the person to continue the work in a new task.`;
+  }
+  return null;
+}

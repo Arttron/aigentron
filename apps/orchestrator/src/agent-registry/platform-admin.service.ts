@@ -17,6 +17,7 @@ import {
   PROPOSE_PACK_INSTALL_TOOL,
   PROPOSE_SETTINGS_TOOL,
   PROPOSE_TASK_TOOL,
+  CREATE_TASK_TOOL,
   PROPOSE_UNDO_TOOL,
   PROPOSE_SKILL_TOOL,
   PROPOSE_TASK_ACTION_TOOL,
@@ -30,6 +31,7 @@ import { SettingsService } from '../settings/settings.service';
 import { MaintenanceService } from '../maintenance/maintenance.service';
 import { DiskMonitorService } from '../maintenance/disk-monitor.service';
 import { StatsService } from '../stats/stats.service';
+import { isSameWork } from '../tasks/subtask-dedupe';
 import { AdminAuditService, type AuditEntry } from './admin-audit.service';
 import { AdminContextService } from './admin-context.service';
 import { parsePage } from './admin-context-core';
@@ -211,6 +213,10 @@ export class PlatformAdminService {
     }
     if (toolName === PROPOSE_BATCH_TOOL) {
       return this.validateBatch(toolInput.items, currentTaskId, str(toolInput.reason));
+    }
+    if (toolName === CREATE_TASK_TOOL) {
+      const r = await this.resolveCreateTask({ project: str(toolInput.project), prompt: str(toolInput.prompt), title: str(toolInput.title) || undefined, agent: str(toolInput.agent) || undefined });
+      return r.ok ? null : r.message;
     }
     if (toolName === PROPOSE_TASK_TOOL) {
       const agent = str(toolInput.agentName).trim();
@@ -1221,6 +1227,69 @@ No project with that slug.`;
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_task', summary: `Started ${asSub ? 'subtask' : 'task'} ${task.id} for agent "${input.agentName}" — ${(input.title ?? input.prompt).replace(/\s+/g, ' ').slice(0, 70)}` });
     this.logger.log(`Admin started task ${task.id} for agent ${input.agentName}`);
     return { ok: true, message: `${asSub ? 'Subtask' : 'Task'} ${task.id} started for agent "${input.agentName}"${asSub ? ' (nested under this conversation; you are told when it finishes)' : ''}. Check on it later with task_diagnose; the user can also open it in the dashboard.` };
+  }
+
+  /**
+   * `create_task` of a lead agent that is allowed to (`createTasks: true` in its file): a NEW top-level task in a project. Checked in
+   * this order: a real, live project; a real agent; a task for the same work already open there is returned instead (no card, no
+   * duplicate); a person approves on a card; then it is created. Returns the sentence the model reads.
+   */
+  async createTaskForLead(currentTaskId: string, sessionId: string, input: { project: string; prompt: string; title?: string; agent?: string; reason?: string; related?: string[] }): Promise<string> {
+    try {
+      const r = await this.resolveCreateTask(input);
+      if (!r.ok) return r.message;
+      const { project, agentName, prompt } = r;
+      const slug = project.slug;
+      // The same work, in the same project, already waiting / running / ready: hand that back instead of making a duplicate. An accepted
+      // (done) one does not block starting the work again later. Without an explicit agent any agent counts (the default one is stored).
+      const open = await this.prisma.task.findMany({
+        where: { projectId: project.id, parentId: null, status: { in: ['queued', 'running', 'needs_approval', 'review'] } },
+        select: { id: true, status: true, prompt: true, agentName: true },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      });
+      const same = open.find((t) => (!agentName || t.agentName === agentName) && isSameWork(t.prompt, prompt));
+      if (same) return `NOT created: an equivalent task is already open in "${slug}" (${same.id}, ${same.status}). Wait for it or build on it instead of starting a duplicate.`;
+
+      const denied = await this.proposals.requireApproval(
+        currentTaskId,
+        sessionId,
+        CREATE_TASK_TOOL,
+        { project: slug, prompt: input.prompt, title: input.title, agent: input.agent, reason: input.reason },
+        (i) => String(i.project ?? '').trim() === slug && i.prompt === input.prompt,
+      );
+      if (denied) return denied.message;
+      const task = await this.tasks.create({ prompt, title: input.title, agentName, project: slug, autostart: true } as never);
+      // Where the work grew out of: linked, so those tasks' summaries fold into the new task's context.
+      const related = [...new Set((input.related ?? []).map((r) => String(r).trim()).filter(Boolean))].slice(0, 10);
+      if (related.length) await this.tasks.linkReferences(task.id, related).catch(() => undefined);
+      await this.audit.record({ taskId: currentTaskId, tool: 'create_task', summary: `Started task ${task.id} in project "${slug}"${agentName ? ` for agent "${agentName}"` : ''} — ${(input.title ?? prompt).replace(/\s+/g, ' ').slice(0, 70)}` });
+      this.logger.log(`Task ${currentTaskId} started task ${task.id} in project ${slug}`);
+      return `Task ${task.id} started in project "${slug}"${agentName ? ` for agent "${agentName}"` : ' (the project default agent)'}. It runs on its own — it is not a subtask of yours, so check_subtasks will not show it; the person can follow it in the dashboard.`;
+    } catch (err) {
+      return `Refused: ${(err as Error).message}`;
+    }
+  }
+
+  /** What `create_task` may start: a live project, an existing agent, a real brief. Shared by the pre-approval check and the handler. */
+  private async resolveCreateTask(input: { project: string; prompt: string; title?: string; agent?: string }): Promise<
+    { ok: true; project: { id: string; slug: string }; agentName: string | undefined; prompt: string } | { ok: false; message: string }
+  > {
+    const slug = String(input.project ?? '').trim();
+    const prompt = String(input.prompt ?? '').trim();
+    if (!slug) return { ok: false, message: 'Refused: give the project slug (e.g. "web").' };
+    if (prompt.length < 20 || prompt.length > 8000) return { ok: false, message: 'Refused: the prompt must be a complete brief (20–8000 characters: what to do, what is done when it is done).' };
+    if ((input.title ?? '').length > 200) return { ok: false, message: 'Refused: the title is too long (max 200).' };
+    const project = await this.prisma.project.findUnique({ where: { slug }, select: { id: true, slug: true, archivedAt: true } });
+    if (!project) return { ok: false, message: `Refused: no project "${slug}".` };
+    if (project.archivedAt) return { ok: false, message: `Refused: project "${slug}" is archived.` };
+    let agentName: string | undefined;
+    if (input.agent?.trim()) {
+      const found = await this.agents.get(input.agent.trim()).catch(() => null);
+      if (!found) return { ok: false, message: `Refused: no agent "${input.agent.trim()}".` };
+      agentName = found.name;
+    }
+    return { ok: true, project, agentName, prompt };
   }
 
   /** All-or-nothing validation of a batch BEFORE any card is shown. Later items may use agents created by earlier ones. */

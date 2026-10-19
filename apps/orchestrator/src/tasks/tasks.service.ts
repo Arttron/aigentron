@@ -14,7 +14,7 @@ import { TitlesService } from '../titles/titles.service';
 import { fallbackTitle, isWeakPrompt } from '../titles/title-core';
 import { TASK_TYPES, isTaskType, typeWhere } from './task-types';
 import { isDoneMessage } from './done-intent';
-import { REUSABLE_STATUSES, isSameWork } from './subtask-dedupe';
+import { REUSABLE_STATUSES, SUBTASK_OVER, isSameWork, subtaskCapError } from './subtask-dedupe';
 import { STATUS_FILTERS, isStatusFilter, statusesOf } from './task-status-filter';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { AttachmentsService } from '../attachments/attachments.service';
@@ -120,12 +120,10 @@ export class TasksService {
    * The person says the task is finished (button, `/done`, or "done" in a message): `done`. Only a person does this for a top-level task —
    * agents' runs end in `review`. Subtasks are finished by their lead, not here.
    */
-  /** Subtask statuses that are over (nothing left to run or accept). */
-  private static readonly SUBTASK_OVER: readonly string[] = ['done', 'cancelled', 'failed'];
-
+  
   /** How many subtasks of a task are not over yet. */
   openSubtaskCount(id: string): Promise<number> {
-    return this.prisma.task.count({ where: { parentId: id, status: { notIn: TasksService.SUBTASK_OVER as never } } });
+    return this.prisma.task.count({ where: { parentId: id, status: { notIn: SUBTASK_OVER as never } } });
   }
 
   async markDone(id: string, opts: { cancelOpenSubtasks?: boolean } = {}): Promise<Task> {
@@ -140,7 +138,7 @@ export class TasksService {
     await this.queue.removeForTask(id).catch((err) => this.logger.warn(`could not drop queued jobs of ${id}: ${(err as Error).message}`));
     // Subtasks are left alone unless the person chose to cancel the open ones (accepting a lead does not accept its subtasks).
     if (opts.cancelOpenSubtasks) {
-      const open = await this.prisma.task.findMany({ where: { parentId: id, status: { notIn: TasksService.SUBTASK_OVER as never } }, select: { id: true } });
+      const open = await this.prisma.task.findMany({ where: { parentId: id, status: { notIn: SUBTASK_OVER as never } }, select: { id: true } });
       for (const s of open) await this.cancel(s.id).catch((err) => this.logger.warn(`could not cancel subtask ${s.id}: ${(err as Error).message}`));
       if (open.length) this.logger.log(`Task ${id}: cancelled ${open.length} open subtask(s) on accept`);
     }
@@ -262,9 +260,8 @@ export class TasksService {
     if (opts.fromAgent) {
       const existing = await this.prisma.task.findMany({ where: { parentId }, select: { id: true, title: true, prompt: true, status: true, agentName: true } });
       const limit = Math.max(1, parseInt(process.env.SUBTASK_LIMIT ?? '25', 10) || 25);
-      if (existing.length >= limit) {
-        throw new ConflictException(`This task already has ${existing.length} subtasks (limit ${limit}). Reuse or finish the existing ones (check_subtasks / complete_subtask) instead of splitting further.`);
-      }
+      const capError = subtaskCapError(existing.map((e) => e.status), limit);
+      if (capError) throw new ConflictException(capError);
       const wanted = input.agentName ? await this.resolveAgentName(input.agentName).catch(() => input.agentName) : null;
       const same = existing.find((e) => (REUSABLE_STATUSES as readonly string[]).includes(e.status) && (e.agentName ?? null) === (wanted ?? null) && isSameWork(e.prompt, input.prompt));
       if (same) {
@@ -381,6 +378,30 @@ export class TasksService {
         `resumes, or adjust the plan. If you can't decide either, report yourself blocked with the question.`,
     );
     this.logger.log(`Task ${taskId} needs input — escalated to lead ${task.parentId}`);
+  }
+
+  /**
+   * Take a subtask out of its lead and make it a top-level task of the same project (it grew too big for a part: it now gets its own
+   * subtasks, review and accept). Its history, files and agent stay; a reference to the former lead keeps the context. Only a settled
+   * subtask can move — a running one is settled by the rules of a subtask (it ends `done`, not "ready — confirm").
+   */
+  async promoteToRoot(id: string): Promise<Task> {
+    const task = await this.getLite(id);
+    if (!task.parentId) throw new ConflictException('This task is already a top-level task.');
+    if (!isTerminalStatus(task.status as TaskStatus)) {
+      throw new ConflictException(`The subtask is still ${task.status} — let it finish (or cancel it) before moving it to the top level.`);
+    }
+    const parentId = task.parentId;
+    await this.prisma.task.update({ where: { id }, data: { parentId: null } });
+    await this.linkReferences(id, [parentId]);
+    this.logger.log(`Subtask ${id} moved out of ${parentId} to the top level`);
+    // The lead may have been waiting only for this one.
+    await this.wakeIfSubtasksDone(parentId).catch((err) => this.logger.warn(`could not re-check the lead ${parentId}: ${(err as Error).message}`));
+    const fresh = serializeTask(await this.get(id));
+    this.bus.publish({ type: 'task-upserted', payload: { task: fresh } });
+    const parent = await this.prisma.task.findUnique({ where: { id: parentId } });
+    if (parent) this.bus.publish({ type: 'task-upserted', payload: { task: serializeTask(parent) } });
+    return fresh;
   }
 
   private async wakeIfSubtasksDone(parentId: string): Promise<void> {

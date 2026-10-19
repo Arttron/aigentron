@@ -544,7 +544,8 @@ export interface RepoInfo {
   sshPublicKey: string | null;
   sshFingerprint: string | null;
   hostKeyTrusted: boolean | null;
-  lastTest: (RepoTestResult & { at?: string }) | null;
+  /** The last test as the server keeps it: the verdict and one line — not the full checklist. */
+  lastTest: { at: string; ok: boolean; summary: string; durationMs: number } | null;
 }
 
 /** Credentials are sent once and never read back. */
@@ -620,6 +621,7 @@ export const api = {
 
   getTask: (id: string) => request<TaskDetail>('GET', `/tasks/${id}`),
   transcript: (id: string) => request<TranscriptEvent[]>('GET', `/tasks/${id}/transcript`),
+  promoteTask: (id: string) => request<unknown>('POST', `/tasks/${e(id)}/promote`),
   markTaskDone: (id: string, cancelOpenSubtasks = false) => request<unknown>('POST', `/tasks/${e(id)}/done`, { body: { cancelOpenSubtasks } }),
   startTask: (id: string, attachments?: string[]) => request<Task>('POST', `/tasks/${e(id)}/start`, { body: { attachments } }),
 

@@ -26,6 +26,11 @@ export const HEARTBEAT_TOOL = `${INTERNAL_TOOL_PREFIX}heartbeat`;
 export const CREATE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}create_subtask`;
 /** Lead-only: check the status + latest result of this task's subtasks. */
 /** A lead marks one of ITS subtasks done (accepts a finished / blocked / failed one as it is). */
+/**
+ * A lead agent (its file says `createTasks: true`) starts a task in ANOTHER or the same project (not a subtask of this one). Gated
+ * like propose_task: a person approves each one on a card, and an equivalent open task is reused instead of duplicated.
+ */
+export const CREATE_TASK_TOOL = `${INTERNAL_TOOL_PREFIX}create_task`;
 export const COMPLETE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}complete_subtask`;
 export const CHECK_SUBTASKS_TOOL = `${INTERNAL_TOOL_PREFIX}check_subtasks`;
 /** Sentinel toolName for a "run out of steps — continue?" approval (not a real tool). */
@@ -444,6 +449,16 @@ export function classifyToolCall(
       dangerous: true,
       summary: `propose_settings ${keys.join(',') || '(none)'} #${shortHash(JSON.stringify(ch))}`,
       reason: `admin agent proposing to change platform settings: ${show}${typeof toolInput.reason === 'string' && toolInput.reason ? ` — ${toolInput.reason.slice(0, 160)}` : ''}`,
+    };
+  }
+  if (name === CREATE_TASK_TOOL.toLowerCase()) {
+    const project = typeof toolInput.project === 'string' ? toolInput.project : '?';
+    const agent = typeof toolInput.agent === 'string' && toolInput.agent ? toolInput.agent : 'the project default';
+    const prompt = typeof toolInput.prompt === 'string' ? toolInput.prompt : '';
+    return {
+      dangerous: true,
+      summary: `create_task [${project}] → ${agent} #${shortHash(`${project}\n${agent}\n${prompt}`)}`,
+      reason: `agent proposing to START a new task in project "${project}" for ${agent} (runs immediately, uses that agent's provider)${typeof toolInput.reason === 'string' && toolInput.reason ? ` — why: ${toolInput.reason.slice(0, 200)}` : ''}: ${prompt.replace(/\s+/g, ' ').slice(0, 160)}`,
     };
   }
   if (name === PROPOSE_TASK_TOOL.toLowerCase()) {

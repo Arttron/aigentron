@@ -25,6 +25,8 @@ export interface AgentDef {
    * publish step or required status report, and each reply settles the task as done.
    */
   mode?: 'chat';
+  /** `createTasks: true` in the file: the agent may start NEW top-level tasks in a project (the `create_task` tool, each one approved by a person). */
+  createTasks?: boolean;
   /** The agent's system-prompt body. */
   instructions: string;
 }
@@ -123,6 +125,7 @@ export class AgentRegistryService {
       disallowedTools?: string[];
       mcp?: string[];
       mode?: 'chat';
+      createTasks?: boolean;
       instructions: string;
     },
   ): Promise<AgentDef> {
@@ -140,10 +143,11 @@ export class AgentRegistryService {
         model: def.model,
       };
     }
-    // `mode` isn't editable in the UI/API payloads — keep what the file already has.
-    if (def.mode === undefined) {
+    // `mode` and `createTasks` aren't editable in the UI/API payloads — keep what the file already has.
+    if (def.mode === undefined || def.createTasks === undefined) {
       const prior = await this.get(name).catch(() => null);
-      if (prior?.mode) def = { ...def, mode: prior.mode };
+      if (def.mode === undefined && prior?.mode) def = { ...def, mode: prior.mode };
+      if (def.createTasks === undefined && prior?.createTasks) def = { ...def, createTasks: true };
     }
     await mkdir(this.dir, { recursive: true });
     await writeFile(join(this.dir, `${name}.md`), serializeAgent(def));
@@ -205,6 +209,7 @@ export function parseAgentMarkdown(raw: string, fallbackName: string): AgentDef 
     disallowedTools: csv(meta.disallowedTools),
     mcp: csv(meta.mcp),
     mode: meta.mode === 'chat' ? 'chat' : undefined,
+    createTasks: /^(true|yes|on|1)$/i.test(String(meta.createTasks ?? '').trim()) ? true : undefined,
     instructions: body.trim(),
   };
 }
@@ -244,6 +249,7 @@ function serializeAgent(def: {
   disallowedTools?: string[];
   mcp?: string[];
   mode?: 'chat';
+  createTasks?: boolean;
   instructions: string;
 }): string {
   const oneLine = (s: string) => s.replace(/[\r\n]+/g, ' ').trim();
@@ -259,6 +265,7 @@ function serializeAgent(def: {
     csvLine('disallowedTools', def.disallowedTools),
     csvLine('mcp', def.mcp),
     def.mode ? `mode: ${def.mode}` : null,
+    def.createTasks ? 'createTasks: true' : null,
   ].filter(Boolean);
   return `---\n${fm.join('\n')}\n---\n${def.instructions.trim()}\n`;
 }
