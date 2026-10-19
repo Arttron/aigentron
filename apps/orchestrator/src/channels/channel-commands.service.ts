@@ -164,7 +164,13 @@ export class ChannelCommandService {
       case '/done': {
         const id = await this.activeTaskId(ctx);
         if (!id) return 'No active task. Use /tasks.';
-        return this.tasks.markDone(id).then(() => '✅ Marked as done.').catch((e) => `⚠️ ${(e as Error).message}`);
+        return this.tasks
+          .markDone(id)
+          .then(async () => {
+            const open = await this.tasks.openSubtaskCount(id).catch(() => 0);
+            return open ? `✅ Marked as done. ${open} subtask(s) are still open — they were left as they are.` : '✅ Marked as done.';
+          })
+          .catch((e) => `⚠️ ${(e as Error).message}`);
       }
       case '/continue': {
         const id = await this.activeTaskId(ctx);

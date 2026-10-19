@@ -58,8 +58,8 @@ export class TasksController {
   @Post(':id/done')
   @UseGuards(RolesGuard)
   @Roles('task_setter', 'operator', 'admin')
-  done(@Param('id') id: string) {
-    return this.tasks.markDone(id);
+  done(@Param('id') id: string, @Body() body?: { cancelOpenSubtasks?: boolean }) {
+    return this.tasks.markDone(id, { cancelOpenSubtasks: body?.cancelOpenSubtasks === true });
   }
 
   @UseGuards(RolesGuard)

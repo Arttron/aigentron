@@ -620,7 +620,7 @@ export const api = {
 
   getTask: (id: string) => request<TaskDetail>('GET', `/tasks/${id}`),
   transcript: (id: string) => request<TranscriptEvent[]>('GET', `/tasks/${id}/transcript`),
-  markTaskDone: (id: string) => request<unknown>('POST', `/tasks/${e(id)}/done`),
+  markTaskDone: (id: string, cancelOpenSubtasks = false) => request<unknown>('POST', `/tasks/${e(id)}/done`, { body: { cancelOpenSubtasks } }),
   startTask: (id: string, attachments?: string[]) => request<Task>('POST', `/tasks/${e(id)}/start`, { body: { attachments } }),
 
   createTask: (body: { prompt: string; title?: string; agentName?: string; attachments?: string[]; autostart?: boolean; parentId?: string; references?: string[]; project?: string }) =>

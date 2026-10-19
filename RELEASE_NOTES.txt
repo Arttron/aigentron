@@ -1,17 +1,9 @@
-Aigentron v0.1.70
+Aigentron v0.1.71
 
-For people who are not programmers: sign in to Codex and Claude subscriptions from the dashboard, a proper menu, and fewer stuck chats.
+For people who are not programmers: a safer "Mark as done" for tasks that have subtasks.
 
 New
-- Sign in from the dashboard. Settings → Providers → Edit a Codex or Claude (subscription) provider → "Sign in": open the link, enter the code (Codex) or paste the code the page shows (Claude). No terminal needed; the key never reaches the browser. If your earlier sign-in is still there and you cancel, it is kept.
-- A real menu. A sidebar on every page on wide screens; on phones and tablets a bottom bar (Tasks · Projects · Agents · More). A red badge on Tasks shows how many approvals/questions wait for you.
-- ▶ Continue for stopped tasks (stalled / blocked / failed) on the task page, and /continue in Telegram. The task list remembers the project filter.
-- The admin assistant has its own reserved processing lane (it never waits behind long task runs) and can see what you are looking at: ask it about "this task" from a task page.
-- Used-up limits: when a provider's plan or balance runs out, the task moves to the fallback provider, and the next runs start there for 30 minutes.
+- When you accept a task that still has unfinished subtasks, the dashboard now asks what to do with them: "Cancel them and mark done", "Mark done, leave them" or "Back". Accepting a task never accepts its subtasks by itself.
+- In Telegram, /done now tells you how many subtasks are still open.
 
-Fixed
-- A task whose saved conversation was lost (for example after the container was recreated) now continues in a fresh session with the recent conversation handed over, instead of failing with "No conversation found". Claude's conversation store now lives in a volume, so updates no longer wipe it.
-- The model list of Anthropic providers showed only the first 20 models; it now shows all, and subscription providers offer the known Claude models.
-- An approval card no longer hangs after you decided it in Telegram or another tab.
-
-Update note: no database changes. Docker installs: Claude's conversation store becomes a persistent volume at the next container re-create.
+Update note: no database changes.

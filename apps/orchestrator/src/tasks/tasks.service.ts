@@ -120,7 +120,15 @@ export class TasksService {
    * The person says the task is finished (button, `/done`, or "done" in a message): `done`. Only a person does this for a top-level task —
    * agents' runs end in `review`. Subtasks are finished by their lead, not here.
    */
-  async markDone(id: string): Promise<Task> {
+  /** Subtask statuses that are over (nothing left to run or accept). */
+  private static readonly SUBTASK_OVER: readonly string[] = ['done', 'cancelled', 'failed'];
+
+  /** How many subtasks of a task are not over yet. */
+  openSubtaskCount(id: string): Promise<number> {
+    return this.prisma.task.count({ where: { parentId: id, status: { notIn: TasksService.SUBTASK_OVER as never } } });
+  }
+
+  async markDone(id: string, opts: { cancelOpenSubtasks?: boolean } = {}): Promise<Task> {
     const task = await this.getLite(id);
     if (task.status === 'done') return serializeTask(await this.get(id));
     if (!TasksService.ACCEPTABLE.includes(task.status as TaskStatus)) {
@@ -130,6 +138,12 @@ export class TasksService {
     }
     // A job still waiting for this task (a scheduled re-check, a continuation) must not resurrect it later.
     await this.queue.removeForTask(id).catch((err) => this.logger.warn(`could not drop queued jobs of ${id}: ${(err as Error).message}`));
+    // Subtasks are left alone unless the person chose to cancel the open ones (accepting a lead does not accept its subtasks).
+    if (opts.cancelOpenSubtasks) {
+      const open = await this.prisma.task.findMany({ where: { parentId: id, status: { notIn: TasksService.SUBTASK_OVER as never } }, select: { id: true } });
+      for (const s of open) await this.cancel(s.id).catch((err) => this.logger.warn(`could not cancel subtask ${s.id}: ${(err as Error).message}`));
+      if (open.length) this.logger.log(`Task ${id}: cancelled ${open.length} open subtask(s) on accept`);
+    }
     await this.setStatus(id, 'done');
     this.logger.log(`Task ${id} accepted as done by a person`);
     return serializeTask(await this.get(id));

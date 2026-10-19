@@ -29,6 +29,7 @@ import {
   ButtonLink,
   Muted,
   ErrorText,
+  Modal,
 } from '@/components/ui';
 import styles from './TaskDetailPage.module.css';
 
@@ -169,10 +170,14 @@ function TaskDetailView({ id }: { id: string }) {
     }
   };
 
-  const markDone = async () => {
+  // A lead with unfinished subtasks: ask what to do with them (accepting the lead does not accept them).
+  const openSubtasks = (task?.subtasks ?? []).filter((s) => !['done', 'cancelled', 'failed'].includes(s.status));
+  const [askDone, setAskDone] = useState(false);
+  const markDone = async (cancelOpen = false) => {
+    setAskDone(false);
     setBusy(true);
     try {
-      await api.markTaskDone(id);
+      await api.markTaskDone(id, cancelOpen);
       refreshTask();
     } catch (e) {
       setError((e as Error).message);
@@ -209,6 +214,28 @@ function TaskDetailView({ id }: { id: string }) {
       setBusy(false);
     }
   };
+
+  const doneModal = askDone && (
+    <Modal title="Unfinished subtasks" onClose={() => setAskDone(false)}>
+      <p>
+        {openSubtasks.length} subtask{openSubtasks.length === 1 ? ' is' : 's are'} still open. Accepting this task does not accept them.
+      </p>
+      <ul style={{ margin: '8px 0 12px 18px' }}>
+        {openSubtasks.map((s) => (
+          <li key={s.id}>
+            {s.title} <Muted>({s.status})</Muted>
+          </li>
+        ))}
+      </ul>
+      <Row>
+        <Button variant="primary" onClick={() => markDone(true)}>
+          Cancel them and mark done
+        </Button>
+        <Button onClick={() => markDone(false)}>Mark done, leave them</Button>
+        <Button onClick={() => setAskDone(false)}>Back</Button>
+      </Row>
+    </Modal>
+  );
 
   const phone = useIsPhone();
   const [tab, setTab] = useState<'chat' | 'files' | 'tasks'>('chat');
@@ -279,7 +306,7 @@ function TaskDetailView({ id }: { id: string }) {
                 </ButtonLink>
               )}
               {resumable && <Button onClick={continueTask} disabled={busy}>▶ Continue</Button>}
-              {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && <Button onClick={markDone}>✅ Mark as done</Button>}
+              {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && <Button onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())}>✅ Mark as done</Button>}
               {terminal && <Button onClick={() => setDiscussing(true)}>💬 Discuss</Button>}
               {!terminal && (
                 <Button variant="red" onClick={cancel} disabled={busy}>
@@ -340,6 +367,7 @@ function TaskDetailView({ id }: { id: string }) {
           <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact />
         )}
         {/* the phone layout returns early: the discussion window has to be here as well */}
+        {doneModal}
         {discussing && <DiscussionModal taskId={id} initialTopic={task.prompt} onClose={() => setDiscussing(false)} onStarted={() => refreshTask()} />}
       </div>
     );
@@ -380,7 +408,7 @@ function TaskDetailView({ id }: { id: string }) {
                   </Button>
                 )}
                 {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && (
-                  <Button variant={task.status === 'review' ? 'primary' : undefined} onClick={markDone} disabled={busy} title="Accept the result — the task becomes “done”">
+                  <Button variant={task.status === 'review' ? 'primary' : undefined} onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())} disabled={busy} title="Accept the result — the task becomes “done”">
                     ✅ Mark as done
                   </Button>
                 )}
@@ -431,6 +459,7 @@ function TaskDetailView({ id }: { id: string }) {
           <TaskRelations task={task} onChange={refreshTask} />
         </>
       )}
+      {doneModal}
       {discussing && <DiscussionModal taskId={id} initialTopic={task?.prompt} onClose={() => setDiscussing(false)} onStarted={() => refreshTask()} />}
     </>
   );
