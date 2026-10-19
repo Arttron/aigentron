@@ -126,6 +126,36 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8932:8932"
 
+  # The `browser` add-on (docs/addons.md): a real Chromium on a virtual display — people watch/operate it through noVNC
+  # (the orchestrator proxies it behind its login), agents drive it over CDP. The image is built by running the add-on's own
+  # installer (infra/addons/browser/bare.sh) inside debian:12 — the same script a bare-metal server runs. Start it with
+  # `docker compose --profile browser up -d browser`. Reachable from the orchestrator as http://aigentron-browser:6080 (view)
+  # and http://aigentron-browser:9222 (CDP); on the host only on loopback (BROWSER_VIEW_HOST_PORT / BROWSER_CDP_HOST_PORT).
+  # Production installs do not use compose: `aigentron addon enable browser` creates the same container and writes the
+  # add-on's state.json into the data volume; here write it yourself if the dashboard should list it (see docs/addons.md).
+  browser:
+    logging: *default-logging
+    build:
+      context: ./infra/addons/browser
+      dockerfile: docker/Dockerfile
+      args:
+        BROWSER: ${BROWSER_ADDON_BROWSER:-}
+    image: aigentron-browser:dev
+    container_name: aigentron-browser
+    profiles: ["browser"]
+    environment:
+      # off = start Chromium WITHOUT the remote-debugging port (people can still use it through noVNC; agents cannot drive it)
+      AGENT_CDP: ${BROWSER_AGENT_CDP:-on}
+    shm_size: 512m
+    mem_limit: 2g
+    restart: unless-stopped
+    volumes:
+      # the `agent` profile (cookies, local storage, downloads) survives re-creates and image updates
+      - browser-profile:/var/lib/aigentron-browser
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${BROWSER_VIEW_HOST_PORT:-6080}:6080"
+      - "${BIND_ADDRESS:-127.0.0.1}:${BROWSER_CDP_HOST_PORT:-9222}:9222"
+
   # Dev server for the project under development (./project), so the playwright
   # MCP has a reachable preview target on the compose network at
   # http://project-dev:3000 (host: :3100). Serves the BASE ./project — a task's
@@ -296,6 +326,7 @@ networks:
 
 volumes:
   secrets:
+  browser-profile:
   pgdata:
   redisdata:
   worktrees:

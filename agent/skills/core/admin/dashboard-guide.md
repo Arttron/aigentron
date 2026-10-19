@@ -7,7 +7,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Layout
 
-- **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📁 Workspace**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker whose first option is the default lead, attachments via 📎 menu incl. **📷 Camera**, "references" to earlier tasks, **💬 Discuss**) and the task list below (search, pages, filters).
+- **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📁 Workspace**, **🌐 Browser**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker — first option = default lead, 📎 attachments incl. **📷 Camera**, references to earlier tasks, **💬 Discuss**) and the task list (search, pages, filters).
 - Bottom-left: theme toggle. Bottom-right: the mascot — click to open this chat; approval cards and agent questions appear next to it on every page.
 - **Task page (`/tasks/<id>`)**: transcript, pending approvals, follow-up box, Cancel/Delete, attachments, PR/branch links, subtasks, **✅ Mark as done**, **💬 Discuss** (finished tasks).
 
@@ -20,7 +20,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Statuses: who sets "done"
 
-**done** is set only by a person. An agent that finishes makes the task **ready — confirm** (`review`). The person says **"done"** / **"готово"** (a short explicit message; longer text is a normal follow-up), presses **✅ Mark as done** (task header; no button in Telegram — write "done") or sends `/done`. Anything else continues the task. Blocked / stalled / failed can be accepted as is (write "done"). Subtasks are accepted by their lead and simply end *done*. Chip *Done* = confirmed by a person; *Ready* = waiting.
+**done** is set only by a person. An agent that finishes makes the task **ready — confirm** (`review`). The person says **"done"** / **"готово"** (a short explicit message; longer text is a normal follow-up), presses **✅ Mark as done** (task header; Telegram: write "done") or sends `/done`. Anything else continues the task. Blocked / stalled / failed can be accepted as is (write "done"). Subtasks are accepted by their lead and simply end *done*. Chip *Done* = confirmed by a person; *Ready* = waiting.
 
 ## Subtasks
 
@@ -29,8 +29,8 @@ Leads call `check_subtasks` and reuse an existing subtask; max 25 per task. New 
 ## The chat window (task page, this admin chat)
 
 - Bar toggles: **terminal** (monospace, prompt-style, follows light/dark; 8-bit palette, stepped pixels) / **classic**, and **all steps** / **messages only** ("N step(s) hidden"). Per browser, remembered.
-- **Ambient strip** under the chat: a light runs along it during a request, events flash it, new messages rise out of it. Decoration only. A small **copy icon** sits under every message (here too).
-- While running, a line shows the work; after **30 s** without anything from the agent: "⏳ No reply from the agent for N s — it may still be thinking…". For an agent on an **Ollama** (local) provider only, it adds "a local model can take a few minutes for the first reply".
+- **Ambient strip** under the chat: an activity light, decoration only. A small **copy icon** sits under every message (here too).
+- While running, a line shows the work; after **30 s** of silence: "⏳ No reply from the agent for N s — it may still be thinking…" (an **Ollama** agent adds that a local model can take minutes for the first reply).
 - Photo/video: click opens the viewer; **Ask about this moment** / **Mark and ask** freezes the frame, the person draws a rectangle and sends it as a follow-up.
 
 ## Console
@@ -56,11 +56,15 @@ Large reference material agents search instead of carrying in the prompt (regula
 
 ## 📁 Workspace (`/workspace`)
 
-Shared folder for non-code work: `WORKSPACE.md` (the brief — the person edits it with ✎; every agent reads it), `memory/` (decisions, open questions, facts, plan, status — agents write with `workspace_note`), `work/` (drafts, data; upload here), `deliverables/` (results from `workspace_save`, versions kept). Browse, preview, download, delete. The first row `..` goes up a folder and holds **Upload** (into `work/`). Size: Settings → Disk & cleanup; never cleaned automatically.
+Shared folder for non-code work: `WORKSPACE.md` (the brief — the person edits it with ✎; every agent reads it), `memory/` (decisions, open questions, facts, plan, status — agents write with `workspace_note`), `work/` (drafts, data; upload here), `deliverables/` (results from `workspace_save`, versions kept). Browse, preview, download, delete; the first row `..` goes up and holds **Upload**. Never cleaned automatically.
+
+## 🌐 Browser (`/browser`)
+
+A real browser on the server (add-on). Not installed → the page shows its needs and the SSH command `sudo aigentron addon enable browser` (Docker: `--backend docker`) with copy buttons; I can't install it. Running → the live screen in the page (operator/admin; few viewers, 2 h per session; **Open in a new tab**, **Fullscreen**). Not answering → `aigentron addon logs browser`. Agents share this browser: its sign-ins are visible to them. `docs/addons.md`.
 
 ## Stats (`/stats`)
 
-By provider: tokens, requests, cost (Codex "—"); Today/7/30 days/all. Before 2026-10-15 follow-ups were over-counted.
+By provider: tokens, requests, cost (Codex "—"); Today/7/30 days/all.
 
 ## Settings (`/settings`) — tabs
 
@@ -68,7 +72,7 @@ General, Providers, LiteLLM, MCP servers, MCP endpoint, Channels, Schedules, Voi
 
 **General** (cards, top to bottom):
 - *Version & updates*: **Check now**, **Update to X** (operator confirms; restart 1–2 min; previous kept for `aigentron rollback`; Docker can't self-update: `aigentron update`). I can start it (`propose_update`).
-- *Disk & cleanup*: free-space bar, what takes it (attachments, video digests, fetched pages, run folders, resources), **Free up space now** (clears only regenerable caches: all video digests, pages >30 days, run folders >3 days). Checked every 10 min: low space = banner + message to the default chat; "critical" = auto-clear. Attachments never auto-deleted.
+- *Disk & cleanup*: free-space bar, what takes it, **Free up space now** (clears only regenerable caches: video digests, pages >30 days, run folders >3 days). Checked every 10 min: low = banner + message to the default chat; critical = auto-clear. Attachments never auto-deleted.
 - *Security* (passwords), *Access* (allowed domains; empty = any; `localhost`/IPs always work unless **Only these domains** is ticked), *Web server* (port 80 optional; paste PEM cert + key → HTTPS on 443, 80 redirects; `aigentron access`; I can't install certificates), *Cloudflare Access* (team domain + AUD, Save, **Test**; when on, real-domain requests without Cloudflare's token are refused; localhost/IP/LAN exempt; `docs/remote-access.md`). `PUBLIC_URL`/listen address: server `.env` (`aigentron access`). I handle domains and Cloudflare via `access_status`, `propose_allowed_domains`, `propose_cloudflare_access`.
 - *Task titles* (see above).
 - Then: *Repository (GitHub)* (*Repo URL* blank = local workspace; *Base branch*; *GitHub token*; *Project subdirectory* = RELATIVE folder like `apps/web`, a URL is rejected); *Escalations* (default channel + chat/thread for questions from tasks with no channel); *Agent instructions (skill)* appended to every prompt; *Verification gate* (commands per line after each run + max auto-fix attempts); *Task queue* (concurrency); *Approvals* (timeout, s); *Display*.
@@ -78,7 +82,7 @@ General, Providers, LiteLLM, MCP servers, MCP endpoint, Channels, Schedules, Voi
 **MCP servers**: built-in playwright, **playwright-proxy**, github, postgres, code-intel, **research**. Add: *name* above the JSON box (Add disabled until set), JSON (stdio `{command,args}` or `{type:"http",url}`), **Add**. `"readOnlyTools": ["*"]` (or names) marks tools read-only (no approvals); `"trustAnnotations": true` + **Discover tools**: server-annotated read-only tools skip approvals. Agents use a server only if in their `mcp:` list. I can't change MCP servers.
 **MCP endpoint**: outside clients (Claude Desktop) drive the platform. **Users**: people, roles. **Signed-in devices**: own sessions (operator/admin: all), **Sign out** per device / "my other devices" / "X everywhere".
 **Voice**: speech-to-text (🎤) and text-to-speech (🔊); each a switch, *Provider* (kind OpenAI: OpenAI, Groq, local Whisper/TTS by Base URL), *Model*, *Language*/*Voice*, **Test**. Telegram `/voice on|off`; dashboard 🔊 and **🎙 Voice mode**. Cloud providers receive audio/text. Mic needs HTTPS/localhost. Needs a provider key: guide the user.
-**Vision**: provider + model that describe photos/video frames (not Claude/Codex sign-ins; **Test** shows a red square, saves first; unsaved changes flagged). Without it `look_at` falls back to the agent's own cloud model. `docs/media.md`.
+**Vision**: provider + model that describe photos/video frames (not Claude/Codex sign-ins; **Test** saves first). Without it `look_at` falls back to the agent's own cloud model. `docs/media.md`.
 I can change only: default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory — never repo URL/tokens — and revert my own changes.
 
 ## Channels (Telegram)
@@ -112,7 +116,7 @@ Dashboard text is English; the person's text, file/agent names, knowledge bases,
 
 ## Browser through a proxy
 
-MCP server `playwright-proxy` sends ALL traffic through the operator's proxy. Server-only setup: `PLAYWRIGHT_PROXY_SERVER` (host:port), `PLAYWRIGHT_PROXY_USER`, `PLAYWRIGHT_PROXY_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; add `playwright-proxy` to the agent's MCP list. `docs/browser-proxy.md`.
+MCP server `playwright-proxy` sends ALL traffic through the operator's proxy (server-only: `PLAYWRIGHT_PROXY_SERVER` host:port, `_USER`, `_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; add it to the agent's MCP list). `docs/browser-proxy.md`.
 
 ## How-tos
 
@@ -123,7 +127,7 @@ MCP server `playwright-proxy` sends ALL traffic through the operator's proxy. Se
 **Default provider** (the admin chat uses it): Settings → Providers → *Default provider*, or `makeDefault`. **Agent model:** Agents → Edit → *Provider*/*Model* (also for admin; a weak/local model may fumble tools).
 **Repository.** Settings → General → Repository: *Repo URL* (save), *GitHub token*, *Base branch*. **Checks after each run:** Verification gate, one command per line.
 **Disk.** Run folders are removed after 14 days (`RUNS_RETENTION_DAYS`, 0 = never); old worktrees only on request (ask me for a cleanup, or `CLEANUP_WORKTREES=true` + `WORKTREE_RETENTION_DAYS`).
-**Official-source research (laws).** Agent from the **researcher** template (I can create it); built-in `research` MCP. `fetch` works for official domains (EU, UA, UK, US; list in `agent/research.json`); `search` needs `BRAVE_API_KEY=…` or `RESEARCH_SEARXNG_URL=…` in server `.env` (restart). No PDFs yet; EN/ISO standards are paid.
+**Official-source research (laws).** Agent from the **researcher** template; built-in `research` MCP. `fetch` works for official domains (EU, UA, UK, US; list in `agent/research.json`); `search` needs `BRAVE_API_KEY=…` or `RESEARCH_SEARXNG_URL=…` in server `.env` (restart). No PDFs yet.
 
 ## What I can and can't do
 

@@ -455,6 +455,36 @@ export interface KbHit {
   score: number;
 }
 
+/** An optional server component (docs/addons.md) — installed on the server with `aigentron addon enable`; the status is live. */
+export type AddonStatus = 'not-installed' | 'enabled-healthy' | 'enabled-unreachable' | 'disabled';
+export interface AddonInfo {
+  name: string;
+  title: string;
+  description: string;
+  requires: { ramMb: number; diskMb: number };
+  ports: { view: number; cdp: number };
+  backends: ('bare' | 'docker')[];
+  status: AddonStatus;
+  state: {
+    enabled: boolean;
+    backend: 'bare' | 'docker';
+    version: string;
+    installedAt: string | null;
+    browser: string | null;
+    arch: string | null;
+    endpoints: { view: string | null; cdp: string | null };
+    profiles: string[];
+    notes: string[];
+  } | null;
+  /** Why a present state file was ignored (the add-on then counts as not installed). */
+  stateError: string | null;
+  health: { ok: boolean; checkedAt: string; error: string | null } | null;
+  /** The exact commands to run on the server (the dashboard never runs them). */
+  commands: { enable: string; enableDocker: string; disable: string; logs: string };
+  /** The dashboard-side proxy of the add-on's page, with the viewing limits (browser add-on only). */
+  view: { path: string; maxSessions: number; sessionMinutes: number; active: number } | null;
+}
+
 const e = encodeURIComponent;
 const octet = (file: File, type = 'application/octet-stream') => ({ 'content-type': type, 'x-filename': e(file.name) });
 
@@ -645,4 +675,9 @@ export const api = {
 
   getSettings: () => request<Settings>('GET', '/settings'),
   updateSettings: (body: SettingsUpdate) => request<Settings>('PUT', '/settings', { body }),
+
+  listAddons: () => request<AddonInfo[]>('GET', '/addons'),
+  getAddon: (name: string) => request<AddonInfo>('GET', `/addons/${e(name)}`),
+  /** The browser add-on's noVNC page, proxied behind the sign-in; `path` tells noVNC where its WebSocket is (host-relative, same proxy). */
+  addonBrowserViewUrl: () => `${API_BASE}/addons/browser/view/vnc.html?autoconnect=1&resize=scale&show_dot=1&reconnect=0&path=api/addons/browser/view/websockify`,
 };

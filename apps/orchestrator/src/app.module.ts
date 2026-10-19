@@ -43,6 +43,7 @@ import { WorkspaceModule } from './workspace/workspace.module';
 import { PacksModule } from './packs/packs.module';
 import { VoiceModule } from './voice/voice.module';
 import { StatsModule } from './stats/stats.module';
+import { AddonsModule } from './addons/addons.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -97,6 +98,7 @@ import { HealthController } from './health/health.controller';
     ChannelsModule,
     EventsModule,
     StatsModule,
+    AddonsModule,
   ],
   controllers: [HealthController],
 })

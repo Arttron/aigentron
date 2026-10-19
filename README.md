@@ -192,6 +192,7 @@ operator password through the local API and prints it once (also `<data>/secrets
 unprivileged OS user** (`AGENT_RUN_AS_UID=1500`; `secrets/`, the database and `.env` are then unreadable to agents — `docs/authentication.md`, "Agents on their own OS user"). It is OFF by default for now: switch it on with `sudo aigentron harden` (or `AGENT_ISOLATION=1` at install time) after trying it on a test server. A bare-metal update stops the service, snapshots the database, migrates, starts the new
 release and waits for `/api/health` - if it does not come up it rolls back by itself (release and database). `aigentron backup` / `aigentron restore` back up and restore everything (`docs/updates.md`). Behind Cloudflare on 80/443:
 open those ports only to Cloudflare's ranges and keep 3001 closed (`docs/remote-access.md`).
+**Add-ons:** `sudo aigentron addon enable browser` installs a real Chromium on the server that you watch and operate from the dashboard and agents drive over CDP (bare-metal: systemd units; Docker: a separate container) — `docs/addons.md`.
 
 **Option B — docker compose**, for building straight from a local checkout of this repo.
 Uses `.env.minimal`, **not** the root `.env` — the latter is the multi-service `full`

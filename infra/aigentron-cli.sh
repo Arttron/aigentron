@@ -44,9 +44,11 @@ completion() {
 _aigentron() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update harden backup restore backup-timer reset-password rollback logout version completion help -h --help -v --version" -- "$cur") )
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update harden backup restore backup-timer reset-password rollback logout addon version completion help -h --help -v --version" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
+  elif [ "${COMP_WORDS[1]}" = addon ]; then
+    if [ "$COMP_CWORD" -eq 2 ]; then COMPREPLY=( $(compgen -W "list enable disable status logs" -- "$cur") ); else COMPREPLY=( $(compgen -W "browser --dry-run --purge --no-cdp --browser" -- "$cur") ); fi
   fi
 }
 complete -F _aigentron aigentron
@@ -79,6 +81,7 @@ _aigentron() {
     'restore:restore from a backup archive'
     'backup-timer:daily automatic backup on|off'
     'reset-password:remove the dashboard password'
+    'addon:add-ons (a real browser on the server): list, enable, disable, status, logs'
     'rollback:go back to the previous release'
     'logout:end this terminal\'s signed-in session'
     'version:the installed version'
@@ -89,6 +92,8 @@ _aigentron() {
     _describe 'command' cmds
   elif [[ ${words[2]} == completion ]]; then
     _values 'shell' bash zsh
+  elif [[ ${words[2]} == addon ]]; then
+    if (( CURRENT == 3 )); then _values 'addon command' list enable disable status logs; else _values 'add-on' browser; fi
   fi
 }
 _aigentron "$@"
@@ -134,6 +139,7 @@ $(say "${B}Maintain${N}")
   aigentron restore <file>    put a backup back (stops the server, keeps what it replaces in backups/before-restore-*)
   aigentron backup-timer on|off   daily automatic backup, 7 kept (bare-metal; off by default)
   aigentron reset-password    forgot the dashboard password? removes all passwords
+  aigentron addon list|enable|disable|status|logs <name>   add-ons, e.g. a real browser on the server (docs/addons.md)
   aigentron version           (also -v, --version)
   aigentron completion bash|zsh   tab completion for this command (the installer sets it up)
 
@@ -287,13 +293,246 @@ do_harden() {
   fi
 }
 
+# ---- add-ons (docs/addons.md) ------------------------------------------------------------------------------------------
+# An add-on lives in infra/addons/<name>/ (addon.json + bare.sh + docker/). Bare-metal: bare.sh installs it on this host
+# (systemd units). Docker: the add-on's image is built by running the SAME bare.sh inside debian:12 and runs as its own
+# container next to the orchestrator on the `aigentron` network. Either way the state ends up in <data>/addons/<name>/state.json,
+# which the dashboard reads.
+ADDON_NET=aigentron
+
+addons_dir() {
+  if [ "$MODE" = bare ]; then echo "$CURRENT/infra/addons"; return 0; fi
+  v=$(version)
+  d="$INSTALL_DIR/releases/$v/infra/addons"
+  [ -d "$d" ] && { echo "$d"; return 0; }
+  # no release checkout next to the .env (an older install, or one made by hand): take the add-on files from the running image
+  d="$INSTALL_DIR/addons-src/$v"
+  if [ ! -f "$d/browser/addon.json" ]; then
+    mkdir -p "$d" && docker cp "$CONTAINER:/app/infra/addons/." "$d" >/dev/null 2>&1 \
+      || die "cannot find the add-on files (neither $INSTALL_DIR/releases/$v/infra/addons nor /app/infra/addons in $CONTAINER — update to a release that ships add-ons)"
+  fi
+  echo "$d"
+}
+addon_dir() {  # $1 = name → the add-on's directory, or a clear error
+  base=$(addons_dir) || exit 1
+  case "$1" in ""|*/*|.*) die "usage: aigentron addon <list|enable|disable|status|logs> <name>" ;; esac
+  [ -f "$base/$1/addon.json" ] || die "no add-on named '$1' — aigentron addon list"
+  echo "$base/$1"
+}
+addon_field() { sed -n "s/.*\"$2\": *\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" "$1/addon.json" | head -1; }  # $1=dir $2=key (scalar)
+addon_state() {  # $1 = name → prints state.json (empty when never enabled)
+  if [ "$MODE" = docker ]; then docker exec "$CONTAINER" sh -c "cat /data/addons/$1/state.json 2>/dev/null" 2>/dev/null || true
+  else cat "$DATA_DIR/addons/$1/state.json" 2>/dev/null || true; fi
+}
+addon_state_field() { sed -n "s/.*\"$1\": *\"\{0,1\}\([^\",}]*\)\"\{0,1\}.*/\1/p" | head -1; }
+addon_state_write() {  # $1 = name; the JSON on stdin → <data>/addons/<name>/state.json (through the orchestrator container on a Docker install)
+  if [ "$MODE" = docker ]; then
+    docker exec -i "$CONTAINER" sh -c "mkdir -p /data/addons/$1 && cat > /data/addons/$1/state.json.tmp && mv /data/addons/$1/state.json.tmp /data/addons/$1/state.json && chmod 644 /data/addons/$1/state.json"
+  else
+    mkdir -p "$DATA_DIR/addons/$1" && chmod 755 "$DATA_DIR/addons/$1" && cat > "$DATA_DIR/addons/$1/state.json.tmp" && mv "$DATA_DIR/addons/$1/state.json.tmp" "$DATA_DIR/addons/$1/state.json" && chmod 644 "$DATA_DIR/addons/$1/state.json"
+  fi
+}
+# Which backend runs (or ran) this add-on: the state file's `backend`, else the install mode.
+addon_backend_of() { b=$(addon_state "$1" | addon_state_field backend); echo "${b:-$MODE}"; }
+addon_usage() {
+  cat <<USAGE
+usage: aigentron addon list                              the add-ons this release ships, and which are enabled
+       aigentron addon enable <name> [--dry-run] [--backend bare|docker] [--browser chrome|chromium|playwright] [--no-cdp]
+       aigentron addon disable <name> [--purge]          --purge also removes the profile/data (bare: + the user and /opt/aigentron/<name>)
+       aigentron addon status <name>                     state.json + are the endpoints answering
+       aigentron addon logs <name>                       follow the add-on's log
+--backend: a Docker install always runs add-ons as containers; a bare-metal server installs them on the host (systemd) unless you
+pass --backend docker (then a container with loopback-published ports). enable/disable need root (sudo) on a bare-metal install
+and Docker access on a Docker install. docs/addons.md
+USAGE
+}
+addon_list() {
+  base=$(addons_dir) || exit 1
+  say "${B}Add-ons${N} ($MODE install)"
+  for d in "$base"/*/; do
+    d="${d%/}"; [ -f "$d/addon.json" ] || continue
+    n=$(basename "$d"); st=$(addon_state "$n"); en=$(printf '%s' "$st" | addon_state_field enabled)
+    case "$en" in true) mark="${G}● enabled${N} ($(printf '%s' "$st" | addon_state_field backend), $(printf '%s' "$st" | addon_state_field browser))" ;; false) mark="${D}○ disabled${N}" ;; *) mark="${D}○ not installed${N}" ;; esac
+    say "  ${B}$n${N}  $(addon_field "$d" title) — $(addon_field "$d" description)"
+    say "      $mark   needs ~$(addon_field "$d" ramMb) MB RAM, $(addon_field "$d" diskMb) MB disk"
+  done
+  say "${D}enable: sudo aigentron addon enable <name>${N}"
+}
+addon_enable() {
+  name="${1:-}"; shift || true
+  dir=$(addon_dir "$name") || exit 1
+  dry=0; browser=""; cdp=on; extra=""; backend="$MODE"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry=1 ;;
+      --browser) browser="${2:-}"; shift ;;
+      --browser=*) browser="${1#--browser=}" ;;
+      --backend) backend="${2:-}"; shift ;;
+      --backend=*) backend="${1#--backend=}" ;;
+      --no-cdp) cdp=off ;;
+      *) die "unknown option $1 (aigentron addon --help)" ;;
+    esac; shift
+  done
+  case "$backend" in bare|docker) ;; *) die "--backend must be bare or docker" ;; esac
+  [ "$MODE" = docker ] && [ "$backend" = bare ] && die "this is a Docker install: add-ons run as containers here (drop --backend bare)"
+  prev=$(addon_state "$name" | addon_state_field backend)
+  if [ -n "$prev" ] && [ "$prev" != "$backend" ] && [ "$(addon_state "$name" | addon_state_field enabled)" = true ]; then
+    die "$name is enabled with the $prev backend — disable it first (aigentron addon disable $name), then enable with --backend $backend"
+  fi
+  if [ "$backend" = bare ]; then
+    [ "$dry" = 1 ] || need_root "addon enable $name"
+    [ -f "$dir/bare.sh" ] || die "add-on '$name' has no bare-metal installer (backends: $(addon_field "$dir" backends))"
+    [ "$dry" = 1 ] && extra="--dry-run"
+    say "${B}Enabling add-on $name${N} on this server (bare-metal)…"
+    # shellcheck disable=SC2086
+    BROWSER="$browser" AGENT_CDP="$cdp" DATA_DIR="$DATA_DIR" bash "$dir/bare.sh" install $extra || die "the add-on install failed (see above)"
+    [ "$dry" = 1 ] || say "${G}✔${N} $name enabled — aigentron addon status $name"
+    return 0
+  fi
+  # Docker backend: a separate container built from the add-on's Dockerfile. On a Docker install it joins a user-defined network so the
+  # orchestrator reaches it by name (nothing published); on a bare-metal server its ports are published on loopback instead.
+  command -v docker >/dev/null 2>&1 || die "docker is required for --backend docker"
+  [ -f "$dir/docker/Dockerfile" ] || die "add-on '$name' has no Docker backend (backends: $(addon_field "$dir" backends))"
+  v=$(version); img="aigentron-$name:$v"; cname="aigentron-$name"; vol="aigentron-$name-data"
+  mount=$(addon_field "$dir" volume); ram=$(addon_field "$dir" ramMb); shm=$(addon_field "$dir" shmMb)
+  view_port=$(addon_field "$dir" view); cdp_port=$(addon_field "$dir" cdp)
+  if [ "$MODE" = docker ]; then
+    host="$cname"; netopt="--network $ADDON_NET"; where="in the orchestrator's volume"
+    probe() { docker exec "$CONTAINER" curl -fsS --max-time 2 "$@" 2>/dev/null; }
+  else
+    host=127.0.0.1; netopt="-p 127.0.0.1:$view_port:$view_port -p 127.0.0.1:$cdp_port:$cdp_port"; where="in $DATA_DIR/addons/$name"
+    probe() { curl -fsS --max-time 2 "$@" 2>/dev/null; }
+  fi
+  if [ "$dry" = 1 ]; then
+    say "${B}Plan (dry run)${N} — enable $name with the Docker backend:"
+    say "  1. docker build -t $img ${browser:+--build-arg BROWSER=$browser }-f $dir/docker/Dockerfile $dir   (debian:12 + bare.sh build)"
+    [ "$MODE" = docker ] && say "  2. docker network create $ADDON_NET (if missing); docker network connect $ADDON_NET $CONTAINER"
+    say "  3. docker run -d --name $cname --restart unless-stopped $netopt --shm-size ${shm:-512}m --memory ${ram:-2048}m -v $vol:$mount -e AGENT_CDP=$cdp $img"
+    say "  4. wait for http://$host:$view_port/ and http://$host:$cdp_port/json/version"
+    say "  5. write state.json $where (enabled: true, backend: docker)"
+    return 0
+  fi
+  running=$(docker inspect -f '{{.State.Running}} {{.Config.Image}}' "$cname" 2>/dev/null || true)
+  if [ "$running" = "true $img" ] && [ "$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$cname" | grep -c "^AGENT_CDP=$cdp$")" -gt 0 ]; then
+    say "${G}✔${N} $name is already enabled ($cname running $img)"
+  else
+    if ! docker image inspect "$img" >/dev/null 2>&1; then
+      say "${B}Building $img${N} from debian:12 (runs the add-on's own installer inside the image; a few minutes the first time)…"
+      # shellcheck disable=SC2086
+      docker build -t "$img" ${browser:+--build-arg BROWSER=$browser} -f "$dir/docker/Dockerfile" "$dir" || die "image build failed"
+    fi
+    if [ "$MODE" = docker ]; then
+      docker network inspect "$ADDON_NET" >/dev/null 2>&1 || docker network create "$ADDON_NET" >/dev/null
+      if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "$CONTAINER" 2>/dev/null | grep -q "\"$ADDON_NET\""; then
+        docker network connect "$ADDON_NET" "$CONTAINER" || die "could not connect $CONTAINER to the $ADDON_NET network"
+      fi
+    fi
+    if [ -n "$running" ]; then say "Re-creating $cname (the $vol volume with the profile is kept)…"; docker rm -f "$cname" >/dev/null; fi
+    say "Starting ${cname}…"
+    # shellcheck disable=SC2086
+    docker run -d --name "$cname" --restart unless-stopped $netopt \
+      --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
+      --shm-size "${shm:-512}m" --memory "${ram:-2048}m" \
+      -v "$vol:$mount" -e "AGENT_CDP=$cdp" "$img" >/dev/null || die "docker run failed"
+  fi
+  i=0; view_ok=0; cdp_ok=0; cdp_ver=""
+  while [ "$i" -lt 60 ]; do
+    [ "$view_ok" = 1 ] || { probe -o /dev/null "http://$host:$view_port/" >/dev/null && view_ok=1; }
+    if [ "$cdp" = off ]; then cdp_ok=1
+    elif [ "$cdp_ok" = 0 ]; then cdp_ver=$(probe "http://$host:$cdp_port/json/version" | sed -n 's/.*"Browser": *"\([^"]*\)".*/\1/p'); [ -n "$cdp_ver" ] && cdp_ok=1; fi
+    [ "$view_ok" = 1 ] && [ "$cdp_ok" = 1 ] && break
+    sleep 2; i=$((i + 2))
+  done
+  browser_kind=$(docker exec "$cname" sh -c '. /opt/aigentron/browser/config.env; echo $BROWSER_KIND' 2>/dev/null || echo unknown)
+  arch=$(docker inspect -f '{{.Architecture}}' "$img" 2>/dev/null || uname -m)
+  notes="\"docker: container $cname$([ "$MODE" = docker ] && printf ' on network %s' "$ADDON_NET" || printf ', ports published on 127.0.0.1'), profile in volume $vol\""
+  [ "$cdp" = off ] && notes="$notes, \"CDP is off (AGENT_CDP=off)\""
+  [ "$view_ok" = 1 ] && [ "$cdp_ok" = 1 ] || notes="$notes, \"started but an endpoint did not answer within 60 s — aigentron addon logs $name\""
+  cdp_ep="\"http://$host:$cdp_port\""; [ "$cdp" = off ] && cdp_ep=null
+  printf '{\n  "name": "%s",\n  "enabled": true,\n  "backend": "docker",\n  "version": "%s",\n  "installedAt": "%s",\n  "browser": "%s",\n  "arch": "%s",\n  "image": "%s",\n  "container": "%s",\n  "endpoints": { "view": "http://%s:%s", "cdp": %s },\n  "profiles": ["agent"],\n  "notes": [%s]\n}\n' \
+    "$name" "$(addon_field "$dir" version)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$browser_kind" "$arch" "$img" "$cname" "$host" "$view_port" "$cdp_ep" "$notes" \
+    | addon_state_write "$name" || die "could not write the state file $where"
+  if [ "$view_ok" = 1 ] && [ "$cdp_ok" = 1 ]; then
+    say "${G}✔${N} $name enabled: view http://$host:$view_port (proxied by the dashboard), $([ "$cdp" = off ] && printf 'CDP off (agents cannot drive it)' || printf 'CDP http://%s:%s %s' "$host" "$cdp_port" "${cdp_ver:+($cdp_ver)}")"
+  else
+    say "${Y}!${N} $cname is running but $([ "$view_ok" = 1 ] || printf 'noVNC ')$([ "$cdp_ok" = 1 ] || printf 'CDP ')did not answer within 60 s — aigentron addon logs $name"; exit 1
+  fi
+}
+addon_disable() {
+  name="${1:-}"; shift || true
+  dir=$(addon_dir "$name") || exit 1
+  purge=0; dry=0
+  for a in "$@"; do case "$a" in --purge|--uninstall) purge=1 ;; --dry-run) dry=1 ;; *) die "unknown option $a" ;; esac; done
+  backend=$(addon_backend_of "$name")
+  if [ "$backend" = bare ]; then
+    [ "$dry" = 1 ] || need_root "addon disable $name"
+    set -- uninstall; [ "$purge" = 1 ] && set -- "$@" --purge; [ "$dry" = 1 ] && set -- "$@" --dry-run
+    DATA_DIR="$DATA_DIR" bash "$dir/bare.sh" "$@" || die "the add-on uninstall failed (see above)"
+    [ "$dry" = 1 ] || say "${G}✔${N} $name disabled$([ "$purge" = 1 ] && printf ' and purged')"
+    return 0
+  fi
+  command -v docker >/dev/null 2>&1 || die "docker is required"
+  [ "$MODE" = docker ] || [ "$dry" = 1 ] || need_root "addon disable $name"
+  cname="aigentron-$name"; vol="aigentron-$name-data"
+  if [ "$dry" = 1 ]; then say "Plan (dry run): docker rm -f $cname$([ "$purge" = 1 ] && printf '; docker volume rm %s; docker rmi aigentron-%s:*' "$vol" "$name"); write enabled:false to the add-on's state.json"; return 0; fi
+  docker rm -f "$cname" >/dev/null 2>&1 || true
+  note="disabled: container removed; the profile volume $vol is kept (disable --purge removes it)"
+  if [ "$purge" = 1 ]; then
+    docker volume rm "$vol" >/dev/null 2>&1 || true
+    for i in $(docker images -q "aigentron-$name" 2>/dev/null | sort -u); do docker rmi "$i" >/dev/null 2>&1 || true; done
+    note="purged: container, the profile volume $vol and the image removed"
+  fi
+  old=$(addon_state "$name")
+  printf '{\n  "name": "%s",\n  "enabled": false,\n  "backend": "docker",\n  "version": "%s",\n  "installedAt": "%s",\n  "browser": "%s",\n  "arch": "%s",\n  "endpoints": {},\n  "profiles": [],\n  "notes": ["%s"]\n}\n' \
+    "$name" "$(addon_field "$dir" version)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(printf '%s' "$old" | addon_state_field browser)" "$(printf '%s' "$old" | addon_state_field arch)" "$note" \
+    | addon_state_write "$name" || die "could not write the state file"
+  say "${G}✔${N} $name $([ "$purge" = 1 ] && printf 'disabled and purged' || printf 'disabled (profile volume %s kept)' "$vol")"
+}
+addon_status() {
+  name="${1:-}"; dir=$(addon_dir "$name") || exit 1
+  st=$(addon_state "$name")
+  say "${B}Add-on $name${N} — $(addon_field "$dir" title) ($MODE install)"
+  [ -n "$st" ] || { say "  ${D}○ not installed${N} — sudo aigentron addon enable $name"; return 0; }
+  printf '%s\n' "$st" | sed 's/^/  /'
+  [ "$(printf '%s' "$st" | addon_state_field enabled)" = true ] || return 0
+  view=$(printf '%s' "$st" | addon_state_field view); cdp=$(printf '%s' "$st" | addon_state_field cdp)
+  if [ "$MODE" = docker ]; then probe() { docker exec "$CONTAINER" curl -fsS --max-time 3 "$1" 2>/dev/null; }; else probe() { curl -fsS --max-time 3 "$1" 2>/dev/null; }; fi
+  if probe "$view/" >/dev/null; then say "  ${G}✔${N} view answers: $view"; else say "  ${R}✘${N} view does not answer: $view  (aigentron addon logs $name)"; fi
+  if [ -n "$cdp" ] && [ "$cdp" != null ]; then
+    if ver=$(probe "$cdp/json/version" | sed -n 's/.*"Browser": *"\([^"]*\)".*/\1/p') && [ -n "$ver" ]; then say "  ${G}✔${N} CDP answers: $cdp  ${D}$ver${N}"; else say "  ${R}✘${N} CDP does not answer: $cdp  (aigentron addon logs $name)"; fi
+  else say "  ${D}CDP is off${N}"; fi
+  if [ "$(printf '%s' "$st" | addon_state_field backend)" = docker ]; then
+    say "  container: $(docker inspect -f '{{.State.Status}} ({{.Config.Image}})' "aigentron-$name" 2>/dev/null || echo 'not found')"
+  elif command -v systemctl >/dev/null 2>&1; then
+    for u in $(systemctl list-units --all --plain --no-legend "aigentron-$name*" 2>/dev/null | awk '{print $1}'); do printf '  %-36s %s\n' "$u" "$(systemctl is-active "$u" 2>/dev/null || true)"; done
+  fi
+}
+addon_logs() {
+  name="${1:-}"; addon_dir "$name" >/dev/null || exit 1
+  if [ "$(addon_backend_of "$name")" = docker ]; then exec docker logs -f --tail 100 "aigentron-$name"; fi
+  exec journalctl -u "aigentron-$name*" -f -n 100
+}
+addon_cmd() {
+  sub="${1:-}"; [ $# -gt 0 ] && shift
+  case "$sub" in
+    list|ls|"") addon_list ;;
+    enable|install|on) addon_enable "$@" ;;
+    disable|uninstall|remove|off) addon_disable "$@" ;;
+    status|show) addon_status "$@" ;;
+    logs|log) addon_logs "$@" ;;
+    help|-h|--help) addon_usage ;;
+    *) say "${R}unknown add-on command:${N} $sub" >&2; addon_usage >&2; exit 2 ;;
+  esac
+}
+
 # The newest release number (the installer is then fetched at THAT tag, not from the moving main branch).
 latest_version() { curl -fsSL --max-time 15 https://api.github.com/repos/Arttron/aigentron/releases/latest 2>/dev/null | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1; }
 
-# -h / --help anywhere
-for a in "$@"; do case "$a" in -h|--help) usage; exit 0 ;; esac; done
+# -h / --help anywhere (the add-on commands print their own)
+for a in "$@"; do case "$a" in -h|--help) if [ "${1:-}" = addon ] || [ "${1:-}" = addons ]; then addon_usage; else usage; fi; exit 0 ;; esac; done
 
 case "${1:-}" in
+  addon|addons) shift; addon_cmd "$@" ;;
   ""|configure|config|setup|wizard) [ $# -gt 0 ] && shift; node_script setup-wizard.mjs "$@" ;;
   connection) shift; node_script setup-wizard.mjs --section connection "$@" ;;
   access|domains|host) shift; node_script setup-wizard.mjs --section access "$@" ;;

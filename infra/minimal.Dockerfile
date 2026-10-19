@@ -108,6 +108,9 @@ COPY infra/minimal-entrypoint.sh infra/db-snapshot.sh infra/minimal-healthcheck.
 # this image and every tool call silently fell through to the SDK's own
 # interactive permission prompt instead of our auto-allow/human-approval gate.
 COPY infra/hooks /app/infra/hooks
+# Add-ons (docs/addons.md): `aigentron addon enable <name>` on a Docker install builds the add-on's image from these files
+# (taken from the release checkout next to the .env, or copied out of this image when that is gone).
+COPY infra/addons /app/infra/addons
 RUN chmod +x /app/infra/minimal-entrypoint.sh /app/infra/minimal-healthcheck.sh /app/infra/agent-exec.sh /app/infra/harden.sh
 
 ENV NODE_ENV=production \

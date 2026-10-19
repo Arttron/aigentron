@@ -147,6 +147,17 @@ export class AppConfigService {
    */
   readonly wizardAdminPassword: string;
 
+  /**
+   * Add-ons (docs/addons.md): the installer keeps each one's `state.json` under `<data dir>/addons/<name>/` — the data dir
+   * is the parent of the secrets dir (`/data` minimal/bare, `/workspace` compose); `ADDONS_DIR` overrides. The descriptors
+   * (`addon.json`) ship with the app in `infra/addons/` (same repo-root-relative resolution as the hook script).
+   */
+  readonly addonsDir: string;
+  readonly addonsDescriptorsDir: string;
+  /** The browser add-on's view proxy: how many people may watch at once, and how long one viewing session may last. */
+  readonly addonViewMaxSessions: number;
+  readonly addonViewSessionMinutes: number;
+
   constructor() {
     this.port = parseInt(process.env.ORCHESTRATOR_PORT ?? '3001', 10);
     this.databaseUrl = this.required('DATABASE_URL');
@@ -212,6 +223,10 @@ export class AppConfigService {
       .filter(Boolean);
     this.mcpToken = process.env.MCP_TOKEN?.trim() ?? '';
     this.wizardAdminPassword = process.env.WIZARD_ADMIN_PASSWORD ?? '';
+    this.addonsDir = process.env.ADDONS_DIR?.trim() || join(this.secretsDir, '..', 'addons');
+    this.addonsDescriptorsDir = process.env.ADDONS_DESCRIPTORS_DIR?.trim() || join(__dirname, '..', '..', '..', '..', 'infra', 'addons');
+    this.addonViewMaxSessions = Math.min(50, Math.max(1, parseInt(process.env.ADDON_VIEW_MAX_SESSIONS ?? '3', 10) || 3));
+    this.addonViewSessionMinutes = Math.min(24 * 60, Math.max(1, parseInt(process.env.ADDON_VIEW_SESSION_MINUTES ?? '120', 10) || 120));
   }
 
   private required(key: string): string {

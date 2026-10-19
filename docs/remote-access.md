@@ -97,7 +97,8 @@ The server can terminate HTTPS on its own — **Settings → General → Web ser
   A port that cannot be bound (taken by another program) is reported in the page and never stops the server. Ports and the redirect can be changed (`secrets/web-server.json`); `WEB_HOST` limits the interface.
 - Certificate files live in the protected `secrets/tls/` folder.
 
-Use a reverse proxy (Caddy / nginx) instead if you already run one on 80/443 — point it at `127.0.0.1:3001` and forward WebSocket upgrades for `/socket.io`.
+Use a reverse proxy (Caddy / nginx) instead if you already run one on 80/443 — point it at `127.0.0.1:3001` and forward WebSocket upgrades for `/socket.io`
+(and for `/api/addons/browser/view/` if you use the Browser add-on, `docs/addons.md`).
 
 ## Make the server check Cloudflare Access itself (optional)
 
@@ -141,6 +142,8 @@ The recommended hardening when the DNS record is proxied by Cloudflare (orange c
 - **Two layers (A and B above):** Cloudflare Access (who may reach the hostname) and the built-in passwords + domain list (who may use the app). The agent-facing
   routes only answer from the same machine, so the tunnel never exposes them.
 - Postgres, Redis, LiteLLM and the research/playwright services are **not** exposed by the tunnel; keep their ports on `127.0.0.1`.
+- The **browser add-on** (`docs/addons.md`) is the same: its noVNC page (`:6080`) and CDP (`:9222`) are bound to loopback / the internal Docker network and have
+  no login of their own — you reach the browser only through the dashboard, which proxies the view behind its sign-in. Never publish 6080/9222.
 - Once sign-in passwords are set, the **session** decides who is acting (the "acting user" switcher is ignored); before that the switcher only labels who did something and is not authentication.
 - The one-time **secret links** the admin sends when it needs a password or key from you (`/api/secret-links/<token>`) are open without a session by design — a hostname behind Cloudflare Access still asks for Access first.
 - Using something else (Tailscale, your own reverse proxy with SSO)? Point it at `orchestrator:3001`, forward WebSocket upgrades for

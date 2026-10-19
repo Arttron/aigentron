@@ -1,6 +1,9 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "stream",
+  // loose: every variable of the environment reaches the tasks. In strict mode turbo hides all but the lists below, so settings added
+  // since (WORKSPACE_DIR, ADDONS_DIR, ADDON_VIEW_*, …) silently did not reach the dev server.
+  "envMode": "loose",
   "globalEnv": [
     "NODE_ENV",
     "DATABASE_URL",

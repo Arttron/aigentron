@@ -1,0 +1,19 @@
+{
+  "name": "browser",
+  "title": "Browser",
+  "description": "A real Chromium on the server: watch and operate it from the dashboard (noVNC), let agents drive it over CDP.",
+  "version": "1",
+  "requires": {
+    "ramMb": 2048,
+    "diskMb": 2048
+  },
+  "ports": {
+    "view": 6080,
+    "cdp": 9222
+  },
+  "backends": ["bare", "docker"],
+  "docker": {
+    "volume": "/var/lib/aigentron-browser",
+    "shmMb": 512
+  }
+}

@@ -206,6 +206,7 @@ export function TaskListPage() {
             <Link to="/resources">📚 Resources</Link>
             <Link to="/knowledge">🧠 Knowledge</Link>
             <Link to="/workspace">📁 Workspace</Link>
+            <Link to="/browser">🌐 Browser</Link>
             <Link to="/stats">📊 Stats</Link>
             <Link to="/settings">⚙ Settings</Link>
           </>
