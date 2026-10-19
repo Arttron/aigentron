@@ -14,6 +14,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { ProjectBadge } from '@/components/ProjectBadge';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { Transcript, type LogLine } from '@/components/Transcript';
+import { newPending, reconcilePending, type PendingMessage } from '@/lib/pending-messages';
 import { DiscussionModal } from '@/components/DiscussionModal';
 import { DiscussionBar } from '@/components/DiscussionBar';
 import { FollowUpForm } from '@/components/FollowUpForm';
@@ -198,8 +199,17 @@ function TaskDetailView({ id }: { id: string }) {
     }
   };
 
+  // A follow-up is shown in the conversation AT ONCE ("sending…"), not when the agent run starts and the server echoes it.
+  const [pending, setPending] = useState<PendingMessage[]>([]);
   const sendFollowUp = async (prompt: string, attachments: string[], references: string[]) => {
-    await api.followUp(id, prompt, attachments, references);
+    const mine = prompt.trim() ? newPending(prompt) : null;
+    if (mine) setPending((p) => [...p, mine]);
+    try {
+      await api.followUp(id, prompt, attachments, references);
+    } catch (e) {
+      if (mine) setPending((p) => p.filter((x) => x.id !== mine.id));
+      throw e;
+    }
     refreshTask();
   };
 
@@ -266,15 +276,23 @@ function TaskDetailView({ id }: { id: string }) {
   // (the final answer is already shown once as 'result').
   const promptText = task?.prompt;
   const promptTs = task?.createdAt;
+  const echoedPrompts = useMemo(() => lines.filter((l) => l.kind === 'prompt').map((l) => l.text), [lines]);
+  useEffect(() => {
+    setPending((p) => {
+      const next = reconcilePending(p, echoedPrompts);
+      return next.length === p.length ? p : next;
+    });
+  }, [echoedPrompts]);
   const visibleLines = useMemo(() => {
-    const vis = debug ? lines : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
+    const real = debug ? lines : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
+    const vis = [...real, ...pending.map((p) => ({ id: p.id, kind: 'prompt', text: p.text, ts: new Date(p.at).toISOString() }))];
     // Until the run emits the opening `prompt` event, seed the request from the
     // task so the conversation always shows what was asked.
-    if (promptText !== undefined && !vis.some((l) => l.kind === 'prompt')) {
+    if (promptText !== undefined && !real.some((l) => l.kind === 'prompt')) {
       return [{ id: 'seed-prompt', kind: 'prompt', text: promptText, ts: promptTs }, ...vis];
     }
     return vis;
-  }, [lines, debug, promptText, promptTs]);
+  }, [lines, debug, promptText, promptTs, pending]);
 
   // Phone: an app-like shell. Header + tabs on top, the conversation fills what is left, the message box is pinned to the bottom.
   useEffect(() => {

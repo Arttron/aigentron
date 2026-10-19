@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Project, ProjectRepoAuth } from '@lds/shared';
 import { api, type RepoInfo, type RepoTestResult } from '@/lib/api';
-import { PROVIDER_NAME, apiMessage, deployKeyPlace, providerTokenPage, relativeTime, repoLabel, stepMark, stepTone, testSummary } from '@/lib/projects';
+import { PROVIDER_NAME, apiMessage, checkRepoUrl, deployKeyPlace, providerTokenPage, relativeTime, repoLabel, stepMark, stepTone, testSummary } from '@/lib/projects';
 import { Button, Card, ErrorText, Field, Muted, SectionTitle } from '@/components/ui';
 import { CopyButton } from '@/components/CopyButton';
 import styles from './projects.module.css';
@@ -137,6 +137,8 @@ export function RepositoryCard({ project, onChanged }: { project: Project; onCha
   const dirty = url.trim() !== (repo.url ?? '') || branch.trim() !== repo.branch || subdir.trim() !== (repo.subdir ?? '');
   const hint = repo.tokenHint ? (repo.tokenHint.startsWith('…') ? repo.tokenHint : `…${repo.tokenHint}`) : '';
   const hasUrl = !!(repo.url ?? '').trim();
+  // The address is checked against the chosen access mode as it is typed (https + SSH key was the common mistake).
+  const urlCheck = checkRepoUrl(url, mode);
 
   const saveRepo = () =>
     run(
@@ -169,7 +171,15 @@ export function RepositoryCard({ project, onChanged }: { project: Project; onCha
       <SectionTitle>Repository</SectionTitle>
       {loadError && <Muted className={styles.note}>Access details could not be loaded ({loadError}); showing what the project says.</Muted>}
       <Field label={`Repository URL${label ? ` — ${PROVIDER_NAME[provider]}` : ''} (blank = a local folder, no remote)`}>
-        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/org/project.git  or  git@github.com:org/project.git" />
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://github.com/org/project.git  or  git@github.com:org/project.git" aria-invalid={urlCheck.level === 'error'} spellCheck={false} autoCapitalize="none" />
+        {urlCheck.message && (
+          <p className={`${styles.note} ${urlCheck.level === 'error' ? styles.fail : styles.warn}`} data-testid="url-check" role={urlCheck.level === 'error' ? 'alert' : undefined}>
+            {urlCheck.message}{' '}
+            {urlCheck.suggestion && (
+              <Button onClick={() => setUrl(urlCheck.suggestion!)}>Use {urlCheck.suggestion}</Button>
+            )}
+          </p>
+        )}
       </Field>
       <div className={styles.row2}>
         <Field label="Branch">
@@ -180,7 +190,7 @@ export function RepositoryCard({ project, onChanged }: { project: Project; onCha
         </Field>
       </div>
       <div className={styles.actions}>
-        <Button variant="primary" disabled={!dirty || busy !== null} onClick={() => void saveRepo()}>
+        <Button variant="primary" disabled={!dirty || busy !== null || urlCheck.level === 'error'} onClick={() => void saveRepo()}>
           {busy === 'save' ? 'Saving…' : 'Save'}
         </Button>
         <span className={`${styles.status} ${styles.ok}`}>{saved}</span>

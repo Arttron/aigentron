@@ -235,7 +235,7 @@
     width: 72px;
     height: 72px;
     right: 8px;
-    bottom: 8px;
+    bottom: calc(8px + var(--nav-h, 0px));
   }
   .panel {
     right: 0;
@@ -384,4 +384,13 @@
 .dockArea .composer {
   padding: 0;
   border: none;
+}
+
+/* a message that is shown at once and not yet echoed by the server */
+.sending {
+  opacity: 0.7;
+}
+.sendingNote {
+  font-size: 11px;
+  color: var(--text-dim);
 }

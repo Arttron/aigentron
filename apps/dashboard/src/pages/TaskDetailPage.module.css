@@ -10,7 +10,8 @@
 /* ---- Phone shell: a fixed, app-like screen. Header + tabs on top, conversation fills the middle, message box pinned below. ---- */
 .shell {
   position: fixed;
-  inset: 0;
+  /* stops above the bottom navigation bar (--nav-h) so the message box is not covered by it */
+  inset: 0 0 var(--nav-h, 0px) 0;
   z-index: 20;
   display: flex;
   flex-direction: column;

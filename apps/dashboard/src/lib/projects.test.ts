@@ -100,3 +100,53 @@ describe('testSummary — a stored last test has no checklist', () => {
     expect(testSummary({ ok: false, durationMs: 1200 } as never)).toContain('Connection failed');
   });
 });
+
+
+import { checkRepoUrl, parseRepoAddress, toHttpsAddress, toSshAddress } from './projects';
+
+describe('parseRepoAddress', () => {
+  it('classifies the address forms', () => {
+    expect(parseRepoAddress('git@github.com:Arttron/lowgrid.git')).toMatchObject({ kind: 'ssh', host: 'github.com', path: 'Arttron/lowgrid' });
+    expect(parseRepoAddress('ssh://git@host.example:2222/org/repo.git')).toMatchObject({ kind: 'ssh', host: 'host.example', path: 'org/repo' });
+    expect(parseRepoAddress('https://github.com/Arttron/lowgrid.git')).toMatchObject({ kind: 'https', host: 'github.com', path: 'Arttron/lowgrid' });
+    expect(parseRepoAddress('https://github.com/Arttron/lowgrid')).toMatchObject({ kind: 'https', path: 'Arttron/lowgrid' });
+    expect(parseRepoAddress('file:///srv/git/x.git')).toMatchObject({ kind: 'file' });
+  });
+  it('flags credentials and refuses nonsense', () => {
+    expect(parseRepoAddress('https://user:ghp_secret@github.com/o/r.git')?.hasCredentials).toBe(true);
+    for (const bad of ['', 'two words', 'github', 'ftp://x/y', '/just/a/path']) expect(parseRepoAddress(bad)).toBeNull();
+  });
+});
+
+describe('address conversions', () => {
+  it('https ↔ ssh', () => {
+    expect(toSshAddress('https://github.com/Arttron/lowgrid.git')).toBe('git@github.com:Arttron/lowgrid.git');
+    expect(toSshAddress('https://github.com/Arttron/lowgrid')).toBe('git@github.com:Arttron/lowgrid.git');
+    expect(toSshAddress('git@github.com:Arttron/lowgrid.git')).toBeNull();
+    expect(toHttpsAddress('git@github.com:Arttron/lowgrid.git')).toBe('https://github.com/Arttron/lowgrid.git');
+    expect(toSshAddress('https://github.com/onlyowner')).toBeNull();
+  });
+});
+
+describe('checkRepoUrl — the address against the access mode', () => {
+  it('SSH key + https address is an error with the SSH address offered (the lowgrid case)', () => {
+    const r = checkRepoUrl('https://github.com/Arttron/lowgrid.git', 'ssh');
+    expect(r.level).toBe('error');
+    expect(r.suggestion).toBe('git@github.com:Arttron/lowgrid.git');
+    expect(checkRepoUrl('git@github.com:Arttron/lowgrid.git', 'ssh').level).toBe('ok');
+  });
+  it('token needs https; a plain http address or an SSH one is refused', () => {
+    expect(checkRepoUrl('https://github.com/o/r.git', 'token').level).toBe('ok');
+    expect(checkRepoUrl('git@github.com:o/r.git', 'token')).toMatchObject({ level: 'error', suggestion: 'https://github.com/o/r.git' });
+    expect(checkRepoUrl('http://git.example/o/r.git', 'token').level).toBe('error');
+  });
+  it('public access: https is fine, an SSH address warns', () => {
+    expect(checkRepoUrl('https://github.com/o/r.git', 'none').level).toBe('ok');
+    expect(checkRepoUrl('git@github.com:o/r.git', 'none').level).toBe('warn');
+  });
+  it('never accepts a secret in the address, and an empty field is fine', () => {
+    expect(checkRepoUrl('https://me:ghp_abc@github.com/o/r.git', 'token').level).toBe('error');
+    expect(checkRepoUrl('', 'ssh')).toEqual({ level: 'ok', message: '' });
+    expect(checkRepoUrl('not a url', 'none').level).toBe('error');
+  });
+});

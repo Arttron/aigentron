@@ -4,6 +4,8 @@ import { SERVER_EVENT, type TaskStatus } from '@lds/shared';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
+import { Markdown } from './Markdown';
+import { newPending, reconcilePending, type PendingMessage } from '@/lib/pending-messages';
 import type { StateName } from '@/lib/mascot';
 import {
   ASSISTANT_RESET_EVENT,
@@ -92,6 +94,15 @@ export function AdminChat() {
     writeEdgeTab(null);
   };
   const { items: msgs } = useTaskStream<Msg>(taskId, toMsgEntry, { onReconnect: () => setReconnects((n) => n + 1) });
+  // What I just sent is shown at once, marked "sending…", until the server echoes it as a message of the chat.
+  const [pending, setPending] = useState<PendingMessage[]>([]);
+  const echoed = msgs.filter((m) => m.from === 'me').map((m) => m.text);
+  useEffect(() => {
+    setPending((p) => {
+      const next = reconcilePending(p, echoed);
+      return next.length === p.length ? p : next;
+    });
+  }, [msgs]);
   const [reconnects, setReconnects] = useState(0);
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [text, setText] = useState('');
@@ -251,6 +262,8 @@ export function AdminChat() {
     if (!body || sending) return;
     setSending(true);
     setError(null);
+    const mine = newPending(body);
+    setPending((p) => [...p, mine]);
     try {
       const page = { path: window.location.pathname, title: document.title };
       if (!taskId) {
@@ -270,6 +283,7 @@ export function AdminChat() {
       }
       if (override === undefined) setText('');
     } catch (e) {
+      setPending((p) => p.filter((x) => x.id !== mine.id)); // it was not sent after all
       setError((e as Error).message);
       if (override !== undefined) throw e;
     } finally {
@@ -356,10 +370,18 @@ export function AdminChat() {
             )}
             {msgs.map((m) => (
               <div key={m.id} className={m.from === 'me' ? styles.me : styles.admin}>
-                {m.text}
+                {m.from === 'me' ? m.text : <Markdown text={m.text} />}
                 {m.id === lastAdmin?.id && autoSpeak && <SpeakButton text={m.text} abs />}
                 <div className={styles.copyRow}>
                   <CopyButton text={m.text} label={m.from === 'me' ? 'Copy your message' : 'Copy message'} />
+                </div>
+              </div>
+            ))}
+            {pending.map((p) => (
+              <div key={p.id} className={`${styles.me} ${styles.sending}`} aria-busy="true">
+                {p.text}
+                <div className={styles.copyRow}>
+                  <span className={styles.sendingNote}>sending…</span>
                 </div>
               </div>
             ))}

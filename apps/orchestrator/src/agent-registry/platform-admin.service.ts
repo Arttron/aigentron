@@ -33,6 +33,7 @@ import { DiskMonitorService } from '../maintenance/disk-monitor.service';
 import { StatsService } from '../stats/stats.service';
 import { isSameWork } from '../tasks/subtask-dedupe';
 import { AdminAuditService, type AuditEntry } from './admin-audit.service';
+import { AttachmentsService } from '../attachments/attachments.service';
 import { AdminContextService } from './admin-context.service';
 import { parsePage } from './admin-context-core';
 import type { SchedulesService } from '../schedules/schedules.service';
@@ -1089,6 +1090,13 @@ export class PlatformAdminService {
       .join('\n');
   }
 
+  /** The task whose page the person is on while talking to the admin (its attachments are what they mean by "this screenshot"), or null. */
+  pageTaskId(adminTaskId: string): string | null {
+    const ref = this.moduleRef.get(AdminContextService, { strict: false }).get(adminTaskId);
+    const page = ref ? parsePage(ref.path) : null;
+    return page?.kind === 'task' && page.id && page.id !== adminTaskId ? page.id : null;
+  }
+
   /** Where the person is right now (the page the dashboard reported with their message) and what is there: a task → its diagnosis, a project → its summary. */
   async currentContext(adminTaskId: string): Promise<string> {
     const ref = this.moduleRef.get(AdminContextService, { strict: false }).get(adminTaskId);
@@ -1097,19 +1105,18 @@ export class PlatformAdminService {
     const head = `The person is on ${page.name} — ${ref.path}${ref.title ? ` (tab title: "${ref.title}")` : ''}.`;
     if (page.kind === 'task' && page.id) {
       const t = await this.prisma.task.findUnique({ where: { id: page.id }, select: { id: true, agentName: true } });
-      if (!t) return `${head}
-No task with that id exists any more.`;
+      if (!t) return `${head}\nNo task with that id exists any more.`;
       // This very conversation is a task too: say so instead of describing the chat to itself.
-      if (t.id === adminTaskId) return `${head}
-That is this chat itself — no other task is open.`;
-      return `${head}
-
-${await this.taskDiagnose(t.id)}`;
+      if (t.id === adminTaskId) return `${head}\nThat is this chat itself — no other task is open.`;
+      const files = await this.moduleRef.get(AttachmentsService, { strict: false }).list(t.id).catch(() => []);
+      const attached = files.length
+        ? `\n\nAttachments of this task (look at a picture/video with look_at, read a document with read_document — pass just the file name): ${files.slice(0, 20).map((f) => f.name + (f.originalName && f.originalName !== f.name ? ` («${f.originalName}»)` : '')).join(', ')}`
+        : '';
+      return `${head}\n\n${await this.taskDiagnose(t.id)}${attached}`;
     }
     if (page.kind === 'project' && page.id) {
       const p = await this.prisma.project.findUnique({ where: { slug: page.id }, select: { slug: true, name: true, kind: true, repoUrl: true, repoBranch: true, isolation: true, defaultAgent: true, archivedAt: true } });
-      if (!p) return `${head}
-No project with that slug.`;
+      if (!p) return `${head}\nNo project with that slug.`;
       const open = await this.prisma.task.count({ where: { project: { slug: p.slug }, status: { in: ['queued', 'running', 'needs_approval', 'review', 'blocked', 'stalled'] } } });
       return [head, '', `Project "${p.name}" (${p.slug}) — ${p.kind}${p.archivedAt ? ', archived' : ''}`, p.repoUrl ? `Repository: ${p.repoUrl} (${p.repoBranch})` : null, `Isolation: ${p.isolation ?? 'follows the installation default'}`, p.defaultAgent ? `Default agent: ${p.defaultAgent}` : null, `Open tasks: ${open}`].filter((l): l is string => l !== null).join('\n');
     }

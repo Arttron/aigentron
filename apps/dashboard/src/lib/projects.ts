@@ -1,5 +1,5 @@
 /** Pure helpers for the Projects pages (slug preview, repository labels, connection-test checklist, project choice). */
-import type { Project } from '@lds/shared';
+import type { Project, ProjectRepoAuth } from '@lds/shared';
 import type { RepoProviderKind, RepoTestResult, RepoTestStep } from './api';
 
 export const SLUG_MAX = 40;
@@ -182,4 +182,81 @@ export function apiMessage(e: unknown): string {
     /* plain text */
   }
   return raw.replace(/^\d+ [^—]*— /, '');
+}
+
+
+// ---- repository address vs. access mode (the field is checked as the person types) ---------------------------------
+
+export type RepoUrlKind = 'ssh' | 'https' | 'http' | 'git' | 'file';
+
+export interface ParsedUrl {
+  kind: RepoUrlKind;
+  host: string;
+  /** `owner/repo` without `.git`, when the path has that shape */
+  path: string;
+  /** an `https://user:secret@…` address */
+  hasCredentials: boolean;
+}
+
+/** What kind of address this is (null = not a repository address at all). */
+export function parseRepoAddress(raw: string): ParsedUrl | null {
+  const v = raw.trim();
+  if (!v || /\s/.test(v)) return null;
+  const scp = /^(?:[\w.-]+@)?([\w.-]+):(?!\/\/)(.+)$/.exec(v);
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) {
+    if (scp && scp[2]!.includes('/') && !v.startsWith('/')) return { kind: 'ssh', host: scp[1]!.toLowerCase(), path: scp[2]!.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, ''), hasCredentials: false };
+    return null;
+  }
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    return null;
+  }
+  const scheme = u.protocol.replace(/:$/, '').toLowerCase();
+  const kind: RepoUrlKind | null = scheme === 'https' ? 'https' : scheme === 'http' ? 'http' : scheme === 'ssh' || scheme === 'git+ssh' ? 'ssh' : scheme === 'git' ? 'git' : scheme === 'file' ? 'file' : null;
+  if (!kind || (kind !== 'file' && !u.hostname)) return null;
+  return { kind, host: u.hostname.toLowerCase(), path: u.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, ''), hasCredentials: Boolean(u.password || (u.username && kind !== 'ssh')) };
+}
+
+/** `https://github.com/org/repo(.git)` → `git@github.com:org/repo.git` (null when it has no host / owner / repo to convert). */
+export function toSshAddress(raw: string): string | null {
+  const p = parseRepoAddress(raw);
+  if (!p || (p.kind !== 'https' && p.kind !== 'http') || !p.path.includes('/')) return null;
+  return `git@${p.host}:${p.path}.git`;
+}
+
+/** `git@github.com:org/repo.git` → `https://github.com/org/repo.git`. */
+export function toHttpsAddress(raw: string): string | null {
+  const p = parseRepoAddress(raw);
+  if (!p || p.kind !== 'ssh' || !p.host || !p.path.includes('/')) return null;
+  return `https://${p.host}/${p.path}.git`;
+}
+
+export interface RepoUrlCheck {
+  level: 'ok' | 'warn' | 'error';
+  message: string;
+  /** an address that would fix it, offered as a button */
+  suggestion?: string;
+}
+
+/** Does the pasted address make sense for the chosen access mode? Empty = fine (a local folder, no remote). */
+export function checkRepoUrl(raw: string, auth: ProjectRepoAuth): RepoUrlCheck {
+  const v = raw.trim();
+  if (!v) return { level: 'ok', message: '' };
+  const p = parseRepoAddress(v);
+  if (!p) return { level: 'error', message: 'That does not look like a repository address. Use https://github.com/org/repo.git or git@github.com:org/repo.git (no spaces).' };
+  if (p.hasCredentials) return { level: 'error', message: 'Do not put a password or token in the address — choose “Token” below and paste it there (it is stored in a file, never in the address).' };
+  if (p.kind !== 'file' && !p.path.includes('/')) return { level: 'warn', message: 'The address has no owner/repository part (expected …/org/repo.git).' };
+  if (auth === 'ssh' && p.kind !== 'ssh') {
+    const suggestion = toSshAddress(v) ?? undefined;
+    return { level: 'error', message: `SSH key access needs an SSH address (git@${p.host || 'github.com'}:org/repo.git), but this one is ${p.kind}.`, suggestion };
+  }
+  if (auth === 'token' && p.kind === 'ssh') {
+    const suggestion = toHttpsAddress(v) ?? undefined;
+    return { level: 'error', message: 'Token access needs an https address (https://github.com/org/repo.git), but this one is an SSH address.', suggestion };
+  }
+  if (auth === 'token' && p.kind !== 'https') return { level: 'error', message: 'A token is sent only over https: use an https:// address.' };
+  if (auth === 'none' && p.kind === 'ssh') return { level: 'warn', message: 'This is an SSH address: choose “SSH key” below and add the key to the repository, or switch to an https address if the repository is public.' };
+  return { level: 'ok', message: '' };
 }

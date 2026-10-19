@@ -464,6 +464,19 @@ export class RealAgentExecutor extends AgentExecutor {
     return text ? text.slice(0, 1000) : undefined;
   }
 
+  /** A full path stays as it is; a bare name is one of the task's attachments (what the prompt lists), resolved to its file. */
+  private async attachmentOrPath(taskId: string, p: string, admin = false): Promise<string> {
+    const v = String(p ?? '').trim();
+    if (!v || v.startsWith('/') || v.includes('/')) return v;
+    // The admin is asked about "this screenshot" from a task page: that task's file first, then the admin chat's own.
+    const page = admin ? this.platformAdmin.pageTaskId(taskId) : null;
+    if (page) {
+      const there = await this.attachments.filePath(page, v).catch(() => null);
+      if (there) return there.path;
+    }
+    return (await this.attachments.filePath(taskId, v)).path;
+  }
+
   /** `push_branch`: validate, get a person's approval (fail-closed), then push the local branch with the project's credentials. */
   private async pushBranchFor(taskId: string, sessionId: string, project: ProjectContext, input: { branch: string; to?: string; reason?: string }): Promise<string> {
     const refs = parsePushRefs(input.branch, input.to);
@@ -715,6 +728,9 @@ export class RealAgentExecutor extends AgentExecutor {
     // A chat agent's "worktree" is the whole agent dir (it holds runs/*/codex-home with sign-in tokens): never an allowed root for it.
     const mediaRoots = opts.chat ? [generatedDir, opts.project.workspaceRoot] : [ctx.worktreePath, generatedDir, opts.project.workspaceRoot];
     const kbScope = { projectId: opts.project.id };
+    const isAdminChat = Boolean(opts.chat && agentDef?.name === 'admin');
+    // Which task's attachments the media tools may open: this task's only — except for the admin (every task's files, secret ones still excluded).
+    const mediaScope = isAdminChat ? undefined : ctx.taskId;
     // What the agent may write to besides its task root: its project's folder (and, in shared mode, the checkout).
     const extraWriteRoots = ctx.discussion ? undefined : extraWriteRootsFor(opts.project, ctx.worktreePath);
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
@@ -779,7 +795,7 @@ export class RealAgentExecutor extends AgentExecutor {
         const skipped: string[] = [];
         for (const p of paths) {
           try {
-            const real = await this.media.safePath(p, mediaRoots, ctx.taskId);
+            const real = await this.media.safePath(await this.attachmentOrPath(ctx.taskId, p), mediaRoots, ctx.taskId);
             // already one of this task's attachments → just reference it; otherwise copy it in
             const own = await realpath(this.attachments.dir(ctx.taskId)).catch(() => this.attachments.dir(ctx.taskId));
             const name = dirname(real) === own ? basename(real) : await this.attachments.adopt(ctx.taskId, real);
@@ -808,8 +824,10 @@ export class RealAgentExecutor extends AgentExecutor {
         }
       },
       onSearchResources: (input) => this.resources.searchReport(input, agentDef?.name, opts.project.slug),
-      onLookAt: (input) => this.media.lookAt(input.path, input.question, mediaRoots, input, { provider: provider.name, model }, ctx.taskId),
-      onVideoDigest: (input) => this.media.videoDigest(input.path, mediaRoots, input, ctx.taskId),
+      // A bare file name (as listed in the prompt: "IMG_4870.jpg (picture — use look_at)") means THIS task's attachment, like read_document.
+      // The admin (it already reads every task via tasks_list / task_diagnose) may also open attachments of the task whose page the person is on.
+      onLookAt: async (input) => this.media.lookAt(await this.attachmentOrPath(ctx.taskId, input.path, isAdminChat), input.question, mediaRoots, input, { provider: provider.name, model }, mediaScope),
+      onVideoDigest: async (input) => this.media.videoDigest(await this.attachmentOrPath(ctx.taskId, input.path, isAdminChat), mediaRoots, input, mediaScope),
       onStartPreview: ctx.discussion ? undefined : () => this.preview.getOrStart(ctx.taskId, opts.workDir),
       onProposeLearnedSkill: ctx.discussion ? undefined : (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.

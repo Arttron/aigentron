@@ -310,6 +310,7 @@ export function Transcript({
                 </span>
                 {ts(it.line)}
                 {it.line.text && <span className={styles.userText} dir="auto">{it.line.text}</span>}
+                {it.line.id.startsWith('pending-') && <span style={{ opacity: 0.6, fontSize: 11, marginLeft: 6 }}>sending…</span>}
                 {thumbs(it.line.attachments)}
                 {it.line.text && <CopyButton text={it.line.text} label="Copy your message" />}
               </div>

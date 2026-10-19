@@ -1,17 +1,15 @@
-Aigentron v0.1.73
+Aigentron v0.1.74
 
-For people who are not programmers: agents can publish code safely, and a failed update no longer leaves the server stopped.
+For people who are not programmers: the admin can look at your screenshots, messages show up at once, tables look like tables.
 
 New
-- push_branch for agents. An agent that has finished work in a project's repository can now ask to publish a branch (for example "develop" as "main" into an empty repository). You approve each push on a card; the server pushes with the project's own key, so agents still never hold any key or token. Pushes are never forced. A plain `git push` from an agent's shell cannot work by design, and the git skill now tells agents so.
-- Publishing a task result into an empty repository now works (it used to be skipped because there was no main branch yet).
-
-Safer updates (bare-metal servers)
-- The updater checks free space (300 MB) before it stops the service and refuses to start when there is not enough, leaving the running version untouched.
-- If anything fails after the service was stopped (for example a full disk), the previous version is brought back up automatically, including the database snapshot if migrations had run. The service file is written atomically.
-- Build caches (pnpm store, npm, corepack) now live in <data dir>/cache (override with CACHE_DIR) instead of root's home directory, and are cleaned after a successful update. These protections apply from the update that installs this version onwards.
+- The admin assistant can open attachments. Ask it about a screenshot from a task page and it finds that task's files; look_at / video_digest accept just the file name. (Before it said it could not find the picture, from the task page and from Telegram alike.)
+- A message you send appears in the conversation immediately ("sending…") instead of when the agent run starts — noticeable on a busy server.
+- Tables in chat are real tables: aligned columns, numbers lined up on the right, zebra rows, sideways scroll on a phone. The admin's answers are now rendered as formatted text (bold, lists, code, tables) instead of raw symbols.
+- The repository address is checked as you type: an SSH key needs an SSH address (git@github.com:org/repo.git), a token needs https, and a password never goes into the address. One button converts the address; Save is blocked while it is wrong.
+- The update dialog says the server is down for 2–4 minutes and not to restart it by hand; the installer log lines carry the time.
 
 Fixed
-- Checkboxes in the approval card (the "Don't ask again" options) showed up as long slider-like bars; they are normal checkboxes now.
+- On a phone the bottom navigation bar covered the message box of the task screen; the screen now stops above the bar.
 
-Update note: no database changes. If a previous update stopped half-way on a full disk, free some space first (see docs/updates.md).
+Update note: no database changes.

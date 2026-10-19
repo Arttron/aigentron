@@ -62,6 +62,31 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
             return <ul key={i}>{b.items.map((it, j) => <li key={j}>{renderInline(it)}</li>)}</ul>;
           case 'ol':
             return <ol key={i}>{b.items.map((it, j) => <li key={j}>{renderInline(it)}</li>)}</ol>;
+          case 'table':
+            return (
+              <div key={i} className={styles.tableWrap} tabIndex={0} role="region" aria-label="table">
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      {b.head.map((c, j) => (
+                        <th key={j} style={b.align[j] ? { textAlign: b.align[j]! } : undefined}>{renderInline(c)}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {b.rows.map((r, k) => (
+                      <tr key={k}>
+                        {r.map((c, j) => (
+                          <td key={j} style={b.align[j] ? { textAlign: b.align[j]! } : undefined} className={b.align[j] === 'right' ? styles.num : undefined}>
+                            {renderInline(c)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
           case 'quote':
             return <blockquote key={i}>{renderInline(b.c)}</blockquote>;
           default:

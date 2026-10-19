@@ -73,7 +73,7 @@ ARCHIVE_URL_WAS_SET="${ARCHIVE_URL:+1}"
 REQUIRE_CHECKSUM="${REQUIRE_CHECKSUM:-0}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 
-log() { printf '==> %s\n' "$1"; }
+log() { printf '==> %s %s\n' "$(date +%H:%M:%S)" "$1"; }
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 
 # Scheme-dispatched: works whether a URL was computed below or passed in via

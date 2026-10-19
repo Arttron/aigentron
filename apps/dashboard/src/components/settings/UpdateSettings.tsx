@@ -92,7 +92,7 @@ export function UpdateSettings() {
 
       {phase !== 'idle' && target && (
         <Muted>
-          {phase === 'done' ? `✓ Updated to ${target} — reloading…` : `⏳ Updating to ${target}. The server is restarting; this page reconnects by itself (it can take a few minutes).`}
+          {phase === 'done' ? `✓ Updated to ${target} — reloading…` : `⏳ Updating to ${target}. The server is down while it switches versions and restarts — 2–4 minutes on a small server. Do not restart it by hand; this page reconnects by itself.`}
         </Muted>
       )}
 
