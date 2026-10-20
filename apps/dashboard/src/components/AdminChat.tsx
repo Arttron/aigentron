@@ -5,6 +5,8 @@ import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
 import { Markdown } from './Markdown';
+import { UserText } from './UserText';
+import { useSmartPaste } from './SmartPaste';
 import { newPending, reconcilePending, type PendingMessage } from '@/lib/pending-messages';
 import type { StateName } from '@/lib/mascot';
 import {
@@ -106,6 +108,7 @@ export function AdminChat() {
   const [reconnects, setReconnects] = useState(0);
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [text, setText] = useState('');
+  const { onPaste, notice: pasteNotice } = useSmartPaste(setText);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [providerIssue, setProviderIssue] = useState<string | null>(null);
@@ -370,7 +373,7 @@ export function AdminChat() {
             )}
             {msgs.map((m) => (
               <div key={m.id} className={m.from === 'me' ? styles.me : styles.admin}>
-                {m.from === 'me' ? m.text : <Markdown text={m.text} />}
+                {m.from === 'me' ? <UserText text={m.text} /> : <Markdown text={m.text} />}
                 {m.id === lastAdmin?.id && autoSpeak && <SpeakButton text={m.text} abs />}
                 <div className={styles.copyRow}>
                   <CopyButton text={m.text} label={m.from === 'me' ? 'Copy your message' : 'Copy message'} />
@@ -416,6 +419,7 @@ export function AdminChat() {
                   onAutoSpeak={setAutoSpeak}
                   onVoiceMode={() => setVoiceOnly(true)}
                 />
+                {pasteNotice}
                 <div className={styles.composer}>
                   <textarea dir="auto"
                     className={styles.input}
@@ -423,6 +427,7 @@ export function AdminChat() {
                     value={text}
                     placeholder="Write a message…"
                     onChange={(e) => setText(e.target.value)}
+                    onPaste={onPaste}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();

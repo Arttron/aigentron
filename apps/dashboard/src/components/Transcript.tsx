@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
 import { Muted } from '@/components/ui';
 import { Markdown } from './Markdown';
+import { UserText } from './UserText';
 import { SpeakButton } from './SpeakButton';
 import { CopyButton } from './CopyButton';
 import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
@@ -309,7 +310,7 @@ export function Transcript({
                   you&gt;
                 </span>
                 {ts(it.line)}
-                {it.line.text && <span className={styles.userText} dir="auto">{it.line.text}</span>}
+                {it.line.text && <UserText text={it.line.text} className={styles.userText} />}
                 {it.line.id.startsWith('pending-') && <span style={{ opacity: 0.6, fontSize: 11, marginLeft: 6 }}>sending…</span>}
                 {thumbs(it.line.attachments)}
                 {it.line.text && <CopyButton text={it.line.text} label="Copy your message" />}

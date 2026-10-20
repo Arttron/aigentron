@@ -260,3 +260,15 @@ export function checkRepoUrl(raw: string, auth: ProjectRepoAuth): RepoUrlCheck {
   if (auth === 'none' && p.kind === 'ssh') return { level: 'warn', message: 'This is an SSH address: choose “SSH key” below and add the key to the repository, or switch to an https address if the repository is public.' };
   return { level: 'ok', message: '' };
 }
+
+
+/**
+ * The agents the New task list of a project offers: the ones pinned to it, or every agent when nothing is pinned (as before). Pinned names
+ * that no longer exist are ignored; if none of them exists any more, everything is offered rather than an empty list.
+ */
+export function offeredAgents<T extends { name: string }>(all: readonly T[], pinned: readonly string[] | null | undefined): T[] {
+  if (!pinned?.length) return [...all];
+  const set = new Set(pinned);
+  const kept = all.filter((a) => set.has(a.name));
+  return kept.length ? kept : [...all];
+}

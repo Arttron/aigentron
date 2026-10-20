@@ -146,6 +146,8 @@ export interface Project {
   verifyCommands: string | null;
   verifyMaxAttempts: number;
   defaultAgent: string | null;
+  /** Agents the New task list of this project offers (empty = every agent). */
+  pinnedAgents: string[];
   notifyChannelId: string | null;
   notifyChatId: string | null;
   archivedAt: string | null;

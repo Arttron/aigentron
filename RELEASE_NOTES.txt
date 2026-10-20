@@ -1,12 +1,9 @@
-Aigentron v0.1.77
+Aigentron v0.1.78
 
-For people who are not programmers: tasks no longer get stuck in "queued" after a restart or an update, and Task titles can use a Claude subscription.
-
-Fixed
-- Tasks stuck in "queued". If the server was restarted or updated while a task was waiting to start, its place in the queue could be lost and the task waited forever (and a lead waiting for its subtasks was never woken, because it was "queued" when they finished). Now, at start and then every few minutes, the server looks for such tasks: one that never ran is queued again, one that already ran is marked stalled with a clear message — and a lead that was waiting for finished subtasks is resumed with their results.
+For people who are not programmers: pinned agents per project, and pasted terminal output / code is formatted for you.
 
 New
-- Task titles lists every provider. A Claude subscription can be chosen (the title is made through the official Claude CLI, a few seconds slower); Codex is shown as not supported for titles.
-- The Test button of a Claude subscription provider really checks the sign-in (shipped in 0.1.75, now with the titles feature using the same path).
+- Pin agents to a project. In the project's settings tick the agents that belong to it; the "New task" list of that project then offers only those. Nothing ticked = every agent, exactly as before. (It only narrows the list people see: schedules, leads and the admin can still start any agent.)
+- Paste terminal output, logs, code, diffs or JSON into a chat box (a task, the admin chat, the new-task box) and it arrives as a formatted block — the language is detected from the text, colour codes from a terminal are removed, and ordinary text is never touched. A line under the box offers "paste as plain text". Blocks are shown as terminal-style code blocks with a copy button.
 
-Update note: no database changes.
+Update note: the database gets one small new column (a nullable text on projects); a snapshot is taken first and nothing existing changes.

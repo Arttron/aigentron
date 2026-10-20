@@ -168,6 +168,8 @@ model Project {
   verifyMaxAttempts Int     @default(2)
   // lead agent for the project's tasks (fallback: AppSettings.defaultAgent)
   defaultAgent      String?
+  // agents offered in this project's New task list (comma-separated names); null = every agent
+  pinnedAgents      String?
   // escalations / notifications (fallback: AppSettings)
   notifyChannelId   String?
   notifyChatId      String?

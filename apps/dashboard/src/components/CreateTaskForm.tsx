@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ATTACH_ACCEPT, hasLiveCamera, prepareFile } from '@/lib/capture';
 import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
+import { useSmartPaste } from '@/components/SmartPaste';
 import { CameraCapture } from '@/components/CameraCapture';
 import { uploadSizeError } from '@/lib/upload-limits';
 import type { Project } from '@lds/shared';
 import { api, type AgentInfo } from '@/lib/api';
-import { pickProject, readProjectPref, writeProjectPref } from '@/lib/projects';
+import { offeredAgents, pickProject, readProjectPref, writeProjectPref } from '@/lib/projects';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText, HiddenFileInput } from '@/components/ui';
 import { DiscussionModal } from '@/components/DiscussionModal';
 import { TaskReferencePicker } from './TaskReferencePicker';
@@ -14,6 +15,7 @@ import styles from './CreateTaskForm.module.css';
 
 export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () => void; projects?: Project[] }) {
   const [prompt, setPrompt] = useState('');
+  const { onPaste, notice: pasteNotice } = useSmartPaste(setPrompt);
   const [agentName, setAgentName] = useState('');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [defaultProvider, setDefaultProvider] = useState('');
@@ -105,7 +107,13 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
 
   // only offered when there is a choice; the remembered one if it still exists, else the default project
   const project = pickProject(projects, projectPick);
-  const selected = agents.find((a) => a.name === agentName);
+  // The agents pinned to the chosen project (none pinned = every agent); a pick that is no longer offered falls back to the default.
+  const projectRow = projects.find((p) => p.slug === project);
+  const offered = offeredAgents(agents, projectRow?.pinnedAgents);
+  const selected = offered.find((a) => a.name === agentName);
+  useEffect(() => {
+    if (agentName && !offered.some((a) => a.name === agentName)) setAgentName('');
+  }, [agentName, offered]);
 
   return (
     <Card as="form" onSubmit={submit}>
@@ -114,8 +122,10 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
         placeholder="Describe the task… (⌘/Ctrl+Enter to create) — attach references with 📎"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
+        onPaste={onPaste}
         onKeyDown={onKeyDown}
       />
+      {pasteNotice}
 
       {staged.length > 0 && (
         <Muted className={styles.staged}>
@@ -153,7 +163,7 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
                   ? `${defaultProvider} (default)`
                   : 'default'}
             </option>
-            {agents.map((a) => (
+            {offered.map((a) => (
               <option key={a.name} value={a.name}>
                 {a.name}
                 {a.provider ? ` (${a.provider})` : ''}

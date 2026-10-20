@@ -186,3 +186,6 @@ legacy migration), `repo-sync.service.ts` (clone / fetch), `repo-test-core.ts` (
 `git-runner.ts` (git with timeouts and redaction), `project-repo.controller.ts` (the routes above), `git-access.module.ts`
 (global; it provides `GIT_CREDENTIALS` — the runtime module must not declare its own provider under that token, a module's own
 provider would shadow the global one).
+
+## Agents pinned to a project
+The project's settings have **Agents offered when creating a task here**: tick the agents that belong to this project and its *New task* list offers only those (the project's default lead and the server default stay selectable as “default”). Nothing ticked = every agent, exactly as before. It only narrows the list people see: agents, schedules and the admin can still start any agent, and a pinned agent that is deleted is ignored. Stored as `Project.pinnedAgents` (comma-separated, `PATCH /api/projects/:slug {pinnedAgents: [...]}`).

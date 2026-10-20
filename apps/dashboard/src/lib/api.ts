@@ -514,6 +514,8 @@ export interface ProjectInput {
   verifyCommands?: string | null;
   verifyMaxAttempts?: number;
   defaultAgent?: string | null;
+  /** agents the New task list of the project offers (empty / null = every agent) */
+  pinnedAgents?: string[] | null;
   notifyChannelId?: string | null;
   notifyChatId?: string | null;
   archived?: boolean;

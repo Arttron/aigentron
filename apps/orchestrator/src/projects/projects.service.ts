@@ -27,8 +27,7 @@ import {
   uniqueSlug,
   type ProjectIsolation,
   type ProjectKind,
-  type ProjectRepoAuth,
-} from './project-core';
+  type ProjectRepoAuth, parsePinnedAgents, serializePinnedAgents } from './project-core';
 import { dropProjectLabel, setProjectLabel, setProjectLabels } from './project-labels';
 
 /** Prisma row shape for a project. */
@@ -48,6 +47,8 @@ export interface ProjectInput {
   verifyCommands?: string | null;
   verifyMaxAttempts?: number | null;
   defaultAgent?: string | null;
+  /** agent names offered in New task (empty / null = all) */
+  pinnedAgents?: string[] | null;
   notifyChannelId?: string | null;
   notifyChatId?: string | null;
 }
@@ -298,6 +299,7 @@ export class ProjectsService implements OnModuleInit {
       verifyCommands: row.verifyCommands,
       verifyMaxAttempts: row.verifyMaxAttempts,
       defaultAgent: row.defaultAgent,
+      pinnedAgents: parsePinnedAgents(row.pinnedAgents),
       notifyChannelId: row.notifyChannelId,
       notifyChatId: row.notifyChatId,
       archivedAt: row.archivedAt?.toISOString() ?? null,
@@ -445,6 +447,7 @@ export class ProjectsService implements OnModuleInit {
       verifyCommands?: string | null;
       verifyMaxAttempts?: number;
       defaultAgent?: string | null;
+      pinnedAgents?: string | null;
       notifyChannelId?: string | null;
       notifyChatId?: string | null;
     } = {};
@@ -503,6 +506,13 @@ export class ProjectsService implements OnModuleInit {
       out.verifyMaxAttempts = n;
     }
     if (input.defaultAgent !== undefined) out.defaultAgent = shortOrNull(input.defaultAgent, 100, 'defaultAgent');
+    if (input.pinnedAgents !== undefined) {
+      try {
+        out.pinnedAgents = serializePinnedAgents(input.pinnedAgents);
+      } catch (e) {
+        throw new BadRequestException((e as Error).message);
+      }
+    }
     if (input.notifyChannelId !== undefined) out.notifyChannelId = shortOrNull(input.notifyChannelId, 100, 'notifyChannelId');
     if (input.notifyChatId !== undefined) out.notifyChatId = shortOrNull(input.notifyChatId, 100, 'notifyChatId');
     return out;

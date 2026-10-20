@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Project, ProjectIsolation } from '@lds/shared';
 import { api, type AgentInfo, type ChannelInfo, type DeleteProjectOptions, type ProjectLibraryCounts } from '@/lib/api';
 import { ISOLATION_HELP, apiMessage } from '@/lib/projects';
-import { Button, Card, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
+import { Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
 import styles from './projects.module.css';
 
 /** Name, checks, default agent, notifications and mode; plus archive / delete. */
@@ -11,6 +11,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
   const [verify, setVerify] = useState(project.verifyCommands ?? '');
   const [attempts, setAttempts] = useState(project.verifyMaxAttempts);
   const [agent, setAgent] = useState(project.defaultAgent ?? '');
+  const [pinned, setPinned] = useState<string[]>(project.pinnedAgents ?? []);
   const [channelId, setChannelId] = useState(project.notifyChannelId ?? '');
   const [chatId, setChatId] = useState(project.notifyChatId ?? '');
   const [mode, setMode] = useState<'' | ProjectIsolation>(project.isolation ?? '');
@@ -38,6 +39,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
         name: name.trim() || project.name,
         ...(code ? { verifyCommands: verify.trim() || null, verifyMaxAttempts: attempts, isolation: mode || null } : {}),
         defaultAgent: agent || null,
+        pinnedAgents: pinned,
         notifyChannelId: channelId || null,
         notifyChatId: chatId.trim() || null,
       });
@@ -103,6 +105,9 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Agents offered when creating a task here (none selected = every agent, as before)">
+          <CheckboxGroup options={agents.map((a) => a.name)} selected={pinned} onChange={setPinned} empty="no agents yet" />
         </Field>
         <Field label="Notification channel — where a question from a task of this project is posted">
           <select className={styles.narrow} value={channelId} onChange={(e) => setChannelId(e.target.value)}>

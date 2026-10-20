@@ -165,3 +165,23 @@ export function normalizeBranch(branch: string | null | undefined): string | nul
   if (!b || b.length > 200 || /[\s~^:?*[\\]|\.\.|^\/|\/$|^-|\.lock$|@\{/.test(b)) return null;
   return b;
 }
+
+
+/** An agent name as the registry allows it (also what may sit in a comma-separated list). */
+const AGENT_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** The stored `pinnedAgents` text (comma-separated) → names; anything unusable is dropped, duplicates removed, order kept. */
+export function parsePinnedAgents(stored: string | null | undefined): string[] {
+  return [...new Set((stored ?? '').split(',').map((s) => s.trim()).filter((s) => AGENT_NAME.test(s)))].slice(0, 50);
+}
+
+/** What an API caller sent → the text to store (null = no pins = every agent). A bad name or a non-list is refused, not silently dropped. */
+export function serializePinnedAgents(input: unknown): string | null {
+  if (input === null || input === undefined) return null;
+  if (!Array.isArray(input)) throw new Error('pinnedAgents must be a list of agent names');
+  const names = [...new Set(input.map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean))];
+  if (names.length > 50) throw new Error('at most 50 pinned agents');
+  const bad = names.find((n) => !AGENT_NAME.test(n));
+  if (bad) throw new Error(`"${bad}" is not an agent name (letters, digits, - and _)`);
+  return names.length ? names.join(',') : null;
+}

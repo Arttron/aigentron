@@ -97,3 +97,25 @@ describe('defaults and normalisation', () => {
     for (const bad of ['', 'a b', 'a..b', '-x', '/x', 'x/', 'x.lock', 'a~b', 'a^b', 'a:b', 'a?b', 'a*b', 'a[b', 'a\\b', 'a@{b']) expect(normalizeBranch(bad), bad).toBeNull();
   });
 });
+
+
+import { parsePinnedAgents, serializePinnedAgents } from './project-core';
+
+describe('pinned agents', () => {
+  it('reads the stored list, dropping junk and duplicates', () => {
+    expect(parsePinnedAgents('pm, dev ,pm,,bad name,../x,Back-end')).toEqual(['pm', 'dev', 'Back-end']);
+    expect(parsePinnedAgents(null)).toEqual([]);
+    expect(parsePinnedAgents('')).toEqual([]);
+  });
+  it('stores a list as text, an empty list as null (= every agent)', () => {
+    expect(serializePinnedAgents(['pm', ' dev ', 'pm'])).toBe('pm,dev');
+    expect(serializePinnedAgents([])).toBeNull();
+    expect(serializePinnedAgents(null)).toBeNull();
+    expect(serializePinnedAgents(undefined)).toBeNull();
+  });
+  it('refuses a bad name, a non-list and too many', () => {
+    expect(() => serializePinnedAgents(['ok', 'bad name'])).toThrow(/not an agent name/);
+    expect(() => serializePinnedAgents('pm,dev')).toThrow(/list/);
+    expect(() => serializePinnedAgents(Array.from({ length: 51 }, (_, i) => `a${i}`))).toThrow(/50/);
+  });
+});

@@ -150,3 +150,22 @@ describe('checkRepoUrl — the address against the access mode', () => {
     expect(checkRepoUrl('not a url', 'none').level).toBe('error');
   });
 });
+
+
+import { offeredAgents } from './projects';
+
+describe('offeredAgents', () => {
+  const all = [{ name: 'pm' }, { name: 'dev' }, { name: 'qa' }];
+  it('nothing pinned offers every agent, as before', () => {
+    expect(offeredAgents(all, [])).toEqual(all);
+    expect(offeredAgents(all, undefined)).toEqual(all);
+    expect(offeredAgents(all, null)).toEqual(all);
+  });
+  it('pinned agents only, in the list order', () => {
+    expect(offeredAgents(all, ['qa', 'pm'])).toEqual([{ name: 'pm' }, { name: 'qa' }]);
+  });
+  it('a pinned agent that was deleted is ignored; all of them gone offers everything', () => {
+    expect(offeredAgents(all, ['dev', 'ghost'])).toEqual([{ name: 'dev' }]);
+    expect(offeredAgents(all, ['ghost'])).toEqual(all);
+  });
+});

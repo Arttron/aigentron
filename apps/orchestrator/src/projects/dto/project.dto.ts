@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { PROJECT_ISOLATIONS, PROJECT_KINDS, PROJECT_REPO_AUTHS, SLUG_RE } from '../project-core';
 
 /** Body of POST /api/projects. Field semantics: ProjectsService.validateFields (the real checks live there). */
@@ -62,6 +62,13 @@ export class CreateProjectDto {
   @IsString()
   @MaxLength(100)
   defaultAgent?: string | null;
+
+  /** Agents the New task list of this project offers (empty = every agent). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  pinnedAgents?: string[] | null;
 
   @IsOptional()
   @IsString()
@@ -129,6 +136,13 @@ export class UpdateProjectDto {
   @IsString()
   @MaxLength(100)
   defaultAgent?: string | null;
+
+  /** Agents the New task list of this project offers (empty = every agent). */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  pinnedAgents?: string[] | null;
 
   @IsOptional()
   @IsString()

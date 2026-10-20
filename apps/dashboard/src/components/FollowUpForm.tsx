@@ -14,6 +14,7 @@ import { MicButton } from './MicButton';
 import { VoiceToggles } from './VoiceToggles';
 import { VoiceMode, type VoiceReply } from './VoiceMode';
 import { TaskReferencePicker } from './TaskReferencePicker';
+import { useSmartPaste } from './SmartPaste';
 import styles from './FollowUpForm.module.css';
 
 interface Staged {
@@ -70,6 +71,7 @@ export function FollowUpForm({
   const [sheet, setSheet] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
+  const { onPaste, notice: pasteNotice } = useSmartPaste(setText);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [references, setReferences] = useState<string[]>([]);
   const [showRefs, setShowRefs] = useState(false);
@@ -397,6 +399,7 @@ export function FollowUpForm({
           <TaskReferencePicker value={references} onChange={setReferences} excludeId={taskId} />
         )}
         {queueEl}
+        {pasteNotice}
         <div className={styles.dockRow}>
           <AttachMenu compact onPick={onAttachKind} busy={uploading} />
           <textarea dir="auto"
@@ -406,6 +409,7 @@ export function FollowUpForm({
             placeholder={terminal ? 'Message…' : 'Message (queued until the run ends)…'}
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={onKeyDown}
             rows={sheet ? 8 : 1}
           />
@@ -447,9 +451,11 @@ export function FollowUpForm({
           placeholder="Type a message — Enter sends, Shift+Enter adds a line. Attach images/PDFs with 📎"
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={onPaste}
           onKeyDown={onKeyDown}
           rows={3}
         />
+        {pasteNotice}
       </div>
 
       {chipsEl}

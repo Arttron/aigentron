@@ -115,7 +115,7 @@ describe('ensureDefault', () => {
     expect(json).toEqual({
       id: DEFAULT_PROJECT_ID, slug: 'default', name: 'Default', kind: 'code', isDefault: true,
       repo: { url: null, branch: 'main', subdir: null, auth: 'none', path: config.workspaceRepoPath },
-      isolation: null, effectiveIsolation: 'shared', verifyCommands: null, verifyMaxAttempts: 2, defaultAgent: null, notifyChannelId: null, notifyChatId: null,
+      isolation: null, effectiveIsolation: 'shared', verifyCommands: null, verifyMaxAttempts: 2, defaultAgent: null, pinnedAgents: [], notifyChannelId: null, notifyChatId: null,
       archivedAt: null, counts: { active: 0, total: 0, resources: 0, knowledge: 0 }, createdAt: expect.any(String), updatedAt: expect.any(String),
     });
     expect(Object.keys(json)).not.toContain('githubToken');
