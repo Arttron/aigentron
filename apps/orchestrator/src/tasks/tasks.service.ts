@@ -11,7 +11,7 @@ import { AgentExecutor } from '../agent/agent-executor';
 import { matchAgent } from '../channels/agent-match';
 import { ModuleRef } from '@nestjs/core';
 import { TitlesService } from '../titles/titles.service';
-import { fallbackTitle, isWeakPrompt } from '../titles/title-core';
+import { fallbackTitle, isWeakPrompt, titleStateFor } from '../titles/title-core';
 import { TASK_TYPES, isTaskType, typeWhere } from './task-types';
 import { isDoneMessage } from './done-intent';
 import { REUSABLE_STATUSES, SUBTASK_OVER, isSameWork, subtaskCapError } from './subtask-dedupe';
@@ -188,7 +188,7 @@ export class TasksService {
     );
   }
 
-  async create(dto: CreateTaskDto, createdById?: string) {
+  async create(dto: CreateTaskDto, createdById?: string, opts: { byAgent?: boolean } = {}) {
     // A subtask's parent must exist; reject a dangling parentId early. A subtask is in its parent's project
     // (create_subtask does not change the project); otherwise the given slug (archived → 400), else the default.
     const parent = dto.parentId ? await this.get(dto.parentId) : null;
@@ -219,7 +219,7 @@ export class TasksService {
       data: {
         prompt: dto.prompt,
         title,
-        titleState: given ? 'manual' : 'auto',
+        titleState: titleStateFor({ given: Boolean(given), byAgent: opts.byAgent }),
         kind: (dto as { kind?: string }).kind === 'discussion' ? 'discussion' : 'task',
         status: 'queued',
         agentName: agent?.name ?? null,
@@ -279,6 +279,7 @@ export class TasksService {
         references: inheritedRefs,
       },
       createdById ?? parent.createdById ?? undefined,
+      { byAgent: opts.fromAgent === true },
     );
     // Mark the parent so it's resumed with results once all subtasks finish.
     await this.prisma.task.update({ where: { id: parentId }, data: { awaitingSubtasks: true } });

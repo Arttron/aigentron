@@ -13,6 +13,7 @@ import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { ProjectsService } from '../projects/projects.service';
 import { docsWorkDirOf, resolveWorkDir, type ProjectContext } from '../projects/project-context';
 import { KeyedMutex } from '../projects/project-mutex';
+import { waitForCapacity } from './capacity-gate';
 import { QUEUED_STALL_MESSAGE, QUEUED_SWEEP_AFTER_MS, QUEUED_SWEEP_EVERY_MS, queuedFate } from './queued-reconcile';
 import { VerificationService, type VerifyResult } from './verification.service';
 import { TaskQueue, type TaskJobData } from './queue.constants';
@@ -46,6 +47,8 @@ export class TaskWorkerService implements OnModuleInit {
   /** Jobs currently waiting for a project lock (each one lends its slot to the rest). */
   private waiting = 0;
   private lastConcurrency = 0;
+  /** the last time a start was held back by the machine's load (for the admin's metrics) */
+  capacityHeld: { at: number; waitedMs: number; forced: boolean } | null = null;
 
   constructor(
     private readonly queue: TaskQueue,
@@ -154,6 +157,15 @@ export class TaskWorkerService implements OnModuleInit {
     const agentDef = pre.agentName ? await this.agents.get(pre.agentName).catch(() => null) : null;
     const chat = agentDef?.mode === 'chat';
     const project = chat ? null : await this.projects.contextFor(pre);
+    // A busy small machine: hold the start (the task stays `queued`) until the load / memory are back inside the limits. The admin's chat lane never waits.
+    if (!chat) {
+      const held = await waitForCapacity({
+        limits: { maxLoadPerCpu: this.config.agentMaxLoadPerCpu, minFreeMemMb: this.config.agentMinFreeMemMb },
+        onWait: (why) => this.logger.warn(`Task ${taskId} waits to start: ${why}`),
+      });
+      if (held.waitedMs > 1000) this.logger.log(`Task ${taskId} waited ${Math.round(held.waitedMs / 1000)} s for the machine${held.forced ? ' (starts anyway: waited the maximum)' : ''}`);
+      this.capacityHeld = { at: Date.now(), waitedMs: held.waitedMs, forced: held.forced };
+    }
     const release = await this.lockProject(project, taskId);
     try {
       await this.processLocked(data, chat, project);

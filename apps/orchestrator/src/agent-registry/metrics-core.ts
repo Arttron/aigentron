@@ -3,7 +3,7 @@
  * real table. No database, no I/O — the service feeds rows in, this turns them into numbers and text.
  */
 
-export const METRIC_TOPICS = ['approvals', 'tasks', 'agents', 'config'] as const;
+export const METRIC_TOPICS = ['approvals', 'tasks', 'agents', 'config', 'system'] as const;
 export type MetricTopic = (typeof METRIC_TOPICS)[number];
 
 /** Rows with the same key counted together, biggest first. */

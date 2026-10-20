@@ -1,9 +1,9 @@
-Aigentron v0.1.78
+Aigentron v0.1.79
 
-For people who are not programmers: pinned agents per project, and pasted terminal output / code is formatted for you.
+For people who are not programmers: a small server no longer falls over when several agents start at once, and task titles are only generated for tasks you created.
 
 New
-- Pin agents to a project. In the project's settings tick the agents that belong to it; the "New task" list of that project then offers only those. Nothing ticked = every agent, exactly as before. (It only narrows the list people see: schedules, leads and the admin can still start any agent.)
-- Paste terminal output, logs, code, diffs or JSON into a chat box (a task, the admin chat, the new-task box) and it arrives as a formatted block — the language is detected from the text, colour codes from a terminal are removed, and ordinary text is never touched. A line under the box offers "paste as plain text". Blocks are shown as terminal-style code blocks with a copy button.
+- Load-aware starts. On a small server (a 2-CPU burstable instance such as AWS t4g/t3.medium) agents that compile and test at the same time can use up the CPU and make everything slow or stop answering. A new agent run now waits — the task stays "queued", at most 10 minutes — while the machine's load per CPU is above AGENT_MAX_LOAD (default 1.5) or free memory is below AGENT_MIN_FREE_MEM_MB (default 300). The admin's chat never waits. Set a limit to 0 to switch it off. Ask the admin for "metrics, system" to see the load, the memory and whether starts are being held. There is a short guide for small servers (docs/small-servers.md): concurrency 1, a CPU safety net for the service, swap.
+- Task titles are generated only for tasks a person created (dashboard, Telegram, an MCP client). Tasks that agents create — subtasks, tasks a lead or the admin starts — keep the first line of their brief, so no model call is spent naming them.
 
-Update note: the database gets one small new column (a nullable text on projects); a snapshot is taken first and nothing existing changes.
+Update note: no database changes.

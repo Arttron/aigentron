@@ -35,6 +35,7 @@ import { isSameWork } from '../tasks/subtask-dedupe';
 import { AdminAuditService, type AuditEntry } from './admin-audit.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { AdminContextService } from './admin-context.service';
+import { sampleSystem } from '../queue/capacity-gate';
 import { METRIC_TOPICS, clampDays, groupTop, humanSeconds, mdTable, normalizeText, pct, percentile, secondsBetween, type MetricTopic } from './metrics-core';
 import { parsePage } from './admin-context-core';
 import type { SchedulesService } from '../schedules/schedules.service';
@@ -1144,6 +1145,30 @@ export class PlatformAdminService {
     const scope = `${input.project ? `project ${input.project}` : 'all projects'}${input.agent ? `, agent ${input.agent}` : ''}, last ${days} day(s)`;
     const taskWhere = { createdAt: { gte: from }, ...(projectId ? { projectId } : {}), ...(input.agent ? { agentName: input.agent } : {}) };
 
+    if (topic === 'system') {
+      const s = sampleSystem();
+      const [running, queued] = await Promise.all([this.prisma.task.count({ where: { status: 'running' } }), this.prisma.task.count({ where: { status: 'queued' } })]);
+      const maxLoad = this.config.agentMaxLoadPerCpu;
+      const minMem = this.config.agentMinFreeMemMb;
+      const held = (maxLoad > 0 && s.loadPerCpu > maxLoad) || (minMem > 0 && s.freeMemMb < minMem);
+      return [
+        '**The machine right now**',
+        '',
+        mdTable(
+          ['What', 'Now', 'Limit that holds new runs back'],
+          [
+            ['CPUs', s.cpus, '—'],
+            ['Load (1 min)', `${s.load1.toFixed(2)} (${s.loadPerCpu.toFixed(2)} per CPU)`, maxLoad > 0 ? `${maxLoad} per CPU = ${(maxLoad * s.cpus).toFixed(1)}  (AGENT_MAX_LOAD)` : 'off'],
+            ['Free memory', `${Math.round(s.freeMemMb)} MB`, minMem > 0 ? `at least ${minMem} MB  (AGENT_MIN_FREE_MEM_MB)` : 'off'],
+            ['Runs in flight / waiting', `${running} running, ${queued} queued`, `parallel runs: ${await this.settings.concurrency()} (Settings → concurrency)`],
+          ],
+        ),
+        '',
+        held ? 'New runs are being held back right now (they stay "queued" until the machine calms down; none waits longer than 10 minutes).' : 'The machine is inside its limits: new runs start at once.',
+        'A burstable instance (t4g / t3) slows down hard when its CPU credits run out — check CPUCreditBalance in CloudWatch; a low `concurrency` (1) and these limits keep it responsive.',
+      ].join('\n');
+    }
+
     if (topic === 'approvals') {
       const rows = await this.prisma.approvalRequest.findMany({
         where: { createdAt: { gte: from }, task: { ...(projectId ? { projectId } : {}), ...(input.agent ? { agentName: input.agent } : {}) } },
@@ -1391,7 +1416,7 @@ export class PlatformAdminService {
     const asSub = !input.standalone && here && !here.parentId;
     const task = asSub
       ? await this.tasks.createSubtask(currentTaskId, { prompt: input.prompt, title: input.title, agentName: input.agentName }, undefined, { fromAgent: true })
-      : await this.tasks.create({ prompt: input.prompt, title: input.title, agentName: input.agentName, autostart: true } as never);
+      : await this.tasks.create({ prompt: input.prompt, title: input.title, agentName: input.agentName, autostart: true } as never, undefined, { byAgent: true });
     if ((task as { reused?: boolean }).reused) return { ok: true, message: `An equivalent subtask already exists: ${task.id} «${task.title}» (${task.status}). Not started again — check on it with task_diagnose.` };
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_task', summary: `Started ${asSub ? 'subtask' : 'task'} ${task.id} for agent "${input.agentName}" — ${(input.title ?? input.prompt).replace(/\s+/g, ' ').slice(0, 70)}` });
     this.logger.log(`Admin started task ${task.id} for agent ${input.agentName}`);
@@ -1428,7 +1453,7 @@ export class PlatformAdminService {
         (i) => String(i.project ?? '').trim() === slug && i.prompt === input.prompt,
       );
       if (denied) return denied.message;
-      const task = await this.tasks.create({ prompt, title: input.title, agentName, project: slug, autostart: true } as never);
+      const task = await this.tasks.create({ prompt, title: input.title, agentName, project: slug, autostart: true } as never, undefined, { byAgent: true });
       // Where the work grew out of: linked, so those tasks' summaries fold into the new task's context.
       const related = [...new Set((input.related ?? []).map((r) => String(r).trim()).filter(Boolean))].slice(0, 10);
       if (related.length) await this.tasks.linkReferences(task.id, related).catch(() => undefined);

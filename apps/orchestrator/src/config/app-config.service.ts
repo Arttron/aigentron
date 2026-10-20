@@ -47,6 +47,10 @@ export class AppConfigService {
    *  logic just finds nothing to reconcile).  */
   readonly shippedAgentDir: string;
   readonly agentMaxTurns: number;
+  /** A new run is held while the 1-minute load per CPU is above this (AGENT_MAX_LOAD, default 1.5; 0 = off). */
+  readonly agentMaxLoadPerCpu: number;
+  /** …or while free memory is below this many MB (AGENT_MIN_FREE_MEM_MB, default 300; 0 = off). */
+  readonly agentMinFreeMemMb: number;
   /** Max times a task may auto-request "continue?" after hitting the step limit
    *  before it's stalled instead — stops a non-converging run grinding forever. */
   readonly maxContinuations: number;
@@ -186,6 +190,10 @@ export class AppConfigService {
     this.secretsDir = process.env.SECRETS_DIR ?? join(this.agentDir, '..', 'secrets');
     this.shippedAgentDir = process.env.SHIPPED_AGENT_DIR ?? defaultShippedAgentDir();
     this.agentMaxTurns = parseInt(process.env.AGENT_MAX_TURNS ?? '40', 10);
+    const loadLimit = Number(process.env.AGENT_MAX_LOAD ?? '1.5');
+    this.agentMaxLoadPerCpu = Number.isFinite(loadLimit) && loadLimit >= 0 ? loadLimit : 1.5;
+    const memLimit = parseInt(process.env.AGENT_MIN_FREE_MEM_MB ?? '300', 10);
+    this.agentMinFreeMemMb = Number.isFinite(memLimit) && memLimit >= 0 ? memLimit : 300;
     this.maxContinuations = parseInt(process.env.MAX_CONTINUATIONS ?? '2', 10);
     // Lazy skills: inject a short index (name + description + path) and let the
     // agent read the full skill file on demand, instead of inlining every

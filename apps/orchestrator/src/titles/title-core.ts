@@ -3,6 +3,15 @@
 export const MAX_TITLE = 70;
 
 /** First line of the request, cut to 80 — the name a task has until a better one is generated. */
+/**
+ * Whether a new task gets a generated title later. Only a task a PERSON created without naming it does (the dashboard, Telegram, an MCP client);
+ * a title the creator gave is final, and a task created by an agent (a subtask, a task a lead or the admin starts, a scheduled job) keeps the
+ * first line of its brief — no model call is spent naming work no person typed.
+ */
+export function titleStateFor(o: { given: boolean; byAgent?: boolean }): 'manual' | 'auto' {
+  return o.given || o.byAgent ? 'manual' : 'auto';
+}
+
 export function fallbackTitle(prompt: string): string {
   const first = prompt.trim().split('\n')[0]?.trim() ?? '';
   const line = first || 'Untitled task';

@@ -22,7 +22,7 @@ Reading tools run at once. **Every `propose_*` opens an approval card; nothing h
 | `admin_history` | `limit?` | Your change journal: id, time, tool, summary, revertible? |
 | `task_diagnose` | `taskId` | Why a task ended as it did: status, error, agent/provider, reported summary, approvals + outcome, subtasks, last messages |
 | `current_context` | – | The page the person is on now: a task page → that task's diagnosis (as `task_diagnose`), a project page → the project, else the page name. Use it for "this task" / "here" / "why did it fail" without an id |
-| `metrics_report` | `topic` (`approvals`\|`tasks`\|`agents`\|`config`), `days?`, `project?`, `agent?` | Tables to check a complaint against: approval cards by reason/tool/repeated command and wait time; task outcomes and why they stopped; per-agent runs, steps, failures, cost; the settings that shape behaviour. Use before and after a change |
+| `metrics_report` | `topic` (`approvals`\|`tasks`\|`agents`\|`config`\|`system`), `days?`, `project?`, `agent?` | Tables to check a complaint against: approval cards by reason/tool/repeated command and wait time; task outcomes and why they stopped; per-agent runs, steps, failures, cost; the settings that shape behaviour. Use before and after a change |
 | `usage_report` | `days?` (default 7) | Requests, tokens, estimated cost per provider (Stats page) |
 | `provider_test` | `name` | Connectivity check with stored credentials: OK / FAILED + reason |
 

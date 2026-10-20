@@ -45,3 +45,19 @@ describe('cleanTitle', () => {
     expect(cleanTitle('ab')).toBeNull();
   });
 });
+
+import { titleStateFor } from './title-core';
+
+describe('titleStateFor — who gets a generated title', () => {
+  it('a task a person created without naming it is named by the model later', () => {
+    expect(titleStateFor({ given: false })).toBe('auto');
+    expect(titleStateFor({ given: false, byAgent: false })).toBe('auto');
+  });
+  it('a title the creator gave is final', () => {
+    expect(titleStateFor({ given: true })).toBe('manual');
+  });
+  it('a task an agent created keeps the first line of its brief — no model call to name it', () => {
+    expect(titleStateFor({ given: false, byAgent: true })).toBe('manual');
+    expect(titleStateFor({ given: true, byAgent: true })).toBe('manual');
+  });
+});
