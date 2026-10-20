@@ -13,6 +13,7 @@ import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { ProjectsService } from '../projects/projects.service';
 import { docsWorkDirOf, resolveWorkDir, type ProjectContext } from '../projects/project-context';
 import { KeyedMutex } from '../projects/project-mutex';
+import { QUEUED_STALL_MESSAGE, QUEUED_SWEEP_AFTER_MS, QUEUED_SWEEP_EVERY_MS, queuedFate } from './queued-reconcile';
 import { VerificationService, type VerifyResult } from './verification.service';
 import { TaskQueue, type TaskJobData } from './queue.constants';
 import { decideStatus } from './decide-status';
@@ -75,6 +76,37 @@ export class TaskWorkerService implements OnModuleInit {
     this.lastConcurrency = await this.settings.concurrency();
     await this.queue.startWorker((data) => this.process(data), this.lastConcurrency);
     setInterval(() => void this.syncConcurrency(), CONCURRENCY_SYNC_MS);
+    // Tasks left `queued` by a previous process whose job is gone would wait forever: run them again, or stall them (resumable) — at boot
+    // (what is claimed belongs to a dead process) and then every few minutes for jobs that vanished while the server kept running.
+    void this.reconcileQueued(0, false);
+    const sweep = setInterval(() => void this.reconcileQueued(QUEUED_SWEEP_AFTER_MS, true), QUEUED_SWEEP_EVERY_MS);
+    sweep.unref?.();
+  }
+
+  /** Look for `queued` tasks (older than `minAgeMs`) that have no job in the queue and give each its fate (queuedFate). Never throws. */
+  async reconcileQueued(minAgeMs: number, includeActive: boolean): Promise<{ requeued: number; stalled: number }> {
+    let requeued = 0;
+    let stalled = 0;
+    try {
+      for (const t of await this.tasks.queuedTasksBefore(new Date(Date.now() - minAgeMs))) {
+        const fate = queuedFate({ hasJob: await this.queue.hasJobFor(t.id, { includeActive }), sessions: t.sessions });
+        if (fate === 'keep') continue;
+        if (fate === 'requeue') {
+          await this.tasks.requeue(t.id, t.agentName);
+          requeued++;
+          this.logger.warn(`Task ${t.id} was queued but had no job in the queue — queued again`);
+        } else {
+          await this.tasks.setStatus(t.id, 'stalled', QUEUED_STALL_MESSAGE);
+          stalled++;
+          // A lead that was waiting for its subtasks while it sat `queued` was never woken (its subtasks finished meanwhile): do it now.
+          await this.tasks.wakeIfSubtasksDone(t.id).catch((err) => this.logger.warn(`Could not resume lead ${t.id}: ${(err as Error).message}`));
+          this.logger.warn(`Task ${t.id} was queued but had no job in the queue — marked stalled (send it again or press Continue)`);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Queue reconcile failed: ${(err as Error).message}`);
+    }
+    return { requeued, stalled };
   }
 
   /** Poll Settings for a changed concurrency and push it into the running

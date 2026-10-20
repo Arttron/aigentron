@@ -1,10 +1,12 @@
-Aigentron v0.1.76
+Aigentron v0.1.77
 
-For people who are not programmers: choosing Codex now installs it for you and takes you straight to signing in.
+For people who are not programmers: tasks no longer get stuck in "queued" after a restart or an update, and Task titles can use a Claude subscription.
+
+Fixed
+- Tasks stuck in "queued". If the server was restarted or updated while a task was waiting to start, its place in the queue could be lost and the task waited forever (and a lead waiting for its subtasks was never woken, because it was "queued" when they finished). Now, at start and then every few minutes, the server looks for such tasks: one that never ran is queued again, one that already ran is marked stalled with a clear message — and a lead that was waiting for finished subtasks is resumed with their results.
 
 New
-- Codex is installed on demand. Create a Codex provider (or press "Sign in" on one) and, if the Codex program is not on the server yet, the server installs it first (about 330 MB, needs 500 MB free and npm), then starts the sign-in: open the link, enter the code. Nothing to do in a terminal. Claude's program ships with the server, so for a Claude subscription you go straight to signing in.
-- A newly created Codex / Claude-subscription provider opens directly into this flow.
-- The location can be moved with CLI_DIR; a Codex you installed yourself (CODEX_BIN) or one baked into the Docker image is used as before.
+- Task titles lists every provider. A Claude subscription can be chosen (the title is made through the official Claude CLI, a few seconds slower); Codex is shown as not supported for titles.
+- The Test button of a Claude subscription provider really checks the sign-in (shipped in 0.1.75, now with the titles feature using the same path).
 
 Update note: no database changes.

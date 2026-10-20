@@ -81,6 +81,14 @@ export class BullTaskQueue extends TaskQueue implements OnModuleInit, OnModuleDe
     this.logger.log(`Task worker started (bullmq, concurrency=${concurrency}, +${CHAT_LANE_CONCURRENCY} reserved for chat agents)`);
   }
 
+  async hasJobFor(taskId: string, opts: { includeActive?: boolean } = {}): Promise<boolean> {
+    const states = ['waiting', 'delayed', 'prioritized', 'paused', ...(opts.includeActive ? ['active'] : [])] as ('waiting' | 'delayed' | 'prioritized' | 'paused' | 'active')[];
+    for (const q of [this.queue, this.chatQueue]) {
+      if ((await q.getJobs(states)).some((j) => j?.data?.taskId === taskId)) return true;
+    }
+    return false;
+  }
+
   setConcurrency(concurrency: number): void {
     // BullMQ's Worker applies a reassigned `.concurrency` to future dispatch
     // without needing a restart. No-op if the worker hasn't started yet —

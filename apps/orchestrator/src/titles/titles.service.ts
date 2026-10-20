@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { ProvidersService } from '../providers/providers.service';
 import { SettingsService } from '../settings/settings.service';
+import { askClaudeCli } from '../provider-login/claude-probe';
 import { chatOnce, type ChatEndpoint } from './simple-chat';
 import { TITLE_SYSTEM, buildTitleInput, cleanTitle } from './title-core';
 
@@ -58,6 +59,34 @@ export class TitlesService {
     return cfg;
   }
 
+  /**
+   * A provider the person picked that is a Claude SUBSCRIPTION (an OAuth token cannot be called over HTTP): the small question goes through
+   * the official CLI instead — a few seconds slower, on the subscription. Null for every other provider.
+   */
+  private async subscriptionChoice(cfg: TitleConfig): Promise<{ provider: string; token: string; model: string } | null> {
+    if (!cfg.provider) return null;
+    try {
+      const row = await this.providers.get(cfg.provider);
+      if (row.authMode !== 'oauth-token' || (row.kind ?? 'anthropic') !== 'anthropic' || !row.secret) return null;
+      return { provider: cfg.provider, token: row.secret, model: cfg.model || SMALL_MODEL.anthropic! };
+    } catch {
+      return null;
+    }
+  }
+
+  /** One short completion for the configured provider: HTTP when it can be called directly, the Claude CLI for a subscription. */
+  private async complete(cfg: TitleConfig, o: { system: string; user: string; maxTokens?: number; timeoutMs?: number }): Promise<{ text: string; provider: string } | null> {
+    const sub = await this.subscriptionChoice(cfg);
+    if (sub) {
+      const r = await askClaudeCli(sub.token, sub.model, o.user, o.system, Math.max(o.timeoutMs ?? 0, 45_000));
+      if (!r.ok) throw new Error(r.error ?? 'the Claude CLI failed');
+      return { text: (r.reply ?? '').trim(), provider: sub.provider };
+    }
+    const ep = await this.endpoint(cfg);
+    if (!ep) return null;
+    return { text: await chatOnce(ep, o), provider: ep.provider };
+  }
+
   /** The endpoint to name tasks with, or null when no provider can be called directly. */
   private async endpoint(cfg: TitleConfig): Promise<(ChatEndpoint & { provider: string }) | null> {
     const names: string[] = [];
@@ -85,10 +114,8 @@ export class TitlesService {
     const cfg = this.get();
     if (!cfg.enabled) return null;
     try {
-      const ep = await this.endpoint(cfg);
-      if (!ep) return null;
-      const raw = await chatOnce(ep, { system: TITLE_SYSTEM, user: buildTitleInput(ctx) });
-      return cleanTitle(raw);
+      const r = await this.complete(cfg, { system: TITLE_SYSTEM, user: buildTitleInput(ctx) });
+      return r ? cleanTitle(r.text) : null;
     } catch (e) {
       this.logger.debug(`title generation failed: ${(e as Error).message.slice(0, 120)}`);
       return null;
@@ -122,11 +149,10 @@ export class TitlesService {
   async test(prompt: string): Promise<{ ok: boolean; title?: string; provider?: string; error?: string }> {
     const cfg = this.get();
     try {
-      const ep = await this.endpoint({ ...cfg, enabled: true });
-      if (!ep) return { ok: false, error: 'No provider can be called directly (subscription logins cannot). Add one with an API key, or pick it here.' };
-      const raw = await chatOnce(ep, { system: TITLE_SYSTEM, user: buildTitleInput({ prompt }) });
-      const title = cleanTitle(raw);
-      return title ? { ok: true, title, provider: ep.provider } : { ok: false, provider: ep.provider, error: `The model answered, but not with a usable title: "${raw.slice(0, 80)}"` };
+      const r = await this.complete({ ...cfg, enabled: true }, { system: TITLE_SYSTEM, user: buildTitleInput({ prompt }) });
+      if (!r) return { ok: false, error: 'No provider can be called directly (a Codex login cannot). Add one with an API key, pick a Claude subscription here, or pick another provider.' };
+      const title = cleanTitle(r.text);
+      return title ? { ok: true, title, provider: r.provider } : { ok: false, provider: r.provider, error: `The model answered, but not with a usable title: "${r.text.slice(0, 80)}"` };
     } catch (e) {
       return { ok: false, error: (e as Error).message };
     }

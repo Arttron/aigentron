@@ -404,7 +404,8 @@ export class TasksService {
     return fresh;
   }
 
-  private async wakeIfSubtasksDone(parentId: string): Promise<void> {
+  /** If this lead is waiting for its subtasks and every one of them is over, resume it with their results. Safe to call any time. */
+  async wakeIfSubtasksDone(parentId: string): Promise<void> {
     const parent = await this.prisma.task.findUnique({
       where: { id: parentId },
       select: {
@@ -966,6 +967,17 @@ export class TasksService {
     }
     if (orphans.length) this.logger.warn(`Reconciled ${orphans.length} orphaned running task(s) → stalled`);
     return orphans.length;
+  }
+
+  /** `queued` tasks last touched before `cutoff`, with how many agent runs each has had (for the queue-vs-status reconcile). */
+  async queuedTasksBefore(cutoff: Date): Promise<{ id: string; agentName: string | null; sessions: number }[]> {
+    const rows = await this.prisma.task.findMany({ where: { status: 'queued', updatedAt: { lt: cutoff } }, select: { id: true, agentName: true, _count: { select: { sessions: true } } } });
+    return rows.map((r) => ({ id: r.id, agentName: r.agentName, sessions: r._count.sessions }));
+  }
+
+  /** Queue a task again from scratch (its first run was lost with the queue). */
+  async requeue(id: string, agentName: string | null): Promise<void> {
+    await this.enqueueRun({ taskId: id }, agentName);
   }
 
   /**

@@ -38,4 +38,6 @@ export abstract class TaskQueue {
   /** Change the running worker's concurrency cap live (TaskWorkerService polls
    *  the Settings value and calls this on change — no restart needed). */
   abstract setConcurrency(concurrency: number): void;
+  /** Is a job for this task still in the queue? `includeActive`: also one that has been claimed / is running (the periodic sweep); at boot those belong to a dead process. */
+  abstract hasJobFor(taskId: string, opts?: { includeActive?: boolean }): Promise<boolean>;
 }

@@ -70,6 +70,10 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
     this.logger.log(`Task worker started (embedded, concurrency=${this.concurrency})`);
   }
 
+  async hasJobFor(taskId: string, opts: { includeActive?: boolean } = {}): Promise<boolean> {
+    return (await this.prisma.queueJob.count({ where: { taskId, ...(opts.includeActive ? {} : { claimedAt: null }) } })) > 0;
+  }
+
   setConcurrency(concurrency: number): void {
     this.concurrency = Math.max(1, concurrency);
     // A slot may now be free (raised) — don't wait for the next poll tick.

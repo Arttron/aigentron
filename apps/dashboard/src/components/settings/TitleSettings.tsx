@@ -21,7 +21,6 @@ export function TitleSettings() {
       .catch((e) => setMsg({ ok: false, text: (e as Error).message }));
   }, []);
 
-  const usable = providers.filter((p) => p.kind !== 'codex' && p.authMode !== 'oauth-token');
   const dirty = JSON.stringify(cfg) !== JSON.stringify(saved);
 
   const save = () =>
@@ -41,7 +40,7 @@ export function TitleSettings() {
     <Card>
       <SectionTitle>Task titles</SectionTitle>
       <Muted>
-        A new task is named from its context — what you wrote, the files you attached and, for a vague request, the first answer — by a small, cheap model, in the language of the request. Until then it
+        A new task is named from its context — what you wrote, the files you attached and, for a vague request, the first answer — by a small, cheap model, in the language of the request (any provider with an API key, or a Claude subscription through its CLI; Codex is not supported here). Until then it
         shows the first line of your message. Titles you or a schedule set yourself are never changed. Costs a fraction of a cent per task; the request text goes to the chosen provider.
       </Muted>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
@@ -52,11 +51,17 @@ export function TitleSettings() {
           <Field label="Provider (empty = the default one)">
             <select value={cfg.provider} onChange={(e) => setCfg({ ...cfg, provider: e.target.value, model: '' })}>
               <option value="">— automatic —</option>
-              {usable.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
+              {providers.map((p) => {
+                // Codex cannot be asked a one-line question from here; a Claude subscription can (through the official CLI, a few seconds slower).
+                const codex = p.kind === 'codex';
+                const subscription = p.authMode === 'oauth-token';
+                return (
+                  <option key={p.name} value={p.name} disabled={codex}>
+                    {p.name}
+                    {codex ? ' — Codex: not supported for titles' : subscription ? ' — Claude subscription (via the CLI, slower)' : ''}
+                  </option>
+                );
+              })}
             </select>
           </Field>
           {cfg.provider && (

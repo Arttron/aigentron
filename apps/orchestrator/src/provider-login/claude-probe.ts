@@ -30,10 +30,19 @@ export function readClaudeProbe(stdout: string): { ok: boolean; reply?: string; 
  * a scratch folder that is deleted afterwards. It costs one very small request on the subscription. Never throws.
  */
 export async function probeClaudeToken(token: string, model: string, timeoutMs = 60_000): Promise<ClaudeProbeResult> {
+  return askClaudeCli(token, model, 'Reply with the single word OK.', undefined, timeoutMs);
+}
+
+/**
+ * One plain question to Claude through the official CLI with a subscription token: no tools, no MCP servers, no project settings, nothing
+ * persisted (a scratch folder, deleted afterwards). Used for the Test button and for naming tasks with a subscription provider.
+ */
+export async function askClaudeCli(token: string, model: string, user: string, system?: string, timeoutMs = 60_000): Promise<ClaudeProbeResult> {
   const started = Date.now();
   const dir = await mkdtemp(join(tmpdir(), 'lds-claude-probe-'));
   try {
-    const args = ['-p', 'Reply with the single word OK.', '--output-format', 'json', '--max-turns', '1', '--no-session-persistence'];
+    const args = ['-p', user, '--output-format', 'json', '--max-turns', '1', '--no-session-persistence', '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands'];
+    if (system) args.push('--system-prompt', system);
     if (model.trim()) args.push('--model', model.trim());
     const out = await new Promise<{ stdout: string; error?: string }>((resolve) => {
       execFile(claudeBin(), args, { cwd: dir, env: loginEnv({ CLAUDE_CODE_OAUTH_TOKEN: token, CLAUDE_CONFIG_DIR: join(dir, 'cfg') }), timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
