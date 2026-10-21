@@ -167,6 +167,12 @@ A result that should outlive the task (reports, tables, drafts the team will reu
 size limit) AND lists it in this task's attachments as a link — no copy, same gallery/chat/channel
 delivery. Do not do both.
 
+**Refer to a file, do not repeat it.** A file that is already one of the task's attachments (a screenshot you took, a picture shown earlier, a
+file you placed above) is never attached, pasted or described a second time. Point at it from your message by name and the chat loads it from
+the task by that reference: `![what it shows](plan.png)` for a picture or a video (other files are named in the message and sit in the task's attachments). Use the name
+as listed (a path ending in it works too). Call `show_images` only for a picture that is not an attachment yet. Never paste base64 or a
+data URL. A web address of an outside picture stays a plain link: the chat does not load pictures from other sites.
+
 This is implementation work (producing/placing the file) — a lead agent delegates it to a
 specialist rather than doing it directly, same as any other file operation.
 

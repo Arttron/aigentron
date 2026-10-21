@@ -4,7 +4,7 @@ import { SERVER_EVENT, type TaskStatus } from '@lds/shared';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
-import { Markdown } from './Markdown';
+import { Markdown, MediaTaskContext } from './Markdown';
 import { UserText } from './UserText';
 import { useSmartPaste } from './SmartPaste';
 import { newPending, reconcilePending, type PendingMessage } from '@/lib/pending-messages';
@@ -373,7 +373,7 @@ export function AdminChat() {
             )}
             {msgs.map((m) => (
               <div key={m.id} className={m.from === 'me' ? styles.me : styles.admin}>
-                {m.from === 'me' ? <UserText text={m.text} /> : <Markdown text={m.text} />}
+                {m.from === 'me' ? <UserText text={m.text} /> : <MediaTaskContext.Provider value={taskId ?? undefined}><Markdown text={m.text} /></MediaTaskContext.Provider>}
                 {m.id === lastAdmin?.id && autoSpeak && <SpeakButton text={m.text} abs />}
                 <div className={styles.copyRow}>
                   <CopyButton text={m.text} label={m.from === 'me' ? 'Copy your message' : 'Copy message'} />

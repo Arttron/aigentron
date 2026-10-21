@@ -1,6 +1,33 @@
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { createContext, memo, useContext, useMemo, useState, type ReactNode } from 'react';
+import { api } from '@/lib/api';
 import { parseInline, parseMarkdown, type Inline } from '@/lib/markdown-parse';
 import styles from './Markdown.module.css';
+
+/** The task whose attachments `![caption](file.png)` in a message refers to (set by the transcript). */
+export const MediaTaskContext = createContext<string | undefined>(undefined);
+
+const isVideoName = (n: string) => /\.(mp4|webm|mov|m4v)$/i.test(n);
+
+/** A file of the task, loaded by its name — the agent writes a reference, not the picture again. */
+function InlineMedia({ name, alt }: { name: string; alt: string }) {
+  const taskId = useContext(MediaTaskContext);
+  const [broken, setBroken] = useState(false);
+  if (!taskId) return <code className={styles.inlineCode}>{name}</code>;
+  const url = api.attachmentUrl(taskId, name);
+  if (broken) return <code className={styles.inlineCode} title="not found among this task's files">{name}</code>;
+  return (
+    <span className={styles.media}>
+      {isVideoName(name) ? (
+        <video src={url} controls preload="metadata" className={styles.mediaEl} onError={() => setBroken(true)} />
+      ) : (
+        <a href={url} target="_blank" rel="noopener noreferrer">
+          <img src={url} alt={alt || name} loading="lazy" className={styles.mediaEl} onError={() => setBroken(true)} />
+        </a>
+      )}
+      {alt && <span className={styles.mediaCaption}>{alt}</span>}
+    </span>
+  );
+}
 
 function renderInline(tokens: Inline[]): ReactNode[] {
   return tokens.map((t, i) => {
@@ -11,6 +38,8 @@ function renderInline(tokens: Inline[]): ReactNode[] {
         return <strong key={i}>{renderInline(t.c)}</strong>;
       case 'italic':
         return <em key={i}>{renderInline(t.c)}</em>;
+      case 'media':
+        return <InlineMedia key={i} name={t.name} alt={t.alt} />;
       case 'link':
         return (
           <a key={i} href={t.href} target="_blank" rel="noopener noreferrer nofollow">

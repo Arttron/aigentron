@@ -107,3 +107,24 @@
 .num {
   font-variant-numeric: tabular-nums;
 }
+
+.media {
+  display: block;
+  margin: 8px 0;
+  max-width: 100%;
+}
+
+.mediaEl {
+  display: block;
+  max-width: min(100%, 520px);
+  max-height: 420px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+}
+
+.mediaCaption {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}

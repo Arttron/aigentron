@@ -1,3 +1,14 @@
+Aigentron v0.1.81
+
+For people who are not programmers: agents no longer have to repeat a picture or a video in the chat - they point at a file of the task by name and the chat shows it.
+
+New
+- Files by reference. In a message an agent can write ![what it shows](plan.png) (or [clip](attachment:clip.mp4)) and the chat loads that picture or video from the task's files, inline, with the caption under it - nothing is attached or pasted a second time. A file that is not there shows its name instead of a broken picture, and pictures from other websites are never loaded. The team charter now tells agents to refer to a file instead of repeating it.
+
+Update note: no database changes.
+
+---
+
 Aigentron v0.1.80
 
 For people who are not programmers: a lead now sees its subtasks' full answers (not the first few lines), a small server no longer falls over when several agents start at once, and task titles are only generated for tasks you created. (This release also carries 0.1.79, whose publication did not complete.)

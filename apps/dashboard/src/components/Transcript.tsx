@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
 import { Muted } from '@/components/ui';
-import { Markdown } from './Markdown';
+import { Markdown, MediaTaskContext } from './Markdown';
 import { UserText } from './UserText';
 import { SpeakButton } from './SpeakButton';
 import { CopyButton } from './CopyButton';
@@ -325,7 +325,9 @@ export function Transcript({
                 </span>
                 {ts(it.line)}
                 <div className={styles.agentBody}>
-                  <Markdown text={it.line.text} />
+                  <MediaTaskContext.Provider value={taskId}>
+                      <Markdown text={it.line.text} />
+                    </MediaTaskContext.Provider>
                   {it.line.speaker && it.line.speaker !== 'system' && (
                     <div>
                       {translated[it.line.id] === undefined ? (

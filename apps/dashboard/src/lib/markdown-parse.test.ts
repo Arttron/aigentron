@@ -86,3 +86,26 @@ describe('tables', () => {
     expect(b.rows[0]![1]![0]).toMatchObject({ t: 'text', v: '<b>no</b>' });
   });
 });
+
+import { mediaName } from './markdown-parse';
+
+describe('files of the task referenced from a message', () => {
+  it('mediaName takes a bare name, attachment: and a path, never another site', () => {
+    expect(mediaName('shot-3-0.png')).toBe('shot-3-0.png');
+    expect(mediaName('attachment:plan.JPG')).toBe('plan.JPG');
+    expect(mediaName('/data/attachments/abc/before%20after.webp')).toBe('before after.webp');
+    expect(mediaName('https://evil.example/x.png')).toBeNull();
+    expect(mediaName('notes.pdf')).toBeNull();
+    expect(mediaName('..')).toBeNull();
+  });
+  it('![caption](file) and [text](file) become inline media; an outside image stays a plain link or text', () => {
+    expect(parseInline('see ![the plan](plan.png) now')).toEqual([
+      { t: 'text', v: 'see ' },
+      { t: 'media', name: 'plan.png', alt: 'the plan' },
+      { t: 'text', v: ' now' },
+    ]);
+    expect(parseInline('[clip](attachment:a.mp4)')).toEqual([{ t: 'media', name: 'a.mp4', alt: 'clip' }]);
+    expect(parseInline('[docs](https://example.com/a)')).toEqual([{ t: 'link', href: 'https://example.com/a', v: 'docs' }]);
+    expect(parseInline('![x](https://example.com/p.png)')).toEqual([{ t: 'link', href: 'https://example.com/p.png', v: 'x' }]);
+  });
+});

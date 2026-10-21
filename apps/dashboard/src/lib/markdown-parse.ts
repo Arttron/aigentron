@@ -8,7 +8,9 @@ export type Inline =
   | { t: 'code'; v: string }
   | { t: 'bold'; c: Inline[] }
   | { t: 'italic'; c: Inline[] }
-  | { t: 'link'; href: string; v: string };
+  | { t: 'link'; href: string; v: string }
+  /** A file of the task shown inline, loaded by its name from the task's attachments (nothing is copied into the message). */
+  | { t: 'media'; name: string; alt: string };
 
 export type Block =
   | { t: 'p'; c: Inline[] }
@@ -31,7 +33,26 @@ export function safeHref(raw: string): string | null {
   }
 }
 
-const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)/g;
+const MEDIA_EXT = /\.(png|jpe?g|webp|gif|mp4|webm|mov|m4v)$/i;
+
+/**
+ * The name of a task attachment a link points at, or null. Accepted: `name.png`, `attachment:name.png`, `attachments/name.png`, or a path
+ * ending in the file (an agent knows the folder, the page does not). Never a URL of another site: pictures from outside are not loaded.
+ */
+export function mediaName(ref: string): string | null {
+  let r = ref.trim().replace(/^<|>$/g, '');
+  if (/^[a-z][a-z0-9+.-]*:/i.test(r) && !/^attachments?:/i.test(r)) return null;
+  r = r.replace(/^attachments?:\/*/i, '');
+  try {
+    r = decodeURIComponent(r);
+  } catch {
+    /* keep as typed */
+  }
+  const name = r.split(/[\\/]/).pop() ?? '';
+  return name && name !== '..' && MEDIA_EXT.test(name) ? name : null;
+}
+
+const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)/g;
 
 export function parseInline(src: string, depth = 0): Inline[] {
   const out: Inline[] = [];
@@ -43,9 +64,11 @@ export function parseInline(src: string, depth = 0): Inline[] {
     if (m[1]) out.push({ t: 'code', v: tok.slice(1, -1) });
     else if (m[2]) out.push(depth < 2 ? { t: 'bold', c: parseInline(tok.slice(2, -2), depth + 1) } : { t: 'text', v: tok });
     else if (m[3]) {
-      const mm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok);
-      const href = mm ? safeHref(mm[2]!) : null;
-      out.push(href ? { t: 'link', href, v: mm![1]! } : { t: 'text', v: tok });
+      const mm = /^!?\[([^\]]*)\]\(([^)]+)\)$/.exec(tok);
+      const media = mm ? mediaName(mm[2]!) : null;
+      const href = mm && !media ? safeHref(mm[2]!) : null;
+      if (mm && media) out.push({ t: 'media', name: media, alt: mm[1]! });
+      else out.push(href && mm![1] ? { t: 'link', href, v: mm![1]! } : { t: 'text', v: tok });
     } else if (m[4]) {
       // Trailing punctuation belongs to the sentence, not the URL.
       const trimmed = tok.replace(/[.,;:!?]+$/, '');
