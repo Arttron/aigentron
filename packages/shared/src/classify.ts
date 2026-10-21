@@ -38,6 +38,11 @@ export const CREATE_TASK_TOOL = `${INTERNAL_TOOL_PREFIX}create_task`;
 export const PUSH_BRANCH_TOOL = `${INTERNAL_TOOL_PREFIX}push_branch`;
 export const COMPLETE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}complete_subtask`;
 export const CHECK_SUBTASKS_TOOL = `${INTERNAL_TOOL_PREFIX}check_subtasks`;
+/**
+ * Raised by the orchestrator itself (not by an agent) when a run that is still working reaches the ceiling of active time: a person decides
+ * whether it may go on. Gated like the other internal tools that cost something; the approval card carries the time used and the extra asked for.
+ */
+export const EXTEND_RUN_TOOL = `${INTERNAL_TOOL_PREFIX}extend_run_time`;
 /** Sentinel toolName for a "run out of steps — continue?" approval (not a real tool). */
 export const CONTINUE_RUN_TOOL = '__continue_run__';
 /** Schedule a delayed re-run of this task ("check back in N seconds"). */
@@ -193,19 +198,23 @@ export interface DangerVerdict {
   summary: string;
   /** Why it was flagged. Empty when not dangerous. */
   reason: string;
+  /** Never waved through, not even in the no-approvals mode (credentials, protected files). */
+  hard?: boolean;
 }
 
 /** Shell command patterns that are destructive, irreversible, or outbound. */
-const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string }> = [
+const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string; hard?: boolean }> = [
   {
     re: /\/proc\/[^\s/]+\/environ|\.codex-home|codex-home\/|(^|[\s/])auth\.json\b|\.git\/config\b|(^|[\s/])\.env(?!\.example)\b|\/\.(ssh|aws|gnupg|docker|kube)\/|\/run\/secrets\/|\/(workspace|data)\/secrets\b/,
     reason: 'touches a credentials file (env/tokens/secrets)',
+    hard: true,
   },
   // The sign-in password lives in a `secrets` directory as auth.json: also catch the ways around a literal path
   // (cd into it, globs like au*.json, find -name auth*, the make target that removes the password).
   {
     re: /\bcd\s+[^\n;&|]*\bsecrets\b|(^|[\s/"'])secrets\/|-i?name\s+["']?[^\s"']*auth|(^|[\s/"'=])au[*?[]|\bauth[\w.-]*[*?[]|\bmake\s+(set|reset)-password\b/,
     reason: 'touches the credentials directory / sign-in password',
+    hard: true,
   },
   { re: /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/i, reason: 'recursive force remove (rm -rf)' },
   { re: /\brm\s+-[a-z]*r[a-z]*\b/i, reason: 'recursive remove (rm -r)' },
@@ -405,6 +414,9 @@ function normalize(p: string): string {
   return (p.startsWith('/') ? '/' : '') + segments.join('/');
 }
 
+/** Scratch folders every run may use freely (build output, downloads, test fixtures): never a reason for a card. */
+export const SCRATCH_ROOTS: readonly string[] = ['/tmp', '/var/tmp', '/private/tmp'];
+
 function isInside(child: string, parent: string): boolean {
   const c = normalize(child);
   const p = normalize(parent);
@@ -415,24 +427,34 @@ function isInside(child: string, parent: string): boolean {
 const RM_REASONS = new Set(['recursive force remove (rm -rf)', 'recursive remove (rm -r)', 'force flag']);
 
 /**
- * `rm [-rfivdR] path…` as ONE simple command whose every target is a real path (no globs, no `~`, no quotes, no `$`, no `..` that leaves
- * the roots) strictly INSIDE the agent's own write roots (never a root itself, never a protected or credentials path). Clearing out
- * its own `work/` folder is routine; the card is kept for anything that could reach beyond it.
+ * `rm [-rfivdR] path…` as ONE simple command whose every target is a real path (no `~`, no `$`, no `..` that leaves the roots) strictly
+ * INSIDE the agent's own write roots or the scratch folders (/tmp) — never a root itself, never a protected or credentials path. Plain quotes
+ * (without spaces inside) and a glob BELOW a named folder (`dist/*`, `/tmp/build-*`) are fine; a glob that spans a whole root (`*`) is not.
+ * Clearing out its own folders is routine; the card is kept for anything that could reach beyond them.
  */
 export function isSafeRmInRoots(command: string, opts: ClassifyOptions): boolean {
   if (!opts.workspaceRoot) return false;
   const c = command.trim();
-  if (/[;&|<>`$()\\"'*?[\]{}~]/.test(c)) return false;
-  const tokens = c.split(/\s+/);
+  if (/[;&|<>`$()\\~{}[\]]/.test(c)) return false;
+  if (/(["'])[^"']*\s[^"']*\1/.test(c)) return false; // a name with a space: not a simple path list
+  const tokens = c.replace(/["']/g, '').split(/\s+/);
   if (tokens[0] !== 'rm') return false;
   let i = 1;
   while (i < tokens.length && /^-[rRfivd]+$/.test(tokens[i]!)) i++;
   const targets = tokens.slice(i);
   if (!targets.length || targets.some((t) => t.startsWith('-'))) return false;
-  const roots = [opts.workspaceRoot, ...(opts.extraWriteRoots ?? [])].filter(Boolean).map((r) => normalize(r));
+  const roots = [opts.workspaceRoot, ...(opts.extraWriteRoots ?? []), ...SCRATCH_ROOTS].filter(Boolean).map((r) => normalize(r));
   return targets.every((t) => {
-    const abs = normalize(t.startsWith('/') ? t : `${opts.workspaceRoot!.replace(/\/$/, '')}/${t}`);
+    const glob = /[*?]/.test(t);
+    // a glob is judged by the folder it sits in: that folder must itself be strictly inside a root
+    const lit = glob ? t.slice(0, Math.max(0, t.search(/[*?]/))).replace(/[^/]*$/, '') : t;
+    const abs = normalize(lit.startsWith('/') ? lit : `${opts.workspaceRoot!.replace(/\/$/, '')}/${lit}`);
     if (isSecretPath(abs) || isProtectedPath(abs) || abs.split('/').some((seg) => seg === '.git' || seg === '.github')) return false;
+    if (glob && /(^|\/)\.\.(\/|$)/.test(t)) return false;
+    // `build-*` right in a root names its files by a prefix: fine. A bare `*` (or `*.log`) in a root spans the whole root: no.
+    const globAt = t.search(/[*?]/);
+    const named = glob && !t.slice(globAt).includes('/') && t.slice(0, globAt).length > 0 && !t.slice(0, globAt).endsWith('/');
+    if (named) return roots.some((r) => isInside(abs, r));
     return roots.some((r) => abs !== r && isInside(abs, r)) && !roots.includes(abs);
   });
 }
@@ -440,7 +462,7 @@ export function isSafeRmInRoots(command: string, opts: ClassifyOptions): boolean
 /** Inside the write boundary: the task root or any extra write root. */
 function insideWriteRoots(absolute: string, opts: ClassifyOptions): boolean {
   if (!opts.workspaceRoot) return true;
-  return isInside(absolute, opts.workspaceRoot) || (opts.extraWriteRoots ?? []).some((r) => r && isInside(absolute, r));
+  return isInside(absolute, opts.workspaceRoot) || (opts.extraWriteRoots ?? []).some((r) => r && isInside(absolute, r)) || SCRATCH_ROOTS.some((r) => isInside(absolute, r));
 }
 
 /**
@@ -502,6 +524,14 @@ export function classifyToolCall(
       dangerous: true,
       summary: `create_task [${project}] → ${agent} #${shortHash(`${project}\n${agent}\n${prompt}`)}`,
       reason: `agent proposing to START a new task in project "${project}" for ${agent} (runs immediately, uses that agent's provider)${typeof toolInput.reason === 'string' && toolInput.reason ? ` — why: ${toolInput.reason.slice(0, 200)}` : ''}: ${prompt.replace(/\s+/g, ' ').slice(0, 160)}`,
+    };
+  }
+  if (name === EXTEND_RUN_TOOL.toLowerCase()) {
+    const n = (k: string) => (typeof toolInput[k] === 'number' ? (toolInput[k] as number) : 0);
+    return {
+      dangerous: true,
+      summary: `extend_run_time +${n('extraMin')} min (after ${n('usedMin')} min) #${shortHash(`${n('usedMin')}:${n('extraMin')}`)}`,
+      reason: `this run has used ${n('usedMin')} min of active time (the limit is ${n('limitMin')} min) and is still making progress — allow ${n('extraMin')} more minutes? Deny to stop it here (the task becomes stalled; the work done so far stays)`,
     };
   }
   if (name === PROPOSE_TASK_TOOL.toLowerCase()) {
@@ -681,10 +711,10 @@ export function classifyToolCall(
     const command = extractCommand(toolInput);
     const summary = command ? `$ ${command}` : `${toolName} (no command)`;
     const safeRm = isSafeRmInRoots(command, opts);
-    for (const { re, reason } of DANGEROUS_SHELL_PATTERNS) {
+    for (const { re, reason, hard } of DANGEROUS_SHELL_PATTERNS) {
       if (safeRm && RM_REASONS.has(reason)) continue;
       if (re.test(command)) {
-        return { dangerous: true, summary, reason };
+        return { dangerous: true, summary, reason, ...(hard ? { hard: true } : {}) };
       }
     }
     return { dangerous: false, summary, reason: '' };
@@ -699,10 +729,10 @@ export function classifyToolCall(
     const summary = `apply_patch ${paths.join(', ') || '(no paths)'}`;
     for (const filePath of paths) {
       if (isSecretPath(filePath)) {
-        return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)' };
+        return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)', hard: true };
       }
       if (isProtectedPath(filePath)) {
-        return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)' };
+        return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)', hard: true };
       }
       if (opts.workspaceRoot) {
         const absolute = filePath.startsWith('/') ? filePath : `${opts.workspaceRoot.replace(/\/$/, '')}/${filePath}`;
@@ -719,11 +749,11 @@ export function classifyToolCall(
     const summary = `${toolName} ${filePath}`;
     // Overwriting a credentials file (e.g. the sign-in password) is gated wherever the worktree boundary sits.
     if (filePath && isSecretPath(filePath)) {
-      return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)' };
+      return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)', hard: true };
     }
     // Protected files (charter / CI / git internals) must not be written silently.
     if (filePath && isProtectedPath(filePath)) {
-      return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)' };
+      return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)', hard: true };
     }
     // Writes outside the confined worktree are dangerous.
     if (opts.workspaceRoot && filePath) {
@@ -752,6 +782,7 @@ export function classifyToolCall(
         dangerous: true,
         summary: `${toolName} ${target}`,
         reason: 'read of a credentials file (tokens/env/secrets could leak into the model context)',
+        hard: true,
       };
     }
   }

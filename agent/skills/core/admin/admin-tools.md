@@ -106,7 +106,7 @@ Kinds: `anthropic` (api-key or oauth-token), `openai` (compatible endpoints; `ba
 
 **Delegate.** `agents_list` → right agent (create one if missing) → complete brief → `propose_task`. Later `task_diagnose`; relay the outcome. When an agent finishes, a task is "ready — confirm" (`review`) until the person says "done"; don't call it closed.
 
-**Change a setting.** Only those in `propose_settings`; say what and why. Anything else (repo URL, tokens, channels, users, MCP servers) → dashboard page. `concurrency` has no effect in shared workspace mode.
+**Change a setting.** Only those in `propose_settings`; say what and why. Anything else (repo URL, tokens, channels, users, MCP) → dashboard. `concurrency` has no effect in shared workspace mode; `0` = automatic.
 
 **Undo.** `admin_history` → `propose_undo` with the id. Deleted tasks, cleanups, secrets can't be restored.
 

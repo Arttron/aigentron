@@ -1,6 +1,6 @@
 import { chmod, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { buildAgentEnv } from './env';
+import { applyNodeHeapLimit, buildAgentEnv } from './env';
 import { assertIsolationReady, chownTree, spawnAsAgent } from './isolation';
 import { hooksConfig } from './settings';
 import { emptyUsage } from './usage';
@@ -195,6 +195,7 @@ export async function runCodex(params: RunAgentParams, onEvent: AgentEventHandle
 
   const env = buildAgentEnv({ ANTHROPIC_MODEL: '' }, process.env, params.workspaceRoot ?? params.cwd, params.hook, params.extraWriteRoots);
   delete env.ANTHROPIC_MODEL; // Anthropic vars mean nothing to Codex
+  applyNodeHeapLimit(env, params.nodeMaxMb);
   env.CODEX_HOME = opts.home;
   if (opts.apiKey) env.CODEX_API_KEY = opts.apiKey;
   if (opts.internalMcp) env[INTERNAL_MCP_TOKEN_ENV] = opts.internalMcp.token;
@@ -226,6 +227,7 @@ export async function runCodex(params: RunAgentParams, onEvent: AgentEventHandle
     cwd: params.cwd,
     env,
     isolation: params.isolation,
+    nice: params.niceness,
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: true, // own process group so abort can kill hook/tool children too
   });

@@ -21,7 +21,7 @@ export class UpdateSettingsDto {
 
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(0)
   @Max(20)
   concurrency?: number;
 

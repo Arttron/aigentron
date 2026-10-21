@@ -1,3 +1,4 @@
+import { ApprovalModePicker } from '@/components/ApprovalModePicker';
 import { useEffect, useState } from 'react';
 import type { Project, ProjectIsolation } from '@lds/shared';
 import { api, type AgentInfo, type ChannelInfo, type DeleteProjectOptions, type ProjectLibraryCounts } from '@/lib/api';
@@ -108,6 +109,9 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
         </Field>
         <Field label="Agents offered when creating a task here (none selected = every agent, as before)">
           <CheckboxGroup options={agents.map((a) => a.name)} selected={pinned} onChange={setPinned} empty="no agents yet" />
+        </Field>
+        <Field label="Approvals for this project's tasks (a task can override it; Inherit follows Settings → General → Approvals)">
+          <ApprovalModePicker scope={{ project: project.slug }} compact />
         </Field>
         <Field label="Notification channel — where a question from a task of this project is posted">
           <select className={styles.narrow} value={channelId} onChange={(e) => setChannelId(e.target.value)}>

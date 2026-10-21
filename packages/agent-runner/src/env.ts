@@ -74,3 +74,11 @@ export function buildAgentEnv(
   }
   return env;
 }
+
+/** NODE_OPTIONS with a heap cap for the Node processes an agent starts (tsc, vitest, builds). Keeps an existing --max-old-space-size untouched. */
+export function applyNodeHeapLimit(env: Record<string, string>, mb: number | undefined): void {
+  if (!mb || mb < 128 || !Number.isFinite(mb)) return;
+  const cur = env.NODE_OPTIONS ?? '';
+  if (/--max-old-space-size/.test(cur)) return;
+  env.NODE_OPTIONS = `${cur} --max-old-space-size=${Math.floor(mb)}`.trim();
+}

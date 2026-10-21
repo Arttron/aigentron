@@ -3,6 +3,8 @@
  * token tree that `Markdown.tsx` turns into React elements, so nothing the model writes can inject markup.
  */
 
+import { contrastText, cssColor, findColors, parseColor } from './color-chip';
+
 export type Inline =
   | { t: 'text'; v: string }
   | { t: 'code'; v: string }
@@ -10,7 +12,9 @@ export type Inline =
   | { t: 'italic'; c: Inline[] }
   | { t: 'link'; href: string; v: string }
   /** A file of the task shown inline, loaded by its name from the task's attachments (nothing is copied into the message). */
-  | { t: 'media'; name: string; alt: string };
+  | { t: 'media'; name: string; alt: string }
+  /** A colour value written in the text, shown on a chip of that colour with a readable text colour (both rebuilt from the parsed numbers). */
+  | { t: 'color'; v: string; bg: string; fg: string };
 
 export type Block =
   | { t: 'p'; c: Inline[] }
@@ -79,6 +83,31 @@ export function parseInline(src: string, depth = 0): Inline[] {
     last = i + tok.length;
   }
   if (last < src.length) out.push({ t: 'text', v: src.slice(last) });
+  return expandColors(out);
+}
+
+function chip(text: string, c: NonNullable<ReturnType<typeof parseColor>>): Inline {
+  return { t: 'color', v: text, bg: cssColor(c), fg: contrastText(c) };
+}
+
+/** Colour values inside plain text become chips; an inline code that is nothing but a colour does too (any short hex there: the author meant a colour). */
+function expandColors(tokens: Inline[]): Inline[] {
+  const out: Inline[] = [];
+  for (const t of tokens) {
+    if (t.t === 'code') {
+      const c = parseColor(t.v);
+      out.push(c ? chip(t.v, c) : t);
+    } else if (t.t === 'text') {
+      let at = 0;
+      for (const f of findColors(t.v)) {
+        if (f.start > at) out.push({ t: 'text', v: t.v.slice(at, f.start) });
+        out.push(chip(f.text, f.color));
+        at = f.end;
+      }
+      if (at === 0) out.push(t);
+      else if (at < t.v.length) out.push({ t: 'text', v: t.v.slice(at) });
+    } else out.push(t);
+  }
   return out;
 }
 

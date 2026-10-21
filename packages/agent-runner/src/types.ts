@@ -55,6 +55,10 @@ export interface RunAgentParams {
   prompt: string;
   /** Run the agent binary as a separate OS user; omitted = the orchestrator's own user (today's behaviour). */
   isolation?: AgentIsolation;
+  /** CPU niceness for the agent process (1-19; 0 / omitted = unchanged) — the machine keeps answering when agents hog the CPU. */
+  niceness?: number;
+  /** Heap cap (MB) for the Node processes the agent starts, via NODE_OPTIONS (0 / omitted = none). */
+  nodeMaxMb?: number;
   /** Working directory the agent runs in — the worktree root, or a subdir of it. */
   cwd: string;
   /**

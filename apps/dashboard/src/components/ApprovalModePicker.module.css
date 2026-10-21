@@ -1,0 +1,17 @@
+.picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 13px;
+}
+
+.picker select {
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+}
+
+.err {
+  color: var(--danger, #c0392b);
+}

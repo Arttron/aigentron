@@ -3,11 +3,22 @@
 Agents compile, run tests, drive a browser and call models at the same time; on 2 vCPU that is easily more than the machine can do, and on a burstable
 instance the CPU credits run out and everything slows down together (timeouts, a dashboard that stops answering). What the server does about it:
 
-- **Parallel runs** — Settings → *concurrency* (default 2). On a 2-vCPU machine use **1**; projects in `shared` mode already run one task at a time.
+- **Parallel runs** — Settings → *concurrency* (default 2; tick **Choose automatically** (stored as 0, since 0.1.82) and the server picks what the machine suits). On a 2-vCPU machine use **1**; projects in `shared` mode already run one task at a time.
 - **Load-aware starts** (since 0.1.79) — a new run is held, the task staying *queued*, while the 1-minute load average per CPU is above `AGENT_MAX_LOAD`
   (default 1.5, i.e. 3.0 on 2 vCPU) or free memory is below `AGENT_MIN_FREE_MEM_MB` (default 300). No run waits longer than 10 minutes (then it
   starts anyway), and the admin's chat is never held. Set a limit to `0` to switch it off; on a very small box try `AGENT_MAX_LOAD=1.0`.
   Ask the admin for `metrics_report` topic `system` to see the load, the memory and whether starts are being held.
+- **Spread-out starts** (since 0.1.82) — held runs no longer start together: they go through one at a time, at least `AGENT_START_GAP_S` (default 10) seconds
+  apart, because the load average lags by a minute and two runs would both see "calm". `0` switches it off.
+- **CPU steal** (since 0.1.82) — a burstable instance out of CPU credits is slowed down by the host, which shows as "steal" time long before the load average
+  rises. A start is held while more than `AGENT_MAX_STEAL` % (default 20) of the CPU time is stolen. `0` switches it off.
+- **Lower priority for agents** (since 0.1.82) — agent processes run at niceness `AGENT_NICE` (default 10; `0` = off), and so do the tests and builds they start, so the
+  dashboard, SSH and the orchestrator itself keep the CPU when agents hog it. Works with and without the separate agent user.
+- **Memory cap for builds and tests** (since 0.1.82) — the Node processes an agent starts (`tsc`, `vitest`, bundlers) get a heap cap through `NODE_OPTIONS`:
+  about a third of the RAM (1.4 GB on a 4 GB machine; none from 12 GB up). A runaway build then fails with "heap out of memory" instead of taking the whole
+  machine down. `AGENT_NODE_MAX_MB=<n>` sets it, `0` switches it off.
+- **A suggestion for parallel runs** — `metrics_report` topic `system` shows how many runs this machine suits (one less than the CPUs on a small box, and no more than
+  memory allows) and says when Settings → *concurrency* is above it.
 - **Per-agent step limit** — `maxTurns` in the agent form keeps one run from going on for ever.
 
 What to do on the machine itself:

@@ -207,18 +207,28 @@ export function GeneralSettingsForm() {
       <Card>
         <SectionTitle>Task queue</SectionTitle>
         <Field label="Concurrency — agent runs processed in parallel">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <input
+              type="checkbox"
+              checked={(form.concurrency ?? 1) === 0}
+              onChange={(e) => set('concurrency', e.target.checked ? 0 : Math.max(1, s?.concurrencyEffective ?? 1))}
+              style={{ width: 'auto', margin: 0 }}
+            />{' '}
+            Choose automatically for this machine{(form.concurrency ?? 1) === 0 && s?.concurrencyEffective ? ` (now ${s?.concurrencyEffective})` : ''}
+          </label>
           <input
             className={styles.narrow}
             type="number"
             min={1}
             max={20}
-            value={form.concurrency ?? 1}
+            disabled={(form.concurrency ?? 1) === 0}
+            value={(form.concurrency ?? 1) === 0 ? (s?.concurrencyEffective ?? 1) : (form.concurrency ?? 1)}
             onChange={(e) => set('concurrency', Number(e.target.value))}
           />
         </Field>
         <Muted className={styles.note}>
           Takes effect live, within ~10s — no restart needed. In shared-workspace mode (one
-          worktree for all tasks) this is effectively capped at 1 regardless of this value.
+          worktree for all tasks) this is effectively capped at 1 regardless of this value. Automatic = one less than the CPUs on a small server (2 vCPU → 1), memory permitting.
         </Muted>
       </Card>
 

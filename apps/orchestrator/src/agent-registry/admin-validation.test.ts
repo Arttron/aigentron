@@ -25,7 +25,8 @@ describe('validateSettingsChanges', () => {
     expect(validateSettingsChanges({ githubToken: 'x' })).toMatch(/can't be changed/);
   });
   it('range-checks numbers', () => {
-    expect(validateSettingsChanges({ concurrency: 0 })).toMatch(/concurrency/);
+    expect(validateSettingsChanges({ concurrency: 17 })).toMatch(/concurrency/);
+    expect(validateSettingsChanges({ concurrency: 0 })).toBeNull(); // 0 = chosen automatically
     expect(validateSettingsChanges({ concurrency: 2 })).toBeNull();
     expect(validateSettingsChanges({ approvalTimeoutSeconds: 5 })).toMatch(/approvalTimeoutSeconds/);
   });

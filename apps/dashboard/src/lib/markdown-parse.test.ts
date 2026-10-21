@@ -109,3 +109,23 @@ describe('files of the task referenced from a message', () => {
     expect(parseInline('![x](https://example.com/p.png)')).toEqual([{ t: 'link', href: 'https://example.com/p.png', v: 'x' }]);
   });
 });
+
+describe('colour values become chips', () => {
+  it('in running text, with a readable text colour', () => {
+    expect(parseInline('main #ffff00 here')).toEqual([
+      { t: 'text', v: 'main ' },
+      { t: 'color', v: '#ffff00', bg: 'rgb(255, 255, 0)', fg: '#000000' },
+      { t: 'text', v: ' here' },
+    ]);
+    expect(parseInline('rgb(0, 0, 128)')).toEqual([{ t: 'color', v: 'rgb(0, 0, 128)', bg: 'rgb(0, 0, 128)', fg: '#ffffff' }]);
+  });
+  it('an inline code that is only a colour, even #123; other code stays code', () => {
+    expect(parseInline('`#123`')).toEqual([{ t: 'color', v: '#123', bg: 'rgb(17, 34, 51)', fg: '#ffffff' }]);
+    expect(parseInline('`const a = #ff0000`')).toEqual([{ t: 'code', v: 'const a = #ff0000' }]);
+  });
+  it('issue numbers, links and bold keep working', () => {
+    expect(parseInline('see #123')).toEqual([{ t: 'text', v: 'see #123' }]);
+    expect(parseInline('**#00ff00**')[0]).toMatchObject({ t: 'bold' });
+    expect(parseInline('[x](https://a.b/#ff8800)')).toEqual([{ t: 'link', href: 'https://a.b/#ff8800', v: 'x' }]);
+  });
+});

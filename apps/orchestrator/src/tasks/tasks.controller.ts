@@ -1,3 +1,4 @@
+import { getHold } from '../queue/holds';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { CreateTaskDto } from './dto/create-task.dto';
@@ -37,8 +38,9 @@ export class TasksController {
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
-    return this.tasks.get(id);
+  async get(@Param('id') id: string) {
+    // `hold`: why a queued task has not started yet (the machine is busy / its turn), or null
+    return { ...(await this.tasks.get(id)), hold: getHold(id) };
   }
 
   @Get(':id/transcript')

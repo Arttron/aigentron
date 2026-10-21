@@ -47,7 +47,7 @@ export function validateSettingsChanges(ch: Record<string, unknown> | undefined)
     const v = ch[k];
     return v === undefined || (typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi) ? null : `${k} must be an integer between ${lo} and ${hi}.`;
   };
-  const err = int('verifyMaxAttempts', 0, 10) ?? int('concurrency', 1, 16) ?? int('approvalTimeoutSeconds', 30, 3600);
+  const err = int('verifyMaxAttempts', 0, 10) ?? int('concurrency', 0, 16) ?? int('approvalTimeoutSeconds', 30, 3600);
   if (err) return err;
   if (ch.defaultAgent !== undefined && (typeof ch.defaultAgent !== 'string' || !/^[\p{L}\p{N}\p{M}_-]{1,60}$/u.test(ch.defaultAgent))) return 'defaultAgent must be an agent name.';
   if (ch.verifyCommands !== undefined && (typeof ch.verifyCommands !== 'string' || ch.verifyCommands.length > 2000)) return 'verifyCommands must be text up to 2000 characters.';

@@ -189,3 +189,7 @@ provider would shadow the global one).
 
 ## Agents pinned to a project
 The project's settings have **Agents offered when creating a task here**: tick the agents that belong to this project and its *New task* list offers only those (the project's default lead and the server default stay selectable as “default”). Nothing ticked = every agent, exactly as before. It only narrows the list people see: agents, schedules and the admin can still start any agent, and a pinned agent that is deleted is ignored. Stored as `Project.pinnedAgents` (comma-separated, `PATCH /api/projects/:slug {pinnedAgents: [...]}`).
+
+## Approvals per level
+
+Whether an agent asks before a risky action is set at three levels, the most specific one that is set wins (in both directions): the **task** (its subtasks follow it; the 🛡 selector on the task page) → the **project** (project settings) → the **global** setting (Settings → General → Approvals, admin only). *Inherit* means "follow the level above". Credentials / protected files and the admin's platform proposals are asked at every level.

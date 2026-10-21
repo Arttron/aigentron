@@ -16,6 +16,8 @@ import { UsersManager } from '@/components/UsersManager';
 import { SchedulesManager } from '@/components/SchedulesManager';
 import { DiskSettings } from '@/components/settings/DiskSettings';
 import { TitleSettings } from '@/components/settings/TitleSettings';
+import { ApprovalSettings } from '@/components/settings/ApprovalSettings';
+import { RunLimitSettings } from '@/components/settings/RunLimitSettings';
 import { VisionSettings } from '@/components/settings/VisionSettings';
 import { VoiceSettings } from '@/components/settings/VoiceSettings';
 
@@ -52,6 +54,8 @@ export function SettingsPage() {
           <AccessSettings />
           <WebServerSettings />
           <CloudflareAccessSettings />
+          <ApprovalSettings />
+          <RunLimitSettings />
           <TitleSettings />
           <GeneralSettingsForm />
         </>

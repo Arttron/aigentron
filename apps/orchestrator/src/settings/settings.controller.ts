@@ -8,6 +8,7 @@ import { IsString, MinLength } from 'class-validator';
 import { SettingsService, type SettingsPatch } from './settings.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppConfigService } from '../config/app-config.service';
+import { machineConcurrency } from '../queue/capacity-gate';
 
 class VerifyWizardPasswordDto {
   @IsString()
@@ -20,6 +21,8 @@ type SettingsRow = Awaited<ReturnType<SettingsService['get']>>;
 /** Wire-facing settings shape — secrets are masked, never returned in full. */
 function serialize(s: SettingsRow) {
   return {
+    /** what the queue really uses now (a stored 0 = automatic, resolved for this machine) */
+    concurrencyEffective: s.concurrency <= 0 ? machineConcurrency() : s.concurrency,
     approvalTimeoutSeconds: s.approvalTimeoutSeconds,
     verifyCommands: s.verifyCommands ?? '',
     verifyMaxAttempts: s.verifyMaxAttempts,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import type { Project } from '@lds/shared';
 import { api, errMsg, type WorkspaceEntry, type WorkspaceListing, type WorkspaceSummary } from '@/lib/api';
 import { AppHeader, BackLink, Button, Card, ErrorText, Muted, Row, SectionTitle, UploadButton } from '@/components/ui';
 import { Markdown } from '@/components/Markdown';
@@ -23,6 +24,8 @@ export function WorkspacePage() {
   const [params, setParams] = useSearchParams();
   const dir = params.get('dir') ?? '';
   const file = params.get('file') ?? '';
+  const project = params.get('project') ?? '';
+  const [projects, setProjects] = useState<Project[]>([]);
   const [listing, setListing] = useState<WorkspaceListing | null>(null);
   const [summary, setSummary] = useState<WorkspaceSummary | null>(null);
   const [text, setText] = useState<string | null>(null);
@@ -30,22 +33,26 @@ export function WorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const go = (next: { dir?: string; file?: string }) => setParams({ ...(next.dir ? { dir: next.dir } : {}), ...(next.file ? { file: next.file } : {}) });
+  const go = (next: { dir?: string; file?: string; project?: string }) =>
+    setParams({ ...((next.project ?? project) ? { project: next.project ?? project } : {}), ...(next.dir ? { dir: next.dir } : {}), ...(next.file ? { file: next.file } : {}) });
   const fail = (e: unknown) => setError(errMsg(e));
 
   const load = useCallback(async () => {
     try {
       setError(null);
-      const [l, s] = await Promise.all([api.workspaceList(dir), api.workspaceSummary()]);
+      const [l, s] = await Promise.all([api.workspaceList(dir, project), api.workspaceSummary(project)]);
       setListing(l);
       setSummary(s);
     } catch (e) {
       fail(e);
     }
-  }, [dir]);
+  }, [dir, project]);
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    void api.listProjects().then(setProjects).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     setEdit(null);
@@ -53,19 +60,19 @@ export function WorkspacePage() {
     if (!file || !TEXT.has(ext(file))) return;
     let live = true;
     api
-      .workspaceText(file)
+      .workspaceText(file, project)
       .then((t) => live && setText(t))
       .catch((e) => live && fail(e));
     return () => {
       live = false;
     };
-  }, [file]);
+  }, [file, project]);
 
   const upload = async (files: File[]) => {
     setBusy(true);
     setError(null);
     try {
-      for (const f of Array.from(files)) await api.workspaceUpload(join(dir, f.name), f);
+      for (const f of Array.from(files)) await api.workspaceUpload(join(dir, f.name), f, project);
       await load();
     } catch (e) {
       fail(e);
@@ -77,7 +84,7 @@ export function WorkspacePage() {
   const remove = async (path: string) => {
     if (!window.confirm(`Delete ${path}? This cannot be undone.`)) return;
     try {
-      await api.workspaceDelete(path);
+      await api.workspaceDelete(path, project);
       if (file === path) go({ dir });
       await load();
     } catch (e) {
@@ -89,7 +96,7 @@ export function WorkspacePage() {
     if (edit === null) return;
     setBusy(true);
     try {
-      await api.workspaceUpload('WORKSPACE.md', edit);
+      await api.workspaceUpload(brief, edit, project);
       setText(edit);
       setEdit(null);
     } catch (e) {
@@ -99,6 +106,8 @@ export function WorkspacePage() {
     }
   };
 
+  const brief = listing?.brief ?? 'WORKSPACE.md';
+  const current = projects.find((p) => p.slug === project);
   const crumbs = dir ? dir.split('/') : [];
   const canDelete = (path: string) => path.startsWith('work/') || path.startsWith('deliverables/');
   const fileExt = ext(file);
@@ -108,15 +117,28 @@ export function WorkspacePage() {
       <BackLink href="/">← all tasks</BackLink>
       <AppHeader title="📁 Workspace" />
       <Card>
-        <SectionTitle>Shared workspace</SectionTitle>
+        <SectionTitle>{current && !current.isDefault ? `Project workspace — ${current.name}` : 'Shared workspace'}</SectionTitle>
+        <label className={styles.projectPick}>
+          <span>Project</span>
+          <select value={project} onChange={(e) => go({ project: e.target.value, dir: '', file: '' })} aria-label="Project">
+            <option value="">Shared workspace</option>
+            {projects
+              .filter((p) => !p.isDefault)
+              .map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.name}
+                </option>
+              ))}
+          </select>
+        </label>
         <Muted>
-          One folder for the team's non-code work. <strong>WORKSPACE.md</strong> is the brief every agent reads (you edit it); <strong>memory/</strong> is what the team has decided
+          One folder for the {current && !current.isDefault ? "project's" : "team's"} non-code work. <strong>{brief}</strong> is the brief every agent reads (you edit it); <strong>memory/</strong> is what the team has decided
           and learned; <strong>work/</strong> holds drafts and data; <strong>deliverables/</strong> holds finished results for you.
           {summary && ` ${size(summary.bytes)} in total.`}
         </Muted>
         <nav className={styles.crumbs} aria-label="Folder">
-          <button type="button" className={styles.crumb} onClick={() => go({})}>
-            workspace
+          <button type="button" className={styles.crumb} onClick={() => go({ dir: '' })}>
+            {current && !current.isDefault ? current.slug : 'workspace'}
           </button>
           {crumbs.map((c, i) => (
             <span key={i}>
@@ -155,7 +177,7 @@ export function WorkspacePage() {
                   {e.dir ? '' : size(e.size)} {when(e.mtime)}
                 </span>
                 {!e.dir && (
-                  <a className={styles.act} href={api.workspaceFileUrl(path, true)} title="Download">
+                  <a className={styles.act} href={api.workspaceFileUrl(path, true, project)} title="Download">
                     ⬇
                   </a>
                 )}
@@ -175,8 +197,8 @@ export function WorkspacePage() {
           <Row spaceBetween>
             <SectionTitle>{file}</SectionTitle>
             <Row wrap>
-              {file === 'WORKSPACE.md' && edit === null && text !== null && <Button onClick={() => setEdit(text)}>✎ Edit brief</Button>}
-              <a href={api.workspaceFileUrl(file, true)}>⬇ Download</a>
+              {file === brief && edit === null && text !== null && <Button onClick={() => setEdit(text)}>✎ Edit brief</Button>}
+              <a href={api.workspaceFileUrl(file, true, project)}>⬇ Download</a>
               <Button onClick={() => go({ dir })}>✕ Close</Button>
             </Row>
           </Row>
@@ -191,9 +213,9 @@ export function WorkspacePage() {
               </Row>
             </>
           ) : IMAGE.has(fileExt) ? (
-            <img className={styles.img} src={api.workspaceFileUrl(file)} alt={file} />
+            <img className={styles.img} src={api.workspaceFileUrl(file, false, project)} alt={file} />
           ) : fileExt === 'pdf' ? (
-            <iframe className={styles.pdf} src={api.workspaceFileUrl(file)} title={file} />
+            <iframe className={styles.pdf} src={api.workspaceFileUrl(file, false, project)} title={file} />
           ) : TEXT.has(fileExt) ? (
             text === null ? (
               <Muted>Loading…</Muted>

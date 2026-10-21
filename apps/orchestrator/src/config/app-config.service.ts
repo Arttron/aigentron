@@ -1,3 +1,4 @@
+import { machineNodeHeapMb } from '../queue/capacity-gate';
 import { parseBudgetLimit } from '../agent/run-guards';
 import { parseAgentRunAs, type AgentRunAs } from '../agent/agent-user';
 import { randomUUID } from 'node:crypto';
@@ -51,6 +52,14 @@ export class AppConfigService {
   readonly agentMaxLoadPerCpu: number;
   /** …or while free memory is below this many MB (AGENT_MIN_FREE_MEM_MB, default 300; 0 = off). */
   readonly agentMinFreeMemMb: number;
+  /** …or while the host steals more than this % of CPU (AGENT_MAX_STEAL, default 20; 0 = off) — a burstable instance out of credits. */
+  readonly agentMaxStealPct: number;
+  /** Seconds between two run starts (AGENT_START_GAP_S, default 10; 0 = off): the load average lags, so starts are spread out. */
+  readonly agentStartGapMs: number;
+  /** Niceness of agent processes (AGENT_NICE, default 10; 0 = off): the dashboard, SSH and the orchestrator keep the CPU when agents hog it. */
+  readonly agentNice: number;
+  /** Heap cap (MB) for the Node processes agents start (AGENT_NODE_MAX_MB; empty = automatic for a small machine, 0 = none). */
+  readonly agentNodeMaxMb: number;
   /** Max times a task may auto-request "continue?" after hitting the step limit
    *  before it's stalled instead — stops a non-converging run grinding forever. */
   readonly maxContinuations: number;
@@ -62,6 +71,10 @@ export class AppConfigService {
   readonly agentConcurrency: number;
   /** Hard ceiling on a single agent run; aborts so it can't wedge a slot. */
   readonly agentRunTimeoutMs: number;
+  /** Ceiling of ACTIVE time a run may reach by being extended while it is still making progress (AGENT_RUN_MAX_MS, default 60 min; not above AGENT_RUN_TIMEOUT_MS = no extension). */
+  readonly agentRunMaxMs: number;
+  /** A run that produced something this recently (ms) is "still alive" when its window runs out (AGENT_RUN_GRACE_MS, default 90 s). */
+  readonly agentRunGraceMs: number;
   /** No-progress watchdog: abort a run that emitted no event for this long (0 = off). Not applied while approvals are pending or a tool is running. */
   readonly agentIdleTimeoutMs: number;
   /** Soft token budgets checked before each run (0 = unlimited): per task, and per rolling 24 h across all tasks. */
@@ -194,6 +207,14 @@ export class AppConfigService {
     this.agentMaxLoadPerCpu = Number.isFinite(loadLimit) && loadLimit >= 0 ? loadLimit : 1.5;
     const memLimit = parseInt(process.env.AGENT_MIN_FREE_MEM_MB ?? '300', 10);
     this.agentMinFreeMemMb = Number.isFinite(memLimit) && memLimit >= 0 ? memLimit : 300;
+    const stealLimit = Number(process.env.AGENT_MAX_STEAL ?? '20');
+    this.agentMaxStealPct = Number.isFinite(stealLimit) && stealLimit >= 0 && stealLimit <= 100 ? stealLimit : 20;
+    const gapS = Number(process.env.AGENT_START_GAP_S ?? '10');
+    this.agentStartGapMs = Number.isFinite(gapS) && gapS >= 0 ? Math.min(gapS, 300) * 1000 : 10_000;
+    const nice = parseInt(process.env.AGENT_NICE ?? '10', 10);
+    this.agentNice = Number.isFinite(nice) ? Math.max(0, Math.min(19, nice)) : 10;
+    const nodeMax = (process.env.AGENT_NODE_MAX_MB ?? '').trim();
+    this.agentNodeMaxMb = /^\d+$/.test(nodeMax) ? Math.min(parseInt(nodeMax, 10), 65536) : machineNodeHeapMb();
     this.maxContinuations = parseInt(process.env.MAX_CONTINUATIONS ?? '2', 10);
     // Lazy skills: inject a short index (name + description + path) and let the
     // agent read the full skill file on demand, instead of inlining every
@@ -206,6 +227,10 @@ export class AppConfigService {
       ? 1
       : parseInt(process.env.AGENT_CONCURRENCY ?? '2', 10);
     this.agentRunTimeoutMs = parseInt(process.env.AGENT_RUN_TIMEOUT_MS ?? '600000', 10);
+    const runMax = parseInt(process.env.AGENT_RUN_MAX_MS ?? '3600000', 10);
+    this.agentRunMaxMs = Number.isFinite(runMax) && runMax > 0 ? runMax : 0;
+    const runGrace = parseInt(process.env.AGENT_RUN_GRACE_MS ?? '90000', 10);
+    this.agentRunGraceMs = Number.isFinite(runGrace) && runGrace > 0 ? runGrace : 90_000;
     this.agentIdleTimeoutMs = Math.max(0, parseInt(process.env.AGENT_IDLE_TIMEOUT_MS ?? '240000', 10) || 0);
     this.budgetTokensPerTask = parseBudgetLimit(process.env.BUDGET_TOKENS_PER_TASK);
     this.budgetTokensPerDay = parseBudgetLimit(process.env.BUDGET_TOKENS_PER_DAY);

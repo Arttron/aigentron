@@ -13,7 +13,8 @@ import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { ProjectsService } from '../projects/projects.service';
 import { docsWorkDirOf, resolveWorkDir, type ProjectContext } from '../projects/project-context';
 import { KeyedMutex } from '../projects/project-mutex';
-import { waitForCapacity } from './capacity-gate';
+import { StartThrottle, waitForCapacity } from './capacity-gate';
+import { clearHold, setHold } from './holds';
 import { QUEUED_STALL_MESSAGE, QUEUED_SWEEP_AFTER_MS, QUEUED_SWEEP_EVERY_MS, queuedFate } from './queued-reconcile';
 import { VerificationService, type VerifyResult } from './verification.service';
 import { TaskQueue, type TaskJobData } from './queue.constants';
@@ -48,6 +49,8 @@ export class TaskWorkerService implements OnModuleInit {
   private waiting = 0;
   private lastConcurrency = 0;
   /** the last time a start was held back by the machine's load (for the admin's metrics) */
+  /** Run starts go through one at a time, spread out (a burst of held runs must not all start in the same second). */
+  private readonly starts = new StartThrottle();
   capacityHeld: { at: number; waitedMs: number; forced: boolean } | null = null;
 
   constructor(
@@ -159,10 +162,16 @@ export class TaskWorkerService implements OnModuleInit {
     const project = chat ? null : await this.projects.contextFor(pre);
     // A busy small machine: hold the start (the task stays `queued`) until the load / memory are back inside the limits. The admin's chat lane never waits.
     if (!chat) {
-      const held = await waitForCapacity({
-        limits: { maxLoadPerCpu: this.config.agentMaxLoadPerCpu, minFreeMemMb: this.config.agentMinFreeMemMb },
-        onWait: (why) => this.logger.warn(`Task ${taskId} waits to start: ${why}`),
-      });
+      const gate = {
+        limits: { maxLoadPerCpu: this.config.agentMaxLoadPerCpu, minFreeMemMb: this.config.agentMinFreeMemMb, maxStealPct: this.config.agentMaxStealPct },
+        onWait: (why: string) => {
+          this.logger.warn(`Task ${taskId} waits to start: ${why}`);
+          setHold(taskId, `waiting to start: ${why}`);
+        },
+      };
+      // one at a time and spread out, unless the gap is switched off; the task page says why it is still queued
+      if (this.config.agentStartGapMs > 0) setHold(taskId, `waiting for its turn (runs start one at a time, ${Math.round(this.config.agentStartGapMs / 1000)} s apart)`);
+      const held = await (this.config.agentStartGapMs > 0 ? this.starts.enter({ ...gate, gapMs: this.config.agentStartGapMs }) : waitForCapacity(gate)).finally(() => clearHold(taskId));
       if (held.waitedMs > 1000) this.logger.log(`Task ${taskId} waited ${Math.round(held.waitedMs / 1000)} s for the machine${held.forced ? ' (starts anyway: waited the maximum)' : ''}`);
       this.capacityHeld = { at: Date.now(), waitedMs: held.waitedMs, forced: held.forced };
     }

@@ -101,7 +101,28 @@ export type TaskDetail = Task & {
   parent: TaskRef | null;
   subtasks: TaskRef[];
   linksOut: TaskLinkOut[];
+  /** why a queued task has not started yet (the machine is busy / its turn), or null */
+  hold?: { reason: string; since: string } | null;
 };
+
+/** How long and how far one agent run may go (Settings → Run limits). */
+export interface RunLimits {
+  timeoutMin: number;
+  maxMin: number;
+  graceSec: number;
+  idleMin: number;
+  maxTurns: number;
+  askToExceed: boolean;
+  extraMin: number;
+}
+
+/** Approvals at one level (task / project): its own value, the mode in force and which level decided. */
+export interface ApprovalLevelView {
+  own: 'ask' | 'off' | null;
+  effective: 'ask' | 'off';
+  source: 'task' | 'ancestor' | 'project' | 'global' | 'default';
+  sourceName?: string;
+}
 
 /** The shared workspace (memory / work / deliverables). */
 export interface WorkspaceSummary {
@@ -119,6 +140,8 @@ export interface WorkspaceListing {
   path: string;
   entries: WorkspaceEntry[];
   writable: boolean;
+  /** the brief file of this workspace (WORKSPACE.md, or PROJECT.md in a project's folder) */
+  brief?: string;
 }
 
 /** An AI model endpoint (from GET /api/providers; secret masked). */
@@ -410,6 +433,8 @@ export interface Settings {
   verifyMaxAttempts: number;
   /** Max agent runs processed in parallel. */
   concurrency: number;
+  /** what the queue really uses now (0 = automatic is resolved for this machine) */
+  concurrencyEffective?: number;
   debugMode: boolean;
   agentInstructions: string;
   defaultProvider: string | null;
@@ -762,16 +787,19 @@ export const api = {
     return request<AttachmentMeta>('POST', `/tasks/${e(id)}/attachments`, { raw: file, headers: octet(file, file.type || 'application/octet-stream') });
   },
 
-  workspaceSummary: () => request<WorkspaceSummary>('GET', '/workspace'),
-  workspaceList: (path: string) => request<WorkspaceListing>('GET', '/workspace/files', { query: { path } }),
-  workspaceFileUrl: (path: string, download = false) => `${API_BASE}/workspace/file?${new URLSearchParams({ path, ...(download ? { download: '1' } : {}) })}`,
-  workspaceText: async (path: string): Promise<string> => {
-    const r = await fetch(`${API_BASE}/workspace/file${buildQuery({ path })}`, { cache: 'no-store' });
+  // `project` = a project's slug: its own folder (empty = the shared workspace)
+  workspaceSummary: (project = '') => request<WorkspaceSummary>('GET', '/workspace', { query: { project: project || undefined } }),
+  workspaceList: (path: string, project = '') => request<WorkspaceListing>('GET', '/workspace/files', { query: { path, project: project || undefined } }),
+  workspaceFileUrl: (path: string, download = false, project = '') =>
+    `${API_BASE}/workspace/file?${new URLSearchParams({ path, ...(download ? { download: '1' } : {}), ...(project ? { project } : {}) })}`,
+  workspaceText: async (path: string, project = ''): Promise<string> => {
+    const r = await fetch(`${API_BASE}/workspace/file${buildQuery({ path, project: project || undefined })}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(`${r.status} — could not read the file`);
     return r.text();
   },
-  workspaceUpload: (path: string, body: Blob | string) => request<{ path: string; size: number }>('PUT', '/workspace/file', { query: { path }, raw: body, headers: { 'content-type': 'application/octet-stream' } }),
-  workspaceDelete: (path: string) => request<{ ok: boolean }>('DELETE', '/workspace/file', { query: { path } }),
+  workspaceUpload: (path: string, body: Blob | string, project = '') =>
+    request<{ path: string; size: number }>('PUT', '/workspace/file', { query: { path, project: project || undefined }, raw: body, headers: { 'content-type': 'application/octet-stream' } }),
+  workspaceDelete: (path: string, project = '') => request<{ ok: boolean }>('DELETE', '/workspace/file', { query: { path, project: project || undefined } }),
 
   listQuestions: (status?: QuestionStatus, taskId?: string) => request<AgentQuestion[]>('GET', '/questions', { query: { status: status || undefined, taskId: taskId || undefined } }),
   answerQuestion: (id: string, answer: { index?: number; indexes?: number[]; text?: string }) => request<AgentQuestion>('POST', `/questions/${e(id)}/answer`, { body: answer }),
@@ -779,6 +807,15 @@ export const api = {
   diskStatus: () => request<DiskStatus | null>('GET', '/maintenance/disk'),
   maintenanceReport: () => request<MaintenanceReport>('GET', '/maintenance/report'),
   relieveDisk: () => request<{ digests: number; research: number; runs: number; bytes: number }>('POST', '/maintenance/relieve'),
+  getApprovalMode: () => request<{ mode: 'ask' | 'off' }>('GET', '/approvals/mode'),
+  setApprovalMode: (mode: 'ask' | 'off') => request<{ mode: 'ask' | 'off' }>('PUT', '/approvals/mode', { body: { mode } }),
+  getTaskApprovalMode: (id: string) => request<ApprovalLevelView>('GET', `/approvals/mode/task/${e(id)}`),
+  setTaskApprovalMode: (id: string, mode: 'ask' | 'off' | null) => request<ApprovalLevelView>('PUT', `/approvals/mode/task/${e(id)}`, { body: { mode } }),
+  getProjectApprovalMode: (slug: string) => request<ApprovalLevelView>('GET', `/approvals/mode/project/${e(slug)}`),
+  setProjectApprovalMode: (slug: string, mode: 'ask' | 'off' | null) => request<ApprovalLevelView>('PUT', `/approvals/mode/project/${e(slug)}`, { body: { mode } }),
+  getRunLimits: () => request<{ limits: RunLimits; defaults: RunLimits }>('GET', '/run-limits'),
+  saveRunLimits: (body: RunLimits) => request<{ limits: RunLimits; defaults: RunLimits }>('PUT', '/run-limits', { body }),
+  resetRunLimits: () => request<{ limits: RunLimits; defaults: RunLimits }>('DELETE', '/run-limits'),
   getTitleSettings: () => request<TitleCfg>('GET', '/titles'),
   saveTitleSettings: (body: TitleCfg) => request<TitleCfg>('PUT', '/titles', { body }),
   testTitle: (prompt?: string) => request<{ ok: boolean; title?: string; provider?: string; error?: string }>('POST', '/titles/test', { body: { prompt } }),

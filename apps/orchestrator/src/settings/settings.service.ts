@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { DEFAULT_PROJECT_ID, normalizeSubdir } from '../projects/project-core';
+import { machineConcurrency } from '../queue/capacity-gate';
 
 const SINGLETON_ID = 'singleton';
 
@@ -144,7 +145,14 @@ export class SettingsService {
    * value no longer has to be 1 in shared mode (it still is, by the seed, until a person raises it).
    */
   async concurrency(): Promise<number> {
-    return Math.max(1, (await this.load()).concurrency);
+    const stored = (await this.load()).concurrency;
+    // 0 = automatic: what this machine suits (one less than the CPUs on a small box, memory permitting)
+    return stored <= 0 ? machineConcurrency() : Math.max(1, stored);
+  }
+
+  /** Whether the number of parallel runs is chosen by the server (stored as 0). */
+  async concurrencyAuto(): Promise<boolean> {
+    return (await this.load()).concurrency <= 0;
   }
 
   /** Whether to persist verbose intermediate transcript events (see AgentEvent). */

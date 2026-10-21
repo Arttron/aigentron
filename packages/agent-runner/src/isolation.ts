@@ -1,5 +1,7 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { access, constants } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import type { AgentIsolation } from './types';
@@ -17,6 +19,37 @@ import type { AgentIsolation } from './types';
 export const AGENT_EXEC_ENV = 'LDS_AGENT_EXEC';
 export const AGENT_UID_ENV = 'LDS_AGENT_UID';
 export const AGENT_GID_ENV = 'LDS_AGENT_GID';
+/** Niceness the wrapper gives the agent (0 / unset = none). */
+export const AGENT_NICE_ENV = 'LDS_AGENT_NICE';
+
+/** A valid niceness for `nice -n`: 1-19, else 0 (= leave the priority alone; also always 0 on Windows). */
+export function cleanNice(n: number | undefined): number {
+  if (process.platform === 'win32' || typeof n !== 'number' || !Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(19, Math.trunc(n)));
+}
+
+const NICE_WRAPPER = `#!/bin/sh
+# Starts the agent binary at a lower CPU priority, so the dashboard, SSH and the orchestrator keep the machine when agents compile and test.
+# LDS_AGENT_EXEC = the real binary, LDS_AGENT_NICE = niceness. Without \`nice\` the agent simply starts as it is.
+if [ -n "\${LDS_AGENT_NICE:-}" ] && command -v nice >/dev/null 2>&1; then exec nice -n "$LDS_AGENT_NICE" "$LDS_AGENT_EXEC" "$@"; fi
+exec "$LDS_AGENT_EXEC" "$@"
+`;
+
+/** The nice wrapper for a run WITHOUT a separate agent user (with one, infra/agent-exec.sh does it): written once into the temp dir. */
+export function niceWrapperPath(): string {
+  const path = join(tmpdir(), `aigentron-nice-exec-${process.getuid?.() ?? 0}.sh`);
+  try {
+    if (!existsSync(path) || readFileSync(path, 'utf8') !== NICE_WRAPPER) {
+      const tmp = `${path}.${process.pid}.tmp`;
+      writeFileSync(tmp, NICE_WRAPPER, { mode: 0o755 });
+      chmodSync(tmp, 0o755);
+      renameSync(tmp, path);
+    }
+  } catch {
+    /* the caller falls back to no wrapper */
+  }
+  return path;
+}
 
 /**
  * Env additions for an isolated agent process: HOME/TMPDIR/XDG dirs inside the
@@ -51,9 +84,11 @@ export function agentCommand(
   args: readonly string[],
   env: Record<string, string>,
   iso?: AgentIsolation,
+  nice?: number,
 ): { command: string; args: string[]; env: Record<string, string> } {
-  if (!iso) return { command, args: [...args], env };
-  return { command: iso.wrapper, args: [...args], env: { ...env, ...isolationEnv(iso, command) } };
+  const n = cleanNice(nice);
+  if (!iso) return n > 0 ? { command: 'nice', args: ['-n', String(n), command, ...args], env } : { command, args: [...args], env };
+  return { command: iso.wrapper, args: [...args], env: { ...env, ...isolationEnv(iso, command), ...(n > 0 ? { [AGENT_NICE_ENV]: String(n) } : {}) } };
 }
 
 /**
@@ -83,10 +118,10 @@ export function resolveClaudeExecutable(): string {
 export function spawnAsAgent(
   command: string,
   args: readonly string[],
-  opts: SpawnOptions & { env: Record<string, string>; isolation?: AgentIsolation },
+  opts: SpawnOptions & { env: Record<string, string>; isolation?: AgentIsolation; nice?: number },
 ): ChildProcess {
-  const { isolation, ...rest } = opts;
-  const c = agentCommand(command, args, opts.env, isolation);
+  const { isolation, nice, ...rest } = opts;
+  const c = agentCommand(command, args, opts.env, isolation, nice);
   return spawn(c.command, c.args, { ...rest, env: c.env });
 }
 

@@ -1,3 +1,6 @@
+import { StartHoldNotice } from '@/components/StartHoldNotice';
+import { usePolling } from '@/lib/use-polling';
+import { ApprovalModePicker } from '@/components/ApprovalModePicker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
@@ -82,6 +85,9 @@ function TaskDetailView({ id }: { id: string }) {
       .then(setTask)
       .catch((e) => setError((e as Error).message));
   }, [id]);
+
+  // A queued task may be held back by the server (busy machine / its turn): look again every few seconds so the notice appears and goes.
+  usePolling(refreshTask, 6000, task?.status === 'queued');
 
   // History + live lines (merged by key, refetched after a reconnect).
   const { items: lines, activityAt } = useTaskStream<LogLine>(id, toLogLine, {
@@ -335,6 +341,7 @@ function TaskDetailView({ id }: { id: string }) {
                   Pushed ↗
                 </ButtonLink>
               )}
+              <ApprovalModePicker scope={{ task: id }} />
               {resumable && <Button onClick={continueTask} disabled={busy}>▶ Continue</Button>}
               {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && <Button onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())}>✅ Mark as done</Button>}
               {task.parentId && terminal && <Button onClick={promote} disabled={busy}>⬆ To top level</Button>}
@@ -375,6 +382,7 @@ function TaskDetailView({ id }: { id: string }) {
         </div>
 
         <div className={tab === 'chat' ? styles.paneChat : styles.paneScroll}>
+          {tab === 'chat' && <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />}
           {tab === 'chat' && <DiscussionBar taskId={id} running={!terminal} />}
           {tab === 'chat' && (
             <Transcript
@@ -423,6 +431,7 @@ function TaskDetailView({ id }: { id: string }) {
               <Row>
                 <StatusBadge status={task.status} />
                 <ProjectBadge project={task.project} link />
+                <ApprovalModePicker scope={{ task: id }} compact />
                 {task.prUrl && (
                   <ButtonLink href={task.prUrl} target="_blank" rel="noreferrer">
                     Pull Request ↗
@@ -486,6 +495,7 @@ function TaskDetailView({ id }: { id: string }) {
 
           <Card>
             <SectionTitle>Conversation</SectionTitle>
+            <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />
             <DiscussionBar taskId={id} running={!terminal} />
             <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           </Card>

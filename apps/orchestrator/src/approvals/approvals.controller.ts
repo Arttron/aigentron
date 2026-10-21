@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import type { ApprovalStatus, HookCheckResponse } from '@lds/shared';
 import { ApprovalsService } from './approvals.service';
 import { HookCheckDto } from './dto/hook-check.dto';
@@ -35,6 +35,44 @@ export class ApprovalsController {
       ? Math.min(Math.max(raw, WAIT_MIN_MS), WAIT_MAX_MS)
       : undefined;
     return this.approvals.waitForVerdict(id, ms);
+  }
+
+  /** Settings → Approvals: `ask` (default) or `off`. */
+  @Get('mode')
+  mode() {
+    return { mode: this.approvals.mode() };
+  }
+
+  @Put('mode')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  setMode(@Body() body: { mode?: unknown }) {
+    return { mode: this.approvals.setMode(body?.mode) };
+  }
+
+  /** The level of one task (its subtasks follow it): own value, the mode in force and which level decided. */
+  @Get('mode/task/:id')
+  taskMode(@Param('id') id: string) {
+    return this.approvals.modeFor(id);
+  }
+
+  @Put('mode/task/:id')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  setTaskMode(@Param('id') id: string, @Body() body: { mode?: unknown }) {
+    return this.approvals.setTaskMode(id, body?.mode);
+  }
+
+  @Get('mode/project/:slug')
+  projectMode(@Param('slug') slug: string) {
+    return this.approvals.projectMode(slug);
+  }
+
+  @Put('mode/project/:slug')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  setProjectMode(@Param('slug') slug: string, @Body() body: { mode?: unknown }) {
+    return this.approvals.setProjectMode(slug, body?.mode);
   }
 
   /** Dashboard: list approvals, optionally filtered by status. */

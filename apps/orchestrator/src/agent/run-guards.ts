@@ -23,6 +23,38 @@ export function isIdleStuck(s: IdleState): boolean {
   return s.now - s.lastEventAt > s.idleMs;
 }
 
+export interface ExtensionState {
+  now: number;
+  lastEventAt: number;
+  lastEventKind: string;
+  /** active time granted so far (first window + extensions) */
+  grantedMs: number;
+  /** the first window (AGENT_RUN_TIMEOUT_MS) */
+  baseMs: number;
+  /** the absolute ceiling of active time (AGENT_RUN_MAX_MS); not above baseMs = no extension */
+  maxMs: number;
+  /** "still alive" = something was heard from the run this recently */
+  graceMs: number;
+  /** a tool call in flight (a long build / test run says nothing) counts as alive for this long */
+  toolGraceMs: number;
+}
+
+/** Still working: something was heard from the run lately, or a tool call has been in flight for a reasonable time. */
+export function runIsAlive(s: Pick<ExtensionState, 'now' | 'lastEventAt' | 'lastEventKind' | 'graceMs' | 'toolGraceMs'>): boolean {
+  const quiet = s.now - s.lastEventAt;
+  return quiet < s.graceMs || (s.lastEventKind === 'tool_use' && quiet < s.toolGraceMs);
+}
+
+/**
+ * The run's time window ran out: how much more to grant (ms), 0 = let it expire. A run that is still producing output (or has a tool running
+ * for a reasonable time) is not cut off in the middle of its work; one that went quiet, or reached the absolute ceiling, is.
+ */
+export function runExtension(s: ExtensionState): number {
+  if (s.maxMs <= s.baseMs || s.grantedMs >= s.maxMs) return 0;
+  if (!runIsAlive(s)) return 0;
+  return Math.min(Math.max(60_000, Math.floor(s.baseMs / 2)), s.maxMs - s.grantedMs);
+}
+
 export interface BudgetLimits {
   perTask: number;
   perDay: number;

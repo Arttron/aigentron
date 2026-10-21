@@ -3,6 +3,7 @@ import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import {
   runtimeForProviderKind,
   addUsage,
@@ -18,7 +19,7 @@ import {
   type SessionTotals,
   type SubagentDefinition,
 } from '@lds/agent-runner';
-import { PUSH_BRANCH_TOOL, isListedMarkdown, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
+import { EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, isListedMarkdown, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
 import { LitellmService, routeName, routeParams, stripSelfPrefix } from '../litellm/litellm.service';
 import { AppConfigService } from '../config/app-config.service';
 import { encodeAttachments } from '../prisma/agent-event-attachments';
@@ -48,7 +49,9 @@ import { ProvidersService } from '../providers/providers.service';
 import { McpService } from '../mcp/mcp.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PreviewService } from '../preview/preview.service';
-import { budgetExceeded, isIdleStuck } from './run-guards';
+import { budgetExceeded, isIdleStuck, runExtension, runIsAlive } from './run-guards';
+import { RunLimitsService } from '../settings/run-limits.service';
+import { ApprovalsService } from '../approvals/approvals.service';
 import { assemblePromptLayers, withRunContext } from './prompt-layers';
 import { AgentExecutor, type AgentRunOutcome, type TaskRunContext } from './agent-executor';
 import { classifyProviderFailure, errorTextOf, isFailoverWorthy, reportText, shortReason, tagSessionId, untagSessionId } from './run-outcome';
@@ -140,6 +143,8 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly projects: ProjectsService,
     private readonly github: GitHubService,
     @Inject(GIT_CREDENTIALS) private readonly credentials: GitCredentialsProvider,
+    private readonly runLimits: RunLimitsService,
+    private readonly moduleRef: ModuleRef,
   ) {
     super();
   }
@@ -684,13 +689,36 @@ export class RealAgentExecutor extends AgentExecutor {
     // The hard ceiling counts ACTIVE time only (E-02): it is paused while the
     // agent waits for a human — an ask_user question (the handler below holds
     // it) or an approval in the PreToolUse hook (the bus events hold it).
-    const timeoutMs = this.config.agentRunTimeoutMs;
-    const deadline = new RunDeadline(timeoutMs, () => {
-      const waited = Math.round(deadline.waitedMs / 1000);
-      onEvent({ kind: 'stderr', text: `agent run timed out after ${Math.round(timeoutMs / 1000)}s of active time${waited ? ` (plus ${waited}s waiting for a person)` : ''} — aborting` });
-      timedOut = true;
-      abortController.abort();
-    });
+    const limits = this.runLimits.get();
+    const timeoutMs = limits.timeoutMin * 60_000;
+    const maxMs = limits.maxMin * 60_000;
+    const graceMs = limits.graceSec * 1000;
+    let extendedNoted = false;
+    const deadline: RunDeadline = new RunDeadline(
+      timeoutMs,
+      () => {
+        const waited = Math.round(deadline.waitedMs / 1000);
+        onEvent({ kind: 'stderr', text: `agent run timed out after ${Math.round(deadline.grantedMs / 1000)}s of active time${waited ? ` (plus ${waited}s waiting for a person)` : ''} — aborting` });
+        timedOut = true;
+        abortController.abort();
+      },
+      Date.now,
+      // The window ran out. A run that is still producing output is given more time, up to the absolute ceiling; past it (or with no
+      // automatic extension at all) a person is asked whether a run that is still working may go on. A quiet run just stops.
+      async (): Promise<number> => {
+        const state = { now: Date.now(), lastEventAt, lastEventKind, grantedMs: deadline.grantedMs, baseMs: timeoutMs, maxMs, graceMs, toolGraceMs: Math.max(graceMs, 10 * 60_000) };
+        const more = runExtension(state);
+        if (more > 0) {
+          if (!extendedNoted) {
+            extendedNoted = true;
+            onEvent({ kind: 'stderr', text: `agent is still making progress after ${Math.round(timeoutMs / 1000)}s — its time is extended while it keeps working (up to ${limits.maxMin} min of active time)` });
+          }
+          return more;
+        }
+        if (!limits.askToExceed || !runIsAlive(state)) return 0;
+        return this.askForMoreTime(ctx.taskId, session.id, Math.round(deadline.grantedMs / 60_000), limits.extraMin, onEvent);
+      },
+    );
     const heldApprovals = new Set<string>();
     const unsubscribeBus = this.bus.subscribe((e) => {
       if (e.type === 'approval-created' && e.payload.approval.taskId === ctx.taskId && !heldApprovals.has(e.payload.approval.id)) {
@@ -703,7 +731,7 @@ export class RealAgentExecutor extends AgentExecutor {
     deadline.start();
     // No-progress watchdog: a run that goes silent (stuck provider stream, hung model call) is
     // aborted long before the overall ceiling. Waiting on a human or a running tool is not "stuck".
-    const idleMs = this.config.agentIdleTimeoutMs;
+    const idleMs = limits.idleMin * 60_000;
     const idleTimer =
       idleMs > 0
         ? setInterval(() => {
@@ -860,7 +888,7 @@ export class RealAgentExecutor extends AgentExecutor {
           providerLabel: provider.name,
           modelLabel: model,
           // An agent's own limit (its file's `maxTurns`) wins over the installation's AGENT_MAX_TURNS.
-          maxTurns: agentDef?.maxTurns ?? this.config.agentMaxTurns,
+          maxTurns: agentDef?.maxTurns ?? limits.maxTurns,
           resumeSessionId,
           appendSystemPrompt: opts.appendSystemPrompt,
           // A discussion participant only talks (and may look things up): no editing, no shell, no delegation.
@@ -875,6 +903,8 @@ export class RealAgentExecutor extends AgentExecutor {
           abortController,
           hook,
           codex: codexOpts,
+          niceness: this.config.agentNice,
+          nodeMaxMb: this.config.agentNodeMaxMb,
           isolation: opts.isolation ?? undefined,
           onProgress: () => {
             lastEventAt = Date.now();
@@ -936,6 +966,8 @@ export class RealAgentExecutor extends AgentExecutor {
           disallowedTools: opts.agentDef?.disallowedTools,
           mcpServers: opts.mcpServers,
           hook,
+          niceness: this.config.agentNice,
+          nodeMaxMb: this.config.agentNodeMaxMb,
           isolation: opts.isolation,
           onReportStatus,
           onHeartbeat,
@@ -1127,6 +1159,10 @@ export class RealAgentExecutor extends AgentExecutor {
     disallowedTools?: string[];
     mcpServers: Record<string, Record<string, unknown>>;
     hook: HookWiring;
+    /** CPU niceness for the run (AGENT_NICE). */
+    niceness?: number;
+    /** Heap cap for the Node processes the agent starts (AGENT_NODE_MAX_MB / automatic). */
+    nodeMaxMb?: number;
     isolation: AgentIsolation | null;
     onReportStatus: (report: ReportedStatus) => void;
     onHeartbeat: () => void;
@@ -1159,6 +1195,8 @@ export class RealAgentExecutor extends AgentExecutor {
           settingsDir: opts.settingsDir,
           abortController,
           hook: opts.hook,
+          niceness: this.config.agentNice,
+          nodeMaxMb: this.config.agentNodeMaxMb,
           isolation: opts.isolation ?? undefined,
           onReportStatus: opts.onReportStatus,
           onHeartbeat: opts.onHeartbeat,
@@ -1187,6 +1225,30 @@ export class RealAgentExecutor extends AgentExecutor {
    *  - Providers already pointing at litellm (e.g. ollama-local) must present
    *    the master key too, since litellm enforces it on every request.
    */
+  /**
+   * The run reached its ceiling of active time while still working: a card asks a person whether it may go on. Approve = `extraMin` more
+   * minutes (asked again when they are used up); deny, no answer in time or no card possible = the run stops here (the task becomes stalled).
+   */
+  private async askForMoreTime(taskId: string, agentSessionId: string, usedMin: number, extraMin: number, onEvent: (e: AgentEvent) => void): Promise<number> {
+    try {
+      const approvals = this.moduleRef.get(ApprovalsService, { strict: false });
+      const toolInput = { usedMin, limitMin: usedMin, extraMin };
+      const res = await approvals.check({ taskId, agentSessionId, toolName: EXTEND_RUN_TOOL, toolInput });
+      if (res.allow) return extraMin * 60_000;
+      if (!res.approvalId) return 0;
+      onEvent({ kind: 'stderr', text: `agent has worked ${usedMin} min and is still making progress — waiting for a person to allow ${extraMin} more minutes` });
+      const verdict = await approvals.waitForVerdict(res.approvalId);
+      if (verdict.status === 'approved') {
+        onEvent({ kind: 'stderr', text: `${extraMin} more minutes allowed` });
+        return extraMin * 60_000;
+      }
+      return 0;
+    } catch (e) {
+      this.logger.warn(`Could not ask for more time (task ${taskId}): ${(e as Error).message}`);
+      return 0;
+    }
+  }
+
   private async resolveModelEnv(provider: Provider, model: string): Promise<AgentModelEnv> {
     // CLI-minted OAuth/subscription token: LiteLLM can only forward a real
     // Anthropic API key, so this always bypasses it and talks to the family's

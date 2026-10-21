@@ -16,13 +16,24 @@ export class RunDeadline {
   private done = false;
   private pausedAt = 0;
   private pausedTotalMs = 0;
+  /** `decide` is out asking (the window ran out); the timer must not be re-armed until it answers */
+  private deciding = false;
 
+  /** All the active time granted so far: the first window plus every extension. */
+  grantedMs: number;
+
+  /**
+   * `decide` is asked when a window runs out: a number of ms > 0 grants that much more (the run is still making progress), 0 lets it expire.
+   * It may take its time (a person is asked): while it does, the run is neither extended nor expired.
+   */
   constructor(
     totalMs: number,
     private readonly onExpire: () => void,
     private readonly now: () => number = Date.now,
+    private readonly decide?: () => number | Promise<number>,
   ) {
     this.remainingMs = totalMs;
+    this.grantedMs = totalMs;
   }
 
   /** Arm the ceiling (counts from now). */
@@ -50,7 +61,7 @@ export class RunDeadline {
     this.holds--;
     if (this.holds > 0 || this.done) return;
     this.pausedTotalMs += this.now() - this.pausedAt;
-    if (this.started) this.arm();
+    if (this.started && !this.deciding) this.arm();
   }
 
   get paused(): boolean {
@@ -69,13 +80,31 @@ export class RunDeadline {
     this.timer = null;
   }
 
+  private expire(): void {
+    this.done = true;
+    this.onExpire();
+  }
+
   private arm(): void {
     this.armedAt = this.now();
     this.timer = setTimeout(() => {
       this.timer = null;
       if (this.done) return;
-      this.done = true;
-      this.onExpire();
+      if (!this.decide) return this.expire();
+      this.deciding = true;
+      Promise.resolve()
+        .then(() => this.decide!())
+        .catch(() => 0)
+        .then((more) => {
+          this.deciding = false;
+          if (this.done) return;
+          if (more > 0) {
+            this.remainingMs = more;
+            this.grantedMs += more;
+            // someone else holds the clock (an approval is pending): resume() re-arms it
+            if (this.holds === 0) this.arm();
+          } else this.expire();
+        });
     }, this.remainingMs);
     this.timer.unref?.();
   }

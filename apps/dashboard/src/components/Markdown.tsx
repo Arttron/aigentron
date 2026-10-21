@@ -38,6 +38,12 @@ function renderInline(tokens: Inline[]): ReactNode[] {
         return <strong key={i}>{renderInline(t.c)}</strong>;
       case 'italic':
         return <em key={i}>{renderInline(t.c)}</em>;
+      case 'color':
+        return (
+          <span key={i} className={styles.colorChip} style={{ background: t.bg, color: t.fg }} title={t.v}>
+            {t.v}
+          </span>
+        );
       case 'media':
         return <InlineMedia key={i} name={t.name} alt={t.alt} />;
       case 'link':

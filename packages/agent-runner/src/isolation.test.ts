@@ -2,7 +2,8 @@ import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { agentCommand, assertIsolationReady, isolationEnv, resolveClaudeExecutable, runAsAgent, spawnAsAgent } from './isolation';
+import { spawnSync } from 'node:child_process';
+import { agentCommand, assertIsolationReady, cleanNice, isolationEnv, niceWrapperPath, resolveClaudeExecutable, runAsAgent, spawnAsAgent } from './isolation';
 import type { AgentIsolation } from './types';
 
 const iso: AgentIsolation = { uid: 1500, gid: 1500, wrapper: '/app/infra/agent-exec.sh', home: '/data/agent/runs/t1/home' };
@@ -83,5 +84,28 @@ describe('spawnAsAgent / runAsAgent', () => {
 describe('resolveClaudeExecutable', () => {
   it('finds the SDK’s native binary for this platform', () => {
     expect(resolveClaudeExecutable()).toMatch(new RegExp(`claude-agent-sdk-${process.platform}-${process.arch}(-musl)?/claude`));
+  });
+});
+
+describe('niceness (a lower CPU priority for the agent)', () => {
+  it('cleanNice keeps 1-19 and turns everything else into "leave it alone"', () => {
+    expect(cleanNice(10)).toBe(10);
+    expect(cleanNice(99)).toBe(19);
+    for (const v of [0, -5, NaN, undefined]) expect(cleanNice(v as number | undefined)).toBe(0);
+  });
+  it('without isolation the command is run through nice; with it the wrapper gets the value in the env', () => {
+    expect(agentCommand('codex', ['exec'], { A: '1' }, undefined, 10)).toEqual({ command: 'nice', args: ['-n', '10', 'codex', 'exec'], env: { A: '1' } });
+    expect(agentCommand('codex', ['exec'], { A: '1' })).toEqual({ command: 'codex', args: ['exec'], env: { A: '1' } });
+    const c = agentCommand('codex', ['exec'], {}, iso, 10);
+    expect(c.command).toBe(iso.wrapper);
+    expect(c.env.LDS_AGENT_NICE).toBe('10');
+    expect(agentCommand('codex', [], {}, iso).env.LDS_AGENT_NICE).toBeUndefined();
+  });
+  it.skipIf(process.platform === 'win32')('the wrapper really starts the binary at that niceness, and unchanged without it', () => {
+    const w = niceWrapperPath();
+    const run = (extra: Record<string, string>) =>
+      spawnSync(w, ['-c', 'ps -o ni= -p $$'], { env: { ...process.env, LDS_AGENT_EXEC: '/bin/sh', ...extra }, encoding: 'utf8' }).stdout.trim();
+    expect(run({ LDS_AGENT_NICE: '10' })).toBe('10');
+    expect(run({})).toBe('0');
   });
 });

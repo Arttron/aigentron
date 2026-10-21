@@ -3,8 +3,8 @@ import {
   INTERNAL_MCP_SERVER,
   INTERNAL_TOOL_PREFIX,
 } from '@lds/shared';
-import { buildAgentEnv } from './env';
-import { assertIsolationReady, isolationEnv, resolveClaudeExecutable } from './isolation';
+import { applyNodeHeapLimit, buildAgentEnv } from './env';
+import { AGENT_EXEC_ENV, AGENT_NICE_ENV, assertIsolationReady, cleanNice, isolationEnv, niceWrapperPath, resolveClaudeExecutable } from './isolation';
 import { writeAgentSettings } from './settings';
 import { emptyUsage } from './usage';
 import { buildInternalToolSpecs } from './internal-tools';
@@ -269,6 +269,7 @@ export async function runAgent(
   onEvent: AgentEventHandler,
 ): Promise<AgentRunResult> {
   const env = buildAgentEnv(params.modelEnv, process.env, params.workspaceRoot ?? params.cwd, params.hook, params.extraWriteRoots);
+  applyNodeHeapLimit(env, params.nodeMaxMb);
   if (params.skillsDir) env.LDS_SKILLS_DIR = params.skillsDir;
   if (params.attachmentsDir) env.LDS_ATTACHMENTS_DIR = params.attachmentsDir;
   const settingsDir = params.settingsDir ?? join(params.cwd, '.lds');
@@ -284,6 +285,19 @@ export async function runAgent(
     await assertIsolationReady(params.isolation);
     Object.assign(env, isolationEnv(params.isolation, resolveClaudeExecutable()));
     claudeExecutable = params.isolation.wrapper;
+  }
+
+  // Lower CPU priority without a separate agent user: the SDK spawns a small wrapper that `nice`s the real CLI (infra/agent-exec.sh does the same with one).
+  const nice = cleanNice(params.niceness);
+  if (nice > 0 && !params.isolation) {
+    try {
+      Object.assign(env, { [AGENT_EXEC_ENV]: resolveClaudeExecutable(), [AGENT_NICE_ENV]: String(nice) });
+      claudeExecutable = niceWrapperPath();
+    } catch {
+      /* an unusual install (the CLI not found next to the SDK): run it as before */
+    }
+  } else if (nice > 0 && params.isolation) {
+    env[AGENT_NICE_ENV] = String(nice);
   }
 
   const { query, tool, createSdkMcpServer } = await esmImport('@anthropic-ai/claude-agent-sdk');

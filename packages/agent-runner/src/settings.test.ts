@@ -54,3 +54,24 @@ describe('PreToolUse approval hook wiring', () => {
     expect(JSON.parse(renderHooks({}))).toEqual({ hooks: {} });
   });
 });
+
+import { applyNodeHeapLimit } from './env';
+
+describe('applyNodeHeapLimit', () => {
+  it('adds a heap cap to NODE_OPTIONS, keeps what is there, and does nothing without a value', () => {
+    const e: Record<string, string> = {};
+    applyNodeHeapLimit(e, 1434);
+    expect(e.NODE_OPTIONS).toBe('--max-old-space-size=1434');
+    const f: Record<string, string> = { NODE_OPTIONS: '--enable-source-maps' };
+    applyNodeHeapLimit(f, 1000);
+    expect(f.NODE_OPTIONS).toBe('--enable-source-maps --max-old-space-size=1000');
+    const g: Record<string, string> = { NODE_OPTIONS: '--max-old-space-size=8000' };
+    applyNodeHeapLimit(g, 1000);
+    expect(g.NODE_OPTIONS).toBe('--max-old-space-size=8000');
+    for (const v of [0, undefined, 50, NaN]) {
+      const h: Record<string, string> = {};
+      applyNodeHeapLimit(h, v as number | undefined);
+      expect(h.NODE_OPTIONS).toBeUndefined();
+    }
+  });
+});

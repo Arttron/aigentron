@@ -195,6 +195,8 @@ model Project {
   defaultAgent      String?
   // agents offered in this project's New task list (comma-separated names); null = every agent
   pinnedAgents      String?
+  // approvals for this project's tasks: ask | off; null = follow the global setting
+  approvalMode      String?
   // escalations / notifications (fallback: AppSettings)
   notifyChannelId   String?
   notifyChatId      String?
@@ -248,6 +250,8 @@ model Task {
   // True while this task has live subtasks it should be resumed for once they
   // all finish (fan-in). Set when it creates a subtask, cleared on wake.
   awaitingSubtasks Boolean @default(false)
+  // approvals for this task and its subtasks: ask | off; null = follow the project / global setting
+  approvalMode String?
 
   sessions  AgentSession[]
   approvals ApprovalRequest[]

@@ -39,6 +39,9 @@ import { exceptionCutoff, exceptionSignature, exceptionTtlDays } from './excepti
 import { McpService } from '../mcp/mcp.service';
 import { ProvidersService } from '../providers/providers.service';
 import { ChannelsService } from '../channels/channels.service';
+import { join } from 'node:path';
+import { SecretJsonFile } from '../security/secret-json-file';
+import { approvalWaived, parseApprovalMode, parseLevel, resolveApprovalMode, type ApprovalMode, type ModeSource } from './approval-mode';
 
 /** Prisma row shape for an approval (Json/Date fields). */
 type ApprovalRow = Awaited<ReturnType<PrismaService['approvalRequest']['create']>>;
@@ -103,6 +106,75 @@ export class ApprovalsService {
     private readonly moduleRef: ModuleRef,
   ) {}
 
+  private modeFile?: SecretJsonFile<ApprovalMode>;
+  private get modeStore(): SecretJsonFile<ApprovalMode> {
+    return (this.modeFile ??= new SecretJsonFile<ApprovalMode>(join(this.config.secretsDir, 'approval-mode.json'), {
+      missing: 'ask',
+      parse: (raw) => parseApprovalMode((raw as { mode?: unknown } | null)?.mode),
+    }));
+  }
+
+  /** Settings → Approvals: `ask` (default) or `off` (the agents' own risky actions run without a card). */
+  mode(): ApprovalMode {
+    return this.modeStore.read();
+  }
+
+  setMode(input: unknown): ApprovalMode {
+    const mode = parseApprovalMode(input);
+    this.modeStore.write({ mode });
+    this.logger.warn(`Approval mode set to "${mode}"`);
+    return mode;
+  }
+
+  /** The mode in force for a task: its own level, its leads', its project's, the global one — and which of them decided. */
+  async modeFor(taskId: string): Promise<{ own: ApprovalMode | null; effective: ApprovalMode; source: ModeSource; sourceName?: string }> {
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { approvalMode: true, parentId: true, projectId: true, project: { select: { approvalMode: true, name: true } } } });
+    if (!task) throw new NotFoundException(`Task ${taskId} not found`);
+    const ancestors: { mode: unknown; title: string }[] = [];
+    for (let parent = task.parentId, hops = 0; parent && hops < 10; hops++) {
+      const row = await this.prisma.task.findUnique({ where: { id: parent }, select: { approvalMode: true, parentId: true, title: true } });
+      if (!row) break;
+      ancestors.push({ mode: row.approvalMode, title: row.title });
+      parent = row.parentId;
+    }
+    const r = resolveApprovalMode({ task: task.approvalMode, ancestors: ancestors.map((a) => a.mode), project: task.project?.approvalMode, global: this.mode() });
+    const sourceName = r.source === 'project' ? task.project?.name : r.source === 'ancestor' ? ancestors.find((a) => parseLevel(a.mode))?.title : undefined;
+    return { own: parseLevel(task.approvalMode), effective: r.mode, source: r.source, ...(sourceName ? { sourceName } : {}) };
+  }
+
+  /** Set (or clear, with null) the level of a task — its subtasks follow it. */
+  async setTaskMode(taskId: string, input: unknown): Promise<ReturnType<ApprovalsService['modeFor']>> {
+    const mode = this.levelInput(input);
+    await this.prisma.task.update({ where: { id: taskId }, data: { approvalMode: mode } }).catch(() => {
+      throw new NotFoundException(`Task ${taskId} not found`);
+    });
+    this.logger.warn(`Approval mode of task ${taskId} set to ${mode ?? 'inherit'}`);
+    return this.modeFor(taskId);
+  }
+
+  async projectMode(slug: string): Promise<{ own: ApprovalMode | null; effective: ApprovalMode; source: ModeSource }> {
+    const row = await this.prisma.project.findUnique({ where: { slug }, select: { approvalMode: true } });
+    if (!row) throw new NotFoundException(`Project ${slug} not found`);
+    const r = resolveApprovalMode({ project: row.approvalMode, global: this.mode() });
+    return { own: parseLevel(row.approvalMode), effective: r.mode, source: r.source };
+  }
+
+  async setProjectMode(slug: string, input: unknown): Promise<ReturnType<ApprovalsService['projectMode']>> {
+    const mode = this.levelInput(input);
+    await this.prisma.project.update({ where: { slug }, data: { approvalMode: mode } }).catch(() => {
+      throw new NotFoundException(`Project ${slug} not found`);
+    });
+    this.logger.warn(`Approval mode of project ${slug} set to ${mode ?? 'inherit'}`);
+    return this.projectMode(slug);
+  }
+
+  private levelInput(input: unknown): ApprovalMode | null {
+    if (input === null || input === undefined || input === 'inherit') return null;
+    const m = parseLevel(input);
+    if (!m) throw new BadRequestException('mode must be "ask", "off" or null (inherit)');
+    return m;
+  }
+
   /**
    * Classify a pending tool call. Benign calls are allowed inline; dangerous
    * ones create a pending approval and move the task to `needs_approval`.
@@ -135,6 +207,12 @@ export class ApprovalsService {
         this.logger.warn(`Refused ${input.toolName} before approval (task ${input.taskId}): ${refusal}`);
         return { allow: false, reason: refusal };
       }
+    }
+
+    // The no-approvals mode: the agent's own risky actions go ahead (credentials and platform proposals never do).
+    if (approvalWaived('off', input.toolName, verdict) && (await this.modeFor(input.taskId).catch(() => ({ effective: this.mode() }))).effective === 'off') {
+      this.logger.log(`Approvals are off: allowed ${input.toolName} — ${verdict.summary.slice(0, 120)}`);
+      return { allow: true };
     }
 
     // Honor allowlist exceptions added from the approval dialog (task-scoped or

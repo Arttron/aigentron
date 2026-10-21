@@ -22,12 +22,16 @@ fail() { echo "agent-exec: $1" >&2; exit 126; }
 case "$LDS_AGENT_UID$LDS_AGENT_GID" in *[!0-9]*) fail "LDS_AGENT_UID/LDS_AGENT_GID must be numeric" ;; esac
 [ "$LDS_AGENT_UID" != 0 ] && [ "$LDS_AGENT_GID" != 0 ] || fail "refusing to run the agent as root (uid/gid 0)"
 
+# LDS_AGENT_NICE (optional): run the agent at a lower CPU priority; ignored when `nice` is missing or the value is not a number.
+nice_cmd=""
+case "${LDS_AGENT_NICE:-}" in ""|*[!0-9]*|0) ;; *) command -v nice >/dev/null 2>&1 && nice_cmd="nice -n $LDS_AGENT_NICE" ;; esac
+
 me=$(id -u)
 if [ "$me" = "$LDS_AGENT_UID" ]; then
   # Already the agent user (the wrapper re-entered from inside an agent run): nothing to drop.
-  exec "$LDS_AGENT_EXEC" "$@"
+  exec $nice_cmd "$LDS_AGENT_EXEC" "$@"
 fi
 [ "$me" = 0 ] || fail "must run as root to switch to uid $LDS_AGENT_UID (running as uid $me)"
 command -v setpriv >/dev/null 2>&1 || fail "setpriv (util-linux) is not installed — install it or unset AGENT_RUN_AS_UID"
 
-exec setpriv --reuid="$LDS_AGENT_UID" --regid="$LDS_AGENT_GID" --clear-groups --no-new-privs -- "$LDS_AGENT_EXEC" "$@"
+exec $nice_cmd setpriv --reuid="$LDS_AGENT_UID" --regid="$LDS_AGENT_GID" --clear-groups --no-new-privs -- "$LDS_AGENT_EXEC" "$@"
