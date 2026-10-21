@@ -26,6 +26,9 @@ case "$LDS_AGENT_UID$LDS_AGENT_GID" in *[!0-9]*) fail "LDS_AGENT_UID/LDS_AGENT_G
 nice_cmd=""
 case "${LDS_AGENT_NICE:-}" in ""|*[!0-9]*|0) ;; *) command -v nice >/dev/null 2>&1 && nice_cmd="nice -n $LDS_AGENT_NICE" ;; esac
 
+# When memory runs out, the kernel takes the agent (and what it started) first - not the orchestrator or the model gateway. Raising the score needs no privilege.
+echo 500 > /proc/self/oom_score_adj 2>/dev/null || true
+
 me=$(id -u)
 if [ "$me" = "$LDS_AGENT_UID" ]; then
   # Already the agent user (the wrapper re-entered from inside an agent run): nothing to drop.

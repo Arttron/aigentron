@@ -49,12 +49,14 @@ export function ApprovalModePicker({ scope, compact }: { scope: Scope; compact?:
 
   if (!view) return error ? <Muted>{error}</Muted> : null;
   const inheritedNow = `${view.effective === 'off' ? 'no approvals' : 'ask'}, from ${SOURCE[view.source]}${view.sourceName ? ` “${view.sourceName}”` : ''}`;
+  // the full explanation lives in the tooltip; the options stay short so a header never stretches
+  const short = view.effective === 'off' ? 'off' : 'ask';
   return (
-    <label className={styles.picker} title="Whether the agent asks before a risky action. A task's setting also covers its subtasks.">
+    <label className={styles.picker} title={`Whether the agent asks before a risky action. A task's setting also covers its subtasks. Now: ${inheritedNow}${view.own ? ' (set here)' : ''}.`}>
       {!compact && <span>🛡 Approvals</span>}
-      <select value={view.own ?? 'inherit'} disabled={busy} onChange={(e) => void change(e.target.value)} aria-label="Approvals">
-        <option value="inherit">Inherit ({inheritedNow})</option>
-        <option value="ask">Ask before risky actions</option>
+      <select className={compact ? styles.select : styles.selectWide} value={view.own ?? 'inherit'} disabled={busy} onChange={(e) => void change(e.target.value)} aria-label="Approvals">
+        <option value="inherit">{compact ? `Inherit (${short})` : `Inherit (${inheritedNow})`}</option>
+        <option value="ask">{compact ? 'Ask' : 'Ask before risky actions'}</option>
         <option value="off">No approvals</option>
       </select>
       {error && <span className={styles.err}>{error}</span>}

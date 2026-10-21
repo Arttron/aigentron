@@ -37,8 +37,14 @@ function withQuestion(base: string, finalText?: string): string {
  *  - strict mode: a clean finish with no report at all → `stalled`;
  *  - otherwise a clean finish: `review` (a person accepts), or `done` for a subtask (its lead does).
  */
+export const MEMORY_STOP_MESSAGE =
+  'The machine was about to run out of memory, so this run was stopped before the system killed the whole service. The work done so far stays; press Continue when the server is calmer (or give it more memory / swap).';
+
 export function decideStatus(outcome: AgentRunOutcome, ctx: RunDecisionContext): RunDecision {
   const finish: RunDecision = { kind: 'finish', status: ctx.parentId ? 'done' : 'review' };
+  if (outcome.memoryStopped && outcome.reported !== 'done') {
+    return ctx.chat ? { kind: 'settle', status: 'failed', error: MEMORY_STOP_MESSAGE } : { kind: 'settle', status: 'stalled', error: MEMORY_STOP_MESSAGE };
+  }
   if (ctx.chat) {
     if (outcome.errored && outcome.reported !== 'done') {
       const why = outcome.timedOut ? 'chat turn timed out' : (outcome.finalText ?? 'chat turn failed');

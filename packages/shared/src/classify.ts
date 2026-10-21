@@ -39,10 +39,10 @@ export const PUSH_BRANCH_TOOL = `${INTERNAL_TOOL_PREFIX}push_branch`;
 export const COMPLETE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}complete_subtask`;
 export const CHECK_SUBTASKS_TOOL = `${INTERNAL_TOOL_PREFIX}check_subtasks`;
 /**
- * Raised by the orchestrator itself (not by an agent) when a run that is still working reaches the ceiling of active time: a person decides
+ * Raised by the orchestrator itself (not a tool an agent can call, hence no tool prefix) when a run that is still working reaches the ceiling of active time: a person decides
  * whether it may go on. Gated like the other internal tools that cost something; the approval card carries the time used and the extra asked for.
  */
-export const EXTEND_RUN_TOOL = `${INTERNAL_TOOL_PREFIX}extend_run_time`;
+export const EXTEND_RUN_TOOL = '__extend_run_time__';
 /** Sentinel toolName for a "run out of steps — continue?" approval (not a real tool). */
 export const CONTINUE_RUN_TOOL = '__continue_run__';
 /** Schedule a delayed re-run of this task ("check back in N seconds"). */

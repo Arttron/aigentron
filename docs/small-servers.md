@@ -15,11 +15,26 @@ instance the CPU credits run out and everything slows down together (timeouts, a
 - **Lower priority for agents** (since 0.1.82) — agent processes run at niceness `AGENT_NICE` (default 10; `0` = off), and so do the tests and builds they start, so the
   dashboard, SSH and the orchestrator itself keep the CPU when agents hog it. Works with and without the separate agent user.
 - **Memory cap for builds and tests** (since 0.1.82) — the Node processes an agent starts (`tsc`, `vitest`, bundlers) get a heap cap through `NODE_OPTIONS`:
-  about a third of the RAM (1.4 GB on a 4 GB machine; none from 12 GB up). A runaway build then fails with "heap out of memory" instead of taking the whole
+  a little over half of the RAM (2.2 GB on a 4 GB machine; none from 16 GB up). A runaway build then fails with "heap out of memory" instead of taking the whole
   machine down. `AGENT_NODE_MAX_MB=<n>` sets it, `0` switches it off.
 - **A suggestion for parallel runs** — `metrics_report` topic `system` shows how many runs this machine suits (one less than the CPUs on a small box, and no more than
   memory allows) and says when Settings → *concurrency* is above it.
 - **Per-agent step limit** — `maxTurns` in the agent form keeps one run from going on for ever.
+
+- **Memory guard** (since 0.1.83) — when the memory available drops below `AGENT_OOM_GUARD_MB` (default 200) while runs are in flight, the **newest** run is
+  stopped by the server (the task becomes *stalled*, the work stays, press *Continue* later) instead of the kernel killing the biggest process — which used to be
+  the whole service (`aigentron.service: Failed with result 'oom-kill'` in the journal, then a restart and the same tasks running it out of memory again).
+  New runs also wait while memory is short, up to an hour (load and CPU steal only up to 10 minutes). Agents ask the kernel to kill *them* first
+  (`oom_score_adj 500`), and the unit has `OOMPolicy=continue`, so one killed process no longer stops the service. `0` switches the guard off.
+- **A big enough swap is the single most useful thing on a 4 GB machine** (see below); the admin's `metrics_report system` says when there is none.
+
+An existing installation gets `OOMPolicy=continue` with the next update; to have it at once:
+
+```sh
+sudo mkdir -p /etc/systemd/system/aigentron.service.d
+printf '[Service]\nOOMPolicy=continue\n' | sudo tee /etc/systemd/system/aigentron.service.d/oom.conf
+sudo systemctl daemon-reload   # takes effect at the next restart of the service
+```
 
 What to do on the machine itself:
 

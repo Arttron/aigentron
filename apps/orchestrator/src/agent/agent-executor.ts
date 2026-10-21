@@ -58,6 +58,8 @@ export interface AgentRunOutcome {
   errored: boolean;
   /** The run was aborted by our timeout/watchdog (vs. a user cancel). */
   timedOut: boolean;
+  /** The run was stopped by the memory guard: the machine was about to run out of memory (the kernel would have killed the whole service). */
+  memoryStopped?: boolean;
   /** The run ended by exhausting the max-turns budget (offer to continue). */
   maxTurns?: boolean;
   /** The agent's last assistant message when it ended WITHOUT a report — the

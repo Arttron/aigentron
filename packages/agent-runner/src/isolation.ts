@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { access, constants } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -29,14 +29,33 @@ export function cleanNice(n: number | undefined): number {
 }
 
 const NICE_WRAPPER = `#!/bin/sh
-# Starts the agent binary at a lower CPU priority, so the dashboard, SSH and the orchestrator keep the machine when agents compile and test.
-# LDS_AGENT_EXEC = the real binary, LDS_AGENT_NICE = niceness. Without \`nice\` the agent simply starts as it is.
+# Starts the agent binary at a lower CPU priority, and as the first thing the kernel's out-of-memory killer takes (so a memory shortage costs one agent
+# run, not the whole service). LDS_AGENT_EXEC = the real binary, LDS_AGENT_NICE = niceness. Without \`nice\` the agent simply starts as it is.
+echo 500 > /proc/self/oom_score_adj 2>/dev/null || true
 if [ -n "\${LDS_AGENT_NICE:-}" ] && command -v nice >/dev/null 2>&1; then exec nice -n "$LDS_AGENT_NICE" "$LDS_AGENT_EXEC" "$@"; fi
 exec "$LDS_AGENT_EXEC" "$@"
 `;
 
-/** The nice wrapper for a run WITHOUT a separate agent user (with one, infra/agent-exec.sh does it): written once into the temp dir. */
-export function niceWrapperPath(): string {
+/** Whether the wrapper can really be started here (a temp dir mounted `noexec`, a missing /bin/sh … would make EVERY agent run fail to start). Probed once. */
+let wrapperProbe: { path: string; ok: boolean } | null = null;
+function wrapperWorks(path: string): boolean {
+  if (wrapperProbe?.path === path) return wrapperProbe.ok;
+  let ok = false;
+  try {
+    const r = spawnSync(path, ['-c', 'exit 0'], { env: { PATH: process.env.PATH ?? '/usr/bin:/bin', [AGENT_EXEC_ENV]: '/bin/sh', [AGENT_NICE_ENV]: '1' }, timeout: 5000 });
+    ok = r.status === 0 && !r.error;
+  } catch {
+    ok = false;
+  }
+  wrapperProbe = { path, ok };
+  return ok;
+}
+
+/**
+ * The nice wrapper for a run WITHOUT a separate agent user (with one, infra/agent-exec.sh does it): written once into the temp dir and tried out.
+ * Null when it cannot be used here — the caller then runs the agent exactly as before, at normal priority, instead of failing every run.
+ */
+export function niceWrapperPath(): string | null {
   const path = join(tmpdir(), `aigentron-nice-exec-${process.getuid?.() ?? 0}.sh`);
   try {
     if (!existsSync(path) || readFileSync(path, 'utf8') !== NICE_WRAPPER) {
@@ -46,9 +65,9 @@ export function niceWrapperPath(): string {
       renameSync(tmp, path);
     }
   } catch {
-    /* the caller falls back to no wrapper */
+    return null;
   }
-  return path;
+  return wrapperWorks(path) ? path : null;
 }
 
 /**
@@ -87,7 +106,12 @@ export function agentCommand(
   nice?: number,
 ): { command: string; args: string[]; env: Record<string, string> } {
   const n = cleanNice(nice);
-  if (!iso) return n > 0 ? { command: 'nice', args: ['-n', String(n), command, ...args], env } : { command, args: [...args], env };
+  // `sh -c`: first make the process the kernel's preferred victim when memory runs out ($0 = niceness, then the command and its arguments), then nice + exec
+  if (!iso) {
+    return n > 0
+      ? { command: 'sh', args: ['-c', 'echo 500 > /proc/self/oom_score_adj 2>/dev/null; exec nice -n "$0" "$@"', String(n), command, ...args], env }
+      : { command, args: [...args], env };
+  }
   return { command: iso.wrapper, args: [...args], env: { ...env, ...isolationEnv(iso, command), ...(n > 0 ? { [AGENT_NICE_ENV]: String(n) } : {}) } };
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRunOutcome } from '../agent/agent-executor';
-import { decideStatus, type RunDecision, type RunDecisionContext } from './decide-status';
+import { MEMORY_STOP_MESSAGE, decideStatus, type RunDecision, type RunDecisionContext } from './decide-status';
 
 const base: AgentRunOutcome = { reported: null, errored: false, timedOut: false };
 const code: RunDecisionContext = { chat: false, parentId: null, requireStatusReport: false };
@@ -45,5 +45,14 @@ describe('decideStatus', () => {
     const d = decideStatus({ reported: null, errored: true, timedOut: false, errorText: 'rate limit exceeded' } as never, { chat: false, parentId: null, requireStatusReport: true });
     expect(d).toMatchObject({ kind: 'settle', status: 'stalled' });
     expect((d as { error: string }).error).toContain('the provider failed: rate limit exceeded');
+  });
+});
+
+describe('a run stopped by the memory guard', () => {
+  it('becomes stalled (failed for a chat turn) with an explanation, and a "done" report still wins', () => {
+    const o = { ...base, errored: true, memoryStopped: true };
+    expect(decideStatus(o, code)).toEqual({ kind: 'settle', status: 'stalled', error: MEMORY_STOP_MESSAGE });
+    expect(decideStatus(o, chat)).toEqual({ kind: 'settle', status: 'failed', error: MEMORY_STOP_MESSAGE });
+    expect(decideStatus({ ...o, reported: 'done' }, code)).toMatchObject({ kind: 'finish' });
   });
 });

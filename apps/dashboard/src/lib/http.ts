@@ -19,11 +19,27 @@ export function errMsg(e: unknown): string {
   return m.replace(/^\d+ [^—]*— /, '');
 }
 
+/** An HTML page where data was expected: a proxy / CDN error page (Cloudflare 520, nginx 502 …), never something to show as text. */
+const looksLikeHtml = (body: string): boolean => /^\s*(<!doctype html|<html[\s>]|<head[\s>]|<body[\s>])/i.test(body);
+
+/** What a person should read for the body of a failed answer: the server's text, or a plain sentence instead of a pasted error page. */
+export function cleanErrorBody(status: number, body: string): string {
+  if (looksLikeHtml(body)) {
+    // 502/503/504 and Cloudflare's 520-527: the server behind the proxy is not answering (restarting, overloaded, busy)
+    if (status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 527)) {
+      return `The server is not reachable right now (HTTP ${status}) — it may be restarting or busy. Try again in a minute.`;
+    }
+    return `The server answered with a web page instead of data (HTTP ${status}).`;
+  }
+  const t = body.trim();
+  return t.length > 600 ? `${t.slice(0, 600)}…` : t;
+}
+
 /** Parses a JSON answer or throws ApiError (status + the server's body text). */
 export async function unwrap<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new ApiError(res.status, body, res.statusText);
+    throw new ApiError(res.status, cleanErrorBody(res.status, body), res.statusText);
   }
   return res.json() as Promise<T>;
 }

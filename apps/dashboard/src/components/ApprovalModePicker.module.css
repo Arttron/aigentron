@@ -6,12 +6,21 @@
   font-size: 13px;
 }
 
-.picker select {
+.select {
   min-width: 0;
-  max-width: 100%;
+  /* a long option must never stretch the page header: the text is cut, the tooltip has the rest */
+  max-width: min(100%, 11rem);
   width: auto;
+  text-overflow: ellipsis;
 }
 
 .err {
   color: var(--danger, #c0392b);
+}
+
+.selectWide {
+  min-width: 0;
+  max-width: 100%;
+  width: auto;
+  text-overflow: ellipsis;
 }

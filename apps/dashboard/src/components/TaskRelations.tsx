@@ -69,7 +69,8 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
       )}
 
       <Card>
-        <Row spaceBetween>
+        <div className={styles.head}>
+          <Row spaceBetween>
           <button type="button" className={styles.fold} aria-expanded={!folded} onClick={toggleFold} disabled={task.subtasks.length === 0}>
             <SectionTitle className={styles.flush}>
               {task.subtasks.length > 0 ? (folded ? '▸ ' : '▾ ') : ''}Subtasks ({task.subtasks.length})
@@ -78,7 +79,8 @@ export function TaskRelations({ task, onChange }: { task: TaskDetail; onChange: 
           <Button size="sm" onClick={() => setAdding((v) => !v)}>
             {adding ? 'Cancel' : '+ Subtask'}
           </Button>
-        </Row>
+          </Row>
+        </div>
 
         {task.subtasks.length === 0 && !adding && (
           <Muted className={styles.empty}>No subtasks. Decompose this task into independent units.</Muted>

@@ -50,6 +50,7 @@ import { McpService } from '../mcp/mcp.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import { PreviewService } from '../preview/preview.service';
 import { budgetExceeded, isIdleStuck, runExtension, runIsAlive } from './run-guards';
+import { oomVictim, readMemInfo } from '../queue/capacity-gate';
 import { RunLimitsService } from '../settings/run-limits.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { assemblePromptLayers, withRunContext } from './prompt-layers';
@@ -110,6 +111,9 @@ export class RealAgentExecutor extends AgentExecutor {
   private readonly logger = new Logger(RealAgentExecutor.name);
   /** AbortControllers for runs currently in flight, keyed by task id. */
   private readonly active = new Map<string, AbortController>();
+  /** Runs in flight for the memory guard: when each started and how to stop it (with the memory left, for the transcript). */
+  private readonly guarded = new Map<string, { startedAt: number; stop: (availableMb: number) => void }>();
+  private guardTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Abort the in-flight run for a task (used by cancel). */
   override cancel(taskId: string): void {
@@ -563,6 +567,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // its type survives the closure assignment under control-flow narrowing.
     const reported: { value: ReportedStatus | null } = { value: null };
     let timedOut = false;
+    let memoryStopped = false;
     const onReportStatus = (report: ReportedStatus): void => {
       reported.value = report;
       this.prisma.agentSession
@@ -686,6 +691,15 @@ export class RealAgentExecutor extends AgentExecutor {
     // Abort any stale controller for this task before replacing it.
     this.active.get(ctx.taskId)?.abort();
     this.active.set(ctx.taskId, abortController);
+    this.guarded.set(ctx.taskId, {
+      startedAt: Date.now(),
+      stop: (availableMb) => {
+        memoryStopped = true;
+        onEvent({ kind: 'stderr', text: `the machine is about to run out of memory (${Math.round(availableMb)} MB left) — this run is stopped before the system kills everything; press Continue when it is calmer` });
+        abortController.abort();
+      },
+    });
+    this.startMemoryGuard();
     // The hard ceiling counts ACTIVE time only (E-02): it is paused while the
     // agent waits for a human — an ask_user question (the handler below holds
     // it) or an approval in the PreToolUse hook (the bus events hold it).
@@ -1022,6 +1036,7 @@ export class RealAgentExecutor extends AgentExecutor {
           reportedSummary: reported.value ? (reportText(reported.value) ?? undefined) : undefined,
           errored: result.isError,
           timedOut,
+          memoryStopped,
           maxTurns: result.maxTurnsExceeded,
           finalText,
           // The provider's own words when the run failed (X-FO-6) — not for an abort, which is ours.
@@ -1073,6 +1088,7 @@ export class RealAgentExecutor extends AgentExecutor {
           reportedSummary: reported.value ? (reportText(reported.value) ?? undefined) : undefined,
           errored: true,
           timedOut,
+          memoryStopped,
           maxTurns,
           finalText,
           errorText: aborted ? undefined : errorTextOf(message),
@@ -1086,6 +1102,8 @@ export class RealAgentExecutor extends AgentExecutor {
       if (idleTimer) clearInterval(idleTimer);
       internalReg?.dispose();
       if (this.active.get(ctx.taskId) === abortController) this.active.delete(ctx.taskId);
+      this.guarded.delete(ctx.taskId);
+      if (this.guarded.size === 0) this.stopMemoryGuard();
     }
   }
 
@@ -1225,6 +1243,30 @@ export class RealAgentExecutor extends AgentExecutor {
    *  - Providers already pointing at litellm (e.g. ollama-local) must present
    *    the master key too, since litellm enforces it on every request.
    */
+  /** Watches the memory while any run is in flight: below the guard, the newest run is stopped by us instead of the kernel killing the whole service. */
+  private startMemoryGuard(): void {
+    if (this.guardTimer || this.config.agentOomGuardMb <= 0) return;
+    this.guardTimer = setInterval(() => {
+      const mem = readMemInfo();
+      const victim = oomVictim(
+        [...this.guarded].map(([taskId, g]) => ({ taskId, startedAt: g.startedAt })),
+        mem.availableMb,
+        this.config.agentOomGuardMb,
+      );
+      if (!victim) return;
+      this.logger.warn(`Memory guard: ${Math.round(mem.availableMb)} MB available (guard ${this.config.agentOomGuardMb} MB) — stopping the newest run, task ${victim}`);
+      this.guarded.get(victim)?.stop(mem.availableMb);
+      this.guarded.delete(victim);
+      if (this.guarded.size === 0) this.stopMemoryGuard();
+    }, 2000);
+    this.guardTimer.unref?.();
+  }
+
+  private stopMemoryGuard(): void {
+    if (this.guardTimer) clearInterval(this.guardTimer);
+    this.guardTimer = null;
+  }
+
   /**
    * The run reached its ceiling of active time while still working: a card asks a person whether it may go on. Approve = `extraMin` more
    * minutes (asked again when they are used up); deny, no answer in time or no card possible = the run stops here (the task becomes stalled).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CREATE_TASK_TOOL, INTERNAL_TOOL_PREFIX, PROPOSE_SETTINGS_TOOL, PUSH_BRANCH_TOOL } from '@lds/shared';
+import { CREATE_TASK_TOOL, EXTEND_RUN_TOOL, INTERNAL_TOOL_PREFIX, PROPOSE_SETTINGS_TOOL, PUSH_BRANCH_TOOL } from '@lds/shared';
 import { approvalWaived, parseApprovalMode, resolveApprovalMode } from './approval-mode';
 
 const risky = { dangerous: true };
@@ -22,6 +22,7 @@ describe('approval mode', () => {
   it('off mode never waives credentials / protected files or admin proposals', () => {
     expect(approvalWaived('off', 'Bash', { dangerous: true, hard: true })).toBe(false);
     expect(approvalWaived('off', PROPOSE_SETTINGS_TOOL, risky)).toBe(false);
+    expect(approvalWaived('off', EXTEND_RUN_TOOL, risky)).toBe(false); // more run time is always the person's call
     expect(approvalWaived('off', `${INTERNAL_TOOL_PREFIX}request_secret`, risky)).toBe(false);
     expect(approvalWaived('off', `${INTERNAL_TOOL_PREFIX}propose_learned_skill`, risky)).toBe(false);
   });

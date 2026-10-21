@@ -94,7 +94,11 @@ describe('niceness (a lower CPU priority for the agent)', () => {
     for (const v of [0, -5, NaN, undefined]) expect(cleanNice(v as number | undefined)).toBe(0);
   });
   it('without isolation the command is run through nice; with it the wrapper gets the value in the env', () => {
-    expect(agentCommand('codex', ['exec'], { A: '1' }, undefined, 10)).toEqual({ command: 'nice', args: ['-n', '10', 'codex', 'exec'], env: { A: '1' } });
+    const plain = agentCommand('codex', ['exec'], { A: '1' }, undefined, 10);
+    expect(plain.command).toBe('sh');
+    expect(plain.args.slice(2)).toEqual(['10', 'codex', 'exec']);
+    expect(plain.args[1]).toContain('oom_score_adj');
+    expect(plain.args[1]).toContain('exec nice -n "$0" "$@"');
     expect(agentCommand('codex', ['exec'], { A: '1' })).toEqual({ command: 'codex', args: ['exec'], env: { A: '1' } });
     const c = agentCommand('codex', ['exec'], {}, iso, 10);
     expect(c.command).toBe(iso.wrapper);
@@ -102,10 +106,24 @@ describe('niceness (a lower CPU priority for the agent)', () => {
     expect(agentCommand('codex', [], {}, iso).env.LDS_AGENT_NICE).toBeUndefined();
   });
   it.skipIf(process.platform === 'win32')('the wrapper really starts the binary at that niceness, and unchanged without it', () => {
-    const w = niceWrapperPath();
+    const w = niceWrapperPath()!;
+    expect(w).toBeTruthy();
     const run = (extra: Record<string, string>) =>
       spawnSync(w, ['-c', 'ps -o ni= -p $$'], { env: { ...process.env, LDS_AGENT_EXEC: '/bin/sh', ...extra }, encoding: 'utf8' }).stdout.trim();
     expect(run({ LDS_AGENT_NICE: '10' })).toBe('10');
     expect(run({})).toBe('0');
+  });
+});
+
+describe('the agent is the first thing the kernel kills when memory runs out', () => {
+  it.skipIf(process.platform !== 'linux')('the wrapper raises oom_score_adj', () => {
+    const w = niceWrapperPath()!;
+    const r = spawnSync(w, ['-c', 'cat /proc/self/oom_score_adj'], { env: { ...process.env, LDS_AGENT_EXEC: '/bin/sh', LDS_AGENT_NICE: '5' }, encoding: 'utf8' });
+    expect(r.stdout.trim()).toBe('500');
+  });
+  it('the sh -c form really starts the command at that niceness (and does not break without /proc)', () => {
+    const c = agentCommand('sh', ['-c', 'ps -o ni= -p $$'], {}, undefined, 7);
+    const r = spawnSync(c.command, c.args, { env: process.env, encoding: 'utf8' });
+    expect(r.stdout.trim()).toBe('7');
   });
 });

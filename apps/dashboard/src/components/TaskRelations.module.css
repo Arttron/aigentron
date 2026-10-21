@@ -1,3 +1,8 @@
+.head {
+  /* air between the + Subtask button and the first row */
+  margin-bottom: 0.9rem;
+}
+
 .flush {
   margin: 0;
 }

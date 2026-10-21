@@ -1,16 +1,10 @@
-Aigentron v0.1.82
+Aigentron v0.1.83
 
-For people who are not programmers: you can switch approvals off (for everything, one project or one task), small servers stay responsive under load, long-running agents are no longer cut off while they are still working, and the chat shows colours.
-
-New
-- Approvals at three levels. Settings -> General -> Approvals has a "No approvals mode" (administrator): risky agent actions run without a card. A project (its settings) and a task (the shield selector on its page; its subtasks follow it) can override it, in either direction - the most specific level that is set wins. Always still asked: passwords and tokens, the charter and CI files, and everything the admin changes on the platform. /tmp is now a free scratch folder (writes and rm), and rm accepts plain quotes and globs below a named folder.
-- Run limits in Settings -> General: the first time window, how far a run that is still working is extended (a run that keeps producing output is no longer cut off after 10 minutes, up to 60), when a silent run is stopped, and steps per run. At the ceiling a card asks whether a run that is still working may go on (+30 minutes per approval; no answer or a refusal stops it, the work done stays).
-- Small servers: held runs start one at a time and a few seconds apart; a burstable instance out of CPU credits (CPU steal) holds starts; agent processes run at a lower CPU priority; the Node processes agents start get a memory cap (a third of the RAM on a small machine); "Choose automatically" for parallel runs; a queued task that is held back says why on its page. See docs/small-servers.md.
-- Workspace: a project picker - browse a project's own folder and its brief.
-- Chat: colour values (#ff8800, rgb(...), hsl(...)) are shown on a chip of that colour with black or white text, whichever contrasts better. An agent can refer to a file of the task by name (![caption](file.png)) instead of repeating it - added in 0.1.81.
-- The frontend engineer template asks for components, an MVC split (view + hook) and one CSS Module per component - it was in 0.1.80.
+For people who are not programmers: a small server no longer falls over when it runs out of memory - the one run that would have tipped it over is stopped instead of the whole service.
 
 Fixed
-- Task titles and the "unrecognized_model ... generate_session_title" error, subtask answers cut at 500 characters - fixed in 0.1.80.
+- On a small machine (4 GB, no swap) the kernel killed a process when memory ran out and systemd then stopped the whole service ("oom-kill" in the log), the service restarted, the same tasks ran again and it happened again every few minutes - tasks seemed to fail even one at a time and the dashboard showed Cloudflare 520. Now: a memory guard stops the newest run before that (the task becomes "stalled", the work stays, press Continue later; AGENT_OOM_GUARD_MB, default 200, 0 = off); new runs wait for memory up to an hour; agents ask the kernel to kill them first; the service unit gets OOMPolicy=continue (applied by this update); the Node memory cap for builds is a third of the RAM; the Metrics report "system" shows memory and swap and warns when there is none; the installer reminds about a swap file. A 2 GB swap file is the most useful thing on a 4 GB machine (docs/small-servers.md).
+- The low-priority wrapper for agents is tried out once and skipped when it cannot start (a temp dir that forbids running files used to make every run fail).
+- A proxy error page (Cloudflare 520, 502/503/504) is shown as one plain sentence instead of pasting its HTML; the approvals selector no longer stretches the task header; room between "+ Subtask" and the list.
 
-Update note: database migrations add an approval-mode column to tasks and projects (applied automatically).
+Update note: the update rewrites the service unit (adds OOMPolicy=continue); no database changes.

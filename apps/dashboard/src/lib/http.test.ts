@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, buildQuery, errMsg, request, setActingHeaders, unwrap } from './http';
+import { ApiError, buildQuery, cleanErrorBody, errMsg, request, setActingHeaders, unwrap } from './http';
 
 const res = (status: number, body: string, statusText = '') => new Response(body, { status, statusText });
 
@@ -92,5 +92,29 @@ describe('request', () => {
   it('rejects with ApiError on a non-2xx answer', async () => {
     stub(res(404, 'gone', 'Not Found'));
     await expect(request('GET', '/tasks/x')).rejects.toMatchObject({ status: 404, detail: 'gone' });
+  });
+});
+
+describe('an error page instead of an answer', () => {
+  const cloudflare = '<!DOCTYPE html>\n<!--[if lt IE 7]> <html class="no-js ie6 oldie"> <![endif]--><head><title>x | 520: Web server is returning an unknown error</title></head><body>…</body></html>';
+  it('a proxy error page becomes one plain sentence', () => {
+    for (const status of [502, 503, 504, 520, 522, 527]) {
+      const m = cleanErrorBody(status, cloudflare);
+      expect(m).toContain(`HTTP ${status}`);
+      expect(m).toContain('restarting or busy');
+      expect(m).not.toContain('<');
+    }
+  });
+  it('another HTML page is named as such, plain text and JSON text stay as they are', () => {
+    expect(cleanErrorBody(404, '<html><body>nope</body></html>')).toBe('The server answered with a web page instead of data (HTTP 404).');
+    expect(cleanErrorBody(409, 'queue is full')).toBe('queue is full');
+    expect(cleanErrorBody(400, '{"message":"bad"}')).toBe('{"message":"bad"}');
+  });
+  it('a very long text is cut', () => {
+    expect(cleanErrorBody(500, 'x'.repeat(2000)).length).toBe(601);
+  });
+  it('unwrap and errMsg show the sentence, not the page', async () => {
+    const err = await unwrap(res(520, cloudflare, '')).catch((e: unknown) => e);
+    expect(errMsg(err)).toBe('The server is not reachable right now (HTTP 520) — it may be restarting or busy. Try again in a minute.');
   });
 });

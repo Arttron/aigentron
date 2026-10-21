@@ -60,6 +60,8 @@ export class AppConfigService {
   readonly agentNice: number;
   /** Heap cap (MB) for the Node processes agents start (AGENT_NODE_MAX_MB; empty = automatic for a small machine, 0 = none). */
   readonly agentNodeMaxMb: number;
+  /** While runs are in flight and the memory available drops below this (MB), the newest run is stopped before the kernel kills the whole service (AGENT_OOM_GUARD_MB, default 200; 0 = off). */
+  readonly agentOomGuardMb: number;
   /** Max times a task may auto-request "continue?" after hitting the step limit
    *  before it's stalled instead — stops a non-converging run grinding forever. */
   readonly maxContinuations: number;
@@ -214,6 +216,8 @@ export class AppConfigService {
     const nice = parseInt(process.env.AGENT_NICE ?? '10', 10);
     this.agentNice = Number.isFinite(nice) ? Math.max(0, Math.min(19, nice)) : 10;
     const nodeMax = (process.env.AGENT_NODE_MAX_MB ?? '').trim();
+    const oomGuard = parseInt(process.env.AGENT_OOM_GUARD_MB ?? '200', 10);
+    this.agentOomGuardMb = Number.isFinite(oomGuard) && oomGuard >= 0 ? oomGuard : 200;
     this.agentNodeMaxMb = /^\d+$/.test(nodeMax) ? Math.min(parseInt(nodeMax, 10), 65536) : machineNodeHeapMb();
     this.maxContinuations = parseInt(process.env.MAX_CONTINUATIONS ?? '2', 10);
     // Lazy skills: inject a short index (name + description + path) and let the

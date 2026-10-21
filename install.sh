@@ -785,6 +785,9 @@ Environment=ENV_FILE=$ENV_FILE
 ExecStart=$CURRENT_LINK/infra/minimal-entrypoint.sh
 Restart=on-failure
 RestartSec=5
+# When the kernel runs out of memory it kills ONE process (agents ask to go first). Without this, systemd then stops the whole service
+# ("Failed with result 'oom-kill'"), every run restarts with it and the same tasks run the machine out of memory again.
+OOMPolicy=continue
 
 [Install]
 WantedBy=multi-user.target
@@ -878,6 +881,12 @@ exec node "$CURRENT_LINK/infra/admin-cli.mjs" "\$@"
 SHIM
   chmod +x /usr/local/bin/aigentron-admin
 
+  # A small machine without swap: a memory spike kills a process (and used to take the whole service down). Say so; never change the system silently.
+  mem_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)
+  if [ -n "${mem_kb:-}" ] && [ "$mem_kb" -lt 6291456 ] 2>/dev/null && [ -z "$(swapon --show --noheadings 2>/dev/null || true)" ]; then
+    log "NOTE: this machine has under 6 GB of memory and no swap. Agents (and a browser) can run it out of memory - a swap file makes that slow instead of fatal:"
+    log "      sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
+  fi
   log "Enabling + starting the aigentron service"
   systemctl daemon-reload
   systemctl enable aigentron

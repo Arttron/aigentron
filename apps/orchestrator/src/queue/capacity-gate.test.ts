@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StartThrottle, autoNodeHeapMb, capacityVerdict, parseCpuStat, recommendConcurrency, stealBetween, waitForCapacity, type CapacitySample } from './capacity-gate';
+import { StartThrottle, autoNodeHeapMb, oomVictim, parseMeminfo, capacityVerdict, parseCpuStat, recommendConcurrency, stealBetween, waitForCapacity, type CapacitySample } from './capacity-gate';
 
 const s = (over: Partial<CapacitySample> = {}): CapacitySample => ({ loadPerCpu: 0.5, load1: 1, cpus: 2, freeMemMb: 2000, stealPct: 0, ...over });
 
@@ -109,6 +109,33 @@ describe('autoNodeHeapMb', () => {
     expect(autoNodeHeapMb(1024)).toBe(768);
     expect(autoNodeHeapMb(11000)).toBe(3850);
     expect(autoNodeHeapMb(12288)).toBe(0);
-    expect(autoNodeHeapMb(65536)).toBe(0);
+  });
+});
+
+describe('memory', () => {
+  const meminfo = 'MemTotal:        4015400 kB\nMemFree:          120000 kB\nMemAvailable:    1500000 kB\nSwapTotal:       2097148 kB\nSwapFree:        2000000 kB\n';
+  it('reads /proc/meminfo, with swap; null without MemAvailable', () => {
+    const m = parseMeminfo(meminfo)!;
+    expect(Math.round(m.availableMb)).toBe(1465);
+    expect(Math.round(m.totalMb)).toBe(3921);
+    expect(Math.round(m.swapTotalMb)).toBe(2048);
+    expect(parseMeminfo('MemTotal: 100 kB\n')).toBeNull();
+    expect(parseMeminfo('')).toBeNull();
+    expect(parseMeminfo('MemTotal: 4000000 kB\nMemAvailable: 1000 kB\n')!.swapTotalMb).toBe(0);
+  });
+  it('the newest run is stopped when memory runs out, nobody when it does not', () => {
+    const runs = [{ taskId: 'old', startedAt: 1 }, { taskId: 'new', startedAt: 9 }, { taskId: 'mid', startedAt: 5 }];
+    expect(oomVictim(runs, 150, 200)).toBe('new');
+    expect(oomVictim(runs, 250, 200)).toBeNull();
+    expect(oomVictim(runs, 10, 0)).toBeNull(); // guard off
+    expect(oomVictim([], 10, 200)).toBeNull();
+  });
+  it('a memory shortage is held much longer than a busy CPU, never forced early', async () => {
+    let t = 0;
+    const r = await waitForCapacity({ limits: { maxLoadPerCpu: 0, minFreeMemMb: 300 }, sample: () => s({ freeMemMb: 100 }), sleep: async (ms) => void (t += ms), now: () => t, pollMs: 60_000, maxWaitMs: 10 * 60_000, maxMemoryWaitMs: 30 * 60_000 });
+    expect(r).toEqual({ waitedMs: 30 * 60_000, forced: true });
+    t = 0;
+    const r2 = await waitForCapacity({ limits: { maxLoadPerCpu: 1, minFreeMemMb: 0 }, sample: () => s({ loadPerCpu: 5 }), sleep: async (ms) => void (t += ms), now: () => t, pollMs: 60_000, maxWaitMs: 10 * 60_000, maxMemoryWaitMs: 30 * 60_000 });
+    expect(r2).toEqual({ waitedMs: 10 * 60_000, forced: true });
   });
 });

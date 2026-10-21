@@ -35,18 +35,20 @@ export interface CapacityVerdict {
   ok: boolean;
   /** why a start is held (null when ok) */
   reason: string | null;
+  /** what is short (set when held): memory is held much longer than the rest — starting into it gets the whole service killed */
+  kind?: 'load' | 'memory' | 'steal';
 }
 
 /** Pure: may another run start now? */
 export function capacityVerdict(s: CapacitySample, l: CapacityLimits): CapacityVerdict {
   if (l.maxLoadPerCpu > 0 && s.loadPerCpu > l.maxLoadPerCpu) {
-    return { ok: false, reason: `the machine is busy (load ${s.load1.toFixed(1)} on ${s.cpus} CPU, limit ${(l.maxLoadPerCpu * s.cpus).toFixed(1)})` };
+    return { ok: false, kind: 'load', reason: `the machine is busy (load ${s.load1.toFixed(1)} on ${s.cpus} CPU, limit ${(l.maxLoadPerCpu * s.cpus).toFixed(1)})` };
   }
   if (l.minFreeMemMb > 0 && s.freeMemMb < l.minFreeMemMb) {
-    return { ok: false, reason: `little free memory (${Math.round(s.freeMemMb)} MB, at least ${l.minFreeMemMb} MB wanted)` };
+    return { ok: false, kind: 'memory', reason: `little free memory (${Math.round(s.freeMemMb)} MB, at least ${l.minFreeMemMb} MB wanted)` };
   }
   if ((l.maxStealPct ?? 0) > 0 && s.stealPct > (l.maxStealPct ?? 0)) {
-    return { ok: false, reason: `the host is taking CPU away (${Math.round(s.stealPct)}% stolen, limit ${l.maxStealPct}% — a burstable instance out of CPU credits)` };
+    return { ok: false, kind: 'steal', reason: `the host is taking CPU away (${Math.round(s.stealPct)}% stolen, limit ${l.maxStealPct}% — a burstable instance out of CPU credits)` };
   }
   return { ok: true, reason: null };
 }
@@ -65,6 +67,37 @@ export function parseCpuStat(text: string): { steal: number; total: number } | n
 export function stealBetween(a: { steal: number; total: number }, b: { steal: number; total: number }): number {
   const dt = b.total - a.total;
   return dt > 0 ? Math.max(0, Math.min(100, ((b.steal - a.steal) / dt) * 100)) : 0;
+}
+
+export interface MemInfo {
+  /** what can be handed to programs without swapping (MemAvailable), MB */
+  availableMb: number;
+  totalMb: number;
+  swapTotalMb: number;
+  swapFreeMb: number;
+}
+
+/** /proc/meminfo text → MB figures (null when it has no MemAvailable: not Linux, or a very old kernel). Pure. */
+export function parseMeminfo(text: string): MemInfo | null {
+  const kb = (key: string): number | null => {
+    const m = new RegExp(`^${key}:\\s+(\\d+)\\s*kB`, 'm').exec(text);
+    return m ? Number(m[1]) : null;
+  };
+  const avail = kb('MemAvailable');
+  const total = kb('MemTotal');
+  if (avail === null || total === null) return null;
+  return { availableMb: avail / 1024, totalMb: total / 1024, swapTotalMb: (kb('SwapTotal') ?? 0) / 1024, swapFreeMb: (kb('SwapFree') ?? 0) / 1024 };
+}
+
+/** The machine's memory now: /proc/meminfo on Linux, the OS module's figures elsewhere (no swap known). */
+export function readMemInfo(): MemInfo {
+  try {
+    const m = parseMeminfo(readFileSync('/proc/meminfo', 'utf8'));
+    if (m) return m;
+  } catch {
+    /* not Linux */
+  }
+  return { availableMb: freemem() / 1_048_576, totalMb: totalmem() / 1_048_576, swapTotalMb: 0, swapFreeMb: 0 };
 }
 
 let lastStat: { at: number; snap: { steal: number; total: number } } | null = null;
@@ -89,7 +122,7 @@ function currentStealPct(): number {
 export function sampleSystem(): CapacitySample {
   const n = Math.max(1, cpus().length);
   const load1 = loadavg()[0] ?? 0;
-  return { loadPerCpu: load1 / n, load1, cpus: n, freeMemMb: freemem() / 1_048_576, stealPct: currentStealPct() };
+  return { loadPerCpu: load1 / n, load1, cpus: n, freeMemMb: readMemInfo().availableMb, stealPct: currentStealPct() };
 }
 
 /**
@@ -103,13 +136,22 @@ export function recommendConcurrency(cpuCount: number, totalMemMb: number): numb
 }
 
 /**
- * A heap cap (MB) for the Node processes an agent starts (tsc, vitest, builds): on a small machine one runaway build must fail with "heap out of
- * memory" instead of taking all the memory — and the dashboard with it. About a third of the RAM, between 768 MB and 4 GB; none (0) on a big
- * machine (12 GB and more), where it would only get in the way.
+ * A heap cap (MB) for the Node processes an agent starts (tsc, vitest, builds). On a small machine the kernel kills a process when memory runs out —
+ * and takes the whole service with it — so one runaway build must fail by itself first, with "heap out of memory". About a third of the RAM
+ * (the orchestrator, the model gateway, the agent's own CLI and a browser need the rest), between 768 MB and 4 GB; none (0) from 12 GB.
  */
 export function autoNodeHeapMb(totalMemMb: number): number {
   if (totalMemMb >= 12 * 1024) return 0;
   return Math.max(768, Math.min(4096, Math.round(totalMemMb * 0.35)));
+}
+
+/**
+ * Memory is running out while runs are in flight: which one to stop BEFORE the kernel does (it would kill whatever is biggest — often the
+ * whole service). The newest run has done the least, so it goes. Null: enough memory, the guard is off, or nothing is running.
+ */
+export function oomVictim(runs: readonly { taskId: string; startedAt: number }[], availableMb: number, guardMb: number): string | null {
+  if (guardMb <= 0 || runs.length === 0 || availableMb >= guardMb) return null;
+  return [...runs].sort((a, b) => b.startedAt - a.startedAt)[0]!.taskId;
 }
 
 export const machineConcurrency = (): number => recommendConcurrency(Math.max(1, cpus().length), totalmem() / 1_048_576);
@@ -146,8 +188,10 @@ export interface GateOptions {
   limits: CapacityLimits;
   /** how often the machine is looked at while a run waits */
   pollMs?: number;
-  /** the longest a run waits before it starts anyway */
+  /** the longest a run waits for load / CPU before it starts anyway */
   maxWaitMs?: number;
+  /** …and for memory (default 60 min): starting into a memory shortage gets the whole service killed, so this wait is much longer */
+  maxMemoryWaitMs?: number;
   sample?: () => CapacitySample;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -168,12 +212,13 @@ export async function waitForCapacity(o: GateOptions): Promise<GateResult> {
   const now = o.now ?? Date.now;
   const poll = o.pollMs ?? 5_000;
   const max = o.maxWaitMs ?? 10 * 60_000;
+  const maxMemory = o.maxMemoryWaitMs ?? 60 * 60_000;
   const started = now();
   let told = false;
   for (;;) {
     const v = capacityVerdict(sample(), o.limits);
     if (v.ok) return { waitedMs: now() - started, forced: false };
-    if (now() - started >= max) return { waitedMs: now() - started, forced: true };
+    if (now() - started >= (v.kind === 'memory' ? maxMemory : max)) return { waitedMs: now() - started, forced: true };
     if (!told) {
       told = true;
       o.onWait?.(v.reason ?? 'the machine is busy');

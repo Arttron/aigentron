@@ -291,8 +291,11 @@ export async function runAgent(
   const nice = cleanNice(params.niceness);
   if (nice > 0 && !params.isolation) {
     try {
-      Object.assign(env, { [AGENT_EXEC_ENV]: resolveClaudeExecutable(), [AGENT_NICE_ENV]: String(nice) });
-      claudeExecutable = niceWrapperPath();
+      const wrapper = niceWrapperPath();
+      if (wrapper) {
+        Object.assign(env, { [AGENT_EXEC_ENV]: resolveClaudeExecutable(), [AGENT_NICE_ENV]: String(nice) });
+        claudeExecutable = wrapper;
+      }
     } catch {
       /* an unusual install (the CLI not found next to the SDK): run it as before */
     }
