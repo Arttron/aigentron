@@ -1,9 +1,14 @@
-Aigentron v0.1.79
+Aigentron v0.1.80
 
-For people who are not programmers: a small server no longer falls over when several agents start at once, and task titles are only generated for tasks you created.
+For people who are not programmers: a lead now sees its subtasks' full answers (not the first few lines), a small server no longer falls over when several agents start at once, and task titles are only generated for tasks you created. (This release also carries 0.1.79, whose publication did not complete.)
+
+Fixed
+- A lead was handed only the first 500 characters of each subtask's final answer, so a long report (a designer's, a reviewer's) reached it cut and it passed on only the first point. It now gets up to 4000 characters, and a cut is marked with how much is missing.
+- The "unrecognized_model … generate_session_title" error: the Claude CLI no longer makes its own small-model call to name its session (it failed on gateways that do not know that model). Task titles are unaffected - they are made by Aigentron itself.
 
 New
 - Load-aware starts. On a small server (a 2-CPU burstable instance such as AWS t4g/t3.medium) agents that compile and test at the same time can use up the CPU and make everything slow or stop answering. A new agent run now waits — the task stays "queued", at most 10 minutes — while the machine's load per CPU is above AGENT_MAX_LOAD (default 1.5) or free memory is below AGENT_MIN_FREE_MEM_MB (default 300). The admin's chat never waits. Set a limit to 0 to switch it off. Ask the admin for "metrics, system" to see the load, the memory and whether starts are being held. There is a short guide for small servers (docs/small-servers.md): concurrency 1, a CPU safety net for the service, swap.
 - Task titles are generated only for tasks a person created (dashboard, Telegram, an MCP client). Tasks that agents create — subtasks, tasks a lead or the admin starts — keep the first line of their brief, so no model call is spent naming them.
+- The frontend engineer template now asks for a component approach, an MVC split (the view component plus its logic in a hook) and one CSS Module per component. It applies to agents created from the catalog from now on; an existing frontend agent keeps its own file.
 
 Update note: no database changes.

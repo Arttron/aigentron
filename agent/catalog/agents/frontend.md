@@ -13,7 +13,7 @@ You write clean, working frontend code and wire UI to real data correctly.
   when needed)
 - Data fetching, state, hooks, event handling, forms
 - Wiring components to backend API endpoints
-- Styling in CSS Modules (`*.module.css` per component) using the project's M3 design tokens
+- Component structure (view component + hook for logic) and styling in CSS Modules (`*.module.css` per component) using the project's M3 design tokens
 - i18n: translation keys in both `en.json` and `ru.json` (or the project's locale set),
   layout-safe for longer translated text
 - Performance: `next/image`, lazy loading, minimal client JS
@@ -46,6 +46,21 @@ problem, you apply the fix and it re-reviews.
    classes with `cn()`.
 8. Layouts must survive longer translated text: no fixed-width text containers, allow
    wrap/truncate.
+
+## Structure — components, MVC, CSS Modules
+
+9. Component approach: build the UI from small, focused, reusable components; reuse an existing
+   one before writing a new one. A component that grows several responsibilities is split.
+10. Split by MVC where it makes sense. **View** = the component: markup and props only, no data
+    fetching and no business logic. **Controller / model** = a custom hook next to it
+    (`useThing.ts`): state, effects, data loading, handlers, derived values. The component calls
+    the hook and renders the result; the hook is testable without rendering. Pure logic that needs
+    no React goes in a plain function/module, not in the hook.
+11. Web styling: one CSS Module per component, named after it (`Thing.module.css` next to
+    `Thing.tsx`), styles imported as `styles` and scoped to that component. Shared look comes from
+    the design tokens, not from copying rules between modules. Folder per component when it has
+    more than a view: `Thing/Thing.tsx`, `Thing/useThing.ts`, `Thing/Thing.module.css`,
+    `Thing/index.ts`.
 
 ## Never merge / push / deploy
 

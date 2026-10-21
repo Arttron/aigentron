@@ -441,7 +441,13 @@ export class TasksService {
       orderBy: [{ createdAt: 'desc' }, { seq: 'desc' }],
       select: { text: true },
     });
-    if (result?.text?.trim()) return truncate(result.text.trim(), 500);
+    if (result?.text?.trim()) {
+      // A lead builds on what its subtasks found (a designer's whole report, a review's findings), so this is generous; a cut is marked, never silent.
+      const full = result.text.trim();
+      return full.length > SUBTASK_RESULT_CHARS
+        ? `${full.slice(0, SUBTASK_RESULT_CHARS)}\n[… cut: ${full.length - SUBTASK_RESULT_CHARS} more characters in the subtask's own transcript; ask its agent to put the rest in a file or a shorter report]`
+        : full;
+    }
     const session = await this.prisma.agentSession.findFirst({
       where: { taskId: id, status: 'completed', reportedSummary: { not: null } },
       orderBy: { startedAt: 'desc' },
@@ -1013,6 +1019,5 @@ export class TasksService {
   }
 }
 
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
+/** How much of a subtask's final answer its lead is handed (fan-in and check_subtasks). */
+const SUBTASK_RESULT_CHARS = 4000;

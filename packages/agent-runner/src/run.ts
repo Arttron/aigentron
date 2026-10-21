@@ -76,6 +76,8 @@ interface SdkQueryOptions {
   env?: Record<string, string>;
   maxTurns?: number;
   resume?: string;
+  /** A fixed session title: the CLI then skips naming the session with a small model. */
+  title?: string;
   systemPrompt?: string | { type: 'preset'; preset: 'claude_code'; append?: string };
   allowedTools?: string[];
   disallowedTools?: string[];
@@ -320,6 +322,9 @@ export async function runAgent(
       env,
       maxTurns: params.maxTurns,
       resume: params.resumeSessionId,
+      // The CLI names its own session with a small model by default — a second model call per run that fails on gateways that do not know that
+      // model (unrecognized_model) and that nobody reads: the task's title is made by the orchestrator (titles/). A fixed title skips it.
+      title: 'Aigentron task',
       ...(params.appendSystemPrompt
         ? {
             systemPrompt: {
