@@ -316,7 +316,7 @@ export class TasksService {
         id: s.id,
         title: s.title,
         status: s.status,
-        summary: await this.summarizeTask(s.id),
+        summary: (await this.summarizeTask(s.id)) + (await this.subtaskFilesNote(s.id)),
       })),
     );
   }
@@ -425,11 +425,11 @@ export class TasksService {
     if (claimed.count === 0) return;
 
     const lines = await Promise.all(
-      parent.subtasks.map(async (s) => `- «${s.title}» → ${s.status}: ${await this.summarizeTask(s.id)}`),
+      parent.subtasks.map(async (s) => `- «${s.title}» → ${s.status}: ${await this.summarizeTask(s.id)}${await this.subtaskFilesNote(s.id)}`),
     );
     const prompt =
       `All ${parent.subtasks.length} subtasks you created have finished:\n${lines.join('\n')}\n\n` +
-      `Review their results and continue — integrate them, start the next phase, or report the task done.`;
+      `Review their results and continue — integrate them, start the next phase, or report the task done. Write your own result: do not quote or retell the subtasks' answers, and do not copy or re-attach their files — the person sees them already.`;
     this.logger.log(`Task ${parentId}: subtasks complete — resuming lead`);
     await this.followUp(parentId, prompt);
   }
@@ -454,6 +454,16 @@ export class TasksService {
       select: { reportedSummary: true },
     });
     return session?.reportedSummary ?? '(no result)';
+  }
+
+  /**
+   * The files a subtask produced, as one line for its lead: name, and how to show them WITHOUT copying (a reference to the subtask's own file).
+   * Empty when it has none. The lead mentions them or shows them; it does not quote them or re-attach them.
+   */
+  private async subtaskFilesNote(id: string): Promise<string> {
+    const files = (await this.attachments.list(id).catch(() => [])).filter((f) => !f.name.startsWith('.')).slice(0, 12);
+    if (!files.length) return '';
+    return `\n  files: ${files.map((f) => `${f.name} (task:${id}/${f.name})`).join(', ')} — show a picture with show_images or ![caption](task:${id}/file.png); name other files; never copy or re-attach them`;
   }
 
   /**

@@ -1,10 +1,15 @@
-Aigentron v0.1.83
+Aigentron v0.1.84
 
-For people who are not programmers: a small server no longer falls over when it runs out of memory - the one run that would have tipped it over is stopped instead of the whole service.
+For people who are not programmers: a better photo viewer, a full-screen conversation, fewer copies of the same file, and a fix for attaching files on a phone.
+
+New
+- Photo viewer: arrow keys, PageUp/PageDown, Home/End and Esc; a click on the left or right edge of the picture steps back or forward; swipe on a phone; the whole screen on a phone; the next pictures are loaded in advance.
+- A task's conversation can fill the screen (the "Full screen" button in its card; Esc exits). A half-typed message and the scroll position are kept.
+- The task menu on a phone closes when you press outside it, press Esc or choose an action.
+- Fewer copies of files. A lead shows what its subtasks produced by reference - a picture in a message as ![caption](task:ID/file.png), another file as a link - instead of copying it into its own chat; the same works through show_images and reaches Telegram. show_images links workspace and library files instead of copying them, and showing the same picture twice no longer makes a second copy. Agents are told to report their own result instead of quoting the subtasks' answers.
 
 Fixed
-- On a small machine (4 GB, no swap) the kernel killed a process when memory ran out and systemd then stopped the whole service ("oom-kill" in the log), the service restarted, the same tasks ran again and it happened again every few minutes - tasks seemed to fail even one at a time and the dashboard showed Cloudflare 520. Now: a memory guard stops the newest run before that (the task becomes "stalled", the work stays, press Continue later; AGENT_OOM_GUARD_MB, default 200, 0 = off); new runs wait for memory up to an hour; agents ask the kernel to kill them first; the service unit gets OOMPolicy=continue (applied by this update); the Node memory cap for builds is a third of the RAM; the Metrics report "system" shows memory and swap and warns when there is none; the installer reminds about a swap file. A 2 GB swap file is the most useful thing on a 4 GB machine (docs/small-servers.md).
-- The low-priority wrapper for agents is tried out once and skipped when it cannot start (a temp dir that forbids running files used to make every run fail).
-- A proxy error page (Cloudflare 520, 502/503/504) is shown as one plain sentence instead of pasting its HTML; the approvals selector no longer stretches the task header; room between "+ Subtask" and the list.
+- Attaching files to a new task on a phone: the size limit now follows the file kind (photos and documents up to 10 MB like the server, video up to 95 MB) and is checked after a photo is shrunk and before the task exists; a file that cannot be read or uploaded is named with the reason; a task that did not get its files is removed and your text and files stay in the form for another try (no duplicate tasks); the button shows the upload progress.
+- Safer defaults for small servers: the low-priority wrapper is tried out before use, and the memory guard from 0.1.83 is kept as it is.
 
-Update note: the update rewrites the service unit (adds OOMPolicy=continue); no database changes.
+Update note: no database changes.

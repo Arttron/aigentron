@@ -102,3 +102,21 @@
     padding: 4px 6px;
   }
 }
+
+/* ---- Desktop full-screen conversation: the card fills the window, the message box is pinned under it. ---- */
+.fullChat {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px max(16px, calc((100vw - 1100px) / 2)) calc(12px + env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+.fullCard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

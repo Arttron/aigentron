@@ -12,7 +12,7 @@ interface PickerProps {
   ref?: Ref<HTMLInputElement>;
 }
 
-/** The hidden `<input type=file>`: hands the chosen files over as an array and resets itself so the same file can be picked again. */
+/** The hidden `<input type=file>`: hands the chosen files over as an array; it is reset when the chooser opens again, so the same file can be picked twice. */
 export function HiddenFileInput({ onFiles, accept, multiple, capture, ref }: PickerProps) {
   return (
     <input
@@ -22,9 +22,13 @@ export function HiddenFileInput({ onFiles, accept, multiple, capture, ref }: Pic
       multiple={multiple}
       capture={capture ? 'environment' : undefined}
       className={styles.hidden}
+      // The previous choice is cleared when the chooser is OPENED (so the same file can be picked again), not right after a pick: on some phones
+      // (Android, files from the gallery or a cloud app) clearing the input invalidates the files while they are still being prepared / uploaded.
+      onClick={(e) => {
+        e.currentTarget.value = '';
+      }}
       onChange={(e) => {
         const files = Array.from(e.target.files ?? []);
-        e.target.value = '';
         if (files.length) void onFiles(files);
       }}
     />

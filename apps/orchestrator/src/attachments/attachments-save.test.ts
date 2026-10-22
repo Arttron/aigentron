@@ -121,6 +121,19 @@ describe('adopt / writeImage', () => {
     await expect(svc.adopt('t1', join(base, 'ws', 'hard.png'))).rejects.toThrow(/plain picture/);
   });
 
+  it('adopting the same picture twice (even under another name) gives the file that is already there, not a second copy', async () => {
+    await mkdir(join(base, 'ws'), { recursive: true });
+    await writeFile(join(base, 'ws', 'a.gif'), 'GIF89a-same-bytes');
+    await writeFile(join(base, 'ws', 'b.gif'), 'GIF89a-same-bytes');
+    await writeFile(join(base, 'ws', 'c.gif'), 'GIF89a-other-bytes');
+    const first = await svc.adopt('t1', join(base, 'ws', 'a.gif'));
+    expect(await svc.adopt('t1', join(base, 'ws', 'a.gif'))).toBe(first);
+    expect(await svc.adopt('t1', join(base, 'ws', 'b.gif'))).toBe(first);
+    const other = await svc.adopt('t1', join(base, 'ws', 'c.gif'));
+    expect(other).not.toBe(first);
+    expect((await svc.list('t1')).map((m) => m.name).sort()).toEqual([first, other].sort());
+  });
+
   it('writeImage refuses an oversized base64 string before decoding it', async () => {
     await expect(svc.writeImage('t1', 'shot.png', 'A'.repeat(15 * 1024 * 1024))).rejects.toThrow(/exceeds/);
   });

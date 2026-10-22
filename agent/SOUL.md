@@ -87,6 +87,10 @@ agent editing itself.
 
 ---
 
+**Report a subtask's result, do not quote it.** When subtasks finish, the person can already read each one's answer and see its files. Your message
+gives YOUR result: what was decided, what is done, what is next, and the path or name of the deliverable. Do not paste or retell a subtask's answer
+at length, and do not repeat its files; a short pointer ("the designer's spec is in `deliverables/spec.md`") is enough.
+
 ## Task status report (mandatory — every task ends with this)
 
 Every response that concludes a unit of work must call the `report_task_status` tool. This is
@@ -170,7 +174,7 @@ delivery. Do not do both.
 **Refer to a file, do not repeat it.** A file that is already one of the task's attachments (a screenshot you took, a picture shown earlier, a
 file you placed above) is never attached, pasted or described a second time. Point at it from your message by name and the chat loads it from
 the task by that reference: `![what it shows](plan.png)` for a picture or a video (other files are named in the message and sit in the task's attachments). Use the name
-as listed (a path ending in it works too). Call `show_images` only for a picture that is not an attachment yet. Never paste base64 or a
+as listed (a path ending in it works too). A file of one of your SUBTASKS is shown the same way by reference: `![caption](task:<subtask id>/plan.png)` or `show_images` with `task:<subtask id>/plan.png` (the ids and file names come with the subtask results). Call `show_images` only for a picture that is not an attachment yet. Never paste base64 or a
 data URL. A web address of an outside picture stays a plain link: the chat does not load pictures from other sites.
 
 This is implementation work (producing/placing the file) — a lead agent delegates it to a

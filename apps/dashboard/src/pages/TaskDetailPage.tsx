@@ -1,5 +1,6 @@
 import { StartHoldNotice } from '@/components/StartHoldNotice';
 import { usePolling } from '@/lib/use-polling';
+import { useDetailsDismiss } from '@/lib/use-details-dismiss';
 import { ApprovalModePicker } from '@/components/ApprovalModePicker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -88,6 +89,22 @@ function TaskDetailView({ id }: { id: string }) {
 
   // A queued task may be held back by the server (busy machine / its turn): look again every few seconds so the notice appears and goes.
   usePolling(refreshTask, 6000, task?.status === 'queued');
+  // The conversation can take the whole screen (desktop); Esc brings the page back, and the page behind does not scroll meanwhile.
+  const [fullChat, setFullChat] = useState(false);
+  useEffect(() => {
+    if (!fullChat) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !e.defaultPrevented) setFullChat(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.documentElement.dataset.pinned = '1';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      delete document.documentElement.dataset.pinned;
+    };
+  }, [fullChat]);
+  // the phone's task menu closes on a press outside it, on Escape and after an action in it
+  const menuRef = useDetailsDismiss();
 
   // History + live lines (merged by key, refetched after a reconnect).
   const { items: lines, activityAt } = useTaskStream<LogLine>(id, toLogLine, {
@@ -318,7 +335,7 @@ function TaskDetailView({ id }: { id: string }) {
             {task.title}
           </span>
           <StatusBadge status={task.status} />
-          <details className={styles.menu}>
+          <details ref={menuRef} className={styles.menu}>
             <summary aria-label="Task menu">⋯</summary>
             <div className={styles.menuBody}>
               <Muted>
@@ -493,13 +510,24 @@ function TaskDetailView({ id }: { id: string }) {
             </Card>
           )}
 
-          <Card>
-            <SectionTitle>Conversation</SectionTitle>
-            <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />
-            <DiscussionBar taskId={id} running={!terminal} />
-            <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} onAsk={(p, a) => sendFollowUp(p, a, [])} />
-          </Card>
-          <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} />
+          {/* One tree whether or not it is full screen, so a half-typed message and the scroll position survive the switch. */}
+          <div className={fullChat ? styles.fullChat : undefined} role={fullChat ? 'dialog' : undefined} aria-label={fullChat ? 'Conversation, full screen' : undefined}>
+            <Card className={fullChat ? styles.fullCard : undefined}>
+              <Row spaceBetween>
+                <SectionTitle>{fullChat ? task.title : 'Conversation'}</SectionTitle>
+                <Row>
+                  {fullChat && <StatusBadge status={task.status} />}
+                  <Button size="sm" onClick={() => setFullChat((v) => !v)} title={fullChat ? 'Back to the page (Esc)' : 'Make the conversation fill the screen'} aria-pressed={fullChat}>
+                    {fullChat ? '⤡ Exit full screen' : '⤢ Full screen'}
+                  </Button>
+                </Row>
+              </Row>
+              <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />
+              <DiscussionBar taskId={id} running={!terminal} />
+              <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} fill={fullChat} onAsk={(p, a) => sendFollowUp(p, a, [])} />
+            </Card>
+            <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact={fullChat} />
+          </div>
 
           <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           <TaskRelations task={task} onChange={refreshTask} />

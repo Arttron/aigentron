@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import { isVideo } from '@/lib/capture';
+import { useIsPhone } from '@/lib/use-media';
 import { Modal, Button, Row, Muted, ErrorText } from '@/components/ui';
 import styles from './MediaViewer.module.css';
 
@@ -28,6 +29,7 @@ export function MediaViewer({
   /** Send the follow-up (prompt + uploaded attachment names). Omitted = view only. */
   onAsk?: (prompt: string, attachments: string[]) => Promise<void>;
 }) {
+  const phone = useIsPhone();
   const [name, setName] = useState(first);
   const url = api.attachmentUrl(taskId, name);
   const video = isVideo(name);
@@ -44,12 +46,45 @@ export function MediaViewer({
   useEffect(() => {
     if (frame) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') step(-1);
-      if (e.key === 'ArrowRight') step(1);
+      // not while typing, and a focused video keeps its own arrow keys (seek)
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || t.tagName === 'VIDEO')) return;
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') step(-1);
+      else if (e.key === 'ArrowRight' || e.key === 'PageDown') step(1);
+      else if (e.key === 'Home' && names?.length) setName(names[0]!);
+      else if (e.key === 'End' && names?.length) setName(names[names.length - 1]!);
+      else if (e.key === 'Escape' && phone) onClose();
+      else return;
+      e.preventDefault();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [names, at, frame]);
+  }, [names, at, frame, phone]);
+
+  // the neighbours are loaded before they are asked for, so stepping does not wait
+  useEffect(() => {
+    if (!names || names.length < 2) return;
+    for (const d of [1, -1]) {
+      const n = names[(at + d + names.length) % names.length]!;
+      if (!isVideo(n)) new Image().src = api.attachmentUrl(taskId, n);
+    }
+  }, [names, at, taskId]);
+
+  // a swipe on a phone steps through the album
+  const swipe = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipe.current = t ? { x: t.clientX, y: t.clientY } : null;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const from = swipe.current;
+    swipe.current = null;
+    const t = e.changedTouches[0];
+    if (!from || !t || frame) return;
+    const dx = t.clientX - from.x;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(t.clientY - from.y) * 1.5) step(dx < 0 ? 1 : -1);
+  };
   const [rect, setRect] = useState<Rect | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
   const [text, setText] = useState('');
@@ -126,7 +161,7 @@ export function MediaViewer({
       const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/jpeg', 0.9));
       if (!blob) throw new Error('Could not take the picture.');
       const at = frame?.t != null ? `-${Math.round(frame.t * 10) / 10}s` : '-marked';
-      const file = new File([blob], `${name.replace(/\.\w+$/, '')}${at}.jpg`, { type: 'image/jpeg' });
+      const file = new File([blob], `${(name.split('/').pop() ?? name).replace(/\.\w+$/, '')}${at}.jpg`, { type: 'image/jpeg' });
       const meta = await api.uploadAttachment(taskId, file);
       const marked = rect && rect.w > 3 && rect.h > 3;
       const where = frame?.t != null ? `the frame of the video "${name}" at ${stamp(frame.t)}` : `the photo "${name}"`;
@@ -139,24 +174,39 @@ export function MediaViewer({
     }
   };
 
-  return (
-    <Modal title={name} onClose={onClose} wide>
-      <div className={styles.stage}>
-        {frame ? (
-          <canvas ref={canvasRef} className={styles.canvas} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
-        ) : video ? (
-          <video ref={videoRef} className={styles.media} src={url} controls playsInline preload="metadata" />
-        ) : (
-          <img ref={imgRef} className={styles.media} src={url} alt={name} />
-        )}
-      </div>
-      {!frame && names && names.length > 1 && (
+  const album = !frame && !!names && names.length > 1;
+  const stage = (
+    <div className={`${styles.stage} ${phone ? styles.stageFull : ''}`} onTouchStart={album ? onTouchStart : undefined} onTouchEnd={album ? onTouchEnd : undefined}>
+      {frame ? (
+        <canvas ref={canvasRef} className={`${styles.canvas} ${phone ? styles.fit : ''}`} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} />
+      ) : video ? (
+        <video ref={videoRef} className={`${styles.media} ${phone ? styles.fit : ''}`} src={url} controls playsInline preload="metadata" />
+      ) : (
+        <img ref={imgRef} className={`${styles.media} ${phone ? styles.fit : ''}`} src={url} alt={name} draggable={false} />
+      )}
+      {album && (
+        <>
+          {/* the left / right edge of the picture steps back / forward; a video keeps its control bar free */}
+          <button type="button" className={`${styles.zone} ${styles.zoneLeft} ${video ? styles.zoneVideo : ''}`} onClick={() => step(-1)} aria-label="Previous picture">
+            <span aria-hidden>‹</span>
+          </button>
+          <button type="button" className={`${styles.zone} ${styles.zoneRight} ${video ? styles.zoneVideo : ''}`} onClick={() => step(1)} aria-label="Next picture">
+            <span aria-hidden>›</span>
+          </button>
+        </>
+      )}
+    </div>
+  );
+  const controls = (
+    <>
+      {album && (
         <Row wrap className={styles.bar}>
           <Button onClick={() => step(-1)}>‹</Button>
           <Muted>
-            {at + 1} / {names.length}
+            {at + 1} / {names!.length}
           </Muted>
           <Button onClick={() => step(1)}>›</Button>
+          {!phone && <Muted>← → on the keyboard, or click the edges of the picture</Muted>}
         </Row>
       )}
       {!frame && (
@@ -206,6 +256,28 @@ export function MediaViewer({
         </>
       )}
       {error && <ErrorText>{error}</ErrorText>}
+    </>
+  );
+
+  // On a phone the viewer takes the whole screen (a dialog would leave a thin strip of picture); elsewhere it is the usual dialog.
+  if (phone) {
+    return (
+      <div className={styles.full} role="dialog" aria-modal="true" aria-label={name}>
+        <div className={styles.fullHead}>
+          <span className={styles.fullTitle}>{name}</span>
+          <button type="button" className={styles.fullClose} onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        </div>
+        {stage}
+        <div className={styles.fullControls}>{controls}</div>
+      </div>
+    );
+  }
+  return (
+    <Modal title={name} onClose={onClose} wide>
+      {stage}
+      {controls}
     </Modal>
   );
 }

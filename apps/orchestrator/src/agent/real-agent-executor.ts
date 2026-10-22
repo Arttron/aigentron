@@ -51,6 +51,7 @@ import { AttachmentsService } from '../attachments/attachments.service';
 import { PreviewService } from '../preview/preview.service';
 import { budgetExceeded, isIdleStuck, runExtension, runIsAlive } from './run-guards';
 import { oomVictim, readMemInfo } from '../queue/capacity-gate';
+import { parseTaskRef, taskRef } from '../attachments/task-ref';
 import { RunLimitsService } from '../settings/run-limits.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { assemblePromptLayers, withRunContext } from './prompt-layers';
@@ -838,10 +839,20 @@ export class RealAgentExecutor extends AgentExecutor {
         const skipped: string[] = [];
         for (const p of paths) {
           try {
+            // a picture of one of THIS task's subtasks (`task:<id>/<name>`): shown from where it is — no copy, no link, nothing to clean up
+            const foreign = parseTaskRef(p);
+            if (foreign) {
+              if (!(await this.isDescendantTask(foreign.taskId, ctx.taskId))) throw new Error('that is not a file of one of this task\'s subtasks');
+              await this.attachments.filePath(foreign.taskId, foreign.name); // exists, and is a regular file
+              const ref = taskRef(foreign.taskId, foreign.name);
+              if (!names.includes(ref)) names.push(ref);
+              continue;
+            }
             const real = await this.media.safePath(await this.attachmentOrPath(ctx.taskId, p), mediaRoots, ctx.taskId);
-            // already one of this task's attachments → just reference it; otherwise copy it in
+            // already one of this task's attachments → just reference it; a workspace / library file is linked (shown from where it is);
+            // only what lives elsewhere (a worktree, a run folder that is cleaned later) is copied in
             const own = await realpath(this.attachments.dir(ctx.taskId)).catch(() => this.attachments.dir(ctx.taskId));
-            const name = dirname(real) === own ? basename(real) : await this.attachments.adopt(ctx.taskId, real);
+            const name = dirname(real) === own ? basename(real) : await this.attachments.link(ctx.taskId, real).catch(() => this.attachments.adopt(ctx.taskId, real));
             if (!names.includes(name)) names.push(name);
           } catch (e) {
             skipped.push(`${basename(p)} (${(e as Error).message.slice(0, 80)})`);
@@ -1243,6 +1254,18 @@ export class RealAgentExecutor extends AgentExecutor {
    *  - Providers already pointing at litellm (e.g. ollama-local) must present
    *    the master key too, since litellm enforces it on every request.
    */
+  /** Is `taskId` a subtask (at any depth) of `ancestorId`? A lead may show what ITS subtasks produced, nothing else of other tasks. */
+  private async isDescendantTask(taskId: string, ancestorId: string): Promise<boolean> {
+    let cur: string | null = taskId;
+    for (let hops = 0; cur && hops < 12; hops++) {
+      const row: { parentId: string | null } | null = await this.prisma.task.findUnique({ where: { id: cur }, select: { parentId: true } });
+      if (!row) return false;
+      if (row.parentId === ancestorId) return true;
+      cur = row.parentId;
+    }
+    return false;
+  }
+
   /** Watches the memory while any run is in flight: below the guard, the newest run is stopped by us instead of the kernel killing the whole service. */
   private startMemoryGuard(): void {
     if (this.guardTimer || this.config.agentOomGuardMb <= 0) return;

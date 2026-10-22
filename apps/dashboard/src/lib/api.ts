@@ -823,7 +823,11 @@ export const api = {
   saveVision: (cfg: VisionCfg | null) => request<{ ok: boolean; vision: VisionCfg | null }>('PUT', '/vision', { body: cfg ?? {} }),
   testVision: () => request<{ ok: boolean; answer?: string; error?: string }>('POST', '/vision/test'),
 
-  attachmentUrl: (id: string, name: string) => `${API_BASE}/tasks/${e(id)}/attachments/${e(name)}`,
+  // `task:<id>/<name>` is a file of ANOTHER task (a lead showing what its subtask produced): loaded from there, never copied
+  attachmentUrl: (id: string, name: string) => {
+    const ref = /^task:([\w-]+)\/(.+)$/.exec(name);
+    return `${API_BASE}/tasks/${e(ref ? ref[1]! : id)}/attachments/${e(ref ? ref[2]! : name)}`;
+  },
 
   listApprovals: (status?: string) => request<ApprovalRequest[]>('GET', '/approvals', { query: { status: status || undefined } }),
   decide: (id: string, decision: 'approve' | 'deny', opts?: { taskException?: boolean; globalException?: boolean }) =>

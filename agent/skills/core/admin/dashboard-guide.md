@@ -15,7 +15,8 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 - **Status chips** (counts; empty hidden): *Needs attention* (approval, blocked, stalled, failed), *Active* (queued/running), *Ready*, *Done*, *Blocked*, *Approval*, *Failed*, *Stalled*, *Cancelled*. A status filter looks at every level (a blocked subtask under a finished parent is listed flat).
 - **Type chips** ("Type:"): *Tasks* (started in the dashboard), *Chats* (with a chat agent such as me), *From chats* (Telegram), *Scheduled*, *Discussions*, *Subtasks* (listed flat). The choice is remembered and in the URL (`/?type=chat`).
-- New tasks get a short title from a small model (Settings → **Task titles**); titles set by a person or schedule never change.
+- A task's conversation fills the screen: **⤢ Full screen** (Esc exits).
+- New tasks get a short title from a small model (Settings → Task titles); set titles never change.
 - **Subtasks** fold under their parent ("▸ 3 subtasks" + "2 done · 1 running"), also on the task page; remembered per task.
 
 ## Statuses: who sets "done"
@@ -44,11 +45,11 @@ Settings → General → **Security** sets the first password (banner until set)
 ## Agents page (`/agents`)
 
 Tabs **Agents** and **Starter packs** (`/agents?tab=packs`). Agents tab starts with *Default lead agent* (saved on choice). List with **Edit** and ✕ (built-in admin: "built-in" badge, only routing — provider/model — editable). **+ New agent** / **Edit** dialog: **Start from a template** pre-fills; fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, instructions. I can do it via approvals.
-**Starter packs**: *English learning*, *Home renovation*, *Software team*. **Install** adds agents, a skill, starter notes and schedules (**off**); never overwrites. I can do it (`propose_pack_install`).
+**Starter packs**: *English learning*, *Home renovation*, *Software team*. **Install** adds agents, a skill, notes and schedules (**off**); never overwrites. I can do it (`propose_pack_install`).
 
 ## 📚 Resources (`/resources`)
 
-Notes, images, PDFs, files; agents see the list (title, description, tags) in their prompt and read what is relevant — a clear description matters most. Upload (≤25 MB each, 500 MB total; videos ≤300 MB) or write a note; tags; optionally limit to chosen agents. **Scope** (2+ projects): global = every agent of every project, project = only agents working on it. Agents never edit them; I add/change text notes (`propose_resource`) and search (`resources_search`).
+Notes, images, PDFs, files; agents see the list (title, description, tags) in their prompt and read what is relevant — a clear description matters most. Upload (≤25 MB each, 500 MB total; videos ≤300 MB) or write a note; tags; optionally limit to chosen agents. **Scope** (2+ projects): global = all agents, project = its agents only. Agents never edit them; I change text notes (`propose_resource`) and search (`resources_search`).
 
 ## 🧠 Knowledge (`/knowledge`)
 

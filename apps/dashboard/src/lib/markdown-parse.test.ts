@@ -87,7 +87,7 @@ describe('tables', () => {
   });
 });
 
-import { mediaName } from './markdown-parse';
+import { mediaName, parseFileRef } from './markdown-parse';
 
 describe('files of the task referenced from a message', () => {
   it('mediaName takes a bare name, attachment: and a path, never another site', () => {
@@ -127,5 +127,20 @@ describe('colour values become chips', () => {
     expect(parseInline('see #123')).toEqual([{ t: 'text', v: 'see #123' }]);
     expect(parseInline('**#00ff00**')[0]).toMatchObject({ t: 'bold' });
     expect(parseInline('[x](https://a.b/#ff8800)')).toEqual([{ t: 'link', href: 'https://a.b/#ff8800', v: 'x' }]);
+  });
+});
+
+describe('files of other tasks, by reference', () => {
+  it('parseFileRef: own media, attachment:, and task:<id>/<name> for any file type', () => {
+    expect(parseFileRef('plan.png')).toEqual({ name: 'plan.png', media: true });
+    expect(parseFileRef('attachment:report.pdf')).toEqual({ name: 'report.pdf', media: false });
+    expect(parseFileRef('task:cm1/shot-3-0.png')).toEqual({ taskId: 'cm1', name: 'shot-3-0.png', media: true });
+    expect(parseFileRef('task:cm1/spec.md')).toEqual({ taskId: 'cm1', name: 'spec.md', media: false });
+    for (const v of ['report.pdf', 'https://x.io/a.png', 'task:cm1/../x.png', 'task:cm1/.links.json', 'task:/a.png', '/etc/passwd']) expect(parseFileRef(v), v).toBeNull();
+  });
+  it('a picture of a subtask is inline media from that task; another file is a file link', () => {
+    expect(parseInline('![the design](task:cm1/design.png)')).toEqual([{ t: 'media', name: 'design.png', alt: 'the design', taskId: 'cm1' }]);
+    expect(parseInline('[the spec](task:cm1/spec.md)')).toEqual([{ t: 'file', name: 'spec.md', label: 'the spec', taskId: 'cm1' }]);
+    expect(parseInline('[](attachment:a.zip)')).toEqual([{ t: 'file', name: 'a.zip', label: 'a.zip' }]);
   });
 });

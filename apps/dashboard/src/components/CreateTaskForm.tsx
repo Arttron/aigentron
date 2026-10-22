@@ -6,7 +6,7 @@ import { useSmartPaste } from '@/components/SmartPaste';
 import { CameraCapture } from '@/components/CameraCapture';
 import { uploadSizeError } from '@/lib/upload-limits';
 import type { Project } from '@lds/shared';
-import { api, type AgentInfo } from '@/lib/api';
+import { api, errMsg, type AgentInfo } from '@/lib/api';
 import { offeredAgents, pickProject, readProjectPref, writeProjectPref } from '@/lib/projects';
 import { Card, SectionTitle, Row, Button, Muted, ErrorText, HiddenFileInput } from '@/components/ui';
 import { DiscussionModal } from '@/components/DiscussionModal';
@@ -31,13 +31,30 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
   const [camera, setCamera] = useState(false);
   const [discussing, setDiscussing] = useState(false);
   const navigate = useNavigate();
+  const [preparing, setPreparing] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
   const stage = async (files: File[]) => {
-    // too big for the proxy → say so now, before a task is created without its file
-    const tooBig = files.map(uploadSizeError).find(Boolean);
-    if (tooBig) setError(tooBig);
-    files = files.filter((f) => !uploadSizeError(f));
-    const ready = await Promise.all(files.map(prepareFile));
-    setStaged((s) => [...s, ...ready]);
+    setError(null);
+    setPreparing(true);
+    try {
+      // a photo is shrunk first, then judged by its size: a 12 MB phone photo is fine, a 30 MB PDF is not (the server takes 10 MB, a video 95 MB)
+      const ready: File[] = [];
+      const problems: string[] = [];
+      for (const f of files) {
+        try {
+          const p = await prepareFile(f);
+          const tooBig = uploadSizeError(p);
+          if (tooBig) problems.push(tooBig);
+          else ready.push(p);
+        } catch (e) {
+          problems.push(`“${f.name}” could not be read: ${(e as Error).message || 'the phone did not hand the file over'}. Pick it again.`);
+        }
+      }
+      if (ready.length) setStaged((cur) => [...cur, ...ready]);
+      if (problems.length) setError(problems.join('\n'));
+    } finally {
+      setPreparing(false);
+    }
   };
 
   useEffect(() => {
@@ -54,13 +71,14 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
       .catch(() => undefined);
   }, []);
 
-  const canSubmit = !busy && (prompt.trim().length > 0 || staged.length > 0);
+  const canSubmit = !busy && !preparing && (prompt.trim().length > 0 || staged.length > 0);
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!canSubmit) return;
     setBusy(true);
     setError(null);
+    let createdId: string | null = null;
     try {
       const text = prompt.trim() || 'Review the attached file(s).';
       // With attachments: create deferred, upload, then start — so the run never
@@ -72,20 +90,33 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
         references: references.length ? references : undefined,
         project: projects.length > 1 ? project : undefined,
       });
+      createdId = task.id;
       if (staged.length) {
         const names: string[] = [];
-        for (const file of staged) names.push((await api.uploadAttachment(task.id, file)).name);
+        for (const [i, file] of staged.entries()) {
+          setProgress(`Uploading ${i + 1}/${staged.length}: ${file.name}`);
+          try {
+            names.push((await api.uploadAttachment(task.id, file)).name);
+          } catch (err) {
+            throw new Error(`“${file.name}” did not upload: ${errMsg(err)}`);
+          }
+        }
+        setProgress('Starting…');
         await api.startTask(task.id, names);
       }
+      createdId = null;
       setPrompt('');
       setAgentName('');
       setStaged([]);
       setReferences([]);
       onCreated?.();
     } catch (err) {
-      setError((err as Error).message);
+      // a task that never got its files must not stay behind (and a retry must not make a second one): drop it, keep what the person typed and picked
+      if (createdId) await api.deleteTask(createdId).catch(() => undefined);
+      setError(`${errMsg(err)}${createdId ? ' — nothing was created; your message and files are still here, try again.' : ''}`);
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -194,13 +225,13 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
           <TaskReferencePicker value={references} onChange={setReferences} />
         )}
         <Button variant="primary" type="submit" disabled={!canSubmit}>
-          {busy ? 'Creating…' : 'Create task'}
+          {busy ? (progress ?? 'Creating…') : preparing ? 'Preparing files…' : 'Create task'}
         </Button>
         <Button type="button" onClick={() => setDiscussing(true)} title="Several agents discuss a topic in a new chat">
           💬 Discuss
         </Button>
-        {error && <ErrorText>{error}</ErrorText>}
       </Row>
+      {error && <ErrorText style={{ whiteSpace: 'pre-line' }}>{error}</ErrorText>}
       {selected?.description && <Muted className={styles.desc}>{selected.description}</Muted>}
       {discussing && <DiscussionModal initialTopic={prompt} onClose={() => setDiscussing(false)} onStarted={(id) => navigate(`/tasks/${id}`)} />}
     </Card>

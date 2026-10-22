@@ -9,8 +9,9 @@ export const MediaTaskContext = createContext<string | undefined>(undefined);
 const isVideoName = (n: string) => /\.(mp4|webm|mov|m4v)$/i.test(n);
 
 /** A file of the task, loaded by its name — the agent writes a reference, not the picture again. */
-function InlineMedia({ name, alt }: { name: string; alt: string }) {
-  const taskId = useContext(MediaTaskContext);
+function InlineMedia({ name, alt, from }: { name: string; alt: string; from?: string }) {
+  const own = useContext(MediaTaskContext);
+  const taskId = from ?? own;
   const [broken, setBroken] = useState(false);
   if (!taskId) return <code className={styles.inlineCode}>{name}</code>;
   const url = api.attachmentUrl(taskId, name);
@@ -26,6 +27,18 @@ function InlineMedia({ name, alt }: { name: string; alt: string }) {
       )}
       {alt && <span className={styles.mediaCaption}>{alt}</span>}
     </span>
+  );
+}
+
+/** A link to a file of a task (not a picture): the file stays where it is, the link downloads it. */
+function FileLink({ name, label, from }: { name: string; label: string; from?: string }) {
+  const own = useContext(MediaTaskContext);
+  const taskId = from ?? own;
+  if (!taskId) return <code className={styles.inlineCode}>{name}</code>;
+  return (
+    <a href={api.attachmentUrl(taskId, name)} target="_blank" rel="noopener noreferrer" className={styles.fileLink} title={name}>
+      📎 {label}
+    </a>
   );
 }
 
@@ -45,7 +58,9 @@ function renderInline(tokens: Inline[]): ReactNode[] {
           </span>
         );
       case 'media':
-        return <InlineMedia key={i} name={t.name} alt={t.alt} />;
+        return <InlineMedia key={i} name={t.name} alt={t.alt} from={t.taskId} />;
+      case 'file':
+        return <FileLink key={i} name={t.name} label={t.label} from={t.taskId} />;
       case 'link':
         return (
           <a key={i} href={t.href} target="_blank" rel="noopener noreferrer nofollow">

@@ -16,6 +16,7 @@ import { QuestionsService } from '../questions/questions.service';
 import { resolveAnswer } from '../questions/questions-core';
 import { isDoneMessage } from '../tasks/done-intent';
 import { AttachmentsService } from '../attachments/attachments.service';
+import { parseTaskRef } from '../attachments/task-ref';
 import { PresenceService } from '../presence/presence.service';
 import { ChannelsService, adapterSignature } from './channels.service';
 import { COMMAND_MENU } from './command-menu';
@@ -432,16 +433,18 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     if ((await this.dest.prefs(dest.channelId, dest.chatId)).muted) return;
     const metas = (await this.attachments.list(taskId)).filter((m) => names.includes(m.name));
     for (const m of metas) await this.channels.markAttachmentSent(dest.channelId, dest.chatId, taskId, m.name);
-    await this.sendPictures(dest.channelId, dest.chatId, taskId, metas, caption.trim());
+    // pictures of a subtask shown by reference (`task:<id>/<name>`) are sent from where they are
+    const items: { taskId: string; name: string }[] = [...metas.map((m) => ({ taskId, name: m.name })), ...names.map(parseTaskRef).filter((r): r is NonNullable<typeof r> => r !== null)];
+    await this.sendPictures(dest.channelId, dest.chatId, items, caption.trim());
   }
 
   /** Pictures as ONE album when the transport can (2–10), else one by one; the caption goes on the first. */
-  private async sendPictures(channelId: string, chatId: string, taskId: string, metas: { name: string; mime: string }[], caption: string): Promise<void> {
+  private async sendPictures(channelId: string, chatId: string, items: { taskId: string; name: string }[], caption: string): Promise<void> {
     const adapter = this.gateway.adapterFor(channelId);
     if (!adapter) return;
     const files: { data: Buffer; filename: string }[] = [];
-    for (const m of metas) {
-      const { path } = await this.attachments.filePath(taskId, m.name);
+    for (const m of items) {
+      const { path } = await this.attachments.filePath(m.taskId, m.name);
       files.push({ data: await readFile(path), filename: m.name });
     }
     if (!files.length) return;
@@ -483,7 +486,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const pics = fresh.filter((m) => m.mime.startsWith('image/'));
     if (pics.length >= 2 && adapter.sendImages) {
       for (const m of pics) await mark(m.name);
-      await this.sendPictures(channelId, chatId, taskId, pics, '').catch((err) => this.logger.warn(`send album failed: ${(err as Error).message}`));
+      await this.sendPictures(channelId, chatId, pics.map((m) => ({ taskId, name: m.name })), '').catch((err) => this.logger.warn(`send album failed: ${(err as Error).message}`));
     }
     for (const meta of fresh) {
       if (pics.length >= 2 && adapter.sendImages && meta.mime.startsWith('image/')) continue;

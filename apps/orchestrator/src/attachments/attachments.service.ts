@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile, rm, stat, lstat, access, writeFile, copyFile, rename, link, unlink } from 'node:fs/promises';
 import { join, basename, extname } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { BadRequestException, Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
@@ -192,11 +192,28 @@ export class AttachmentsService {
     const stat0 = await lstat(srcPath); // not stat: a symlink (or a hard link to a file elsewhere) must never be followed into a copy of something private
     if (!stat0.isFile() || stat0.nlink !== 1) throw new BadRequestException(`"${basename(srcPath)}" is not a plain picture file.`);
     if (stat0.size > MAX_BYTES * 3) throw new PayloadTooLargeException(`"${basename(srcPath)}" is too large to show.`);
+    // the same picture shown again (an agent calls show_images twice on one file) is the file already there, not a second copy
+    const same = await this.sameContent(dir, srcPath, stat0.size);
+    if (same) return same;
     const name = await this.uniqueName(dir, sanitize(basename(srcPath)));
     const dest = join(dir, name);
     await copyFile(srcPath, dest);
     const r = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? await this.images.optimize(dest, undefined, false, (d, n) => this.uniqueName(d, n)) : { path: dest, changed: false };
     return basename(r.path);
+  }
+
+  /** The name of a file already in `dir` with exactly this content (same size first, then the hash), or null. */
+  private async sameContent(dir: string, srcPath: string, size: number): Promise<string | null> {
+    const names = (await readdir(dir).catch(() => [] as string[])).filter((n) => !n.startsWith('.'));
+    let srcHash: string | null = null;
+    for (const n of names) {
+      const st = await stat(join(dir, n)).catch(() => null);
+      if (!st || !st.isFile() || st.size !== size) continue;
+      srcHash ??= createHash('sha256').update(await readFile(srcPath)).digest('hex');
+      const h = createHash('sha256').update(await readFile(join(dir, n))).digest('hex');
+      if (h === srcHash) return n;
+    }
+    return null;
   }
 
   /**

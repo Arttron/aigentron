@@ -12,7 +12,9 @@ export type Inline =
   | { t: 'italic'; c: Inline[] }
   | { t: 'link'; href: string; v: string }
   /** A file of the task shown inline, loaded by its name from the task's attachments (nothing is copied into the message). */
-  | { t: 'media'; name: string; alt: string }
+  | { t: 'media'; name: string; alt: string; /** a file of ANOTHER task (a lead showing its subtask's file) */ taskId?: string }
+  /** A link to a file of the task (any type, not a picture / video): downloads from the task, nothing is copied into the message. */
+  | { t: 'file'; name: string; label: string; taskId?: string }
   /** A colour value written in the text, shown on a chip of that colour with a readable text colour (both rebuilt from the parsed numbers). */
   | { t: 'color'; v: string; bg: string; fg: string };
 
@@ -56,6 +58,41 @@ export function mediaName(ref: string): string | null {
   return name && name !== '..' && MEDIA_EXT.test(name) ? name : null;
 }
 
+export interface FileRef {
+  /** set for a file of another task (`task:<id>/<name>`) */
+  taskId?: string;
+  name: string;
+  /** a picture or a video (shown inline) rather than a file to download */
+  media: boolean;
+}
+
+/**
+ * A reference to a file of a task: `task:<id>/<name>` (another task, e.g. a subtask) or `attachment:<name>` / a bare media name (this task).
+ * Never a URL of another site. Non-media files are only recognised with an explicit `task:` / `attachment:` prefix.
+ */
+export function parseFileRef(ref: string): FileRef | null {
+  const r = ref.trim().replace(/^<|>$/g, '');
+  const t = /^task:([\w-]{1,64})\/([^/\\]{1,200})$/.exec(r);
+  if (t) return t[2] !== '..' && !t[2]!.startsWith('.') ? { taskId: t[1]!, name: t[2]!, media: MEDIA_EXT.test(t[2]!) } : null;
+  if (/^attachments?:/i.test(r)) {
+    const name = mediaOrFileName(r.replace(/^attachments?:\/*/i, ''));
+    return name ? { name, media: MEDIA_EXT.test(name) } : null;
+  }
+  const bare = mediaName(r);
+  return bare ? { name: bare, media: true } : null;
+}
+
+function mediaOrFileName(raw: string): string | null {
+  let r = raw;
+  try {
+    r = decodeURIComponent(r);
+  } catch {
+    /* keep as typed */
+  }
+  const name = r.split(/[\\/]/).pop() ?? '';
+  return name && name !== '..' && !name.startsWith('.') ? name : null;
+}
+
 const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)/g;
 
 export function parseInline(src: string, depth = 0): Inline[] {
@@ -69,10 +106,15 @@ export function parseInline(src: string, depth = 0): Inline[] {
     else if (m[2]) out.push(depth < 2 ? { t: 'bold', c: parseInline(tok.slice(2, -2), depth + 1) } : { t: 'text', v: tok });
     else if (m[3]) {
       const mm = /^!?\[([^\]]*)\]\(([^)]+)\)$/.exec(tok);
-      const media = mm ? mediaName(mm[2]!) : null;
-      const href = mm && !media ? safeHref(mm[2]!) : null;
-      if (mm && media) out.push({ t: 'media', name: media, alt: mm[1]! });
-      else out.push(href && mm![1] ? { t: 'link', href, v: mm![1]! } : { t: 'text', v: tok });
+      const ref = mm ? parseFileRef(mm[2]!) : null;
+      const href = mm && !ref ? safeHref(mm[2]!) : null;
+      if (mm && ref) {
+        out.push(
+          ref.media
+            ? { t: 'media', name: ref.name, alt: mm[1]!, ...(ref.taskId ? { taskId: ref.taskId } : {}) }
+            : { t: 'file', name: ref.name, label: mm[1] || ref.name, ...(ref.taskId ? { taskId: ref.taskId } : {}) },
+        );
+      } else out.push(href && mm![1] ? { t: 'link', href, v: mm![1]! } : { t: 'text', v: tok });
     } else if (m[4]) {
       // Trailing punctuation belongs to the sentence, not the URL.
       const trimmed = tok.replace(/[.,;:!?]+$/, '');
