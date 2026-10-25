@@ -57,3 +57,18 @@ The server is stopped at the start of the switch. Since 0.1.73 the installer (a)
 Build caches (pnpm store, npm, corepack, `XDG_CACHE_HOME`) are kept in `<data dir>/cache` (`CACHE_DIR=<path>` to change it) since 0.1.73, so they follow the data directory you put on the big volume, and are cleaned after a successful update (`pnpm store prune`). Before, they went to the home directory of the user running the installer (`/root/.cache`, `/root/.npm`) — on a server with a small root disk and the install on another volume that filled `/` during an update.
 
 A release directory that this run created and could not finish (a full disk during `pnpm install` / the build) is deleted again when the installer exits with an error, together with the downloaded archive — otherwise the half-built release (about a gigabyte) made the next attempt fail too. Releases that were complete before the run are never touched.
+
+## While the server is down: the "Updating" page
+
+An update stops the server for a while (a graceful stop of running agents, a copy of the database, the migrations, the switch). On a bare-metal install the installer
+(`install.sh`) runs `infra/maintenance-holder.mjs` on the SAME ports for exactly that time, so a person who opens or reloads the dashboard sees **"Updating Aigentron to X"** with
+the steps (stopping, saving the database, updating it, switching, starting) and a timer, instead of an error. The page polls `/api/health` and reloads by itself when the new
+version answers. Requests to the API get `503` with the header `x-aigentron-updating: 1`; a dashboard tab that is already open turns that into a banner and also reloads by itself.
+
+- It holds the API port (3001), the HTTP port of *Settings → Security → Web server* when one is set, and HTTPS (with the certificate you installed) — never anything else. It shows
+  only the announced steps, no log lines, no paths: the page can be seen by anyone who can reach the server.
+- It stops before the real server is started (a port has one owner) and in every failure path (a failed snapshot or migration, a rollback). If the new version does not become
+  healthy, it comes back for the rollback with the message that the previous version is being restored.
+- The short moment between the page letting go of the port and the new server answering shows "Starting the new version…" in a tab that was already open; a brand-new visitor in
+  that moment gets a refused connection (a few seconds).
+- `NO_UPDATE_PAGE=1` (environment of the installer) turns it off. It does not exist on Docker installs (`aigentron update` replaces the container).

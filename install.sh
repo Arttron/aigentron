@@ -76,6 +76,34 @@ AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 log() { printf '==> %s %s\n' "$(date +%H:%M:%S)" "$1"; }
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
 
+# The "updating" page: while an update has the real server stopped, infra/maintenance-holder.mjs answers on the same ports (see that file), so a person who
+# opens the dashboard sees the steps and when it ends instead of an error. Bare-metal updates only; NO_UPDATE_PAGE=1 turns it off. It is always stopped
+# before the service is started again (a port can have one owner), and by the EXIT trap.
+HOLDER_PID=
+PROGRESS_FILE=
+step() { # announce a step of the update to the page (a line "<epoch ms> <key>")
+  [ -n "$PROGRESS_FILE" ] && printf '%s000 %s\n' "$(date +%s)" "$1" >> "$PROGRESS_FILE" 2>/dev/null
+  return 0
+}
+start_holder() {
+  [ "${NO_UPDATE_PAGE:-0}" = 1 ] && return 0
+  [ -n "$HOLDER_PID" ] && return 0
+  [ -f "$RELEASE_DIR/infra/maintenance-holder.mjs" ] && command -v node >/dev/null 2>&1 || return 0
+  _host=$(sed -n 's/^ORCHESTRATOR_HOST=//p' "$ENV_FILE" 2>/dev/null | tail -1 | tr -d '"'"'"' ')
+  # shellcheck disable=SC2086
+  node "$RELEASE_DIR/infra/maintenance-holder.mjs" --version "$VERSION" --from "${PREV_RELEASE:-}" --port 3001 ${_host:+--host "$_host"} --secrets "$DATA_DIR/secrets" --progress "$PROGRESS_FILE" >/dev/null 2>&1 &
+  HOLDER_PID=$!
+  sleep 1 # let it bind
+}
+stop_holder() {
+  [ -n "$HOLDER_PID" ] || return 0
+  kill "$HOLDER_PID" 2>/dev/null || true
+  _i=0
+  while kill -0 "$HOLDER_PID" 2>/dev/null && [ "$_i" -lt 30 ]; do sleep 0.1 2>/dev/null || sleep 1; _i=$((_i + 1)); done
+  kill -9 "$HOLDER_PID" 2>/dev/null || true
+  HOLDER_PID=
+}
+
 # Scheme-dispatched: works whether a URL was computed below or passed in via
 # ARCHIVE_URL directly, in either source mode.
 fetch() {  # $1=url $2=dest-file
@@ -828,19 +856,29 @@ EOF
       rm -f "${SERVICE_FILE:-/etc/systemd/system/aigentron.service}.new" 2>/dev/null || true
     fi
     systemctl daemon-reload >/dev/null 2>&1 || true
+    stop_holder
     systemctl start aigentron >/dev/null 2>&1 || true
   }
-  trap 'recover_service; discard_partial_release' EXIT
+  trap 'recover_service; discard_partial_release; stop_holder' EXIT
+  PROGRESS_FILE="$DATA_DIR/.update-progress"
+  : > "$PROGRESS_FILE" 2>/dev/null || PROGRESS_FILE=
+  was_active=0
+  systemctl is-active --quiet aigentron 2>/dev/null && was_active=1
+  step stopping
   log "Stopping the running service (running agents get a graceful stop)"
   systemctl stop aigentron >/dev/null 2>&1 || true
+  [ "$was_active" = 1 ] && start_holder
   if [ -s "$DB_FILE" ]; then
+    step snapshot
     log "Snapshotting the database → $DATA_DIR/backups/pre-$VERSION.db"
     if ! snapshot_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION" "$RELEASE_DIR/apps/orchestrator" </dev/null; then
+      stop_holder
       systemctl start aigentron >/dev/null 2>&1 || true
       die "could not snapshot the database before migrating — nothing was changed (the running version stays in place). Check free disk space / that $DB_FILE is readable."
     fi
     DB_SNAPSHOT=1
   fi
+  step migrate
   log "Applying database migrations (sqlite)…"
   if ! (cd "$RELEASE_DIR/apps/orchestrator" && \
     DATABASE_URL="file:$DB_FILE" \
@@ -848,16 +886,19 @@ EOF
     if [ -n "$DB_SNAPSHOT" ]; then
       log "Migration FAILED — restoring the database from the snapshot"
       if restore_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION"; then
+        stop_holder
         systemctl start aigentron >/dev/null 2>&1 || true
         die "database migration to $VERSION failed; the database was restored from $DATA_DIR/backups/pre-$VERSION.db and the previous release stays in place. Nothing is lost — see the error above."
       fi
       die "database migration to $VERSION failed AND restoring the snapshot failed — restore it by hand: cp $DATA_DIR/backups/pre-$VERSION.db $DB_FILE (rm -f $DB_FILE-wal $DB_FILE-shm first)"
     fi
+    stop_holder
     systemctl start aigentron >/dev/null 2>&1 || true
     die "database migration to $VERSION failed (no snapshot: there was no database yet); the previous release stays in place."
   fi
   MIGRATED=1
 
+  step switch
   ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
   log "Writing $SERVICE_FILE"
   write_unit "$VERSION"
@@ -890,6 +931,8 @@ SHIM
   log "Enabling + starting the aigentron service"
   systemctl daemon-reload
   systemctl enable aigentron
+  step start
+  stop_holder # the port goes to the real server now; the page in the browser keeps polling until it answers
   systemctl restart aigentron
   RECOVER=0
 
@@ -897,6 +940,8 @@ SHIM
   if ! wait_health "${HEALTH_TIMEOUT:-120}"; then
     log "The new release did NOT become healthy — rolling back."
     systemctl stop aigentron >/dev/null 2>&1 || true
+    step rollback
+    [ "$was_active" = 1 ] && start_holder
     if [ -n "$DB_SNAPSHOT" ]; then
       if restore_db "$DB_FILE" "$DATA_DIR/backups" "$VERSION"; then log "Database restored from the pre-update snapshot."
       else log "WARNING: could not restore the database snapshot $DATA_DIR/backups/pre-$VERSION.db - restore it by hand."; fi
@@ -905,6 +950,7 @@ SHIM
       ln -sfn "$INSTALL_DIR/releases/$PREV_RELEASE" "$CURRENT_LINK"
       write_unit "$PREV_RELEASE"
       systemctl daemon-reload
+      stop_holder
       systemctl start aigentron >/dev/null 2>&1 || true
       if wait_health 60; then die "release $VERSION did not start (see: journalctl -u aigentron -n 80); rolled back to $PREV_RELEASE and its database snapshot - the server is running the old version."; fi
       die "release $VERSION did not start and the rollback to $PREV_RELEASE did not come up either - see: journalctl -u aigentron -n 80"

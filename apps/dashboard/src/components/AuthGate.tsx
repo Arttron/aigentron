@@ -5,6 +5,7 @@ import { getSocket } from '@/lib/socket';
 import { DiskBanner } from '@/components/DiskBanner';
 import { Button, Card, ErrorText, Field, Modal, Muted, Row } from '@/components/ui';
 import { Qr } from '@/components/QrCode';
+import { UpdatingBanner } from '@/components/UpdatingBanner';
 import styles from './AuthGate.module.css';
 
 /** Reconnect the live-updates socket so it carries the (new or cleared) session cookie. */
@@ -273,12 +274,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, refresh);
   }, [refresh]);
 
-  if (!status) return null;
+  if (!status) return <UpdatingBanner />;
   if (status.configured && !status.authenticated)
-    return <LoginScreen users={status.users} onDone={refresh} />;
+    return (
+      <>
+        <UpdatingBanner />
+        <LoginScreen users={status.users} onDone={refresh} />
+      </>
+    );
 
   return (
     <AuthContext.Provider value={{ status, refresh }}>
+      <UpdatingBanner />
       {!status.configured && !dismissed && (
         <div className={status.publicUrl ? styles.bannerWarn : styles.banner} role="status">
           <span>

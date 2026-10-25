@@ -1,20 +1,8 @@
-Aigentron v0.1.95
+Aigentron v0.1.96
 
-For people who are not programmers: a safer approval system (after an independent review), usage statistics by project and by day, and the project as the context of the task page.
+For people who are not programmers: while the server updates, anyone who opens the dashboard now sees what is going on instead of an error.
 
 New
-- Usage statistics (Stats): three views — by provider, by project, by day — a project selector, and tick boxes that switch the columns off (sessions, requests, input, output, cache, cost). The per-day view draws a column per day in your own time zone.
-- The task page has a Project selector at the top. It is the context of the page: the list, its counters and the New task form belong to the chosen project (All projects shows everything and keeps the project picker in the form).
-- Your own alert sound: upload up to five short audio files (mp3, wav, ogg, m4a; 1 MB, 15 s) in Settings → General → Alert sound. They stay in your browser.
+- An "Updating Aigentron" page while the server is down during an update (bare-metal installs): it shows the steps (stopping, saving the database, updating it, switching, starting) and a timer, and the page reloads by itself when the new version answers. It also covers the case when the new version does not start and the previous one is being restored. A dashboard tab that is already open shows a banner "Aigentron is updating" and reloads by itself (from the next update on: tabs opened with an older version only get the errors they used to). It shows only the announced steps — no log lines, no paths. Set NO_UPDATE_PAGE=1 for the installer to switch it off. Details: docs/updates.md.
 
-Fixed
-- Choosing a status in the task list showed subtasks; it now lists the main tasks (a task matches when its own status or one of its subtasks' is the chosen one). The counters on the status chips follow the same rule and the chosen project.
-- Approvals, after a review of the whole system:
-  - the browser could be sent to another site without a card by unusual address spellings (//host, https:\\host, a tab inside the scheme); addresses are now read the way the browser reads them, and the tracked page follows "back" and tab changes;
-  - merges are recognised in every form (git -C … merge, git --no-pager merge …), and so are pushes naming main/master in quotes, with --all/--mirror, or through GitHub tools;
-  - writes to protected files (.github, .git/hooks, agent definitions) are asked about whether the path is written absolute or relative, from the shell too; `git config` that makes git run a program is asked about;
-  - listing the environment (printenv, env) or putting a variable named like a secret into a command is asked about, and so are web requests with a value taken from the shell;
-  - writes outside the working directory are caught through quotes, variables, sh -c, find -delete, curl -o, tar -C and similar; plain copying FROM another folder, `git checkout -b x origin/main` and "merge main" in a commit message no longer raise a card;
-  - when the dock, a Telegram button and a 👍 answer at the same moment, only the first one counts (before, a continuation could start twice).
-
-Update note: no database changes.
+Update note: no database changes. The first update that uses this is the update TO this version's installer, so you can watch the page during it.

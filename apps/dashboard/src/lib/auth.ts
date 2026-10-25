@@ -20,6 +20,8 @@ export interface AuthStatus {
 
 /** Fired when the server answered 401 to a normal API call (session expired / signed out elsewhere). */
 export const AUTH_REQUIRED_EVENT = 'lds-auth-required';
+/** Fired when the server answered with the installer's "updating" page (503 + `x-aigentron-updating`). */
+export const UPDATING_EVENT = 'lds-updating';
 
 /**
  * Sends the session cookie with every call to our API (needed when the dashboard runs on another port in dev) and
@@ -32,6 +34,7 @@ export function installAuthFetch(): void {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (!isOurs(url)) return original(input, init);
     const res = await original(input, { credentials: 'include', ...init });
+    if (res.status === 503 && res.headers.get('x-aigentron-updating')) window.dispatchEvent(new Event(UPDATING_EVENT));
     if (res.status === 401 && !url.includes('/auth/')) window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
     return res;
   };
@@ -44,7 +47,11 @@ async function post<T>(path: string, body?: unknown): Promise<{ ok: boolean; sta
 }
 
 export const authApi = {
-  status: (): Promise<AuthStatus> => fetch(`${API_BASE}/auth/status`, { cache: 'no-store' }).then((r) => r.json() as Promise<AuthStatus>),
+  status: (): Promise<AuthStatus> =>
+    fetch(`${API_BASE}/auth/status`, { cache: 'no-store' }).then((r) => {
+      if (!r.ok) throw new Error(`status ${r.status}`); // e.g. the 503 of an update in progress: keep what we knew, do not read it as a status
+      return r.json() as Promise<AuthStatus>;
+    }),
   setup: (password: string) => post<unknown>('setup', { password }),
   login: (user: string, password: string, code?: string) => post<{ needsCode?: boolean; needsSetup?: { secret: string; uri: string }; recoveryCodes?: string[] }>('login', { user, password, ...(code ? { code } : {}) }),
   logout: () => post<unknown>('logout'),
