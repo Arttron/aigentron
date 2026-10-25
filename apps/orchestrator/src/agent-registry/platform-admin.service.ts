@@ -1,3 +1,4 @@
+import { ProjectsService } from '../projects/projects.service';
 import { copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
@@ -309,7 +310,7 @@ export class PlatformAdminService {
     return null;
   }
 
-  async tasksList(input: { status?: string; limit?: number; order?: string; olderThanDays?: number }): Promise<string> {
+  async tasksList(input: { status?: string; limit?: number; order?: string; olderThanDays?: number; project?: string }): Promise<string> {
     const status = input.status?.trim();
     if (status && !STATUSES.includes(status)) {
       return `Unknown status "${status}". Valid: ${STATUSES.join(', ')}.`;
@@ -320,9 +321,11 @@ export class PlatformAdminService {
       typeof input.olderThanDays === 'number' && input.olderThanDays > 0
         ? new Date(Date.now() - input.olderThanDays * 86_400_000)
         : null;
+    const projectId = input.project?.trim() ? (await this.moduleRef.get(ProjectsService, { strict: false }).get(input.project.trim()).catch(() => null))?.id ?? '' : null;
     const where = {
       ...(status ? { status: status as never } : {}),
       ...(cutoff ? { createdAt: { lt: cutoff } } : {}),
+      ...(projectId !== null ? { projectId } : {}),
     };
     const [rows, total] = await Promise.all([
       this.prisma.task.findMany({

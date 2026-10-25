@@ -68,6 +68,8 @@ import { extraWriteRootsFor, resolveWorkDir, type ProjectContext } from '../proj
 import { parsePushRefs } from '../projects/push-core';
 import { GitHubService } from '../worktrees/github.service';
 import { splitSubtaskReport } from '../tasks/subtask-report';
+import { scopeAdminTools, scopePrompt, type AdminScope } from './admin-scope';
+import { parsePinnedAgents } from '../projects/project-core';
 import { projectFacts } from './project-orientation';
 import { GIT_CREDENTIALS, type GitCredentialsProvider } from '../projects/git-credentials.port';
 import type { Workspace } from '../workspace/workspace.service';
@@ -209,7 +211,9 @@ export class RealAgentExecutor extends AgentExecutor {
     // throws away the prompt cache of the whole conversation (see prompt-layers.ts).
     const projectMap = chat || docs ? '' : await buildProjectMap(workDir);
     const memory = workspaceOn ? await workspace.digest().catch(() => '') : '';
-    const instructions = await this.buildInstructions(agentDef, project);
+    // The admin in the chat of a project (not the default one) is that project's assistant, not the platform's: its tools are narrowed (admin-scope.ts) and it is told so.
+    const adminScope = agentDef?.name === 'admin' && !ctx.discussion ? await this.adminScopeFor(project) : null;
+    const instructions = `${await this.buildInstructions(agentDef, project)}${adminScope ? `\n\n${scopePrompt(adminScope)}` : ''}`;
     // Other registered agents become delegatable subagents (each on its own provider);
     // a chat agent talks to the user directly and delegates to no one. The map
     // depends on the LEAD's provider (an agent without a provider of its own runs
@@ -361,6 +365,20 @@ export class RealAgentExecutor extends AgentExecutor {
       this.logger.warn(`Task ${ctx.taskId}: ${note}`);
     }
     return last;
+  }
+
+  /** The limits of the admin in the chat of a project that is not the default one (null = the platform admin, nothing narrowed). */
+  private async adminScopeFor(project: ProjectContext): Promise<AdminScope | null> {
+    if (project.isDefault) return null;
+    const row = await this.projects.get(project.slug).catch(() => null);
+    const pinned = parsePinnedAgents(row?.pinnedAgents);
+    const agents = pinned.length ? pinned : project.defaultAgent ? [project.defaultAgent] : [];
+    return {
+      slug: project.slug,
+      name: project.name,
+      agents,
+      owns: async (id) => (await this.prisma.task.findUnique({ where: { id }, select: { projectId: true } }).catch(() => null))?.projectId === project.id,
+    };
   }
 
   /** Callbacks behind the admin agent's catalog/propose tools (see AdminToolsWiring). */
@@ -804,6 +822,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const mediaRoots = opts.chat ? [generatedDir, opts.project.workspaceRoot] : [ctx.worktreePath, generatedDir, opts.project.workspaceRoot];
     const kbScope = { projectId: opts.project.id };
     const isAdminChat = Boolean(opts.chat && agentDef?.name === 'admin');
+    const adminScope = agentDef?.name === 'admin' && !ctx.discussion ? await this.adminScopeFor(opts.project) : null;
     // Which task's attachments the media tools may open: this task's only — except for the admin (every task's files, secret ones still excluded).
     const mediaScope = isAdminChat ? undefined : ctx.taskId;
     // What the agent may write to besides its task root: its project's folder (and, in shared mode, the checkout).
@@ -920,7 +939,7 @@ export class RealAgentExecutor extends AgentExecutor {
       onStopPreview: ctx.discussion ? undefined : async () => ({ stopped: this.preview.stop(ctx.taskId) }),
       onProposeLearnedSkill: ctx.discussion ? undefined : (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.
-      admin: agentDef?.name === 'admin' && !ctx.discussion ? this.adminTools(ctx.taskId, session.id) : undefined,
+      admin: agentDef?.name === 'admin' && !ctx.discussion ? (adminScope ? scopeAdminTools(this.adminTools(ctx.taskId, session.id), adminScope) : this.adminTools(ctx.taskId, session.id)) : undefined,
     };
     const internalReg = isCodex ? this.internalMcp.register(toolHandlers) : null;
     const codexOpts: CodexRunOptions | undefined = isCodex

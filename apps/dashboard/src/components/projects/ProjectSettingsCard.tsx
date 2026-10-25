@@ -113,7 +113,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
         <Field label="Approvals for this project's tasks (a task can override it; Inherit follows Settings → Work → Approvals)">
           <ApprovalModePicker scope={{ project: project.slug }} compact />
         </Field>
-        <Field label="Notification channel — where a question from a task of this project is posted">
+        <Field label="Notification channel — where a question from a task of this project is posted. A channel (or chat) chosen here belongs to this project: it shows only its tasks and its admin talks only about it">
           <select className={styles.narrow} value={channelId} onChange={(e) => setChannelId(e.target.value)}>
             <option value="">(none — the global escalation setting)</option>
             {channelId && !channels.some((c) => c.id === channelId) && <option value={channelId}>{channelId}</option>}
@@ -124,7 +124,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
             ))}
           </select>
         </Field>
-        <Field label="Chat / thread id in that channel (e.g. your Telegram chat id)">
+        <Field label="Chat / thread id in that channel (e.g. your Telegram chat id). Empty = the whole channel belongs to this project">
           <input value={chatId} onChange={(e) => setChatId(e.target.value)} placeholder="e.g. 123456789" />
         </Field>
         {code && (

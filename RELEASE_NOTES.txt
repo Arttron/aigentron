@@ -1,9 +1,9 @@
-Aigentron v0.1.97
+Aigentron v0.1.98
 
-For people who are not programmers: the update card now shows that an update is running, in any tab, and the update block is back at the top of Settings → General.
+For people who are not programmers: a channel tied to a project now really belongs to that project, and the admin in such a chat only talks about that project.
 
 Fixed
-- While an update is running (started from this page, another tab or the console), Settings → General → Version & updates says so: "Updating to X — started N min ago", with what the installer is doing right now and a warning with the commands to look at it if nothing has been written to the update log for five minutes. Meanwhile "an update is available", the Update button and Check now are hidden, and pressing Update a second time shows the running update instead of just an error.
-- The Version & updates card is the first card of the General tab again (it had slipped down in the settings regrouping).
+- A channel tied to a project showed every task of the service. A chat counted as tied only when the project named both the channel and a chat id; now choosing just the channel (the chat id left empty) gives the project every chat of that channel. A project that names the chat itself wins over one that names only the channel. In these chats /tasks, new tasks, replies, approvals and questions are limited to the project.
+- The admin in the chat of a project (any project except the default one) greeted with everything it knew about the whole fleet. It is now that project's assistant: it sees only the project's tasks, usage and notes, lists only the project's own agents, refuses platform administration (agents, providers, channels, schedules, settings, updates, access, secrets) and does not tour the platform. This is a limit of its tools and instructions, not an isolation boundary (see docs/plan-project-isolation.md).
 
-Update note: no database changes.
+Update note: no database changes. Set the project's Default agent so the right agent answers in the project's chat.

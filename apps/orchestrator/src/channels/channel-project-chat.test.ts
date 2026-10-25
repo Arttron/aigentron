@@ -63,11 +63,20 @@ describe('the rest of a bound chat works only with its project too', () => {
 });
 
 describe('ProjectsService.boundToChat', () => {
-  const make = (rows: unknown[]) => new ProjectsService({ project: { findMany: vi.fn(async () => rows) } } as never, {} as never, {} as never, {} as never);
-  it('one project on that chat binds it; none or several do not', async () => {
-    expect((await make([{ id: 'a', slug: 'a', name: 'A' }]).boundToChat('c', 'x'))?.slug).toBe('a');
+  // like the database: the rows that name this chat, or name the channel with no chat
+  const make = (rows: { notifyChatId?: string | null }[]) =>
+    new ProjectsService({ project: { findMany: vi.fn(async (q: { where: { OR: { notifyChatId: string | null }[] } }) => rows.filter((r) => q.where.OR.some((c) => (c.notifyChatId === '' ? !r.notifyChatId : c.notifyChatId === null ? r.notifyChatId == null : c.notifyChatId === r.notifyChatId)))) } } as never, {} as never, {} as never, {} as never);
+  it('one project that names the chat binds it; none or several do not', async () => {
+    expect((await make([{ id: 'a', slug: 'a', name: 'A', notifyChatId: 'x' }]).boundToChat('c', 'x'))?.slug).toBe('a');
     expect(await make([]).boundToChat('c', 'x')).toBeNull();
-    expect(await make([{ id: 'a', slug: 'a' }, { id: 'b', slug: 'b' }]).boundToChat('c', 'x')).toBeNull();
-    expect(await make([{ id: 'a', slug: 'a' }]).boundToChat('', 'x')).toBeNull();
+    expect(await make([{ id: 'a', slug: 'a', notifyChatId: 'x' }, { id: 'b', slug: 'b', notifyChatId: 'x' }]).boundToChat('c', 'x')).toBeNull();
+    expect(await make([{ id: 'a', slug: 'a', notifyChatId: 'x' }]).boundToChat('', 'x')).toBeNull();
+  });
+  it('a project that names the CHANNEL without a chat owns every chat of it; a project naming the chat itself wins over it', async () => {
+    expect((await make([{ id: 'a', slug: 'a', name: 'A', notifyChatId: null }]).boundToChat('c', 'any-chat'))?.slug).toBe('a');
+    expect((await make([{ id: 'a', slug: 'a', notifyChatId: '' }]).boundToChat('c', 'any-chat'))?.slug).toBe('a');
+    expect((await make([{ id: 'a', slug: 'a', notifyChatId: null }, { id: 'b', slug: 'b', notifyChatId: 'x' }]).boundToChat('c', 'x'))?.slug).toBe('b');
+    expect((await make([{ id: 'a', slug: 'a', notifyChatId: null }, { id: 'b', slug: 'b', notifyChatId: 'x' }]).boundToChat('c', 'other'))?.slug).toBe('a');
+    expect(await make([{ id: 'a', slug: 'a', notifyChatId: null }, { id: 'b', slug: 'b', notifyChatId: null }]).boundToChat('c', 'x')).toBeNull(); // two projects claim the whole channel
   });
 });

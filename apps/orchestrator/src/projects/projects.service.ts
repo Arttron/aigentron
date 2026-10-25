@@ -202,15 +202,20 @@ export class ProjectsService implements OnModuleInit {
   }
 
   /**
-   * The project a chat is bound to: the one whose notification channel + chat is exactly this one (Project → Notifications). Null when none is — or when
-   * several projects point at the same chat (ambiguous: nothing is narrowed, the chat sees every task).
+   * The project a chat is bound to (Project → Notifications): the one that names this very chat, else — when no project names it — the one that names this
+   * CHANNEL without a chat (the whole channel belongs to the project). Null when none is, or when several tie (ambiguous: nothing is narrowed).
    */
   async boundToChat(channelId: string, chatId: string): Promise<ProjectRow | null> {
     if (!channelId || !chatId) return null;
-    const rows = await this.prisma.project.findMany({ where: { notifyChannelId: channelId, notifyChatId: chatId, archivedAt: null }, take: 2 });
-    if (rows.length !== 1) return null;
-    setProjectLabels(rows);
-    return rows[0]!;
+    const rows = await this.prisma.project.findMany({
+      where: { notifyChannelId: channelId, archivedAt: null, OR: [{ notifyChatId: chatId }, { notifyChatId: null }, { notifyChatId: '' }] },
+      take: 20,
+    });
+    const exact = rows.filter((r) => r.notifyChatId === chatId);
+    const pick = exact.length ? exact : rows;
+    if (pick.length !== 1) return null;
+    setProjectLabels(pick);
+    return pick[0]!;
   }
 
   /** Creates the folder layout that is missing (never overwrites). The default project's layout is the workspace (WorkspaceService). */

@@ -220,7 +220,7 @@ export interface AdminToolsWiring {
   proposeAgent: (input: { name: string; content: string }) => Promise<{ ok: boolean; message: string }>;
   proposeSkill: (input: { name: string; content: string }) => Promise<{ ok: boolean; message: string }>;
   /** Platform tasks (read-only listing; no approval needed). */
-  tasksList: (input: { status?: string; limit?: number; order?: string; olderThanDays?: number }) => Promise<string>;
+  tasksList: (input: { status?: string; limit?: number; order?: string; olderThanDays?: number; project?: string }) => Promise<string>;
   /** Cancel/delete explicit tasks — human-approved before anything happens. */
   proposeTaskAction: (input: { action: 'cancel' | 'delete'; taskIds: string[]; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Providers: read-only overview and connectivity check (never include secrets). */
