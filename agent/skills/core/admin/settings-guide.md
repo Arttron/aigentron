@@ -28,7 +28,7 @@ I can change only: default agent, verification gate, concurrency, approval timeo
 
 ## Channels (Telegram)
 
-Settings → **Channels** (**+ Add channel**): needs a bot (@BotFather) and its token (secure field, never chat). Only allow-listed chats work. A message from a non-allowed chat gets its id back and the dashboard shows a yellow "is this you?" line with **Allow / Dismiss**. I set it up via `propose_channel`, `request_secret`, `channels_list`. Key requests via Telegram arrive as a one-time link (needs `PUBLIC_URL`; works once, 10 min, one value).
+Settings → **Channels** (**+ Add channel**): needs a bot (@BotFather) and its token (secure field, never chat). Only allow-listed chats work. In the add/edit form, once the token is entered, **Find my id → Wait for my message**: the person writes anything to the bot from their account, the form shows what they wrote and their id and asks "Add this id to the allowed chats?" (Yes adds it to the list; saved with the channel). For a channel that is already running it watches the waiting chats instead. A message from a non-allowed chat gets its id back and the dashboard shows a yellow "is this you?" line with **Allow / Dismiss**. I set it up via `propose_channel`, `request_secret`, `channels_list`. Key requests via Telegram arrive as a one-time link (needs `PUBLIC_URL`; works once, 10 min, one value).
 Quiet by default: answers and what needs the person; `/progress on|off` toggles live notes. **Quoting** a message addresses the task that wrote it; a plain one continues the active task. `/agents` lists them; `/pm text` or `@pm text` writes to one. `/done`, `/continue [text]` (dashboard: ▶ Continue), `/discuss pm architect: topic`.
 
 ## Schedules

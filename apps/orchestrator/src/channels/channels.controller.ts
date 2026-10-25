@@ -3,12 +3,13 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { IsBoolean, IsObject, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Matches, MaxLength, Max, Min } from 'class-validator';
 import { ChannelsService, type ChannelConfig } from './channels.service';
 import { ChannelManagerService } from './channel-manager.service';
 import { PairingService } from './pairing.service';
@@ -32,6 +33,26 @@ class CreateChannelDto {
   @IsOptional()
   @IsObject()
   config?: ChannelConfig;
+}
+
+class ProbeSenderDto {
+  @IsString()
+  @MaxLength(20)
+  kind!: string;
+
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsObject()
+  config?: ChannelConfig;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(25)
+  waitSeconds?: number;
 }
 
 class UpdateChannelDto {
@@ -71,6 +92,30 @@ export class ChannelsController {
     const row = await this.channels.create(dto);
     await this.manager.reload();
     return this.channels.serialize(row);
+  }
+
+  /**
+   * "Find my id" (the add-channel form): wait up to `waitSeconds` for a message to the account in the form and answer who wrote what, so the person can
+   * put their id on the allow-list. For a channel that is already RUNNING the bot's messages cannot be read twice: the chats that wrote to it and are not
+   * allowed yet (the pairing list) are watched instead.
+   */
+  @Post('probe-sender')
+  @HttpCode(200)
+  async probeSender(@Body() dto: ProbeSenderDto) {
+    const wait = dto.waitSeconds ?? 20;
+    if (dto.id) {
+      const row = await this.channels.getRow(dto.id);
+      if (row.enabled && this.channels.isConfigured(row)) {
+        const since = Date.now();
+        for (;;) {
+          const fresh = this.pairing.list(dto.id).find((p) => p.lastSeen >= since);
+          if (fresh) return { found: true, chatId: fresh.chatId, userId: fresh.userId, userName: fresh.userName, text: fresh.firstText ?? '' };
+          if (Date.now() - since >= wait * 1000) return { found: false };
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+    }
+    return this.channels.probeSender(dto);
   }
 
   @Put(':id')

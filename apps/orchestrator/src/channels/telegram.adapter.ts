@@ -1,7 +1,7 @@
 import { toTelegramHtml } from './telegram-html';
 import { basename } from 'node:path';
 import { Logger } from '@nestjs/common';
-import type { ChannelAdapter, ChatActivity, IncomingHandler, MessageButton, OutgoingApproval, PollingHooks } from './channel-adapter';
+import type { ChannelAdapter, ChatActivity, IncomingHandler, MessageButton, OutgoingApproval, PollingHooks, ProbedSender } from './channel-adapter';
 import { COMMAND_MENU } from './command-menu';
 
 /** Telegram bot config stored in Channel.config. */
@@ -170,6 +170,42 @@ export class TelegramAdapter implements ChannelAdapter {
       if (!/can't parse entities|can't find end|unsupported start tag/i.test((e as Error).message)) throw e;
       this.logger.warn(`${method}: Telegram refused the formatting, sending plain text`);
       return this.call<T>(method, { ...base, text: plain });
+    }
+  }
+
+  /** The "find my id" helper: see ChannelAdapter.probeSender. */
+  async probeSender(waitSeconds: number): Promise<ProbedSender | null> {
+    const deadline = Date.now() + Math.max(1, waitSeconds) * 1000;
+    const fetchUpdates = async (offset: number, timeout: number): Promise<TelegramUpdate[]> => {
+      try {
+        return await this.call<TelegramUpdate[]>('getUpdates', { offset, timeout, allowed_updates: ['message'] }, { timeoutMs: (timeout + 10) * 1000, retries: 0 });
+      } catch (e) {
+        if (/conflict|terminated by other/i.test((e as Error).message)) throw new Error('Something else is reading this bot\'s messages (the channel is already running, or another program uses the same bot) — stop it first, or use the list of waiting chats under the channel.');
+        throw e;
+      }
+    };
+    // what was written before the call is of no interest: offset -1 returns only the newest update and confirms everything older
+    const old = await fetchUpdates(-1, 0);
+    let offset = old.length ? old[old.length - 1]!.update_id + 1 : 0;
+    for (;;) {
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) return null;
+      const askedAt = Date.now();
+      const updates = await fetchUpdates(offset, Math.min(left, POLL_HOLD_S));
+      if (!updates.length && Date.now() - askedAt < 200) await delay(500); // an answer that did not wait (a proxy, a mock) must not become a hot loop
+      for (const u of updates) {
+        offset = u.update_id + 1;
+        const m = u.message;
+        if (!m) continue;
+        await fetchUpdates(offset, 0).catch(() => undefined); // confirm it: the running channel must not treat this test message as a task
+        return {
+          chatId: String(m.chat.id),
+          userId: String(m.from?.id ?? m.chat.id),
+          userName: m.from?.username ? `@${m.from.username}` : m.from?.first_name,
+          chatTitle: m.chat.title,
+          text: (m.text ?? m.caption ?? '').trim() || '[no text: a photo, a file or a sticker]',
+        };
+      }
     }
   }
 
@@ -538,7 +574,7 @@ interface TelegramUpdate {
     message_id: number;
     text?: string;
     caption?: string;
-    chat: { id: number };
+    chat: { id: number; title?: string };
     from?: { id: number; username?: string; first_name?: string };
     reply_to_message?: { message_id: number; text?: string; caption?: string };
     /** A partial quote (the selected text of the replied-to message). */

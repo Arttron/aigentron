@@ -29,6 +29,7 @@ import { ChannelGateway, type MessageRef } from './channel-gateway.service';
 import { ChatDestinationService } from './chat-destination.service';
 import { ProjectsService } from '../projects/projects.service';
 import { approvalOutcome, compactProcessLine, questionButtons, questionOutcome, questionText, reactionIcon, resultMessage, withQuote } from './chat-format';
+import { chatTargets, type ChatRef } from './project-chats';
 import { resolveTarget, spokenToTask, type RoutingFacts } from './inbound-routing';
 import type { IncomingEvent } from './channel-adapter';
 
@@ -558,9 +559,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     if (this.presence.anyoneFocused()) return;
     const row = await this.prisma.agentQuestion.findUnique({ where: { id: q.id }, select: { status: true } });
     if (row?.status !== 'pending') return;
-    for (const ch of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
-      for (const chatId of this.channels.allowedChatIds(ch)) await this.postQuestion(ch.id, chatId, q);
-    }
+    for (const t of await this.chatsForTask(q.taskId)) await this.postQuestion(t.channelId, t.chatId, q);
   }
 
   /** Post a question with one button per option; the person can also just reply with text. */
@@ -625,10 +624,23 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
    * dashboard task needs a decision but no one is online to see the UI).
    */
   private async broadcastApproval(approval: ApprovalMsg): Promise<void> {
-    const rows = (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r));
-    for (const row of rows) {
-      for (const chatId of this.channels.allowedChatIds(row)) await this.postApproval(row.id, chatId, approval);
+    for (const t of await this.chatsForTask(approval.taskId)) await this.postApproval(t.channelId, t.chatId, approval);
+  }
+
+  /** The chats an unthreaded task may be announced in: its project's own chat, else every allowed chat no other project owns (project-chats.ts). */
+  private async chatsForTask(taskId: string): Promise<ChatRef[]> {
+    const allowed: ChatRef[] = [];
+    for (const row of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
+      for (const chatId of this.channels.allowedChatIds(row)) allowed.push({ channelId: row.id, chatId });
     }
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } }).catch(() => null);
+    if (!task) return allowed;
+    const owned = await this.prisma.project.findMany({
+      where: { archivedAt: null, notifyChannelId: { not: null }, notifyChatId: { not: null } },
+      select: { id: true, notifyChannelId: true, notifyChatId: true },
+    });
+    const bindings = owned.map((p) => ({ projectId: p.id, channelId: p.notifyChannelId!, chatId: p.notifyChatId! }));
+    return chatTargets(task.projectId, allowed, bindings);
   }
 
   /**

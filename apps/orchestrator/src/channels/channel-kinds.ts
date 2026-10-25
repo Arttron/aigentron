@@ -28,6 +28,8 @@ export interface ChannelKindMeta {
   fields: ChannelFieldDef[];
   /** One-line setup hint shown in the form. */
   hint?: string;
+  /** The form can offer "find my id": wait for a message to the account and show who wrote it (the adapter has `probeSender`). */
+  canProbe?: boolean;
 }
 
 interface ChannelKindDef extends ChannelKindMeta {
@@ -44,6 +46,7 @@ export const CHANNEL_KINDS: ChannelKindDef[] = [
     kind: 'telegram',
     label: 'Telegram',
     available: true,
+    canProbe: true,
     hint: 'Create a bot with @BotFather, paste its token, and add the chat id(s) allowed to drive it (deny by default).',
     fields: [
       { key: 'botToken', label: 'Bot token (from @BotFather)', type: 'password', secret: true, required: true, placeholder: '123456:ABC-DEF…' },
@@ -64,5 +67,5 @@ export function getKind(kind: string): ChannelKindDef | undefined {
 
 /** Browser-safe kind metadata (no adapter factories). */
 export function kindMeta(): ChannelKindMeta[] {
-  return CHANNEL_KINDS.map(({ kind, label, available, fields, hint }) => ({ kind, label, available, fields, hint }));
+  return CHANNEL_KINDS.map(({ kind, label, available, fields, hint, canProbe }) => ({ kind, label, available, fields, hint, canProbe }));
 }

@@ -155,6 +155,18 @@ export interface PollingHooks {
 export type ChatActivity = 'typing' | 'upload_photo' | 'upload_video' | 'upload_document' | 'record_voice' | 'upload_voice' | 'record_video_note';
 
 /** The base functions a channel transport implements. */
+/** Who wrote the message a probe was waiting for (see ChannelAdapter.probeSender). */
+export interface ProbedSender {
+  /** the chat to put on the allow-list (a person's private chat has the same number as their user id) */
+  chatId: string;
+  userId: string;
+  userName?: string;
+  /** a group's title, when it was written from a group */
+  chatTitle?: string;
+  /** what they wrote */
+  text: string;
+}
+
 export interface ChannelAdapter {
   readonly kind: string;
   /** Longest text one message may carry (UTF-16 units); longer texts are split by the gateway. Unset = unlimited. */
@@ -167,6 +179,12 @@ export interface ChannelAdapter {
    *  posted message's id so a caller can later edit it (e.g. a live status
    *  line) or react to it. */
   sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<{ messageId: string }>;
+  /**
+   * Wait for the next message anybody writes to this channel's account and say who wrote what (the "find my id" helper of the add-channel form). Reads and
+   * confirms that message so the running channel never sees it, and forgets what was written before the call. Only for a channel that is NOT running
+   * (two readers of one Telegram bot cancel each other). Resolves null when nothing arrived within `waitSeconds`. Optional.
+   */
+  probeSender?(waitSeconds: number): Promise<ProbedSender | null>;
   /** Replace the buttons under a message (tick marks on a multiple-choice question). Optional. */
   setButtons?(chatId: string, messageId: string, buttons: MessageButton[][]): Promise<void>;
   /** Replace a previously-sent message's text in place (e.g. a live-updating

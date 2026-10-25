@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { api, type AgentInfo, type ChannelInfo, type ChannelInput, type ChannelKindMeta } from '@/lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, type AgentInfo, type ChannelInfo, type ChannelInput, type ChannelKindMeta, type ProbedSender } from '@/lib/api';
 import { Field, Row, Button, Muted, ErrorText } from '@/components/ui';
 import styles from './ChannelForm.module.css';
 
@@ -58,6 +58,12 @@ export function ChannelForm({
   };
 
   const set = (key: string, v: string) => setValues((s) => ({ ...s, [key]: v }));
+  /** Put an id on the allow-list field (no duplicates). */
+  const addAllowed = (id: string) =>
+    setValues((s) => {
+      const have = (s.allowedChatIds ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+      return { ...s, allowedChatIds: have.includes(id) ? have.join(', ') : [...have, id].join(', ') };
+    });
 
   return (
     <form onSubmit={submit}>
@@ -108,6 +114,8 @@ export function ChannelForm({
         );
       })}
 
+      {def?.canProbe && <FindMyId kind={kind} channelId={initial?.id} values={values} def={def} hasStoredSecret={Object.values(initial?.secrets ?? {}).some((s) => s.set)} onAdd={(id) => addAllowed(id)} />}
+
       <Row>
         <Button variant="primary" type="submit" disabled={busy || !name.trim() || !def}>
           {busy ? 'Saving…' : isNew ? 'Add channel' : 'Save changes'}
@@ -129,4 +137,118 @@ function initialValues(initial?: ChannelInfo): Record<string, string> {
     out[k] = Array.isArray(v) ? v.join(', ') : v == null ? '' : String(v);
   }
   return out;
+}
+
+const WAIT_ROUNDS = 5; // × ~20 s each
+
+/**
+ * "Find my id": once the account's key is in the form, press the button, write anything to the bot from your own account, and the message arrives here with
+ * who wrote it — then one tap puts that id on the allow-list. Nothing is saved until the form is.
+ */
+function FindMyId({ kind, channelId, values, def, hasStoredSecret, onAdd }: { kind: string; channelId?: string; values: Record<string, string>; def: ChannelKindMeta; hasStoredSecret: boolean; onAdd: (id: string) => void }) {
+  const [state, setState] = useState<'idle' | 'waiting' | 'found' | 'none'>('idle');
+  const [who, setWho] = useState<ProbedSender | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState(false);
+  const cancelled = useRef(false);
+
+  const secretKey = def.fields.find((f) => f.secret)?.key;
+  const keyReady = Boolean(secretKey && ((values[secretKey] ?? '').trim() || hasStoredSecret));
+  const allowed = (values.allowedChatIds ?? '').split(',').map((x) => x.trim());
+
+  useEffect(() => () => void (cancelled.current = true), []);
+
+  const start = async () => {
+    cancelled.current = false;
+    setState('waiting');
+    setError(null);
+    setAdded(false);
+    const config: Record<string, unknown> = {};
+    for (const f of def.fields) {
+      const raw = (values[f.key] ?? '').trim();
+      if (f.type !== 'list' && f.type !== 'agent' && raw) config[f.key] = raw;
+    }
+    try {
+      for (let i = 0; i < WAIT_ROUNDS && !cancelled.current; i++) {
+        const r = await api.probeChannelSender({ kind, id: channelId, config, waitSeconds: 20 });
+        if (r.found) {
+          setWho(r);
+          setState('found');
+          return;
+        }
+      }
+      if (!cancelled.current) setState('none');
+    } catch (e) {
+      setError((e as Error).message);
+      setState('idle');
+    }
+  };
+
+  return (
+    <div className={styles.findId}>
+      <strong>Find my id</strong>
+      {state === 'idle' && (
+        <>
+          <Muted>
+            {keyReady
+              ? 'Press the button, then write any message to your bot from your own account — it shows up here with your id, and you can allow it with one tap.'
+              : 'Enter the bot token above first; then you can find your id by writing to the bot.'}
+          </Muted>
+          <Button onClick={() => void start()} disabled={!keyReady}>
+            Wait for my message
+          </Button>
+        </>
+      )}
+      {state === 'waiting' && (
+        <>
+          <Muted>⏳ Waiting… write any message to your bot in {def.label} now (up to 100 seconds).</Muted>
+          <Button
+            onClick={() => {
+              cancelled.current = true;
+              setState('idle');
+            }}
+          >
+            Stop waiting
+          </Button>
+        </>
+      )}
+      {state === 'none' && (
+        <>
+          <Muted>Nothing arrived. Check that you wrote to the right bot, then try again.</Muted>
+          <Button onClick={() => void start()}>Try again</Button>
+        </>
+      )}
+      {state === 'found' && who && (
+        <>
+          <Muted role="status">
+            📩 {who.userName ? <strong>{who.userName}</strong> : 'Someone'} wrote{who.chatTitle ? ` in “${who.chatTitle}”` : ''}: “{who.text.slice(0, 200)}”
+            <br />
+            {who.chatTitle ? 'Chat id' : 'Id'}: <code>{who.chatId}</code>
+            {who.userId !== who.chatId ? <> (user id <code>{who.userId}</code>)</> : null}
+          </Muted>
+          {added || allowed.includes(who.chatId) ? (
+            <Muted>✓ This id is in the allowed list{added ? ' (saved with the channel)' : ''}.</Muted>
+          ) : (
+            <>
+              <Muted>Add this id to the allowed chats?</Muted>
+              <Row>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    onAdd(who.chatId);
+                    setAdded(true);
+                  }}
+                >
+                  Yes, allow it
+                </Button>
+                <Button onClick={() => setState('idle')}>No</Button>
+              </Row>
+            </>
+          )}
+          <Button onClick={() => void start()}>Find another</Button>
+        </>
+      )}
+      {error && <ErrorText>{error}</ErrorText>}
+    </div>
+  );
 }

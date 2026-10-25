@@ -1,13 +1,11 @@
-Aigentron v0.1.90
+Aigentron v0.1.91
 
-For people who are not programmers: a messenger chat can now belong to one project, and messages in Telegram no longer turn file names into links.
+For people who are not programmers: a project's chat now hears only about that project, and adding a Telegram channel has a "Find my id" helper.
 
 New
-- A chat tied to a project works only with it. When a project's notification channel and chat are set (the project's settings), that chat shows only the project's tasks in /tasks, starts new tasks (a message or a file) in the project, ignores replies and buttons of other projects' tasks, and does not get escalations of other projects. /settings names the project. If two projects point at the same chat, nothing is narrowed.
-- Telegram messages are formatted: bold, italic, code, code blocks, headings, bullet lists and [text](https://…) links appear as formatting instead of stray ** and backticks.
+- Find my id (Settings → Channels → add or edit a Telegram channel). Once the bot token is entered, press "Wait for my message", write anything to your bot from your own account, and the form shows what you wrote and your id, then asks "Add this id to the allowed chats?". Yes adds it to the list (saved with the channel). The test message is read and confirmed, so it never becomes a task. For a channel that is already running, the form watches the waiting chats instead (two programs cannot read one bot).
 
 Fixed
-- File names such as progress.md or english/plan.md were shown as links to websites (.md, .sh, .py … are real internet domains). File names and paths are now shown as code and are never linked.
-- If Telegram refuses a message's formatting, the same text is sent plain, so no message is lost.
+- A chat that belongs to a project (the project's notification channel and chat) still received the approvals and questions of every task. They now go to the task's project chat only, and a chat owned by a project hears nothing about other projects' tasks. A project without its own chat skips the chats other projects own. If the chat of a project is not in the channel's allowed list, nothing is sent to it.
 
 Update note: no database changes.

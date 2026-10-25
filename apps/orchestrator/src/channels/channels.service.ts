@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import type { ChannelAdapter } from './channel-adapter';
+import type { ChannelAdapter, ProbedSender } from './channel-adapter';
 import { CHANNEL_KINDS, getKind, kindMeta, type ChannelFieldDef } from './channel-kinds';
 import { ChatDestinationService } from './chat-destination.service';
 
@@ -123,6 +123,25 @@ export class ChannelsService {
         config: config as Prisma.InputJsonValue,
       },
     });
+  }
+
+  /**
+   * "Find my id": wait for the next message to the account described by `kind` + `config` (a new channel's form values; with `id` the stored secrets
+   * fill in what the form left blank) and say who wrote what. Builds a throw-away adapter — nothing is saved.
+   */
+  async probeSender(input: { kind: string; config?: ChannelConfig; id?: string; waitSeconds?: number }): Promise<{ found: false } | ({ found: true } & ProbedSender)> {
+    const def = getKind(input.kind);
+    if (!def?.available || !def.build) throw new BadRequestException('this kind of channel cannot be probed');
+    const current = input.id ? ((await this.getRow(input.id)).config as ChannelConfig) : {};
+    const config = normalizeConfig(def.fields, input.config, current);
+    for (const f of def.fields) if (f.required && !config[f.key]) throw new BadRequestException(`${f.label} is required`);
+    const adapter = def.build('probe', config);
+    if (!adapter.probeSender) throw new BadRequestException('this kind of channel cannot be probed');
+    const wait = Math.min(25, Math.max(1, Math.floor(input.waitSeconds ?? 20)));
+    const got = await adapter.probeSender(wait).catch((e) => {
+      throw new BadRequestException((e as Error).message);
+    });
+    return got ? { found: true, ...got } : { found: false };
   }
 
   async update(id: string, patch: ChannelPatch): Promise<ChannelRow> {

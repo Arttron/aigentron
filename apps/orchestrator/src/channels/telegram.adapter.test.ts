@@ -123,3 +123,39 @@ describe('TelegramAdapter formatting', () => {
     expect(calls[1]!.body.text).toBe('hello **x**');
   });
 });
+
+describe('TelegramAdapter.probeSender ("find my id")', () => {
+  it('forgets older messages, waits for a new one, confirms it and says who wrote what', async () => {
+    const calls: { offset?: number; timeout?: number }[] = [];
+    const answers = [
+      [{ update_id: 5, message: { message_id: 1, text: 'old', chat: { id: 1 }, from: { id: 1 } } }], // before the call: skipped
+      [], // nothing yet
+      [{ update_id: 6, message: { message_id: 2, text: 'hello bot', chat: { id: 4242 }, from: { id: 4242, username: 'bob', first_name: 'Bob' } } }],
+      [], // the confirmation
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init?: RequestInit) => {
+      calls.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ ok: true, result: answers.shift() ?? [] }));
+    }));
+    const r = await new TelegramAdapter('t', { botToken: 'x' }).probeSender(20);
+    expect(r).toEqual({ chatId: '4242', userId: '4242', userName: '@bob', chatTitle: undefined, text: 'hello bot' });
+    expect(calls[0]).toMatchObject({ offset: -1, timeout: 0 });
+    expect(calls[1]).toMatchObject({ offset: 6 }); // the old update 5 is confirmed
+    expect(calls[3]).toMatchObject({ offset: 7, timeout: 0 }); // the new one is confirmed, so the channel never sees it
+  });
+  it('a group message gives the group chat id; a photo has no text', async () => {
+    const answers = [[], [{ update_id: 1, message: { message_id: 2, chat: { id: -100123, title: 'Team' }, from: { id: 7, first_name: 'Ann' }, photo: [{ file_id: 'f' }] } }], []];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, result: answers.shift() ?? [] }))));
+    const r = await new TelegramAdapter('t', { botToken: 'x' }).probeSender(20);
+    expect(r).toMatchObject({ chatId: '-100123', userId: '7', userName: 'Ann', chatTitle: 'Team' });
+    expect(r?.text).toContain('no text');
+  });
+  it('a bot that something else is reading gets a clear message', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: false, description: 'Conflict: terminated by other getUpdates request' }), { status: 409 })));
+    await expect(new TelegramAdapter('t', { botToken: 'x' }).probeSender(5)).rejects.toThrow(/reading this bot/);
+  });
+  it('nothing written in time → null', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, result: [] }))));
+    expect(await new TelegramAdapter('t', { botToken: 'x' }).probeSender(1)).toBeNull();
+  });
+});

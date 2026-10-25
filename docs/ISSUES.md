@@ -192,3 +192,11 @@ The repository card read `ok` / `message` from the sync answer, but the server r
 ## 2026-10-25 — `progress.md` showed up as a link in Telegram (fixed)
 
 Telegram links anything shaped like `name.tld`, and `.md`, `.sh`, `.py`, `.rs`, `.zip` … are real top-level domains, so file names in an agent's message became links to websites. Messages are now sent with Telegram's HTML subset (`channels/telegram-html.ts`): file names and paths go into `<code>` (never linked), the usual Markdown (bold, italic, code, fenced code, headings, bullets, `[text](https://…)`) is shown as formatting, the rest is escaped, web addresses and e-mails are left alone. If Telegram refuses the markup the same text is sent plain.
+
+## 2026-10-25 — a project's chat still received every task's approvals and questions (fixed)
+
+0.1.90 narrowed the chat's commands, but an approval or question of a dashboard task that nobody answered on the page was still broadcast to EVERY allowed chat of every channel (`broadcastApproval`, `escalateQuestion`). They now go through `chatTargets` (`channels/project-chats.ts`): a project with its own chat is announced there only, and a chat owned by a project hears about no other project's tasks.
+
+## 2026-10-25 — finding your Telegram id needed the pairing round-trip (added a helper)
+
+The only way to learn a chat id was to enable the channel, write to the bot and find the yellow "is this you?" line. The add/edit channel form now has **Find my id**: with the token entered, wait for a message to the bot (`POST /channels/probe-sender`, a throw-away adapter that reads and confirms that one update so the running channel never treats it as a task), show who wrote what, ask whether to allow the id. A channel that is already running cannot be read twice, so there the waiting-chats (pairing) list is watched instead.

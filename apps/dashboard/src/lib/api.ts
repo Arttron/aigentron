@@ -392,6 +392,16 @@ export interface ChannelKindMeta {
   available: boolean;
   fields: ChannelFieldMeta[];
   hint?: string;
+  /** the form can offer "find my id" */
+  canProbe?: boolean;
+}
+
+export interface ProbedSender {
+  chatId: string;
+  userId: string;
+  userName?: string;
+  chatTitle?: string;
+  text: string;
 }
 
 export type ChannelInput = {
@@ -706,6 +716,9 @@ export const api = {
   deleteMcp: (name: string) => request<{ name: string }>('DELETE', `/mcp-servers/${e(name)}`),
 
   listChannelKinds: () => request<ChannelKindMeta[]>('GET', '/channels/kinds'),
+  /** Wait up to ~20 s for a message to the account in the form and say who wrote it. */
+  probeChannelSender: (body: { kind: string; id?: string; config: Record<string, unknown>; waitSeconds?: number }) =>
+    request<({ found: false } | ({ found: true } & ProbedSender))>('POST', '/channels/probe-sender', { body }),
   listPairings: (channelId: string) =>
     request<{ chatId: string; userName: string | null; firstText: string | null; attempts: number; lastSeen: string }[]>('GET', `/channels/${e(channelId)}/pairings`),
   allowPairing: (channelId: string, chatId: string) => request<unknown>('POST', `/channels/${e(channelId)}/pairings/${e(chatId)}/allow`),
