@@ -3,6 +3,7 @@ import { SERVER_EVENT, CLIENT_EVENT, type AgentQuestion, type ApprovalRequest } 
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { usePolling } from '@/lib/use-polling';
+import { alertForRequest, installAlertUnlock } from '@/lib/alert-sound';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { QuestionCard } from '@/components/QuestionCard';
 import styles from './ApprovalDock.module.css';
@@ -25,7 +26,10 @@ export function ApprovalDock() {
       .then((list) => active && setQuestions(list))
       .catch(() => undefined);
     const socket = getSocket();
-    const onAsked = (e: { question: AgentQuestion }) => setQuestions((prev) => (prev.some((q) => q.id === e.question.id) ? prev : [...prev, e.question]));
+    const onAsked = (e: { question: AgentQuestion }) => {
+      setQuestions((prev) => (prev.some((q) => q.id === e.question.id) ? prev : [...prev, e.question]));
+      void alertForRequest('question');
+    };
     const onDone = (e: { question: AgentQuestion }) => setQuestions((prev) => prev.filter((q) => q.id !== e.question.id));
     const onTaskGone = (e: { taskId: string }) => setQuestions((prev) => prev.filter((q) => q.taskId !== e.taskId));
     socket.on(SERVER_EVENT.questionCreated, onAsked);
@@ -69,6 +73,7 @@ export function ApprovalDock() {
       setApprovals((prev) =>
         prev.some((a) => a.id === e.approval.id) ? prev : [...prev, e.approval],
       );
+      void alertForRequest('approval'); // the sound the person chose in Settings → General → Alert sound
     };
     const onResolved = (e: { approvalId: string }) => {
       setApprovals((prev) => prev.filter((a) => a.id !== e.approvalId));
@@ -88,6 +93,9 @@ export function ApprovalDock() {
       socket.off(SERVER_EVENT.taskDeleted, onTaskDeleted);
     };
   }, []);
+
+  // The first touch of the page wakes the audio, so the alert sound can play by itself later.
+  useEffect(() => installAlertUnlock(), []);
 
   // Report window focus to the server (drives channel escalation of unattended
   // approvals), sending the initial state on (re)connect.

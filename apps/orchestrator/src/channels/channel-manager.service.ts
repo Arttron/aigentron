@@ -406,7 +406,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     error: string | null,
     status: TaskStatus,
   ): Promise<void> {
-    // The task's project's notification chat, else the global one (Settings → Escalations).
+    // The task's project's notification chat, else the global one (Settings → Work → Escalations).
     const target = await this.projects.notifyTargetFor(taskId);
     if (!target) return;
     const { channelId, chatId } = target;
@@ -836,7 +836,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * A notice for the operators that belongs to no task (disk space, …): to the default notification chat (Settings → Escalations), or — when none
+   * A notice for the operators that belongs to no task (disk space, …): to the default notification chat (Settings → Work → Escalations), or — when none
    * is set — to every allowed chat of every enabled channel.
    */
   async notifyOperators(text: string): Promise<void> {

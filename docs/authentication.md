@@ -6,11 +6,11 @@ what they may do; the session — not any header — decides who is acting.
 
 ## Turning it on
 
-- **First password (normal way):** a banner asks "Set password" while none exists (also Settings → General → **Security**).
+- **First password (normal way):** a banner asks "Set password" while none exists (also Settings → **Security**).
   It becomes the **default operator's** password (8–200 characters). You stay signed in on that browser for 30 days (`AUTH_SESSION_DAYS`).
 - **More people:** Settings → **Users** → 🔑 *Set password* for each user (operator/admin only). They are listed on the login screen
   from then on. A user without a password cannot sign in. Resetting someone's password signs them out everywhere.
-- **Your own password:** Settings → General → Security → *Change my password*. At least one operator/admin must always keep a password.
+- **Your own password:** Settings → Security → *Change my password*. At least one operator/admin must always keep a password.
 - **Headless install:** set `ADMIN_PASSWORD` in `.env` before the first start; it is applied once (for the default operator) when no
   password exists yet (you can remove it afterwards). Installs with the earlier single password are migrated to the default operator automatically.
 - **Fresh `install.sh`** (never on an existing install): right after the first start it sets a random operator password through `POST /api/auth/setup` on localhost, prints it once and saves it to
@@ -18,7 +18,7 @@ what they may do; the session — not any header — decides who is acting.
 - Until a password exists nothing changes: the instance is open, and a warning is logged at startup.
   **Set it right after updating**, especially if the dashboard is reachable from outside.
 
-## Allowed domains (Settings → General → Access)
+## Allowed domains (Settings → Security → Access)
 
 A second, separate control: **which domain names the server answers to**. Add the name you publish it under (`dev.example.com`, or `*.example.com`);
 anything else gets `421`. Empty list = no restriction (the behaviour before this existed); `PUBLIC_URL`'s host counts as listed.
@@ -61,7 +61,7 @@ keep working until they expire, but are not listed.
 
 ## Two-factor sign-in (authenticator app)
 
-Optional, per user. Each person turns it on for themselves, once: Settings → General → Security → **Two-factor sign-in → Turn on**. Confirm with your password, scan the QR (or open the link on the phone, or type the key) in
+Optional, per user. Each person turns it on for themselves, once: Settings → Security → **Two-factor sign-in → Turn on**. Confirm with your password, scan the QR (or open the link on the phone, or type the key) in
 any TOTP app (Google / Microsoft Authenticator, 1Password, Aegis …), type the code it shows, and save the **ten recovery codes** (shown once; each works one time instead of a code).
 From then on the sign-in asks for the password and then a 6-digit code. Details:
 

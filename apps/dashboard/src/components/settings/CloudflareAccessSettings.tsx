@@ -15,7 +15,7 @@ interface CfTest {
   you: { present: boolean; ok?: boolean; email?: string | null; error?: string };
 }
 
-/** Settings → General → Cloudflare Access: make the server itself check Access's sign-in token. */
+/** Settings → Security → Cloudflare Access: make the server itself check Access's sign-in token. */
 export function CloudflareAccessSettings() {
   const [team, setTeam] = useState('');
   const [aud, setAud] = useState('');

@@ -3,7 +3,7 @@ import { Roles } from '../identity/roles.decorator';
 import { RolesGuard } from '../identity/roles.guard';
 import { RunLimitsService } from './run-limits.service';
 
-/** Settings → General → Run limits. */
+/** Settings → Work → Run limits. */
 @Controller('run-limits')
 export class RunLimitsController {
   constructor(private readonly limits: RunLimitsService) {}

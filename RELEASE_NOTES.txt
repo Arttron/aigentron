@@ -1,12 +1,17 @@
-Aigentron v0.1.93
+Aigentron v0.1.94
 
-For people who are not programmers: a project's chat gets its approvals at once, a subtask's answer reads as that agent's message, long answers fold, and picking tasks in the list is simpler.
+For people who are not programmers: fewer approval cards for the browser, safer previews, an alert sound, and a settings page that is no longer one endless list.
 
 New
-- Approvals and questions of a project that has its own chat go to that chat immediately (before: after about 10 seconds, and not at all while the dashboard was open). A project without a chat, the default one too, is announced only in a free chat that no project owns. The project's chat must be among the channel's allowed chats.
-- In the conversation of a lead task, the report of each subtask now shows as a message from that subtask's agent (for example "designer>") instead of "you>", without the instructions that were sent to the lead. Older reports keep their old look.
-- Long messages of agents with a name (subtask reports, discussion turns) fold to ten lines with "Show more".
-- Picking tasks in the list has no mode any more: every row has a checkbox on the left, the bar above the list is always there and its buttons (Mark as done, Cancel, Delete) switch on once something is ticked, so the page no longer jumps. Shift-click ticks a range.
-- Checkboxes and radio buttons everywhere are drawn in the style of the interface (both themes).
+- Alert sound: a short sound in the dashboard when an approval (or a question) appears — a falling "uh-oh" by default, with other sounds, volume and "only when I am in another tab" to choose from (Settings → General → Alert sound; per browser). The browser plays it after you have clicked on the page once.
+- Settings regrouped: General (look, titles, updates, disk), Work (approvals, run limits, repository, checks, queue, agent instructions, escalations), Security (sign-in and two-factor, signed-in devices, domains, Cloudflare, web server). MCP servers and the MCP endpoint share one tab, Voice and Vision share one.
+- The browser (Playwright) no longer asks for an approval on every click, keystroke or form field while it is on the agent's own preview; on an outside site, running page scripts, uploading files and installing still ask.
 
-Update note: no database changes. A new type of conversation entry is stored (a subtask's report); nothing needs to be done.
+Changed
+- "No approvals" mode still asks about three things: a merge, anything on the main / master branch (push, checkout, reset, delete …) and anything outside the working directory. Everything else goes ahead as before; credentials, protected files and admin changes are still asked. The ordinary mode asks about the same actions too (a plain `git merge` and `git checkout main` are new there).
+
+Fixed
+- A preview could show another project's site: a dev server left behind kept its port, and the next preview took it for its own. Now a preview port must be free before the start, the process answering on it must be the one that was started, and stopping a preview ends the whole process group.
+- Agents now stop the preview right after the screenshots (new `stop_preview` tool and a rule in the Playwright skill): one process, only while needed.
+
+Update note: no database changes.

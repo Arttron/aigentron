@@ -23,7 +23,7 @@ After changing the `.env` values: `docker compose --profile proxy up -d --force-
 
 ## Safety
 - The browser is refused `file:`, `chrome:` and other non-http(s) addresses outright (not even an approval card), and the container's environment no longer holds the proxy login after start — a page cannot read it from `/proc/self/environ` or from a local file.
-- Same approval rules as the normal browser: capture tools are free, navigation to a non-local URL, clicks and typing need approval; credentials are never given to agents (the skill tells them not to ask for or print them).
+- Same approval rules as the normal browser: capture tools are free, and so are clicks and typing while the browser is on a local page; navigation to a non-local URL — and clicks and typing once the browser is on one — need approval; credentials are never given to agents (the skill tells them not to ask for or print them).
 - The proxy sees the sites the browser visits (HTTPS content stays encrypted, host names do not). Use a proxy you trust; metered proxies are billed per use.
 - The proxy browser cannot reach the project's own preview servers (`project-dev`, task previews) — use the normal browser for those.
 - On bare-metal / minimal installs without compose, run the browser MCP yourself with `--config` pointing at a file with the same `launchOptions.proxy` shape and register it as an MCP server named `playwright-proxy`.

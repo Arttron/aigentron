@@ -171,7 +171,7 @@ dashboard. Code: `apps/orchestrator/src/addons/`, page: `apps/dashboard/src/page
 The add-on's view endpoint is a noVNC web client (HTTP + WebSocket) **with no sign-in of its own**; it must stay on loopback / the internal
 network, and the orchestrator puts it behind the dashboard's sign-in:
 
-- **Who** — the page and the WebSocket handshake pass the same gate, in this order: domain allow-list (Settings → Access) → Cloudflare
+- **Who** — the page and the WebSocket handshake pass the same gate, in this order: domain allow-list (Settings → Security → Access) → Cloudflare
   Access token (when on) → the session cookie → the **operator or admin** role (whoever watches can also type into the browser). Otherwise
   401 (no session) / 403. With sign-in off, the acting-user header or the default operator counts, as everywhere in the API.
 - **Headers** — allow-lists in both directions. Cookies, `Authorization`, `x-lds-user`, `X-Forwarded-*` / `cf-*` never reach the add-on;

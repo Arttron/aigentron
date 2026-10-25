@@ -4,7 +4,7 @@ import { AppConfigService } from '../config/app-config.service';
 import { SecretJsonFile } from '../security/secret-json-file';
 import { normalizeRunLimits, runLimitsFromEnv, type RunLimits } from './run-limits-core';
 
-/** Settings → General → Run limits: a JSON file next to the other small settings, read live (the next run uses a saved change). */
+/** Settings → Work → Run limits: a JSON file next to the other small settings, read live (the next run uses a saved change). */
 @Injectable()
 export class RunLimitsService {
   private store?: SecretJsonFile<Partial<RunLimits>>;

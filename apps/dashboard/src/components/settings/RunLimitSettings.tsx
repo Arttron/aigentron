@@ -12,7 +12,7 @@ const FIELDS: { key: 'timeoutMin' | 'maxMin' | 'graceSec' | 'idleMin' | 'maxTurn
   { key: 'extraMin', label: 'More time per approval (minutes)', min: 5, max: 480, hint: 'What a person grants when the ceiling is reached.' },
 ];
 
-/** Settings → General → Run limits: how long and how far one agent run may go, and what happens at the ceiling. */
+/** Settings → Work → Run limits: how long and how far one agent run may go, and what happens at the ceiling. */
 export function RunLimitSettings() {
   const [cfg, setCfg] = useState<RunLimits | null>(null);
   const [saved, setSaved] = useState<RunLimits | null>(null);

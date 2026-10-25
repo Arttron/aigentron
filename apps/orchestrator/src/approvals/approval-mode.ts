@@ -1,9 +1,9 @@
 import { CREATE_TASK_TOOL, INTERNAL_TOOL_PREFIX, PUSH_BRANCH_TOOL, type DangerVerdict } from '@lds/shared';
 
 /**
- * `ask` (default): a risky action waits for a person. `off`: the agent's own risky actions (shell, writes outside its folders, MCP calls,
- * git push, starting a task) go ahead without a card. Even then, never waved through: credentials / protected files (the verdict is
- * `hard`) and everything an admin proposal changes on the platform (settings, providers, agents, updates … — a person confirms those).
+ * `ask` (default): a risky action waits for a person. `off`: the agent's own risky actions (shell, MCP calls, git push, starting a task) go ahead
+ * without a card. Even then, never waved through: a merge, an action on main / master, anything outside the working directory (the verdict's `guard`),
+ * credentials / protected files (the verdict is `hard`) and everything an admin proposal changes on the platform (settings, providers, agents, updates … — a person confirms those).
  */
 export type ApprovalMode = 'ask' | 'off';
 
@@ -12,8 +12,9 @@ export const parseApprovalMode = (raw: unknown): ApprovalMode => (raw === 'off' 
 /** The internal tools an agent may run without a card in `off` mode (they are the agent's own work, not a platform change). */
 const AGENT_OWN_INTERNAL = new Set([PUSH_BRANCH_TOOL.toLowerCase(), CREATE_TASK_TOOL.toLowerCase()]);
 
-export function approvalWaived(mode: ApprovalMode, toolName: string, verdict: Pick<DangerVerdict, 'dangerous' | 'hard'>): boolean {
-  if (mode !== 'off' || !verdict.dangerous || verdict.hard) return false;
+export function approvalWaived(mode: ApprovalMode, toolName: string, verdict: Pick<DangerVerdict, 'dangerous' | 'hard' | 'guard'>): boolean {
+  // a merge, an action on main / master and anything outside the working directory are asked about even here (verdict.guard)
+  if (mode !== 'off' || !verdict.dangerous || verdict.hard || verdict.guard) return false;
   const name = toolName.toLowerCase();
   if (name.startsWith(INTERNAL_TOOL_PREFIX)) return AGENT_OWN_INTERNAL.has(name);
   return true;

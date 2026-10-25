@@ -16,8 +16,19 @@ install or run Playwright yourself via Bash; if the MCP isn't there, report `blo
 **Preview target — your own worktree.** To see *your* in-progress changes (not the base app),
 first call `mcp__lds_internal__preview_worktree` (no args). It starts an ephemeral dev server for
 **this task's worktree** and returns a URL like `http://orchestrator:3200`; navigate the browser
-there (use the URL exactly as returned: on a server with the add-on it is `localhost`, the browser being on the same machine). This is what you want when reviewing a change you just made. The server is torn down
-automatically when the task finishes. (The target app must honor `$PORT` and bind `0.0.0.0`.)
+there (use the URL exactly as returned: on a server with the add-on it is `localhost`, the browser being on the same machine). This is what you want when reviewing a change you just made. When your screenshots are taken, call
+`mcp__lds_internal__stop_preview` — the server must not keep running (it is also torn down when the task finishes). (The target app must honor `$PORT` and bind `0.0.0.0`.)
+
+**Be sure the page is YOUR project's.** A port can be answered by a server that was left running (another task, another project): its pages look like a working
+preview but are a different site. So:
+- Only open the address `preview_worktree` returned. The orchestrator picks a port that is really free and checks that the process answering on it is the dev server
+  it started from your worktree; if a port is taken by something else it skips it, and when none is left it says so — report that, do not open the busy port anyway.
+- **One process, and only while you need it.** Call `preview_worktree` once, take your screenshots, then call `stop_preview` right away — no server is left running
+  after the screenshots (not for the next task, not "in case"). Need the page again later? Start it again. Never start a dev server of your own (`npm run dev &`, `nohup …`)
+  and never reuse a port you find open; if you started something by hand anyway, kill it before you finish (check with `lsof -i :PORT` / `ss -ltnp`).
+- After the first navigation, take a `browser_snapshot` and check that it is this project (its title, a heading or text you know from its code — the `name` in
+  `package.json`, the page you just changed). If it shows another site, stop: tell the person which port and what you saw (a leftover server of another project),
+  and do NOT deliver screenshots of it as this project's.
 
 **Base app (fallback).** The always-on `project-dev` service is a sample app of the Docker stack (the `./project` folder), not a registered project: it exists only on a Docker install
 and only for the default project's stack. In any other project use `preview_worktree`; use `project-dev` (`http://project-dev:3080`) only when it is there and you explicitly want the
@@ -43,7 +54,7 @@ blocked or the task needs that egress IP — it is slower and the proxy may be m
 - Which browser: local/dev URLs and anything that works directly → `playwright`. A public site that is blocked,
   rate-limited by IP or region-locked → `playwright-proxy`. Don't use the proxy browser for the project's own
   preview URLs (`preview_worktree`, `project-dev`) — the proxy cannot reach the internal network.
-- Rules are the same: capture tools run freely; navigating to a non-local URL and clicking/typing go through the
+- Rules are the same: capture tools run freely, and so do clicks and typing on local pages; navigating to a non-local URL, and clicking/typing once the browser is on one, go through the
   approval gate. Each browser keeps its own tabs and cookies; don't expect a login made in one to exist in the other.
 - If the tools are missing or the first navigation fails with a proxy / connection error, report it in your status
   (`blocked`, with the error text) — do NOT try other proxies, and **never ask for or print the proxy login/password**
@@ -58,6 +69,7 @@ blocked or the task needs that egress IP — it is slower and the proxy may be m
 
 ```
 mcp__lds_internal__preview_worktree {}  → live URL for YOUR worktree (e.g. http://orchestrator:3200)
+mcp__lds_internal__stop_preview {}      → stop it again as soon as the screenshots are taken
     ↓
 mcp__playwright__browser_navigate → the page (the returned URL)
     ↓
@@ -90,8 +102,9 @@ browser_snapshot {}                              # structure check
 ```
 
 > Read-only browser tools — navigating to a **local** URL, resize, screenshot, snapshot,
-> console/network, wait — run without approval. Page-mutating actions (`browser_click`,
-> `browser_type`) and navigating to a **non-local** URL go through the approval gate. Keep calls
+> console/network, wait — run without approval. So do clicking, typing, filling forms and pressing keys **while the browser is on a local page**
+> (your own preview) — that is your own dev server. Once the browser has been taken to a **non-local** site (a person approved the visit) those
+> interactions go through the approval gate, as do navigating to a non-local URL, `browser_evaluate` / `browser_run_code`, `browser_file_upload` and `browser_install` always. Keep calls
 > tight — navigate once, capture the viewports you need, analyze; don't loop the same state.
 
 ## Rules for Designer

@@ -25,6 +25,6 @@ They start tasks, so they use model budget. Prepared: English — a daily lesson
 
 Notes
 - English/renovation agents are written for non-code work: they can read the library and the project folder and keep notes there (progress log, plan) but have no shell. Point the project at a
-  plain notes folder (Settings → General → leave the repository empty / use a local workspace) rather than a code repository.
+  plain notes folder (Settings → Work → leave the repository empty / use a local workspace) rather than a code repository.
 - Renovation renders: no image generator is connected yet — the designer produces precise descriptions and ready image prompts.
 - Making your own pack = a folder under `agent/packs/<name>/` with `pack.json` (see the shipped ones); `pnpm test` checks every reference in it.

@@ -4,7 +4,7 @@ import { WebServerService } from './web-server.service';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
 
-/** Settings → General → Web server (ports and certificate) and `aigentron access`. */
+/** Settings → Security → Web server (ports and certificate) and `aigentron access`. */
 @Controller('web-server')
 export class WebServerController {
   constructor(private readonly web: WebServerService) {}

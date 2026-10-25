@@ -917,6 +917,7 @@ export class RealAgentExecutor extends AgentExecutor {
       onLookAt: async (input) => this.media.lookAt(await this.attachmentOrPath(ctx.taskId, input.path, isAdminChat), input.question, mediaRoots, input, { provider: provider.name, model }, mediaScope),
       onVideoDigest: async (input) => this.media.videoDigest(await this.attachmentOrPath(ctx.taskId, input.path, isAdminChat), mediaRoots, input, mediaScope),
       onStartPreview: ctx.discussion ? undefined : () => this.preview.getOrStart(ctx.taskId, opts.workDir),
+      onStopPreview: ctx.discussion ? undefined : async () => ({ stopped: this.preview.stop(ctx.taskId) }),
       onProposeLearnedSkill: ctx.discussion ? undefined : (input) => this.skillsLearned.propose(ctx.taskId, session.id, input.name, input.content),
       // Agent-management tools: the built-in admin agent only.
       admin: agentDef?.name === 'admin' && !ctx.discussion ? this.adminTools(ctx.taskId, session.id) : undefined,

@@ -150,7 +150,7 @@ export function UsersManager() {
       <Muted className={styles.hint}>
         {signInOn
           ? 'Everyone signs in by picking their name and typing their own password; their role decides what they may do. Set or reset a person\'s password with 🔑 below.'
-          : 'Sign-in is off: roles scope what the acting user may do, picked from the 🎭 selector in the header. Turn sign-in on in Settings → General → Security — then each user gets their own password here.'}
+          : 'Sign-in is off: roles scope what the acting user may do, picked from the 🎭 selector in the header. Turn sign-in on in Settings → Security — then each user gets their own password here.'}
       </Muted>
 
       {users.map((u) => (

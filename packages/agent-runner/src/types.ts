@@ -191,6 +191,8 @@ export interface RunAgentParams {
    * browser MCP can screenshot the agent's own changes rather than the base app.
    */
   onStartPreview?: () => Promise<{ url: string }>;
+  /** `stop_preview`: shut the preview dev server of this task down (same condition as `onStartPreview`). */
+  onStopPreview?: () => Promise<{ stopped: boolean }>;
   /**
    * When set, the agent gets a `propose_learned_skill` tool (roadmap Phase 6) to
    * write/update agent/skills/learned/<name>.md — a durable, fleet-wide

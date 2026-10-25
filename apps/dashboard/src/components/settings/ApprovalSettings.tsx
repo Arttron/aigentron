@@ -3,7 +3,7 @@ import { useAction } from '@/lib/use-settings-resource';
 import { api } from '@/lib/api';
 import { Card, ErrorText, Muted, SectionTitle } from '@/components/ui';
 
-/** Settings → General → Approvals: ask before a risky action (default), or let the agents work without cards. */
+/** Settings → Work → Approvals: ask before a risky action (default), or let the agents work without cards. */
 export function ApprovalSettings() {
   const [off, setOff] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -39,8 +39,8 @@ export function ApprovalSettings() {
       </label>
       {off && (
         <Muted>
-          ⚠ On: shell commands, writes anywhere, outside calls, git push and starting tasks go ahead without a card, on every project that does not set its own level. Still asked even now: touching sign-in passwords / tokens / the charter
-          and CI files, and everything the admin changes on the platform (settings, providers, agents, updates). Runs that reach the step limit or the time ceiling are continued by themselves (a run that keeps hitting the step limit without finishing is still stopped after a few rounds). Switch it back off when you are done.
+          ⚠ On: shell commands, outside calls, git push and starting tasks go ahead without a card, on every project that does not set its own level. Still asked even now: a merge (git merge, a pull request merge), any action on the main / master branch
+          (a push, checkout, reset, delete …), anything outside the working directory (a write, move or delete beyond the project folder), touching sign-in passwords / tokens / the charter and CI files, and everything the admin changes on the platform (settings, providers, agents, updates). Runs that reach the step limit or the time ceiling are continued by themselves (a run that keeps hitting the step limit without finishing is still stopped after a few rounds). Switch it back off when you are done.
         </Muted>
       )}
       {msg && (msg.ok ? <Muted>{msg.text}</Muted> : <ErrorText>{msg.text}</ErrorText>)}

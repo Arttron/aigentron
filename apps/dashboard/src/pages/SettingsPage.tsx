@@ -17,22 +17,26 @@ import { SchedulesManager } from '@/components/SchedulesManager';
 import { DiskSettings } from '@/components/settings/DiskSettings';
 import { TitleSettings } from '@/components/settings/TitleSettings';
 import { ApprovalSettings } from '@/components/settings/ApprovalSettings';
+import { AlertSoundSettings } from '@/components/settings/AlertSoundSettings';
 import { RunLimitSettings } from '@/components/settings/RunLimitSettings';
 import { VisionSettings } from '@/components/settings/VisionSettings';
 import { VoiceSettings } from '@/components/settings/VoiceSettings';
 
+/**
+ * Grouped by what the person is doing: the everyday look and upkeep (General), how agents work (Work), who may get in (Security), the AI behind them
+ * (Providers, LiteLLM, Voice & vision), what they connect to (MCP, Channels, Schedules) and who the people are (Users).
+ */
 const TABS = [
   { id: 'general', label: 'General' },
+  { id: 'work', label: 'Work' },
+  { id: 'security', label: 'Security' },
   { id: 'providers', label: 'Providers' },
   { id: 'litellm', label: 'LiteLLM' },
-  { id: 'mcp', label: 'MCP servers' },
-  { id: 'mcp-endpoint', label: 'MCP endpoint' },
+  { id: 'mcp', label: 'MCP' },
   { id: 'channels', label: 'Channels' },
   { id: 'schedules', label: 'Schedules' },
-  { id: 'voice', label: 'Voice' },
-  { id: 'vision', label: 'Vision' },
+  { id: 'voice', label: 'Voice & vision' },
   { id: 'users', label: 'Users' },
-  { id: 'sessions', label: 'Signed-in devices' },
 ] as const satisfies ReadonlyArray<TabDef<string>>;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -48,28 +52,46 @@ export function SettingsPage() {
 
       {tab === 'general' && (
         <>
+          <GeneralSettingsForm sections={['display']} />
+          <AlertSoundSettings />
+          <TitleSettings />
           <UpdateSettings />
           <DiskSettings />
-          <SecuritySettings />
-          <AccessSettings />
-          <WebServerSettings />
-          <CloudflareAccessSettings />
+        </>
+      )}
+      {tab === 'work' && (
+        <>
           <ApprovalSettings />
           <RunLimitSettings />
-          <TitleSettings />
-          <GeneralSettingsForm />
+          <GeneralSettingsForm sections={['repo', 'verify', 'queue', 'approvals', 'instructions', 'escalations']} />
+        </>
+      )}
+      {tab === 'security' && (
+        <>
+          <SecuritySettings />
+          <SessionsSettings />
+          <AccessSettings />
+          <CloudflareAccessSettings />
+          <WebServerSettings />
         </>
       )}
       {tab === 'providers' && <ProvidersManager />}
       {tab === 'litellm' && <LiteLlmRoutes />}
-      {tab === 'mcp' && <McpManager />}
-      {tab === 'mcp-endpoint' && <McpEndpointManager />}
+      {tab === 'mcp' && (
+        <>
+          <McpManager />
+          <McpEndpointManager />
+        </>
+      )}
       {tab === 'channels' && <ChannelsManager />}
       {tab === 'schedules' && <SchedulesManager />}
-      {tab === 'voice' && <VoiceSettings />}
-      {tab === 'vision' && <VisionSettings />}
+      {tab === 'voice' && (
+        <>
+          <VoiceSettings />
+          <VisionSettings />
+        </>
+      )}
       {tab === 'users' && <UsersManager />}
-      {tab === 'sessions' && <SessionsSettings />}
     </>
   );
 }

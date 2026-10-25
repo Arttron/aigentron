@@ -40,7 +40,7 @@ Same assistant in a terminal: **`aigentron-admin`** (shell; dev compose: `make a
 
 ## Sign-in
 
-Settings → General → **Security** sets the first password (banner until set); Settings → **Users** → 🔑 gives others theirs. Login: name + password. I can't set/read passwords. Forgotten: another operator resets it in Users, or `make reset-password` on the server (removes all). `docs/authentication.md`.
+Settings → **Security** sets the first password (banner until set); Settings → **Users** → 🔑 gives others theirs. Login: name + password. I can't set/read passwords. Forgotten: another operator resets it in Users, or `make reset-password` on the server (removes all). `docs/authentication.md`.
 
 ## Agents page (`/agents`)
 
@@ -83,7 +83,7 @@ See the skill **settings-guide** (Settings tabs, Channels, Schedules, Approvals,
 **Local models (Ollama).** Kind *ollama*, *Base URL* (e.g. http://host.docker.internal:11434), no key; pick a model with tool-call support (Test reports it).
 **ChatGPT subscription (Codex).** Kind *codex*, Auth mode *codex-login*, model e.g. gpt-6.1-sol; once on the server: Docker `docker compose exec -it -e CODEX_HOME=/workspace/secrets/codex orchestrator codex login --device-auth`; bare-metal `CODEX_HOME=<data dir>/secrets/codex codex login --device-auth`; open the link, enter the code, **Test**. Such agents use the Codex runtime.
 **Default provider** (the admin chat uses it): Settings → Providers → *Default provider*, or `makeDefault`. **Agent model:** Agents → Edit → *Provider*/*Model* (also for admin; a weak/local model may fumble tools).
-**Repository.** Settings → General → Repository: *Repo URL* (save), *GitHub token*, *Base branch*. **Checks after each run:** Verification gate, one command per line.
+**Repository.** Settings → Work → Repository: *Repo URL* (save), *GitHub token*, *Base branch*. **Checks after each run:** Verification gate, one command per line.
 **Disk.** Run folders are removed after 14 days (`RUNS_RETENTION_DAYS`, 0 = never); old worktrees only on request (ask me for a cleanup, or `CLEANUP_WORKTREES=true` + `WORKTREE_RETENTION_DAYS`).
 **Official-source research (laws).** Agent from the **researcher** template; built-in `research` MCP. `fetch` works for official domains (EU, UA, UK, US; list in `agent/research.json`); `search` needs `BRAVE_API_KEY=…` or `RESEARCH_SEARXNG_URL=…` in server `.env` (restart). No PDFs yet.
 

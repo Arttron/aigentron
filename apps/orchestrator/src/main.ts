@@ -44,14 +44,14 @@ async function bootstrap(): Promise<void> {
   installProcessGuards();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(AppConfigService);
-  // Domain allow-list (Settings → General → Access). Applies to everything, the dashboard files included. Local names, IPs and
+  // Domain allow-list (Settings → Security → Access). Applies to everything, the dashboard files included. Local names, IPs and
   // single-word hosts always pass, so port forwarding / ssh -L / opening the server by IP behave as before.
   const access = app.get(AccessService);
   app.use((req: { headers: Record<string, string | string[] | undefined> & { host?: string }; socket: { remoteAddress?: string } }, res: { status: (n: number) => { type: (t: string) => { send: (b: string) => void } } }, next: () => void) => {
     if (access.allowsRequest(req.headers.host, req.socket.remoteAddress, req.headers)) return next();
-    res.status(421).type('text/plain').send('This address is not served here. If you own this server, allow the domain in Settings → General → Access, or open it by IP / localhost.');
+    res.status(421).type('text/plain').send('This address is not served here. If you own this server, allow the domain in Settings → Security → Access, or open it by IP / localhost.');
   });
-  // Cloudflare Access (Settings → General): under a real domain name every request must carry Access's signed token.
+  // Cloudflare Access (Settings → Security): under a real domain name every request must carry Access's signed token.
   const cfAccess = app.get(CloudflareAccessService);
   app.use(async (req: { headers: Record<string, string | string[] | undefined> }, res: { status: (n: number) => { type: (t: string) => { send: (b: string) => void } } }, next: () => void) => {
     const host = req.headers.host as string | undefined;

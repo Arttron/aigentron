@@ -1,5 +1,5 @@
 /**
- * How long and how far one agent run may go (Settings → General → Run limits). The environment variables are the defaults;
+ * How long and how far one agent run may go (Settings → Work → Run limits). The environment variables are the defaults;
  * what a person saves in the dashboard wins and applies from the next run, no restart.
  */
 export interface RunLimits {

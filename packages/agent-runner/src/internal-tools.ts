@@ -37,6 +37,7 @@ export type InternalToolHandlers = Pick<
   | 'onLookAt'
   | 'onVideoDigest'
   | 'onStartPreview'
+  | 'onStopPreview'
   | 'onProposeLearnedSkill'
   | 'admin'
 >;
@@ -349,12 +350,22 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'preview_worktree',
       description:
-        "Start (or reuse) a live dev server for THIS task's worktree and get its URL, so you can preview your own in-progress changes in the browser (not the base app). Call it before navigating/screenshotting with the browser tools, then open the returned URL. The server is torn down automatically when the task finishes.",
+        "Start (or reuse) a live dev server for THIS task's worktree and get its URL, so you can preview your own in-progress changes in the browser (not the base app). Call it before navigating/screenshotting with the browser tools, then open the returned URL. Start it ONCE per check and call `stop_preview` as soon as the screenshots are taken: one process at a time, none left running (it is also stopped when the task finishes, but do not rely on that).",
       shape: {},
       handler: async () => {
         const { url } = await params.onStartPreview!();
         return `Preview of your worktree is live at ${url} — navigate the browser there.`;
       },
+    });
+  }
+
+  if (params.onStopPreview) {
+    specs.push({
+      name: 'stop_preview',
+      description:
+        "Stop the preview dev server of THIS task (the one `preview_worktree` started). Call it right after you have taken the screenshots you need — no process should be left running. Safe to call when nothing is running. If you need the page again later, call `preview_worktree` again.",
+      shape: {},
+      handler: async () => ((await params.onStopPreview!()).stopped ? 'The preview server is stopped.' : 'No preview server was running.'),
     });
   }
 

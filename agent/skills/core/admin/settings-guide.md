@@ -7,23 +7,28 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Settings (`/settings`) — tabs
 
-General, Providers, LiteLLM, MCP servers, MCP endpoint, Channels, Schedules, Voice, Vision, Users, Signed-in devices.
+General, Work, Security, Providers, LiteLLM, MCP, Channels, Schedules, Voice & vision, Users.
 
-**General** (cards, top to bottom):
+**General** (everyday look and upkeep; cards top to bottom):
+- *Display*: **Theme** (per browser), **Assistant** (put the mascot back), debug mode.
+- *Alert sound* (per browser): a short sound when an approval card appears — a falling "uh-oh" by default; pick another (chime, ping, knock, bell), set the volume, also for agent questions, only while the tab is in the background; **Test the sound**. The browser plays it only after one click on the page.
+- *Task titles* (see above).
 - *Version & updates*: **Check now**, **Update to X** (operator confirms; restart 1–2 min; previous kept for `aigentron rollback`; Docker can't self-update: `aigentron update`). I can start it (`propose_update`).
 - *Disk & cleanup*: free-space bar, what takes it, **Free up space now** (regenerable caches only). Checked every 10 min: low = banner + message to the default chat; critical = auto-clear. Attachments never auto-deleted.
-- *Security* (passwords; optional two-factor sign-in with an authenticator app — each person turns it on for themselves; an operator/admin can tick *Require two-factor sign-in* for a user in Users (set up at their next sign-in) and **Reset 2FA** for a lost phone in Users; docs/authentication.md), *Access* (allowed domains, empty = any; `localhost`/IPs always work unless **Only these domains**), *Web server* (port 80 optional; PEM cert + key → HTTPS on 443; `aigentron access`), *Cloudflare Access* (team domain + AUD, Save, **Test**; requests on real domains without Cloudflare's token are refused; localhost/IP/LAN exempt). I handle domains and Cloudflare via `access_status`, `propose_allowed_domains`, `propose_cloudflare_access`.
-- *Approvals*: **No approvals mode** (admin only) = the global level; a project (its settings) and a task (🛡 selector, subtasks follow) can override it, most specific wins. Off: no cards (step/time limits go on alone), except credentials/charter files and admin changes.
+
+**Work** (how agents work; cards top to bottom):
+- *Approvals*: **No approvals mode** (admin only) = the global level; a project (its settings) and a task (🛡 selector, subtasks follow) can override it, most specific wins. Off: no cards (step/time limits go on alone), except a merge, an action on main/master (push, checkout, reset, delete …), anything outside the working directory, credentials/charter files and admin changes.
 - *Run limits*: first time window, extension while still working, quiet limit, steps per run, and at the ceiling a card asks whether a working run may go on (+N min). Env vars are defaults.
-- *Task titles* (see above).
-- Then: *Repository (GitHub)* (*Repo URL* blank = local workspace; *Base branch*; *GitHub token*; *Project subdirectory* = RELATIVE folder like `apps/web`, a URL is rejected); *Escalations* (default channel + chat/thread for questions from tasks with no channel); *Agent instructions (skill)* appended to every prompt; *Verification gate* (commands per line after each run + max auto-fix attempts); *Task queue* (concurrency); *Approvals* (timeout, s); *Display*.
+- Then one form with **Save settings**: *Repository (GitHub)* (the Default project's: *Repo URL* blank = local workspace; *Base branch*; *GitHub token*; *Project subdirectory* = RELATIVE folder like `apps/web`, a URL is rejected); *Verification gate* (commands per line after each run + max auto-fix attempts); *Task queue* (concurrency); *Approval timeout* (s); *Agent instructions (skill)* appended to every prompt; *Escalations* (default channel + chat/thread for questions from tasks with no channel).
+
+**Security**: *Security* (passwords; optional two-factor sign-in with an authenticator app — each person turns it on for themselves; an operator/admin can tick *Require two-factor sign-in* for a user in Users (set up at their next sign-in) and **Reset 2FA** for a lost phone in Users; docs/authentication.md); *Signed-in devices* (own sessions, operator/admin: all; **Sign out** per device / "my other devices" / "X everywhere"); *Access* (allowed domains, empty = any; `localhost`/IPs always work unless **Only these domains**); *Cloudflare Access* (team domain + AUD, Save, **Test**; requests on real domains without Cloudflare's token are refused; localhost/IP/LAN exempt); *Web server* (port 80 optional; PEM cert + key → HTTPS on 443; `aigentron access`). I handle domains and Cloudflare via `access_status`, `propose_allowed_domains`, `propose_cloudflare_access`.
 
 **Providers**: **+ Add provider**, **Default provider**, rows: **Test**, **Edit** (**Delete provider** is in that dialog). Codex / Claude-oauth: **Sign in**. Form: *Name*, *Kind*, *Base URL*, *Auth mode*, *Secret*, *Default model* (**Load models**), *Rate limits*.
 **LiteLLM**: model routes of the gateway (advanced).
-**MCP servers**: built-in playwright, **playwright-proxy**, github, postgres, code-intel, **research**. Add: paste whatever the server's page gives — `{"mcpServers": {…}}` (Claude Desktop / Cursor / LM Studio / `.mcp.json`), one `{url, headers}` or `{command, args}` object, a `claude mcp add …` command or a URL; the page shows what it understood (the missing `type` is filled in; the name is taken from the text), **Add**. `"readOnlyTools": ["*"]` (or names) marks tools read-only (no approvals); `"trustAnnotations": true` + **Discover tools**: server-annotated read-only tools skip approvals. Agents use a server only if in their `mcp:`. I can't change MCP servers.
-**MCP endpoint**: outside clients (Claude Desktop) drive the platform. **Users**: people, roles. **Signed-in devices**: own sessions (operator/admin: all), **Sign out** per device / "my other devices" / "X everywhere".
-**Voice**: speech-to-text (🎤) and text-to-speech (🔊); each a switch, *Provider* (kind OpenAI: OpenAI, Groq, local Whisper/TTS by Base URL), *Model*, *Language*/*Voice*, **Test**. Telegram `/voice on|off`; dashboard 🔊 and **🎙 Voice mode**. Cloud providers receive audio/text. Mic needs HTTPS/localhost. Needs a provider key: guide the user.
-**Vision**: provider + model that describe photos/video frames (not Claude/Codex sign-ins; **Test** saves first). Without it `look_at` falls back to the agent's own cloud model. `docs/media.md`.
+**MCP** (two cards). *MCP servers*: built-in playwright, **playwright-proxy**, github, postgres, code-intel, **research**. Add: paste whatever the server's page gives — `{"mcpServers": {…}}` (Claude Desktop / Cursor / LM Studio / `.mcp.json`), one `{url, headers}` or `{command, args}` object, a `claude mcp add …` command or a URL; the page shows what it understood (the missing `type` is filled in; the name is taken from the text), **Add**. `"readOnlyTools": ["*"]` (or names) marks tools read-only (no approvals); `"trustAnnotations": true` + **Discover tools**: server-annotated read-only tools skip approvals. Agents use a server only if in their `mcp:`. I can't change MCP servers.
+*MCP endpoint*: outside clients (Claude Desktop) drive the platform. **Users**: people, roles.
+**Voice & vision** (two cards). *Voice*: speech-to-text (🎤) and text-to-speech (🔊); each a switch, *Provider* (kind OpenAI: OpenAI, Groq, local Whisper/TTS by Base URL), *Model*, *Language*/*Voice*, **Test**. Telegram `/voice on|off`; dashboard 🔊 and **🎙 Voice mode**. Cloud providers receive audio/text. Mic needs HTTPS/localhost. Needs a provider key: guide the user.
+*Vision*: provider + model that describe photos/video frames (not Claude/Codex sign-ins; **Test** saves first). Without it `look_at` falls back to the agent's own cloud model. `docs/media.md`.
 I can change only: default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory — never repo URL/tokens — and revert my own changes.
 
 ## Channels (Telegram)
@@ -37,11 +42,11 @@ Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N 
 
 ## Approvals
 
-A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails: `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` block a task. Approvals time out (deny) per Settings → General → Approvals.
+A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails: `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` block a task. Approvals time out (deny) per Settings → Work → Approvals.
 
 ## Questions from agents
 
-`ask_user`: a card with **answer buttons** (one or several) in the dock bottom right and in Telegram (tap, text or number); first answer wins; none in 1 h → the agent chooses or reports blocked. In Telegram a task blocked on the person becomes the chat's active one: the next plain reply answers it. Blocked/stalled questions escalate to the parent lead or the default channel (Settings → Escalations). `docs/questions.md`.
+`ask_user`: a card with **answer buttons** (one or several) in the dock bottom right and in Telegram (tap, text or number); first answer wins; none in 1 h → the agent chooses or reports blocked. In Telegram a task blocked on the person becomes the chat's active one: the next plain reply answers it. Blocked/stalled questions escalate to the parent lead or the default channel (Settings → Work → Escalations). `docs/questions.md`.
 
 ## Camera, video, pictures
 

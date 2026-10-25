@@ -6,7 +6,7 @@ Goal: open the dashboard from a laptop or phone over HTTPS **without opening any
 
 | | **A. Built-in** (default, nothing to sign up for) | **B. Cloudflare Access** (alternative, or an extra layer) |
 |---|---|---|
-| What it does | Passwords per user (`docs/authentication.md`) + a list of **allowed domains** (Settings → General → Access) | Cloudflare asks visitors to sign in (Google / GitHub / e-mail one-time code) **before** your server sees them |
+| What it does | Passwords per user (`docs/authentication.md`) + a list of **allowed domains** (Settings → Security → Access) | Cloudflare asks visitors to sign in (Google / GitHub / e-mail one-time code) **before** your server sees them |
 | Who is let in | People with a password for this server | People you list in the Access policy |
 | Second factor | No (use a long passphrase) | Yes, effectively — the e-mail/identity provider |
 | The login page is visible to | anyone who can reach the address (names and roles are listed there) | nobody until they pass Cloudflare |
@@ -45,7 +45,7 @@ phone / laptop ──HTTPS──▶ Cloudflare (Access login) ──tunnel──
 3. *(Way B — optional but recommended)* **Access → Applications → Add an application → Self-hosted**: the same hostname, a policy **Allow**
    for your e-mail(s) or your identity provider (Google/GitHub/one-time e-mail code). Set a session length you are comfortable with.
    Make the policy cover the **whole hostname** (not just `/`). Free plan: up to 50 Access users.
-4. *(Way A)* In the dashboard: Settings → General → **Access**, add `dev.your-domain.com` (or set `PUBLIC_URL`, which adds it automatically).
+4. *(Way A)* In the dashboard: Settings → **Security** → **Access**, add `dev.your-domain.com` (or set `PUBLIC_URL`, which adds it automatically).
 
 ## Start it (dev / docker compose)
 
@@ -75,7 +75,7 @@ if no dashboard password is set yet, prints a loud warning at startup and shows 
 
 By default `localhost`, IP addresses and single-word names are **always** accepted (so a port forward, an SSH tunnel or opening the server by IP never locks you out). That also means
 `https://<server-ip>/` shows the dashboard — protected only by the passwords. To make the server answer **only** under your domains, add at least one domain and tick
-**Only these domains** (Settings → General → Access, or `aigentron access` → *Refuse access by IP address*): from outside, a request that comes in under an IP address or a bare server
+**Only these domains** (Settings → Security → Access, or `aigentron access` → *Refuse access by IP address*): from outside, a request that comes in under an IP address or a bare server
 name gets an error page instead of the dashboard — and a forged `Host: localhost` does not help. What still works: the server itself (agent hooks, health checks,
 `aigentron`, an SSH tunnel *to* it — they connect from the machine, so they count as local) and requests that come through your tunnel / reverse proxy under an allowed domain.
 Requests relayed by a proxy (with forwarding headers) count as "outside", so a proxy cannot be used to reach the server by IP either. It applies to every port (3001, 80, 443)
@@ -84,7 +84,7 @@ This is not a substitute for passwords (Settings → Security): set both.
 
 ## Let the server serve ports 80 and 443 itself (no proxy needed)
 
-The server can terminate HTTPS on its own — **Settings → General → Web server**, or `aigentron access` → *Ports & HTTPS certificate*:
+The server can terminate HTTPS on its own — **Settings → Security → Web server**, or `aigentron access` → *Ports & HTTPS certificate*:
 
 - Port **3001** (HTTP) is always there. Port **80** (plain HTTP) is **optional** — switch it on in the same place when you want it.
 - Install a **certificate** (full chain + private key, PEM, key not password-protected) and the server serves **HTTPS on 443**; port 80 (when on) **redirects domain names to HTTPS**
@@ -103,7 +103,7 @@ Use a reverse proxy (Caddy / nginx) instead if you already run one on 80/443 —
 ## Make the server check Cloudflare Access itself (optional)
 
 Cloudflare Access alone protects the hostname *if* every request really goes through it. To make the server enforce that, give it the two values of your Access
-application — **Settings → General → Cloudflare Access** in the dashboard, or `aigentron access` → *Cloudflare Access* in a terminal on the server:
+application — **Settings → Security → Cloudflare Access** in the dashboard, or `aigentron access` → *Cloudflare Access* in a terminal on the server:
 
 - **Team domain** — Zero Trust → Settings → *Team domain* (`yourteam.cloudflareaccess.com`);
 - **Application Audience (AUD) tag** — Access → Applications → your application → *Overview*.

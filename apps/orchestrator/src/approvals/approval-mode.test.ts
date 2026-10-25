@@ -20,6 +20,13 @@ describe('approval mode', () => {
     expect(approvalWaived('off', CREATE_TASK_TOOL, risky)).toBe(true);
     expect(approvalWaived('off', EXTEND_RUN_TOOL, risky)).toBe(true); // more run time is granted by itself: the person chose not to be asked
   });
+  it('off mode still asks about a merge, an action on main / master and anything outside the working directory', () => {
+    for (const guard of ['merge', 'main-branch', 'outside'] as const) {
+      expect(approvalWaived('off', 'Bash', { dangerous: true, guard })).toBe(false);
+      expect(approvalWaived('off', PUSH_BRANCH_TOOL, { dangerous: true, guard })).toBe(false);
+      expect(approvalWaived('off', 'mcp__github__merge_pull_request', { dangerous: true, guard })).toBe(false);
+    }
+  });
   it('off mode never waives credentials / protected files or admin proposals', () => {
     expect(approvalWaived('off', 'Bash', { dangerous: true, hard: true })).toBe(false);
     expect(approvalWaived('off', PROPOSE_SETTINGS_TOOL, risky)).toBe(false);

@@ -1,10 +1,11 @@
-import { type ChildProcess, spawn } from 'node:child_process';
+import { type ChildProcess, execFile, spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { playwrightSseUrl } from '../addons/addons-core';
+import { parseLsofPids, parsePsTable, parseSsPids, portOwner } from './preview-core';
 
 /** A running ephemeral preview: the worktree's dev server + its allocated port. */
 interface Preview {
@@ -64,10 +65,7 @@ export class PreviewService implements OnModuleDestroy {
       this.touch(existing);
       return { url: existing.url };
     }
-    const port = this.allocatePort();
-    if (port == null) {
-      throw new Error(`No free preview slot (max ${POOL_SIZE} concurrent previews)`);
-    }
+    const port = await this.allocatePort();
     const url = `http://${this.publicHost()}:${port}`;
     this.logger.log(`Starting preview for task ${taskId} at ${url} (cwd=${cwd})`);
 
@@ -81,7 +79,9 @@ export class PreviewService implements OnModuleDestroy {
         // hook secret, model keys). Just what a dev server needs to boot.
         env: scrubbedEnv(port),
         stdio: 'ignore',
-        detached: false,
+        // its own process group: npm and the dev server it starts are grandchildren of this shell, and stopping the preview must end all of them
+        // (a server that outlived its preview kept the port and was later shown as another project's site)
+        detached: true,
       },
     );
 
@@ -104,6 +104,7 @@ export class PreviewService implements OnModuleDestroy {
 
     try {
       await this.waitReady(port, proc);
+      await this.assertOurs(port, proc, cwd);
     } catch (err) {
       this.stop(taskId);
       throw new Error(`Preview failed to start: ${(err as Error).message}`);
@@ -111,19 +112,16 @@ export class PreviewService implements OnModuleDestroy {
     return { url };
   }
 
-  /** Stop and clean up a task's preview, if any. Idempotent. */
-  stop(taskId: string): void {
+  /** Stop and clean up a task's preview, if any. Idempotent. Says whether there was one. */
+  stop(taskId: string): boolean {
     const p = this.running.get(taskId);
-    if (!p) return;
+    if (!p) return false;
     this.running.delete(taskId);
     clearTimeout(p.idleTimer);
     p.proc.removeAllListeners('exit');
-    try {
-      p.proc.kill('SIGTERM');
-    } catch {
-      // already gone
-    }
+    killTree(p.proc);
     this.logger.log(`Stopped preview for task ${taskId} (port ${p.port})`);
+    return true;
   }
 
   onModuleDestroy(): void {
@@ -136,14 +134,36 @@ export class PreviewService implements OnModuleDestroy {
     p.idleTimer = setTimeout(() => this.stop(p.taskId), IDLE_MS);
   }
 
-  /** First free port in the pool, or null when all slots are taken. */
-  private allocatePort(): number | null {
+  /**
+   * The first port of the pool that is free for real: not one of our previews and nothing at all answering on it (a server left behind by an agent or an earlier
+   * preview would otherwise be taken for the new one and its pages shown as this project's).
+   */
+  private async allocatePort(): Promise<number> {
     const used = new Set([...this.running.values()].map((p) => p.port));
+    const busy: string[] = [];
     for (let i = 0; i < POOL_SIZE; i++) {
       const port = PORT_BASE + i;
-      if (!used.has(port)) return port;
+      if (used.has(port)) continue;
+      if (!(await tcpProbe(port))) return port;
+      const pids = await listenerPids(port);
+      busy.push(`${port}${pids?.length ? ` (pid ${pids.join(', ')})` : ''}`);
+      this.logger.warn(`Preview port ${port} is already in use by something that is not a preview of ours${pids?.length ? ` (pid ${pids.join(', ')})` : ''} — skipped`);
     }
-    return null;
+    throw new Error(
+      busy.length
+        ? `No free preview port: ${busy.join(', ')} ${busy.length === 1 ? 'is' : 'are'} answered by other processes that are not previews of ours (a dev server left running?). Stop them, or ask a person to.`
+        : `No free preview slot (max ${POOL_SIZE} concurrent previews)`,
+    );
+  }
+
+  /** The port answers — but is the answer from the dev server WE started (not one that was already there)? Throws when it is someone else's. */
+  private async assertOurs(port: number, proc: ChildProcess, cwd: string): Promise<void> {
+    if (!proc.pid) return;
+    const listeners = await listenerPids(port);
+    const owner = portOwner(listeners, proc.pid, await processTable());
+    if (owner.kind === 'foreign') {
+      throw new Error(`port ${port} is served by another process (pid ${owner.pids.join(', ')}), not by this project's dev server in ${cwd} — the page there would be a different site`);
+    }
   }
 
   /** Poll until the port accepts a TCP connection, the proc exits, or we time out. */
@@ -182,4 +202,40 @@ function scrubbedEnv(port: number): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { PORT: String(port), HOST: '0.0.0.0', NODE_ENV: 'development' };
   for (const k of allow) if (process.env[k] !== undefined) env[k] = process.env[k];
   return env;
+}
+
+/** SIGTERM to the whole process group of a preview, SIGKILL a few seconds later for whatever ignored it. */
+function killTree(proc: ChildProcess): void {
+  const pid = proc.pid;
+  if (!pid) return;
+  const send = (sig: NodeJS.Signals): boolean => {
+    try {
+      process.kill(-pid, sig); // the group: the shell, npm and the dev server
+      return true;
+    } catch {
+      try {
+        proc.kill(sig);
+        return true;
+      } catch {
+        return false; // already gone
+      }
+    }
+  };
+  if (!send('SIGTERM')) return;
+  setTimeout(() => send('SIGKILL'), 5000).unref();
+}
+
+const run = (cmd: string, args: string[]): Promise<string | null> =>
+  new Promise((resolve) => execFile(cmd, args, { timeout: 4000, maxBuffer: 1 << 20 }, (err, stdout) => resolve(err && !stdout ? null : String(stdout))));
+
+/** Pids listening on a TCP port (lsof, else ss); null when neither tool is there to ask. */
+async function listenerPids(port: number): Promise<number[] | null> {
+  const lsof = await run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp']);
+  if (lsof !== null) return parseLsofPids(lsof);
+  const ss = await run('ss', ['-ltnpH', `sport = :${port}`]);
+  return ss === null ? null : parseSsPids(ss);
+}
+
+async function processTable(): Promise<Map<number, number>> {
+  return parsePsTable((await run('ps', ['-A', '-o', 'pid=,ppid='])) ?? '');
 }

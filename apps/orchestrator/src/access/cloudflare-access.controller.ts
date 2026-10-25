@@ -4,7 +4,7 @@ import { CloudflareAccessService } from './cloudflare-access.service';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
 
-/** Settings → General → Cloudflare Access (and `aigentron access`). */
+/** Settings → Security → Cloudflare Access (and `aigentron access`). */
 @Controller('cloudflare-access')
 export class CloudflareAccessController {
   constructor(private readonly cf: CloudflareAccessService) {}

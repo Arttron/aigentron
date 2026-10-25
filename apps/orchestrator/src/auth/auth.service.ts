@@ -122,7 +122,7 @@ export class AuthService implements OnModuleInit {
       const pub = publicOrigin(process.env.PUBLIC_URL);
       this.logger.warn(
         `No sign-in password is set — the API is open to anyone who can reach it${pub ? ` (PUBLIC_URL=${pub}!)` : ''}. ` +
-          'Set one in the dashboard (Settings → General → Security) or with ADMIN_PASSWORD.',
+          'Set one in the dashboard (Settings → Security) or with ADMIN_PASSWORD.',
       );
     }
   }

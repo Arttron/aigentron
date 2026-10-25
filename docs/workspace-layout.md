@@ -50,7 +50,7 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 - **One project per task.** Every task belongs to a project (`Task.projectId`; the default project unless another slug was given,
   a subtask follows its lead). The worker resolves the task's project ONCE per job (`ProjectsService.contextFor`) and everything
   below — checkout, mode, cwd, verify commands and attempts, write roots, the `workspace_*` folder, the default lead, the
-  escalation chat — comes from that project. The global Settings → General repository fields are the default project's
+  escalation chat — comes from that project. The global Settings → Work repository fields are the default project's
   (a write there is mirrored into the project row). Git credentials are the project's (`docs/projects.md`: token / SSH key files
   in the secrets dir, `GIT_CREDENTIALS` port) and travel in the env of EACH git command — clone/fetch (`RepoSyncService`),
   worktree creation, push; nothing is written into a checkout's `.git/config`, so agents never hold a secret. Providers and
@@ -59,7 +59,7 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 - **Shared mode** (`Project.isolation = shared`, or `WORKSPACE_SHARED=true` when the project follows the installation — the
   default in all profiles): every task of the project works directly in the project's checkout, one task of that project at a
   time (an in-process FIFO lock per project in the worker). Tasks of DIFFERENT projects run side by side under the global
-  concurrency cap (Settings → General): a task waiting for its project's lock lends its slot to the others, so a busy project
+  concurrency cap (Settings → Work): a task waiting for its project's lock lends its slot to the others, so a busy project
   never starves the rest; a lead never holds the lock while it waits for its subtasks. No per-task branch or PR; the agents
   edit whatever branch is currently checked out. If a repo URL + credentials are configured the orchestrator pushes the
   current branch to the project's remote. With only the default project this is exactly the old behaviour (the seeded
@@ -70,11 +70,11 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
   API still uses the installation's token). Tasks of such a project run in parallel.
 - **Docs projects** (`Project.kind = docs`): no checkout, no verify, no push; the agent's working directory is the project's `work/`.
 - The agent's working directory is the checkout root, or the project's *subdirectory* (`Project.repoSubdir`; the default project's
-  comes from *Project subdirectory* in Settings → General — a **relative folder inside the repo**, validated; empty = root). Chat
+  comes from *Project subdirectory* in Settings → Work — a **relative folder inside the repo**, validated; empty = root). Chat
   agents (the admin) run in the agent dir instead and have no file tools.
 - Verify commands and the number of fix attempts are the project's (`Project.verifyCommands` / `verifyMaxAttempts`; the default
-  project's are the Settings → General values). A task without an agent gets the project's `defaultAgent`, else the global one; a
-  blocked task without a chat thread escalates to the project's notification chat, else the global one (Settings → Escalations). A messenger chat that is a project's notification chat (the project's notify channel + chat) is **bound** to that project: the chat works **only** with it: `/tasks` and `/task <id>` show only its tasks; a new task (text or file) starts in it; the active task, a quoted message or a button of another project's task is ignored (a plain message then starts a new task) and switching to one is refused; escalations of other projects' tasks are not sent to it, even when it is the global fallback chat; the approvals and questions of dashboard tasks (nobody answered them on the page) go to their project's own chat only — at once, even while the dashboard is open — and a project without a chat (the default one too) is announced only in a free chat, after the usual ~10 s and only when nobody is at the dashboard; `/settings` names the project. If two projects point at the same chat it is ambiguous and nothing is narrowed.
+  project's are the Settings → Work values). A task without an agent gets the project's `defaultAgent`, else the global one; a
+  blocked task without a chat thread escalates to the project's notification chat, else the global one (Settings → Work → Escalations). A messenger chat that is a project's notification chat (the project's notify channel + chat) is **bound** to that project: the chat works **only** with it: `/tasks` and `/task <id>` show only its tasks; a new task (text or file) starts in it; the active task, a quoted message or a button of another project's task is ignored (a plain message then starts a new task) and switching to one is refused; escalations of other projects' tasks are not sent to it, even when it is the global fallback chat; the approvals and questions of dashboard tasks (nobody answered them on the page) go to their project's own chat only — at once, even while the dashboard is open — and a project without a chat (the default one too) is announced only in a free chat, after the usual ~10 s and only when nobody is at the dashboard; `/settings` names the project. If two projects point at the same chat it is ambiguous and nothing is narrowed.
 - Approvals gate risky actions; reads of credential files (`.env*`, `auth.json`, `.git/config`, `/proc/*/environ`, `secrets/`, ssh/cloud keys)
   need approval. Note the project itself may contain such files (`.env.local`, `.env.production`…) — they are gated, not hidden.
 - With agent isolation on (`AGENT_RUN_AS_UID`, `docs/authentication.md`) the agent is a separate OS user: `secrets/`, the database,
@@ -118,7 +118,7 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 
 ## 4a. Disk space
 
-- **Monitoring:** the server reads the free space of the data disk every 10 minutes. When it drops below the *warn* limit a banner appears across the dashboard, Settings → General → **Disk & cleanup** shows the numbers and what takes the space, and a message goes to the default notification chat (Settings → Escalations) — or, if none is set, to every allowed chat of every enabled channel (at most every 12 h while it stays low).
+- **Monitoring:** the server reads the free space of the data disk every 10 minutes. When it drops below the *warn* limit a banner appears across the dashboard, Settings → General → **Disk & cleanup** shows the numbers and what takes the space, and a message goes to the default notification chat (Settings → Work → Escalations) — or, if none is set, to every allowed chat of every enabled channel (at most every 12 h while it stays low).
 - **Automatic relief at *critical*:** all video digests, fetched pages older than 30 days and run folders older than 3 days are removed by the server itself (once per 6 h). Never your files, tasks, notes or knowledge bases. **Free up space now** does the same on demand (`POST /api/maintenance/relieve`).
 - **Regular tidying (every 6 h):** run folders (14 days), video digests (30 days), fetched pages (180 days). Task attachments (your files) are only *reported* unless you set `ATTACHMENTS_RETENTION_DAYS` — the report shows how much belongs to tasks finished more than 90 days ago (and the retention in force); delete those tasks yourself or ask the admin.
 - **Container logs** are rotated (3 × 20 MB per container) in the compose file and in the installer's `docker run`.
@@ -151,7 +151,7 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
 - Concurrency in Settings is the cap for all projects together; tasks of one shared-mode project still run one at a time. Installs
   made in shared mode were seeded with 1 — raise it to run several projects at once. Chat turns (the admin) no longer queue
   behind a running task.
-- Settings → General still shows the repository / subdirectory / verify fields: they are the default project's (writes are
+- Settings → Work still shows the repository / subdirectory / verify fields: they are the default project's (writes are
   mirrored into the project row; a change made through `PATCH /api/projects/default` is not shown back there yet).
 - The project often carries its own `.env.*` files; they are inside the agents' working directory.
 - Dev stack, project repo: stale `agent/task-*` worktrees/branches from the former worktree mode may exist (see the report) —

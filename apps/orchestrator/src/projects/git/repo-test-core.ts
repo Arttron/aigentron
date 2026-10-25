@@ -50,7 +50,7 @@ function tokenHint(provider: RepoProvider): string {
     case 'github':
       return 'Check the token on GitHub → Settings → Developer settings → Personal access tokens: it must not be expired and must have "Contents: read & write" (fine-grained) or the "repo" scope (classic) for this repository. Then save it again here.';
     case 'gitlab':
-      return 'Check the token on GitLab → the project → Settings → Access tokens (or your Personal access tokens): not expired, role Developer or above, scopes read_repository + write_repository. Then save it again here.';
+      return 'Check the token on GitLab → the project → Settings → Security → Access tokens (or your Personal access tokens): not expired, role Developer or above, scopes read_repository + write_repository. Then save it again here.';
     case 'bitbucket':
       return 'Bitbucket needs a repository access token or an app password with "Repositories: read / write". Then save it again here.';
     default:

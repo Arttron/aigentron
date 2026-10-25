@@ -43,7 +43,7 @@ SSH, keep it 0600, delete it afterwards.
 - **Stop the old server** (`sudo aigentron stop`, and disable it) once the new one works. Two servers must not share one **Telegram bot** (a bot token polls from one place) or push to the
   same repositories.
 - On the new server: **re-enable the add-ons** (`sudo aigentron addon enable browser` / `playwright`); sign in again in the browser add-on.
-- **`.env`**: copy what you need from `env-from-backup.txt` (domains, `PUBLIC_URL`, API keys set there, `AGENT_*` limits). Settings → Access / Cloudflare Access: the **domain names** of the
+- **`.env`**: copy what you need from `env-from-backup.txt` (domains, `PUBLIC_URL`, API keys set there, `AGENT_*` limits). Settings → Security → Access / Cloudflare Access: the **domain names** of the
   old server do not exist on the new one — check them before you lock yourself out (`aigentron access`).
 - Agent isolation (`aigentron harden`) was a property of the old server: run it again on the new one if you used it.
 - Projects with a remote repository fetch by themselves at the next task (Projects → settings → **Test** checks the access: the deploy keys moved with `secrets/`; a host that had them

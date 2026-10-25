@@ -23,7 +23,7 @@ const ago = (iso: string): string => {
   return `${Math.round(s / 86_400)} d ago`;
 };
 
-/** Settings → General → Signed-in devices: your sessions; an operator/admin also sees (and can end) everybody's. */
+/** Settings → Security → Signed-in devices: your sessions; an operator/admin also sees (and can end) everybody's. */
 export function SessionsSettings() {
   const [rows, setRows] = useState<SessionRow[] | null>(null);
   const [me, setMe] = useState<{ id: string; role: string } | null>(null);
@@ -58,7 +58,7 @@ export function SessionsSettings() {
       <Card>
         <SectionTitle>Signed-in devices</SectionTitle>
         <Muted>
-          Nothing to show yet. Devices appear here once sign-in is on (Settings → General → Security) and someone signs in. Sessions that were already signed in before this list existed keep
+          Nothing to show yet. Devices appear here once sign-in is on (Settings → Security) and someone signs in. Sessions that were already signed in before this list existed keep
           working but are not shown.
         </Muted>
       </Card>

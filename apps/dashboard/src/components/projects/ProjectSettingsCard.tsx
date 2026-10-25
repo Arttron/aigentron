@@ -110,7 +110,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
         <Field label="Agents offered when creating a task here (none selected = every agent, as before)">
           <CheckboxGroup options={agents.map((a) => a.name)} selected={pinned} onChange={setPinned} empty="no agents yet" />
         </Field>
-        <Field label="Approvals for this project's tasks (a task can override it; Inherit follows Settings → General → Approvals)">
+        <Field label="Approvals for this project's tasks (a task can override it; Inherit follows Settings → Work → Approvals)">
           <ApprovalModePicker scope={{ project: project.slug }} compact />
         </Field>
         <Field label="Notification channel — where a question from a task of this project is posted">

@@ -18,7 +18,7 @@ const KEYS_TTL_MS = 10 * 60_000;
 const REFETCH_MIN_MS = 60_000;
 
 /**
- * Cloudflare Access as a second, independent gate (Settings → General → Cloudflare Access, `aigentron access`). When on, a request
+ * Cloudflare Access as a second, independent gate (Settings → Security → Cloudflare Access, `aigentron access`). When on, a request
  * that arrives under a real domain name (not localhost / an IP / a single-word LAN name — those always work) must carry a valid
  * Cloudflare Access token, so reaching the origin around Cloudflare (a tunnel hostname without an Access policy) gets you nothing.
  * Stored in `<secretsDir>/cloudflare-access.json`, beside the other access files the approval gate guards.

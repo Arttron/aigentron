@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import {
+import { browserPageAfter, type BrowserPage,
   classifyToolCall,
   forbiddenBrowserNavigation,
   CONTINUE_RUN_TOOL,
@@ -114,7 +114,7 @@ export class ApprovalsService {
     }));
   }
 
-  /** Settings → Approvals: `ask` (default) or `off` (the agents' own risky actions run without a card). */
+  /** Settings → Work → Approvals: `ask` (default) or `off` (the agents' own risky actions run without a card). */
   mode(): ApprovalMode {
     return this.modeStore.read();
   }
@@ -175,6 +175,14 @@ export class ApprovalsService {
     return m;
   }
 
+  /** What each task's browser last navigated to (in memory: a restart forgets it, and 'blank' is the safe-to-click start of a fresh browser). */
+  private readonly browserPages = new Map<string, BrowserPage>();
+  private noteBrowserPage(taskId: string, page: BrowserPage): void {
+    this.browserPages.delete(taskId);
+    this.browserPages.set(taskId, page);
+    if (this.browserPages.size > 500) this.browserPages.delete(this.browserPages.keys().next().value as string);
+  }
+
   /**
    * Classify a pending tool call. Benign calls are allowed inline; dangerous
    * ones create a pending approval and move the task to `needs_approval`.
@@ -189,10 +197,15 @@ export class ApprovalsService {
     const readOnlyMcp = input.toolName.startsWith('mcp__')
       ? await this.moduleRef.get(McpService, { strict: false }).readOnlyMap().catch(() => ({}))
       : undefined;
+    // Where the task's browser is (its own dev server, or a site a person let it visit): clicks and typing on its own pages need no card.
+    const isBrowser = /^mcp__playwright(?:-proxy)?__/i.test(input.toolName);
+    const browserPage = isBrowser ? (this.browserPages.get(input.taskId) ?? 'blank') : undefined;
+    if (isBrowser) this.noteBrowserPage(input.taskId, browserPageAfter(input.toolName, input.toolInput, browserPage));
     const verdict = classifyToolCall(input.toolName, input.toolInput, {
       workspaceRoot: input.workspaceRoot,
       extraWriteRoots: input.extraWriteRoots,
       readOnlyMcp,
+      browserPage,
     });
     if (!verdict.dangerous) {
       return { allow: true };

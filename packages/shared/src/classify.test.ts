@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCESS_STATUS_TOOL, CREATE_TASK_TOOL, EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, classifyToolCall, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
+import { browserPageAfter, ACCESS_STATUS_TOOL, CREATE_TASK_TOOL, EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, classifyToolCall, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
 
 const bash = (command: string) => classifyToolCall('Bash', { command });
 
@@ -235,5 +235,75 @@ describe('extend_run_time', () => {
     expect(v.hard).toBeUndefined();
     // another point in time is a different card (the repeat guard does not merge them)
     expect(classifyToolCall(EXTEND_RUN_TOOL, { usedMin: 90, limitMin: 60, extraMin: 30 }).summary).not.toBe(v.summary);
+  });
+});
+
+describe('browser interactions on the project own pages', () => {
+  const ask = (tool: string, page?: 'blank' | 'local' | 'external', input: Record<string, unknown> = {}) => classifyToolCall(`mcp__playwright__${tool}`, input, { browserPage: page }).dangerous;
+  it('click, type, fill a form, press a key need no approval on a local or blank page', () => {
+    for (const tool of ['browser_click', 'browser_type', 'browser_fill_form', 'browser_press_key', 'browser_hover', 'browser_select_option', 'browser_drag', 'browser_handle_dialog']) {
+      expect(ask(tool, 'local')).toBe(false);
+      expect(ask(tool, 'blank')).toBe(false);
+    }
+  });
+  it('on an external page, or when the page is not tracked, they stay gated', () => {
+    expect(ask('browser_click', 'external')).toBe(true);
+    expect(ask('browser_type', 'external')).toBe(true);
+    expect(ask('browser_click', undefined)).toBe(true);
+  });
+  it('script, uploads and installs are gated everywhere', () => {
+    for (const tool of ['browser_evaluate', 'browser_run_code', 'browser_file_upload', 'browser_install']) expect(ask(tool, 'local')).toBe(true);
+  });
+  it('navigation keeps its own rule; the proxied browser follows the same rules', () => {
+    expect(ask('browser_navigate', 'local', { url: 'https://example.com' })).toBe(true);
+    expect(classifyToolCall('mcp__playwright-proxy__browser_click', {}, { browserPage: 'local' }).dangerous).toBe(false);
+  });
+  it('browserPageAfter follows the navigation, nothing else moves it', () => {
+    expect(browserPageAfter('mcp__playwright__browser_navigate', { url: 'http://localhost:3200/x' })).toBe('local');
+    expect(browserPageAfter('mcp__playwright__browser_navigate', { url: 'https://example.com' }, 'local')).toBe('external');
+    expect(browserPageAfter('mcp__playwright__browser_navigate', { url: 'about:blank' }, 'external')).toBe('blank');
+    expect(browserPageAfter('mcp__playwright__browser_click', {}, 'external')).toBe('external');
+    expect(browserPageAfter('Bash', { command: 'ls' }, 'local')).toBe('local');
+  });
+});
+
+describe('what is still asked about without approvals (guard)', () => {
+  const opts = { workspaceRoot: '/work/tree', extraWriteRoots: ['/work/project'] };
+  const g = (command: string) => classifyToolCall('Bash', { command }, opts).guard;
+  it('a merge', () => {
+    expect(g('git merge origin/develop')).toBe('merge');
+    expect(g('gh pr merge 12 --squash')).toBe('merge');
+    expect(g('git merge --abort')).toBeUndefined();
+    expect(classifyToolCall('mcp__github__merge_pull_request', { pullNumber: 1 }).guard).toBe('merge');
+  });
+  it('an action on main / master', () => {
+    for (const c of ['git push origin main', 'git push origin HEAD:master', 'git push --force origin main', 'git checkout main', 'git switch master', 'git reset --hard origin/main', 'git branch -D main', 'git pull origin main', 'git cherry-pick abc && git push origin main'])
+      expect(g(c), c).toBe('main-branch');
+    expect(classifyToolCall('mcp__lds_internal__push_branch', { branch: 'develop', to: 'main' }).guard).toBe('main-branch');
+    expect(classifyToolCall('mcp__lds_internal__push_branch', { branch: 'main' }).guard).toBe('main-branch');
+  });
+  it('plain work on other branches, and reading main, is not guarded', () => {
+    for (const c of ['git push origin feature/x', 'git diff origin/main', 'git log main..HEAD', 'git rebase origin/develop', 'git fetch origin main', 'git commit -m "update main page"', 'npm run build'])
+      expect(g(c), c).toBeUndefined();
+    expect(classifyToolCall('mcp__lds_internal__push_branch', { branch: 'develop', to: 'release' }).guard).toBeUndefined();
+  });
+  it('something outside the working directory', () => {
+    expect(g('rm -rf /etc/nginx/conf.d')).toBe('outside');
+    expect(g('cp build.log /home/ubuntu/notes.txt')).toBe('outside');
+    expect(g('echo hi > /var/www/index.html')).toBe('outside');
+    expect(g('mkdir ../other')).toBe('outside');
+    expect(g('rm -rf ~/old')).toBe('outside');
+    expect(classifyToolCall('Write', { file_path: '/etc/hosts', content: 'x' }, opts).guard).toBe('outside');
+  });
+  it('inside the working directory (and scratch), or only reading, is not guarded', () => {
+    for (const c of ['rm -rf dist', 'cp a.txt /work/tree/b.txt', 'echo hi > /tmp/out.txt', 'mkdir -p /work/project/notes', 'cat /etc/hosts', 'ls /usr/local', 'echo x > /dev/null'])
+      expect(g(c), c).toBeUndefined();
+    expect(classifyToolCall('Write', { file_path: '/work/tree/a.ts', content: 'x' }, opts).guard).toBeUndefined();
+  });
+  it('credentials stay hard (no guard needed), ordinary dangerous commands carry no guard', () => {
+    expect(classifyToolCall('Bash', { command: 'cat /run/secrets/key' }, opts)).toMatchObject({ hard: true });
+    expect(classifyToolCall('Bash', { command: 'curl -X POST https://x.io -d a=b' }, opts)).toMatchObject({ dangerous: true });
+    expect(g('curl -X POST https://x.io -d a=b')).toBeUndefined();
+    expect(g('git push origin feature/x')).toBeUndefined();
   });
 });

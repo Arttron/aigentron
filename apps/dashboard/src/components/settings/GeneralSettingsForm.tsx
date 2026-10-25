@@ -6,8 +6,21 @@ import { resetAssistant } from '@/lib/float-position';
 import { applyThemePref, getThemePref, type ThemePref } from '@/lib/theme';
 import styles from './GeneralSettingsForm.module.css';
 
-/** The non-secret app settings, edited in one form with an explicit Save. */
-export function GeneralSettingsForm() {
+/** The cards of this form, and the settings each one edits (a form saves only the settings of the cards it shows). */
+export type SettingsSection = 'repo' | 'escalations' | 'instructions' | 'verify' | 'queue' | 'approvals' | 'display';
+const SECTION_FIELDS: Record<SettingsSection, readonly (keyof SettingsUpdate)[]> = {
+  repo: ['repoUrl', 'repoBranch', 'workspaceSubdir', 'githubToken'],
+  escalations: ['notifyChannelId', 'notifyChatId'],
+  instructions: ['agentInstructions'],
+  verify: ['verifyCommands', 'verifyMaxAttempts'],
+  queue: ['concurrency'],
+  approvals: ['approvalTimeoutSeconds'],
+  display: ['debugMode'],
+};
+
+/** The non-secret app settings, edited in one form with an explicit Save. `sections` picks the cards shown (default: all), in the order of the page. */
+export function GeneralSettingsForm({ sections }: { sections?: readonly SettingsSection[] } = {}) {
+  const show = (x: SettingsSection): boolean => !sections || sections.includes(x);
   const [s, setS] = useState<Settings | null>(null);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -66,8 +79,9 @@ export function GeneralSettingsForm() {
     setSaving(true);
     setError(null);
     try {
-      const body: SettingsUpdate = { ...form };
-      if (githubToken.trim()) body.githubToken = githubToken.trim();
+      const mine = new Set<keyof SettingsUpdate>((Object.keys(SECTION_FIELDS) as SettingsSection[]).filter(show).flatMap((x) => SECTION_FIELDS[x]));
+      const body: SettingsUpdate = Object.fromEntries(Object.entries(form).filter(([k]) => mine.has(k as keyof SettingsUpdate)));
+      if (show('repo') && githubToken.trim()) body.githubToken = githubToken.trim();
       const updated = await api.updateSettings(body);
       setS(updated);
       setGithubToken('');
@@ -84,215 +98,229 @@ export function GeneralSettingsForm() {
 
   return (
     <form onSubmit={save}>
-      <Card>
-        <SectionTitle>Repository (GitHub)</SectionTitle>
-        <Muted className={styles.note}>
-          These are the settings of the Default project — manage all projects on the <Link to="/projects">Projects page</Link>.
-        </Muted>
-        <Field label="Repo URL (leave blank to work in a local workspace, no remote)">
-          <input
-            value={form.repoUrl ?? ''}
-            onChange={(e) => set('repoUrl', e.target.value)}
-            placeholder="https://github.com/org/project.git"
-          />
-        </Field>
-        <Field label="Base branch">
-          <input
-            className={styles.narrow}
-            value={form.repoBranch ?? ''}
-            onChange={(e) => set('repoBranch', e.target.value)}
-            placeholder="main"
-          />
-        </Field>
-        <Field label="GitHub token (write access — used to clone, push branches, open PRs)">
-          <input
-            type="password"
-            value={githubToken}
-            onChange={(e) => setGithubToken(e.target.value)}
-            placeholder={s.githubTokenSet ? `set (${s.githubTokenHint}) — leave blank to keep` : 'not set'}
-          />
-        </Field>
-        <Field label="Project subdirectory (optional — a package within the repo, e.g. apps/web)">
-          <input
-            className={styles.narrow}
-            value={form.workspaceSubdir ?? ''}
-            onChange={(e) => set('workspaceSubdir', e.target.value)}
-            placeholder="(repo root)"
-          />
-          {/[:@\\]|^\/|\.\./.test(form.workspaceSubdir ?? '') && (
-            <ErrorText>
-              This looks like a URL or an absolute path, not a folder inside the repository. A git address belongs in
-              “Repo URL”; here use a relative folder such as <code>apps/web</code>, or leave it empty for the repo root.
-            </ErrorText>
-          )}
-        </Field>
-        <Muted className={styles.note}>
-          With a repo set, each task branches off the latest <code>{form.repoBranch || 'main'}</code>;
-          on success the branch is pushed and a PR is opened. Agents run in the subdirectory above
-          (blank = repo root); they can still read/write anywhere in the checkout.
-        </Muted>
-      </Card>
+      {show('repo') && (
+        <Card>
+          <SectionTitle>Repository (GitHub)</SectionTitle>
+          <Muted className={styles.note}>
+            These are the settings of the Default project — manage all projects on the <Link to="/projects">Projects page</Link>.
+          </Muted>
+          <Field label="Repo URL (leave blank to work in a local workspace, no remote)">
+            <input
+              value={form.repoUrl ?? ''}
+              onChange={(e) => set('repoUrl', e.target.value)}
+              placeholder="https://github.com/org/project.git"
+            />
+          </Field>
+          <Field label="Base branch">
+            <input
+              className={styles.narrow}
+              value={form.repoBranch ?? ''}
+              onChange={(e) => set('repoBranch', e.target.value)}
+              placeholder="main"
+            />
+          </Field>
+          <Field label="GitHub token (write access — used to clone, push branches, open PRs)">
+            <input
+              type="password"
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
+              placeholder={s.githubTokenSet ? `set (${s.githubTokenHint}) — leave blank to keep` : 'not set'}
+            />
+          </Field>
+          <Field label="Project subdirectory (optional — a package within the repo, e.g. apps/web)">
+            <input
+              className={styles.narrow}
+              value={form.workspaceSubdir ?? ''}
+              onChange={(e) => set('workspaceSubdir', e.target.value)}
+              placeholder="(repo root)"
+            />
+            {/[:@\\]|^\/|\.\./.test(form.workspaceSubdir ?? '') && (
+              <ErrorText>
+                This looks like a URL or an absolute path, not a folder inside the repository. A git address belongs in
+                “Repo URL”; here use a relative folder such as <code>apps/web</code>, or leave it empty for the repo root.
+              </ErrorText>
+            )}
+          </Field>
+          <Muted className={styles.note}>
+            With a repo set, each task branches off the latest <code>{form.repoBranch || 'main'}</code>;
+            on success the branch is pushed and a PR is opened. Agents run in the subdirectory above
+            (blank = repo root); they can still read/write anywhere in the checkout.
+          </Muted>
+        </Card>
+      )}
 
-      <Card>
-        <SectionTitle>Escalations (questions from tasks with no channel)</SectionTitle>
-        <Field label="Default channel — where a blocked/needs-input task created in the dashboard asks">
-          <select
-            className={styles.narrow}
-            value={form.notifyChannelId ?? ''}
-            onChange={(e) => set('notifyChannelId', e.target.value)}
-          >
-            <option value="">(none — dashboard only)</option>
-            {channels.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.kind})
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Chat / thread id in that channel (e.g. your Telegram chat id)">
-          <input
-            value={form.notifyChatId ?? ''}
-            onChange={(e) => set('notifyChatId', e.target.value)}
-            placeholder="e.g. 123456789"
-          />
-        </Field>
-        <Muted className={styles.note}>
-          When an agent needs input on a task that has no channel of its own, its question is posted
-          here. Reply in that chat to answer (routed back as a follow-up). Leave the channel blank to
-          keep escalations dashboard-only. Subtask questions still go to the lead that created them.
-        </Muted>
-      </Card>
+      {show('escalations') && (
+        <Card>
+          <SectionTitle>Escalations (questions from tasks with no channel)</SectionTitle>
+          <Field label="Default channel — where a blocked/needs-input task created in the dashboard asks">
+            <select
+              className={styles.narrow}
+              value={form.notifyChannelId ?? ''}
+              onChange={(e) => set('notifyChannelId', e.target.value)}
+            >
+              <option value="">(none — dashboard only)</option>
+              {channels.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.kind})
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Chat / thread id in that channel (e.g. your Telegram chat id)">
+            <input
+              value={form.notifyChatId ?? ''}
+              onChange={(e) => set('notifyChatId', e.target.value)}
+              placeholder="e.g. 123456789"
+            />
+          </Field>
+          <Muted className={styles.note}>
+            When an agent needs input on a task that has no channel of its own, its question is posted
+            here. Reply in that chat to answer (routed back as a follow-up). Leave the channel blank to
+            keep escalations dashboard-only. Subtask questions still go to the lead that created them.
+          </Muted>
+        </Card>
+      )}
 
-      <Card>
-        <SectionTitle>Agent instructions (skill)</SectionTitle>
-        <Field label="Appended to every agent's system prompt before it starts the task">
-          <textarea
-            value={form.agentInstructions ?? ''}
-            onChange={(e) => set('agentInstructions', e.target.value)}
-            rows={4}
-            placeholder="e.g. Inspect the project before changing it; match existing style…"
-          />
-        </Field>
-        <Muted className={styles.note}>
-          Per-agent instructions live in <code>./agent/agents/*.md</code>; this is the default for
-          tasks without an agent.
-        </Muted>
-      </Card>
+      {show('instructions') && (
+        <Card>
+          <SectionTitle>Agent instructions (skill)</SectionTitle>
+          <Field label="Appended to every agent's system prompt before it starts the task">
+            <textarea
+              value={form.agentInstructions ?? ''}
+              onChange={(e) => set('agentInstructions', e.target.value)}
+              rows={4}
+              placeholder="e.g. Inspect the project before changing it; match existing style…"
+            />
+          </Field>
+          <Muted className={styles.note}>
+            Per-agent instructions live in <code>./agent/agents/*.md</code>; this is the default for
+            tasks without an agent.
+          </Muted>
+        </Card>
+      )}
 
-      <Card>
-        <SectionTitle>Verification gate</SectionTitle>
-        <Field label="Commands (one per line) run in the worktree after each run; blank = off">
-          <textarea
-            value={form.verifyCommands ?? ''}
-            onChange={(e) => set('verifyCommands', e.target.value)}
-            rows={3}
-            placeholder={'pnpm install\npnpm lint\npnpm test'}
-          />
-        </Field>
-        <Field label="Max auto-fix attempts on failure (0 = fail without fixing)">
-          <input
-            className={styles.narrow}
-            type="number"
-            min={0}
-            max={10}
-            value={form.verifyMaxAttempts ?? 2}
-            onChange={(e) => set('verifyMaxAttempts', Number(e.target.value))}
-          />
-        </Field>
-        <Muted className={styles.note}>
-          On failure the agent gets the output and retries; only a green run is marked done / pushed.
-        </Muted>
-      </Card>
+      {show('verify') && (
+        <Card>
+          <SectionTitle>Verification gate</SectionTitle>
+          <Field label="Commands (one per line) run in the worktree after each run; blank = off">
+            <textarea
+              value={form.verifyCommands ?? ''}
+              onChange={(e) => set('verifyCommands', e.target.value)}
+              rows={3}
+              placeholder={'pnpm install\npnpm lint\npnpm test'}
+            />
+          </Field>
+          <Field label="Max auto-fix attempts on failure (0 = fail without fixing)">
+            <input
+              className={styles.narrow}
+              type="number"
+              min={0}
+              max={10}
+              value={form.verifyMaxAttempts ?? 2}
+              onChange={(e) => set('verifyMaxAttempts', Number(e.target.value))}
+            />
+          </Field>
+          <Muted className={styles.note}>
+            On failure the agent gets the output and retries; only a green run is marked done / pushed.
+          </Muted>
+        </Card>
+      )}
 
-      <Card>
-        <SectionTitle>Task queue</SectionTitle>
-        <Field label="Concurrency — agent runs processed in parallel">
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+      {show('queue') && (
+        <Card>
+          <SectionTitle>Task queue</SectionTitle>
+          <Field label="Concurrency — agent runs processed in parallel">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <input
+                type="checkbox"
+                checked={(form.concurrency ?? 1) === 0}
+                onChange={(e) => set('concurrency', e.target.checked ? 0 : Math.max(1, s?.concurrencyEffective ?? 1))}
+                style={{ width: 'auto', margin: 0 }}
+              />{' '}
+              Choose automatically for this machine{(form.concurrency ?? 1) === 0 && s?.concurrencyEffective ? ` (now ${s?.concurrencyEffective})` : ''}
+            </label>
+            <input
+              className={styles.narrow}
+              type="number"
+              min={1}
+              max={20}
+              disabled={(form.concurrency ?? 1) === 0}
+              value={(form.concurrency ?? 1) === 0 ? (s?.concurrencyEffective ?? 1) : (form.concurrency ?? 1)}
+              onChange={(e) => set('concurrency', Number(e.target.value))}
+            />
+          </Field>
+          <Muted className={styles.note}>
+            Takes effect live, within ~10s — no restart needed. In shared-workspace mode (one
+            worktree for all tasks) this is effectively capped at 1 regardless of this value. Automatic = one less than the CPUs on a small server (2 vCPU → 1), memory permitting.
+          </Muted>
+        </Card>
+      )}
+
+      {show('approvals') && (
+        <Card>
+          <SectionTitle>Approval timeout</SectionTitle>
+          <Field label="Approval timeout (seconds) — fail-closed deny after this">
+            <input
+              className={styles.narrow}
+              type="number"
+              min={10}
+              max={3600}
+              value={form.approvalTimeoutSeconds ?? 300}
+              onChange={(e) => set('approvalTimeoutSeconds', Number(e.target.value))}
+            />
+          </Field>
+        </Card>
+      )}
+
+      {show('display') && (
+        <Card>
+          <SectionTitle>Display</SectionTitle>
+          <Field label="Theme">
+            <select
+              className={styles.narrow}
+              value={themePref}
+              onChange={(e) => changeTheme(e.target.value as ThemePref)}
+            >
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </Field>
+          <Muted className={styles.note}>
+            Applies immediately — this is a per-browser preference, not part of "Save settings"
+            below. "System" follows your OS's light/dark setting.
+          </Muted>
+          <Field label="Assistant">
+            <Row>
+              <Button
+                onClick={() => {
+                  resetAssistant();
+                  setAssistantReset(true);
+                  setTimeout(() => setAssistantReset(false), 2000);
+                }}
+              >
+                Reset position / show
+              </Button>
+              {assistantReset && <Muted>done — the assistant is back in its corner</Muted>}
+            </Row>
+          </Field>
+          <Muted className={styles.note}>
+            The assistant bubble can be dragged anywhere and tucked away to a slim tab on the right edge. If it gets lost or
+            hidden, this puts it back (per-browser, like the theme). Double-clicking the bubble does the same.
+          </Muted>
+          <label className={styles.checkRow}>
             <input
               type="checkbox"
-              checked={(form.concurrency ?? 1) === 0}
-              onChange={(e) => set('concurrency', e.target.checked ? 0 : Math.max(1, s?.concurrencyEffective ?? 1))}
-              style={{ width: 'auto', margin: 0 }}
-            />{' '}
-            Choose automatically for this machine{(form.concurrency ?? 1) === 0 && s?.concurrencyEffective ? ` (now ${s?.concurrencyEffective})` : ''}
+              className={styles.checkbox}
+              checked={form.debugMode ?? false}
+              onChange={(e) => set('debugMode', e.target.checked)}
+            />
+            <span>
+              Debug mode — show verbose <code>assistant</code> lines in transcripts
+            </span>
           </label>
-          <input
-            className={styles.narrow}
-            type="number"
-            min={1}
-            max={20}
-            disabled={(form.concurrency ?? 1) === 0}
-            value={(form.concurrency ?? 1) === 0 ? (s?.concurrencyEffective ?? 1) : (form.concurrency ?? 1)}
-            onChange={(e) => set('concurrency', Number(e.target.value))}
-          />
-        </Field>
-        <Muted className={styles.note}>
-          Takes effect live, within ~10s — no restart needed. In shared-workspace mode (one
-          worktree for all tasks) this is effectively capped at 1 regardless of this value. Automatic = one less than the CPUs on a small server (2 vCPU → 1), memory permitting.
-        </Muted>
-      </Card>
-
-      <Card>
-        <SectionTitle>Approvals</SectionTitle>
-        <Field label="Approval timeout (seconds) — fail-closed deny after this">
-          <input
-            className={styles.narrow}
-            type="number"
-            min={10}
-            max={3600}
-            value={form.approvalTimeoutSeconds ?? 300}
-            onChange={(e) => set('approvalTimeoutSeconds', Number(e.target.value))}
-          />
-        </Field>
-      </Card>
-
-      <Card>
-        <SectionTitle>Display</SectionTitle>
-        <Field label="Theme">
-          <select
-            className={styles.narrow}
-            value={themePref}
-            onChange={(e) => changeTheme(e.target.value as ThemePref)}
-          >
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </Field>
-        <Muted className={styles.note}>
-          Applies immediately — this is a per-browser preference, not part of "Save settings"
-          below. "System" follows your OS's light/dark setting.
-        </Muted>
-        <Field label="Assistant">
-          <Row>
-            <Button
-              onClick={() => {
-                resetAssistant();
-                setAssistantReset(true);
-                setTimeout(() => setAssistantReset(false), 2000);
-              }}
-            >
-              Reset position / show
-            </Button>
-            {assistantReset && <Muted>done — the assistant is back in its corner</Muted>}
-          </Row>
-        </Field>
-        <Muted className={styles.note}>
-          The assistant bubble can be dragged anywhere and tucked away to a slim tab on the right edge. If it gets lost or
-          hidden, this puts it back (per-browser, like the theme). Double-clicking the bubble does the same.
-        </Muted>
-        <label className={styles.checkRow}>
-          <input
-            type="checkbox"
-            className={styles.checkbox}
-            checked={form.debugMode ?? false}
-            onChange={(e) => set('debugMode', e.target.checked)}
-          />
-          <span>
-            Debug mode — show verbose <code>assistant</code> lines in transcripts
-          </span>
-        </label>
-      </Card>
+        </Card>
+      )}
 
       <Row>
         <Button variant="primary" type="submit" disabled={saving}>

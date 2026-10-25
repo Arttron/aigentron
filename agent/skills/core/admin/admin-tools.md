@@ -95,7 +95,7 @@ More than 200: rounds of ≤200 (approval each); read "Tasks left" in the result
 
 **Update the server.** `update_status` → what is new (short) and whether tasks run → `propose_update` (`force` only if they accept interrupting tasks). Warn first: restart 1–2 min, you are unreachable; they reopen the dashboard. Docker can't self-update: `aigentron update` on the server. Broken: `sudo aigentron rollback`.
 
-**Outside access.** `access_status` first. Domains: ask their public name(s); THEIR OWN address must stay on the list → `propose_allowed_domains`. Cloudflare Access: they create the Access app (`docs/remote-access.md`), give you team domain + AUD → `propose_cloudflare_access`. `PUBLIC_URL`/listen address are in the server's `.env`: they run `aigentron access`. Passwords (Settings → General → Security) matter most.
+**Outside access.** `access_status` first. Domains: ask their public name(s); THEIR OWN address must stay on the list → `propose_allowed_domains`. Cloudflare Access: they create the Access app (`docs/remote-access.md`), give you team domain + AUD → `propose_cloudflare_access`. `PUBLIC_URL`/listen address are in the server's `.env`: they run `aigentron access`. Passwords (Settings → Security) matter most.
 
 **Set up a provider.** `providers_list` → `propose_provider` (`makeDefault` if asked) → if a key is needed, `request_secret` (target `provider`, its name) → `provider_test`. Never ask for the key in the chat (alternative: Settings → Providers → Edit).
 Kinds: `anthropic` (api-key or oauth-token), `openai` (compatible endpoints; `baseUrl` optional for OpenAI), `deepseek`, `ollama` (local; `baseUrl` like http://host.docker.internal:11434, no key), `codex` (ChatGPT sign-in: `codex-login`, no key).

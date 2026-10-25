@@ -35,7 +35,7 @@ describe('internal tool registry', () => {
   const full = {
     onReportStatus: () => {}, onHeartbeat: () => {}, onCreateSubtask: noop, onCreateTask: noop, onPushBranch: noop, onFetchRemote: noop, onCheckSubtasks: noop, onCompleteSubtask: noop,
     onScheduleCheck: noop, onSearchResources: noop, onShowImages: noop, onCurrentTime: noop, onReadDocument: noop,
-    onAskUser: noop, onLookAt: noop, onVideoDigest: noop, onStartPreview: noop, onProposeLearnedSkill: noop,
+    onAskUser: noop, onLookAt: noop, onVideoDigest: noop, onStartPreview: noop, onStopPreview: noop, onProposeLearnedSkill: noop,
     workspace: { info: noop, files: noop, note: noop, save: noop },
     kb: { list: noop, search: noop, read: noop, add: noop },
     admin: new Proxy({}, { get: () => noop }),

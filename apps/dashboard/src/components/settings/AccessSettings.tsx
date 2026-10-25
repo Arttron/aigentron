@@ -11,7 +11,7 @@ interface AccessInfo {
   server?: { port: number; listenHost: string; bindAddress: string | null; publicUrl: string | null };
 }
 
-/** Settings → General → Access: which domain names this server answers to. */
+/** Settings → Security → Access: which domain names this server answers to. */
 export function AccessSettings() {
   const [text, setText] = useState('');
   const [strict, setStrict] = useState(false);

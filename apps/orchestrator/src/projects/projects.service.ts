@@ -192,7 +192,7 @@ export class ProjectsService implements OnModuleInit {
 
   /**
    * Where a task's escalation goes when it has no channel thread of its own (§2.7): the project's notification chat,
-   * else the global one (Settings → Escalations); null = dashboard-only.
+   * else the global one (Settings → Work → Escalations); null = dashboard-only.
    */
   async notifyTargetFor(taskId: string): Promise<{ channelId: string; chatId: string } | null> {
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } }).catch(() => null);

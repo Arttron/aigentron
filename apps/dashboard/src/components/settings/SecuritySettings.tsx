@@ -5,7 +5,7 @@ import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/comp
 import { SetPasswordForm, reconnectSocket } from '@/components/AuthGate';
 import { TwoFactorSettings } from './TwoFactorSettings';
 
-/** Settings → General → Security: set the first password, or change YOUR password / sign out. */
+/** Settings → Security: set the first password, or change YOUR password / sign out. */
 export function SecuritySettings() {
   const { status, refresh } = useAuth();
   const [current, setCurrent] = useState('');

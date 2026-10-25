@@ -8,7 +8,7 @@ import { ownAddresses } from './own-addresses';
 import { hostAllowed, isAlwaysAllowed, normalizeHost, parseDomainList, requestAllowed } from './access-core';
 
 /**
- * The domains this instance answers to (Settings → General → Access). Stored in `<secretsDir>/access.json` — beside
+ * The domains this instance answers to (Settings → Security → Access). Stored in `<secretsDir>/access.json` — beside
  * the sign-in file, in the directory the approval gate guards, so an agent cannot quietly widen it. Empty list (and no
  * PUBLIC_URL) = no restriction, exactly as before. Local names, IP addresses and single-word hosts always work.
  */
@@ -49,7 +49,7 @@ export class AccessService {
     return ph && !list.includes(ph) ? [...list, ph] : list;
   }
 
-  /** Strict mode (Settings → Access): refuse IP addresses and bare server names from outside — only the allowed domains. */
+  /** Strict mode (Settings → Security → Access): refuse IP addresses and bare server names from outside — only the allowed domains. */
   strict(): boolean {
     return this.json.read().strict && this.effective().length > 0;
   }

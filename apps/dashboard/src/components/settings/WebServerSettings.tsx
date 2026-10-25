@@ -26,7 +26,7 @@ interface WebStatus {
   uncoveredDomains: string[];
 }
 
-/** Settings → General → Web server: which ports the server listens on, and its HTTPS certificate. */
+/** Settings → Security → Web server: which ports the server listens on, and its HTTPS certificate. */
 export function WebServerSettings() {
   const [httpPort, setHttpPort] = useState('80');
   const [httpsPort, setHttpsPort] = useState('443');

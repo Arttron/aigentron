@@ -77,6 +77,8 @@ export const LOOK_AT_TOOL = `${INTERNAL_TOOL_PREFIX}look_at`;
 export const VIDEO_DIGEST_TOOL = `${INTERNAL_TOOL_PREFIX}video_digest`;
 export const RESOURCES_SEARCH_TOOL = `${INTERNAL_TOOL_PREFIX}resources_search`;
 export const PREVIEW_TOOL = `${INTERNAL_TOOL_PREFIX}preview_worktree`;
+/** Stop the task's preview dev server (once the screenshots are taken). Not gated. */
+export const STOP_PREVIEW_TOOL = `${INTERNAL_TOOL_PREFIX}stop_preview`;
 /**
  * Propose a write to agent/skills/learned/<name>.md (roadmap Phase 6 — skill
  * lifecycle). Unlike every other internal tool, this ONE is deliberately NOT
@@ -195,6 +197,22 @@ export interface ClassifyOptions {
    * Comes from the `readOnlyTools` key of an MCP server's config (see McpService).
    */
   readOnlyMcp?: Record<string, readonly string[]>;
+  /**
+   * What the task's browser is looking at, as far as the orchestrator has seen (see `browserPageAfter`). On a `blank` or `local` page the browser's own
+   * interactions (click, type, fill a form, press a key …) need no approval — the page is the project's own dev server and nothing leaves the machine; on an
+   * `external` page (a person approved the visit) they stay gated. Unset (callers that do not track it): always gated.
+   */
+  browserPage?: BrowserPage;
+}
+
+export type BrowserPage = 'blank' | 'local' | 'external';
+
+/** Where the browser is after this call: a navigation moves it (local dev addresses are `local`, anything else `external`); every other call leaves it where it was. */
+export function browserPageAfter(toolName: string, toolInput: Record<string, unknown>, current: BrowserPage = 'blank'): BrowserPage {
+  if (!/^mcp__playwright(?:-proxy)?__browser_navigate$/i.test(toolName)) return current;
+  const url = typeof toolInput.url === 'string' ? toolInput.url.trim() : '';
+  if (!url || url.toLowerCase() === 'about:blank') return 'blank';
+  return isLocalNavUrl(url) ? 'local' : 'external';
 }
 
 export interface DangerVerdict {
@@ -205,6 +223,46 @@ export interface DangerVerdict {
   reason: string;
   /** Never waved through, not even in the no-approvals mode (credentials, protected files). */
   hard?: boolean;
+  /**
+   * The kind of action that is still asked about in the no-approvals mode (everything else dangerous goes ahead there): a `merge`, an action on the
+   * `main-branch` (main / master), or something outside the working `outside` directory.
+   */
+  guard?: Guard;
+}
+
+export type Guard = 'merge' | 'main-branch' | 'outside';
+
+const GUARD_LABEL: Record<Guard, string> = {
+  merge: 'a merge',
+  'main-branch': 'an action on the main / master branch',
+  outside: 'an action outside the working directory',
+};
+
+/** git verbs that change something or bring something in; `main` / `master` named as a ref of one of them (origin main, HEAD:main, origin/main) is an action on that branch. */
+const MAIN_BRANCH_GIT = /\bgit\b[^\n;&|]*\b(push|merge|pull|reset|cherry-pick|revert|branch|update-ref|checkout|switch|tag)\b[^\n;&|]*(?:^|[\s:/+])(?:main|master)\b/i;
+const MERGE_COMMANDS = /\bgit\s+merge\b(?![^\n;&|]*--(?:abort|quit))|\bgh\s+pr\s+merge\b|\bgh\s+api\b[^\n;&|]*\/merge\b/i;
+/** A command word that writes, moves or deletes — only these make an absolute path in the command an action "outside". */
+const MUTATING_VERB = /(^|[\s;&|(])(rm|rmdir|mv|cp|mkdir|touch|chmod|chown|ln|tee|dd|truncate|install|rsync|unlink|shred)\b|\bsed\s+-[a-z]*i|>>?\s*[^\s&|]/;
+
+/** Does a shell command write / move / delete something outside the agent's write roots? (A heuristic over the paths named in the command.) */
+export function shellActsOutside(command: string, opts: ClassifyOptions): boolean {
+  if (!opts.workspaceRoot || !MUTATING_VERB.test(command)) return false;
+  const named = Array.from(command.matchAll(/(?:^|[\s"'=<>:])((?:~|\.\.?)?\/[^\s"'|;&<>)]*|\.\.(?=\s|$))/g), (m) => m[1]!);
+  return named.some((t) => {
+    if (/^\/dev\/(null|stdout|stderr|stdin|tty)$/.test(t)) return false;
+    if (t === '/' || t === '/*') return true;
+    const abs = t.startsWith('~') ? t : normalize(t.startsWith('/') ? t : `${opts.workspaceRoot!.replace(/\/$/, '')}/${t}`);
+    if (abs.startsWith('~')) return true;
+    return !insideWriteRoots(abs, opts);
+  });
+}
+
+/** The merge / main-branch / outside guard a shell command falls under, if any. */
+function shellGuard(command: string, opts: ClassifyOptions): { guard: Guard; reason: string } | null {
+  if (MAIN_BRANCH_GIT.test(command)) return { guard: 'main-branch', reason: GUARD_LABEL['main-branch'] };
+  if (MERGE_COMMANDS.test(command)) return { guard: 'merge', reason: GUARD_LABEL.merge };
+  if (shellActsOutside(command, opts)) return { guard: 'outside', reason: GUARD_LABEL.outside };
+  return null;
 }
 
 /** Shell command patterns that are destructive, irreversible, or outbound. */
@@ -296,6 +354,27 @@ const PLAYWRIGHT_READONLY = new Set([
   'browser_tabs',
 ]);
 
+/**
+ * Page interactions of the Playwright browser. Free on the project's own (local) pages, gated on external ones. Not in the list, so always gated:
+ * `browser_evaluate` / `browser_run_code` (arbitrary script: can post anything anywhere), `browser_file_upload` (reads files of the browser machine), `browser_install`.
+ */
+const PLAYWRIGHT_LOCAL_INTERACTIONS = new Set([
+  'browser_click',
+  'browser_hover',
+  'browser_type',
+  'browser_fill_form',
+  'browser_press_key',
+  'browser_select_option',
+  'browser_drag',
+  'browser_handle_dialog',
+  'browser_close',
+  'browser_mouse_move_xy',
+  'browser_mouse_click_xy',
+  'browser_mouse_drag_xy',
+  'browser_mouse_down',
+  'browser_mouse_up',
+]);
+
 /** Hosts a browser may navigate to without approval (local dev only). Anything
  *  else is gated so navigation can't become an outbound-exfil channel that
  *  bypasses the shell's outbound-network gate. */
@@ -326,6 +405,7 @@ function isReadOnlyMcpTool(
   name: string,
   toolInput: Record<string, unknown>,
   declared?: Record<string, readonly string[]>,
+  browserPage?: BrowserPage,
 ): boolean {
   const parts = name.split('__'); // ['mcp', '<server>', '<tool>...']
   if (parts.length < 3) return false;
@@ -349,7 +429,8 @@ function isReadOnlyMcpTool(
       if (tool === 'browser_navigate') {
         return isLocalNavUrl(typeof toolInput.url === 'string' ? toolInput.url : '');
       }
-      return PLAYWRIGHT_READONLY.has(tool);
+      if (PLAYWRIGHT_READONLY.has(tool)) return true;
+      return (browserPage === 'local' || browserPage === 'blank') && PLAYWRIGHT_LOCAL_INTERACTIONS.has(tool);
     default:
       return false; // unknown server → gated (e.g. postgres query: can't tell read from write)
   }
@@ -515,8 +596,10 @@ export function classifyToolCall(
   if (name === PUSH_BRANCH_TOOL.toLowerCase()) {
     const branch = typeof toolInput.branch === 'string' ? toolInput.branch : '?';
     const to = typeof toolInput.to === 'string' && toolInput.to ? toolInput.to : branch;
+    const onMain = /^(main|master)$/i.test(branch) || /^(main|master)$/i.test(to);
     return {
       dangerous: true,
+      ...(onMain ? { guard: 'main-branch' as const } : {}),
       summary: `push_branch ${branch} → origin/${to} #${shortHash(`${branch}\n${to}`)}`,
       reason: `agent proposing to PUBLISH the local branch "${branch}" to the project's remote as "${to}" (publishes commits to a remote; no force)${typeof toolInput.reason === 'string' && toolInput.reason ? ` — why: ${toolInput.reason.slice(0, 200)}` : ''}`,
     };
@@ -706,9 +789,11 @@ export function classifyToolCall(
   // mutation or data-exfiltration risk, so agents can navigate code and preview
   // UIs without an approval prompt on every call.
   if (name.startsWith('mcp__')) {
-    if (isReadOnlyMcpTool(name, toolInput, opts.readOnlyMcp)) {
+    if (isReadOnlyMcpTool(name, toolInput, opts.readOnlyMcp, opts.browserPage)) {
       return { dangerous: false, summary: toolName, reason: '' };
     }
+    // merging a pull request (GitHub MCP `merge_pull_request`, …) is asked about even without approvals
+    if (/(^|_)merge(_|$)/i.test(name.split('__').slice(2).join('__'))) return { dangerous: true, summary: toolName, reason: 'MCP tool call (external server): a merge', guard: 'merge' };
     return { dangerous: true, summary: toolName, reason: 'MCP tool call (external server)' };
   }
 
@@ -716,12 +801,16 @@ export function classifyToolCall(
     const command = extractCommand(toolInput);
     const summary = command ? `$ ${command}` : `${toolName} (no command)`;
     const safeRm = isSafeRmInRoots(command, opts);
+    const guarded = shellGuard(command, opts);
     for (const { re, reason, hard } of DANGEROUS_SHELL_PATTERNS) {
       if (safeRm && RM_REASONS.has(reason)) continue;
       if (re.test(command)) {
-        return { dangerous: true, summary, reason, ...(hard ? { hard: true } : {}) };
+        if (hard) return { dangerous: true, summary, reason, hard: true };
+        return { dangerous: true, summary, reason: guarded ? `${guarded.reason}: ${reason}` : reason, ...(guarded ? { guard: guarded.guard } : {}) };
       }
     }
+    // not in the list of dangerous commands, but a merge / a main-branch action / a write beyond the working directory is still asked about
+    if (guarded) return { dangerous: true, summary, reason: guarded.reason, guard: guarded.guard };
     return { dangerous: false, summary, reason: '' };
   }
 
@@ -742,7 +831,7 @@ export function classifyToolCall(
       if (opts.workspaceRoot) {
         const absolute = filePath.startsWith('/') ? filePath : `${opts.workspaceRoot.replace(/\/$/, '')}/${filePath}`;
         if (!insideWriteRoots(absolute, opts)) {
-          return { dangerous: true, summary, reason: `write outside the task worktree (${opts.workspaceRoot})` };
+          return { dangerous: true, summary, reason: `write outside the task worktree (${opts.workspaceRoot})`, guard: 'outside' };
         }
       }
     }
@@ -770,6 +859,7 @@ export function classifyToolCall(
           dangerous: true,
           summary,
           reason: `write outside the task worktree (${opts.workspaceRoot})`,
+          guard: 'outside',
         };
       }
     }

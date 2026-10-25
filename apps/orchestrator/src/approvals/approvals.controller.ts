@@ -37,7 +37,7 @@ export class ApprovalsController {
     return this.approvals.waitForVerdict(id, ms);
   }
 
-  /** Settings → Approvals: `ask` (default) or `off`. */
+  /** Settings → Work → Approvals: `ask` (default) or `off`. */
   @Get('mode')
   mode() {
     return { mode: this.approvals.mode() };
