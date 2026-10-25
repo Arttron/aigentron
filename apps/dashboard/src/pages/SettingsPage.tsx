@@ -52,10 +52,10 @@ export function SettingsPage() {
 
       {tab === 'general' && (
         <>
+          <UpdateSettings />
           <GeneralSettingsForm sections={['display']} />
           <AlertSoundSettings />
           <TitleSettings />
-          <UpdateSettings />
           <DiskSettings />
         </>
       )}

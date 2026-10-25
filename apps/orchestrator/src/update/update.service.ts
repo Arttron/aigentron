@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs';
+import { statSync, chmodSync, existsSync, mkdirSync, readFileSync, statfsSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { BadRequestException, ConflictException, Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
@@ -92,16 +92,19 @@ export class UpdateService {
   }
 
   /** The last update attempt (this server may be the new version that the update just installed). */
-  lastUpdate(): (LastUpdate & { logTail: string }) | null {
+  lastUpdate(): (LastUpdate & { logTail: string; logAt: string | null }) | null {
     try {
       const s = JSON.parse(readFileSync(join(this.stateDir, 'status.json'), 'utf8')) as LastUpdate;
       let logTail = '';
+      let logAt: string | null = null;
       try {
-        logTail = readFileSync(join(this.stateDir, 'update.log'), 'utf8').split('\n').slice(-40).join('\n');
+        const log = join(this.stateDir, 'update.log');
+        logTail = readFileSync(log, 'utf8').split('\n').slice(-40).join('\n');
+        logAt = statSync(log).mtime.toISOString(); // when the installer last wrote anything: a running update that has been quiet for long is stuck
       } catch {
         /* no log */
       }
-      return { ...resolveStaleStatus(s), logTail };
+      return { ...resolveStaleStatus(s), logTail, logAt };
     } catch {
       return null;
     }

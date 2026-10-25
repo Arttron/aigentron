@@ -1,8 +1,9 @@
-Aigentron v0.1.96
+Aigentron v0.1.97
 
-For people who are not programmers: while the server updates, anyone who opens the dashboard now sees what is going on instead of an error.
+For people who are not programmers: the update card now shows that an update is running, in any tab, and the update block is back at the top of Settings → General.
 
-New
-- An "Updating Aigentron" page while the server is down during an update (bare-metal installs): it shows the steps (stopping, saving the database, updating it, switching, starting) and a timer, and the page reloads by itself when the new version answers. It also covers the case when the new version does not start and the previous one is being restored. A dashboard tab that is already open shows a banner "Aigentron is updating" and reloads by itself (from the next update on: tabs opened with an older version only get the errors they used to). It shows only the announced steps — no log lines, no paths. Set NO_UPDATE_PAGE=1 for the installer to switch it off. Details: docs/updates.md.
+Fixed
+- While an update is running (started from this page, another tab or the console), Settings → General → Version & updates says so: "Updating to X — started N min ago", with what the installer is doing right now and a warning with the commands to look at it if nothing has been written to the update log for five minutes. Meanwhile "an update is available", the Update button and Check now are hidden, and pressing Update a second time shows the running update instead of just an error.
+- The Version & updates card is the first card of the General tab again (it had slipped down in the settings regrouping).
 
-Update note: no database changes. The first update that uses this is the update TO this version's installer, so you can watch the page during it.
+Update note: no database changes.
