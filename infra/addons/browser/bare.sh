@@ -13,7 +13,7 @@
 #
 # Environment: DATA_DIR (where addons/browser/state.json goes; default /opt/aigentron/data), BROWSER (= --browser),
 #              AGENT_CDP=off (= --no-cdp: start the browser WITHOUT the remote-debugging port), PREFIX (default /opt/aigentron/browser).
-# Supported: Debian 11/12/13, Ubuntu 22.04/24.04 (apt); Amazon Linux 2023, Fedora (dnf). Anything else is refused politely.
+# Supported: Debian 11+ , Ubuntu 22.04+ (apt; versions newer than 12/24.04 are tried with a warning); Amazon Linux 2023, Fedora (dnf). Anything else is refused politely.
 # ----------------------------------------------------------------------------------------------------------------------
 set -eu   # no pipefail: `cmd | grep -q` / `| head -1` would turn a harmless SIGPIPE into a failure
 
@@ -77,9 +77,14 @@ case "$OS_ID" in
   debian|ubuntu) PKG=apt ;;
   amzn|fedora) PKG=dnf ;;
 esac
+NEWER_OS=0
+version_at_least() { [ -n "$1" ] && [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 supported() {
   case "$OS_ID:$OS_VERSION" in
     debian:11|debian:12|debian:13|ubuntu:22.04|ubuntu:24.04|amzn:2023|fedora:*) return 0 ;;
+    # a newer Debian / Ubuntu than the ones this was tried on: go ahead (package names are looked up, and the browser self-test at the end tells whether it works)
+    debian:*) version_at_least "$OS_VERSION" 11 && { NEWER_OS=1; return 0; } ;;
+    ubuntu:*) version_at_least "$OS_VERSION" 22.04 && { NEWER_OS=1; return 0; } ;;
   esac
   return 1
 }
@@ -122,7 +127,8 @@ pkg_install() {  # $@ = packages; only the missing ones are installed (idempoten
 # ---- preflight ---------------------------------------------------------------------------------------------------------
 preflight() {
   if [ "$(id -u)" != 0 ]; then [ "$DRY_RUN" = 1 ] && warn "not root — the real install needs: sudo aigentron addon enable browser" || die "this needs root — run: sudo aigentron addon enable browser"; fi
-  [ -n "$PKG" ] && supported || die "this add-on supports Debian 11/12/13, Ubuntu 22.04/24.04, Amazon Linux 2023 and Fedora — this is '$OS_PRETTY'. On other systems use the Docker backend (docs/addons.md)."
+  [ -n "$PKG" ] && supported || die "this add-on supports Debian 11 or newer, Ubuntu 22.04 or newer, Amazon Linux 2023 and Fedora — this is '$OS_PRETTY'. On other systems use the Docker backend (docs/addons.md)."
+  [ "$NEWER_OS" = 1 ] && warn "$OS_PRETTY is newer than the systems this add-on was tried on (Debian 13, Ubuntu 24.04) — going ahead; the browser self-test at the end shows whether it works."
   case "$ARCH" in x86_64|aarch64) ;; *) die "unsupported CPU architecture '$ARCH' (x86_64 and aarch64 only)" ;; esac
   if [ "$BUILD" = 0 ] && [ "$HAS_SYSTEMD" = 0 ]; then die "systemd is required to run the browser as a service (no /run/systemd/system). Inside a container use the Docker backend instead."; fi
   for d in /opt /var/lib; do
@@ -218,6 +224,14 @@ try_playwright_chromium() {
     apt)
       libs="libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libx11-6 libx11-xcb1 libxcb1 libxext6 libxi6 libxtst6 libatspi2.0-0 libgtk-3-0 libdbus-1-3 libexpat1 libglib2.0-0 libxcursor1 libxrender1 libxss1"
       if pkg_available libasound2t64; then libs="$libs libasound2t64"; else libs="$libs libasound2"; fi
+      # a library that was renamed (the t64 suffix) or dropped by a newer release: use the new name, or skip it with a warning
+      resolved=""
+      for p in $libs; do
+        if pkg_installed "$p" || pkg_available "$p"; then resolved="$resolved $p"
+        elif pkg_available "${p}t64"; then resolved="$resolved ${p}t64"
+        else warn "package $p is not in this system's repositories — skipped (the browser self-test shows whether it was needed)"; fi
+      done
+      libs=$resolved
       # shellcheck disable=SC2086
       pkg_install $libs ;;
     dnf)

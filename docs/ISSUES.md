@@ -200,3 +200,7 @@ Telegram links anything shaped like `name.tld`, and `.md`, `.sh`, `.py`, `.rs`, 
 ## 2026-10-25 — finding your Telegram id needed the pairing round-trip (added a helper)
 
 The only way to learn a chat id was to enable the channel, write to the bot and find the yellow "is this you?" line. The add/edit channel form now has **Find my id**: with the token entered, wait for a message to the bot (`POST /channels/probe-sender`, a throw-away adapter that reads and confirms that one update so the running channel never treats it as a task), show who wrote what, ask whether to allow the id. A channel that is already running cannot be read twice, so there the waiting-chats (pairing) list is watched instead.
+
+## 2026-10-25 — the add-ons refused Ubuntu 26.04 (fixed)
+
+`sudo aigentron addon enable playwright` stopped with "this add-on supports Debian 11/12/13, Ubuntu 22.04/24.04 …" on Ubuntu 26.04: the supported systems were an exact list, so every new release was refused until someone edited it. Debian 11+ and Ubuntu 22.04+ are now accepted (a version newer than the tried ones gets a warning), library names are resolved (`name`, else `nameT64`, else skipped with a warning), and the browser self-test at the end of the install is what says whether it really works. Both add-ons (`playwright`, `browser`). Checked in an Ubuntu 24.04 container (dry run); 26.04 itself was not available to test.

@@ -30,7 +30,7 @@ it brings its own matching Chromium), as one systemd unit `aigentron-playwright.
 It is deliberately **not** the `browser` add-on. That one is a real, visible browser with a profile a person signs in to (and becomes part of the personal assistant);
 this one is a throw-away headless browser — `--isolated`, no profile is kept between sessions — that agents may drive freely.
 
-- **Install**: Debian 11/12/13, Ubuntu 22.04/24.04 (apt), Amazon Linux 2023, Fedora (dnf), x86_64 or aarch64. Packages (Chromium's libraries), Node ≥ 18 (NodeSource if missing),
+- **Install**: Debian 11+ and Ubuntu 22.04+ (apt; versions newer than Debian 13 / Ubuntu 24.04 are tried with a warning and the browser self-test decides), Amazon Linux 2023, Fedora (dnf), x86_64 or aarch64. Packages (Chromium's libraries), Node ≥ 18 (NodeSource if missing),
   `npm install @playwright/mcp` and `playwright install chromium` into `/opt/aigentron/playwright`, the system user `aigentron-playwright`, the unit, then checks: the
   server answers on `/sse`, and Chromium starts as that user. Re-running repairs; `--dry-run` prints the plan; `--files-only` installs the files without a unit (image builds, tests).
 - **Unit**: own user, read-only system (`ProtectSystem=strict`), `PrivateTmp`, loopback only (`--host 127.0.0.1`, DNS-rebinding guard `--allowed-hosts`), `MemoryMax=1536M`,
@@ -68,7 +68,7 @@ written into the orchestrator's `/data` volume through `docker exec`.
 
 ## What `enable browser` does on a bare-metal server
 
-1. **Preflight** — root, systemd, a supported OS (`/etc/os-release`: Debian 11/12/13, Ubuntu 22.04/24.04 with apt; Amazon Linux 2023 and
+1. **Preflight** — root, systemd, a supported OS (`/etc/os-release`: Debian 11+, Ubuntu 22.04+ with apt (newer than the tested ones: a warning, then go ahead; a library renamed with the `t64` suffix is found by itself, one that is gone is skipped with a warning); Amazon Linux 2023 and
    Fedora with dnf — anything else is refused with a pointer to the Docker backend), x86_64 or aarch64, ≥ 2 GB free on `/opt` and `/var/lib`,
    a warning below 3 GB RAM.
 2. **Display stack** — `Xvfb` + `openbox` + `x11vnc` (apt, Fedora); on Amazon Linux, which packages neither x11vnc nor openbox, TigerVNC's `Xvnc`

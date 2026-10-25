@@ -1,11 +1,9 @@
-Aigentron v0.1.91
+Aigentron v0.1.92
 
-For people who are not programmers: a project's chat now hears only about that project, and adding a Telegram channel has a "Find my id" helper.
-
-New
-- Find my id (Settings → Channels → add or edit a Telegram channel). Once the bot token is entered, press "Wait for my message", write anything to your bot from your own account, and the form shows what you wrote and your id, then asks "Add this id to the allowed chats?". Yes adds it to the list (saved with the channel). The test message is read and confirmed, so it never becomes a task. For a channel that is already running, the form watches the waiting chats instead (two programs cannot read one bot).
+For people who are not programmers: the Playwright and Browser add-ons now install on newer servers, such as Ubuntu 26.04.
 
 Fixed
-- A chat that belongs to a project (the project's notification channel and chat) still received the approvals and questions of every task. They now go to the task's project chat only, and a chat owned by a project hears nothing about other projects' tasks. A project without its own chat skips the chats other projects own. If the chat of a project is not in the channel's allowed list, nothing is sent to it.
+- `sudo aigentron addon enable playwright` (and the Browser add-on) refused any system that was not on a fixed list, so Ubuntu 26.04 was rejected with "this add-on supports Debian 11/12/13, Ubuntu 22.04/24.04 …". Debian 11 or newer and Ubuntu 22.04 or newer are accepted now; a version newer than the ones it was tried on gets a warning and the install goes ahead.
+- A library renamed by a newer release (the `t64` suffix) is found by itself, and one that no longer exists is skipped with a warning instead of stopping the install. At the end the add-on starts the browser as a self-test, which shows whether everything works.
 
-Update note: no database changes.
+Update note: no database changes. After updating, run `sudo aigentron addon enable playwright` again.
