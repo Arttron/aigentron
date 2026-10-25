@@ -1,14 +1,12 @@
-Aigentron v0.1.85
+Aigentron v0.1.86
 
-For people who are not programmers: a browser for the agents on any server, easier adding of MCP servers, a tidier task list with bulk actions, and a guide to working on the code directly on the server.
+For people who are not programmers: moving to another server is now two commands, and the backup no longer misses your projects' folders.
 
 New
-- Playwright add-on: `sudo aigentron addon enable playwright` gives the agents a headless browser (the `playwright` MCP server) on a server without Docker compose. Separate from the Browser add-on, so a personal browser stays personal. The installer was run in a Debian 12 (aarch64) container: libraries, Node, Chromium, the MCP server starts and refuses a foreign Host. It needs 0.5-1.5 GB of memory while a page is open: on a 4 GB machine keep the swap file and run one browser task at a time.
-- The System navigation has "Add-ons" instead of "Browser": two tabs, Browser (the live view as before) and Playwright (status, what to type on the server). /browser redirects there.
-- Adding an MCP server accepts any client's format: {"mcpServers": {...}} (Claude Desktop, Cursor, LM Studio, .mcp.json, VS Code), a single {url, headers} / {command, args} object, a "claude mcp add ..." command or a URL. The form shows what it understood; a missing type is filled in. The MCP endpoint page now gives the Claude Code command with the token header and a .mcp.json block.
-- Task list: only main tasks, each with "5 subtasks - 3 done - 1 stalled" (the subtasks are on its page); a task that is idle while a subtask runs shows as running; a selection mode (Select) with Mark as done / Cancel / Delete for several tasks at once.
-- Agents and providers: no delete button in the list; deleting is in the edit dialog.
-- In the no-approvals mode a run that reaches the step limit or the time ceiling is continued by itself.
-- docs/work-on-server.md: how to edit and test the code directly on the server (your own clone, the project's checkout, an existing clone for the default project), and why a project you work in must use worktree isolation, not shared.
+- Moving to another server: `sudo aigentron export` on the old one (or `--to user@host:path` to send it over SSH) and `sudo aigentron import <archive>` on the new one (the same or a newer version, the same data folder). It carries the database, secrets, agents, skills, resources, attachments, every project's folder and the code (the checkouts and the agents' worktrees, without node_modules and build output; `--no-repos` leaves the code out). Add-ons and the Browser add-on's profile are not carried: re-enable the add-ons on the new server. Stop the old server afterwards (a Telegram bot and repository pushes must not run from two places). Step by step: docs/moving-servers.md.
+- `aigentron backup --with-repos` adds the code to an ordinary backup. A restore refuses an archive made by a newer version (use --force to override) and warns when the data folder differs.
+
+Fixed
+- `aigentron backup` did not include the projects' own folders (`projects/<slug>`: the project's memory, library, results). They are in the archive now; backups made by older versions do not have them, so take a fresh export before moving.
 
 Update note: no database changes.

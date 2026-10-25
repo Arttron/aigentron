@@ -44,7 +44,7 @@ completion() {
 _aigentron() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update harden backup restore backup-timer reset-password rollback logout addon version completion help -h --help -v --version" -- "$cur") )
+    COMPREPLY=( $(compgen -W "configure providers channels agents repo access advanced connection admin status start stop restart logs doctor update harden backup restore backup-timer reset-password rollback logout addon export import version completion help -h --help -v --version" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = addon ]; then
@@ -79,6 +79,8 @@ _aigentron() {
     'harden:run agents as their own OS user (secrets and database closed to them)'
     'backup:one archive of the database, secrets, agents, files'
     'restore:restore from a backup archive'
+    'export:everything, to move to another server'
+    'import:put an export on this (new) server'
     'backup-timer:daily automatic backup on|off'
     'reset-password:remove the dashboard password'
     'addon:add-ons (a real browser, a Playwright browser for agents): list, enable, disable, status, logs'
@@ -135,8 +137,10 @@ $(say "${B}Maintain${N}")
   aigentron harden            run agents as their own OS user (uid 1500): secrets, the database and .env become
                               unreadable to them; new installs have this on already (docs/authentication.md)
   aigentron rollback          go back to the previous release (bare-metal; the last one is kept)
-  aigentron backup [file]     one archive: database, secrets, agents/skills/resources/attachments, workspace (not runs/ or caches)
-  aigentron restore <file>    put a backup back (stops the server, keeps what it replaces in backups/before-restore-*)
+  aigentron backup [file] [--with-repos]   one archive: database, secrets, agents/skills/resources/attachments, workspace, projects' folders (not runs/ or caches; --with-repos adds the code checkouts)
+  aigentron restore <file> [--force]       put a backup back (stops the server, keeps what it replaces in backups/before-restore-*; refuses an archive of a newer version)
+  aigentron export [file] [--to user@host:path] [--no-repos]   a MOVE: everything above plus the code and worktrees; --to sends it with scp
+  aigentron import <file>     the other half of a move, on the new server (restore + what to check afterwards)
   aigentron backup-timer on|off   daily automatic backup, 7 kept (bare-metal; off by default)
   aigentron reset-password    forgot the dashboard password? removes all passwords
   aigentron addon list|enable|disable|status|logs <name>   add-ons, e.g. a real browser on the server (docs/addons.md)
@@ -188,26 +192,65 @@ doctor() {
 docker_volume() { docker inspect -f '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null; }
 
 do_backup() {
-  ts=$(date +%Y%m%d-%H%M%S)
+  ts=$(date +%Y%m%d-%H%M%S); dest=""; extra=""; to=""; name="aigentron-backup"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --with-repos) extra="$extra --with-repos" ;;
+      --export) name="aigentron-export" ;;   # set by `aigentron export`: another name, so the rotation of daily backups never deletes it
+      --to) to="${2:-}"; shift ;;
+      --to=*) to="${1#--to=}" ;;
+      -*) die "unknown option $1 (aigentron backup [file] [--with-repos])" ;;
+      *) dest="$1" ;;
+    esac; shift
+  done
   if [ "$MODE" = docker ]; then
-    dest="${1:-$PWD/aigentron-backup-$ts.tar.gz}"
+    dest="${dest:-$PWD/$name-$ts.tar.gz}"
     command -v docker >/dev/null 2>&1 || die "docker is required"
-    docker exec "$CONTAINER" sh /app/infra/backup.sh backup /data "/data/backups/aigentron-backup-$ts.tar.gz"
-    docker cp "$CONTAINER:/data/backups/aigentron-backup-$ts.tar.gz" "$dest" >/dev/null
+    # shellcheck disable=SC2086
+    docker exec -e "APP_VERSION=$(version)" "$CONTAINER" sh /app/infra/backup.sh backup /data "/data/backups/$name-$ts.tar.gz" $extra
+    docker cp "$CONTAINER:/data/backups/$name-$ts.tar.gz" "$dest" >/dev/null
     chmod 600 "$dest" 2>/dev/null || true
     say "${G}✔${N} $dest   ${D}(the container keeps a copy in /data/backups; the host .env with your API keys is not included - keep $INSTALL_DIR/.env yourself)${N}"
   else
     need_root backup
-    dest="${1:-$DATA_DIR/backups/aigentron-backup-$ts.tar.gz}"
+    dest="${dest:-$DATA_DIR/backups/$name-$ts.tar.gz}"
+    # shellcheck disable=SC2086
     ORCH_DIR="$CURRENT/apps/orchestrator" APP_VERSION="$(version)" BACKUP_ENV_FILE="$INSTALL_DIR/.env" DATABASE_URL="file:$DATA_DIR/orchestrator.db" \
-      sh "$CURRENT/infra/backup.sh" backup "$DATA_DIR" "$dest"
+      sh "$CURRENT/infra/backup.sh" backup "$DATA_DIR" "$dest" $extra
     say "${D}Copy it off this server (scp / aws s3 cp) - a backup on the same disk does not survive losing the disk.${N}"
+  fi
+  if [ -n "$to" ]; then
+    command -v scp >/dev/null 2>&1 || die "scp is required for --to"
+    say "Sending $dest to $to …"
+    scp -p "$dest" "$to" || die "scp failed - the archive is still at $dest"
+    say "${G}✔${N} sent. On the new server (after installing Aigentron there):  ${B}sudo aigentron import <path of the archive there>${N}"
   fi
 }
 
+# Moving to another server: the archive of everything (database, secrets, agents, skills, resources, attachments, every project's folder AND the code
+# checkouts with the agents' worktrees, without node_modules / build output). `aigentron import` on the new server puts it back.
+do_export() {
+  has_repos=1
+  for a in "$@"; do [ "$a" = --no-repos ] && has_repos=0; done
+  args=""
+  for a in "$@"; do [ "$a" = --no-repos ] || args="$args $a"; done
+  # shellcheck disable=SC2086
+  set -- --export $args
+  [ "$has_repos" = 1 ] && set -- "$@" --with-repos
+  do_backup "$@"
+  say ""
+  say "${B}To finish the move${N} (docs/moving-servers.md):"
+  say "  1. new server: install Aigentron (same or newer version), then  ${B}sudo aigentron import <archive>${N}"
+  say "  2. ${B}stop this server${N} (sudo aigentron stop) once the new one works - two servers must not share one Telegram bot or the same repository pushes"
+  say "  3. on the new server: re-enable add-ons (sudo aigentron addon enable browser|playwright), check domains / Cloudflare Access in Settings, and run  aigentron doctor"
+}
+
 do_restore() {
-  [ -n "${1:-}" ] || die "usage: aigentron restore <backup-file>"
+  [ -n "${1:-}" ] || die "usage: aigentron restore <backup-file> [--force]"
   [ -s "$1" ] || die "$1 not found"
+  restore_args=""; shift_file="$1"; shift
+  for a in "$@"; do case "$a" in --force) restore_args="--force" ;; *) die "unknown option $a" ;; esac; done
+  set -- "$shift_file"
   say "${Y}Restoring replaces the database, secrets, agents, skills, resources, attachments and the workspace with the archive's content${N} (the replaced files are kept in backups/before-restore-*)."
   printf 'Type yes to continue: '; read -r ans || ans=
   [ "$ans" = yes ] || { say "cancelled"; exit 1; }
@@ -216,15 +259,27 @@ do_restore() {
     vol=$(docker_volume); [ -n "$vol" ] || die "cannot find the data volume of $CONTAINER"
     src=$(cd "$(dirname "$1")" && pwd)
     docker stop -t 60 "$CONTAINER" >/dev/null
-    docker run --rm --entrypoint sh -v "$vol:/data" -v "$src:/in:ro" "$img" /app/infra/backup.sh restore /data "/in/$(basename "$1")" || { say "${R}restore failed${N} - starting the server again"; docker start "$CONTAINER" >/dev/null; exit 1; }
+    docker run --rm -e "APP_VERSION=$(version)" --entrypoint sh -v "$vol:/data" -v "$src:/in:ro" "$img" /app/infra/backup.sh restore /data "/in/$(basename "$1")" $restore_args || { say "${R}restore failed${N} - starting the server again"; docker start "$CONTAINER" >/dev/null; exit 1; }
     docker start "$CONTAINER" >/dev/null
   else
     need_root restore
     systemctl stop "$SERVICE" || true
-    ORCH_DIR="$CURRENT/apps/orchestrator" DATABASE_URL="file:$DATA_DIR/orchestrator.db" sh "$CURRENT/infra/backup.sh" restore "$DATA_DIR" "$1" || { say "${R}restore failed${N} - starting the server again"; systemctl start "$SERVICE" || true; exit 1; }
+    ORCH_DIR="$CURRENT/apps/orchestrator" APP_VERSION="$(version)" DATABASE_URL="file:$DATA_DIR/orchestrator.db" sh "$CURRENT/infra/backup.sh" restore "$DATA_DIR" "$1" $restore_args || { say "${R}restore failed${N} - starting the server again"; systemctl start "$SERVICE" || true; exit 1; }
     systemctl start "$SERVICE"
   fi
   say "${G}✔${N} restored and started. Check: aigentron status"
+}
+
+# The same, as the second half of a move: what to check afterwards.
+do_import() {
+  do_restore "$@"
+  say ""
+  say "${B}After the import${N} (docs/moving-servers.md):"
+  say "  - open the dashboard and check Tasks / Projects; a project with a remote repository fetches by itself, the code was carried too if the archive was made by 'aigentron export'"
+  say "  - add-ons are NOT carried over: sudo aigentron addon enable browser|playwright (the browser add-on's profile with your sign-ins stays on the old server)"
+  say "  - the old server must be stopped (Telegram bot, repository pushes): sudo aigentron stop there"
+  say "  - the .env of the old server is saved as <data>/backups/env-from-backup.txt - copy over PUBLIC_URL, domains and API keys you need; sudo aigentron harden if agents ran isolated there"
+  say "  - aigentron doctor"
 }
 
 backup_timer() {
@@ -577,6 +632,8 @@ case "${1:-}" in
   harden) shift; do_harden "$@" ;;
   backup) shift; do_backup "$@" ;;
   restore) shift; do_restore "$@" ;;
+  export) shift; do_export "$@" ;;
+  import) shift; do_import "$@" ;;
   backup-timer) shift; backup_timer "$@" ;;
   rollback)
     [ "$MODE" = docker ] && die "rollback is for bare-metal installs; under Docker, re-run the installer with VERSION=<the older version>"

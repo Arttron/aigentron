@@ -60,3 +60,7 @@ archive: ## Build the release source archive locally (dist/aigentron-<VERSION>.t
 
 clean: ## Stop the stack and remove volumes (DESTRUCTIVE)
 	$(COMPOSE) down -v
+
+.PHONY: test-infra
+test-infra: ## shell tests of backup / restore / export / import in throw-away containers (needs Docker)
+	sh scripts/test-infra.sh

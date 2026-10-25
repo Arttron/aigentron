@@ -58,3 +58,7 @@ Dashboard text is English; the person's text, names, knowledge bases, voice (50 
 ## Browser through a proxy
 
 MCP server `playwright-proxy` sends ALL traffic through the operator's proxy (server-only: `PLAYWRIGHT_PROXY_SERVER` host:port, `_USER`, `_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; add it to the agent's MCP list). `docs/browser-proxy.md`.
+
+## Moving to another server
+
+I cannot do it for you (it is two commands on the servers over SSH): `sudo aigentron export` on the old one, `sudo aigentron import <archive>` on the new one (same or newer version, same data folder). It carries the database, secrets, agents/skills/resources, every project's folder and the code; not the add-ons or the browser profile. Then stop the old server (Telegram bot!), re-enable add-ons, check domains. `docs/moving-servers.md`.

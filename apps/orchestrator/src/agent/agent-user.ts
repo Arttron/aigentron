@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentIsolation } from '@lds/agent-runner';
 
@@ -57,6 +57,11 @@ export interface ChownPlanInput {
   /** The project's folder (memory / work / deliverables): WORKSPACE_DIR for the default project, `<PROJECTS_DIR>/<slug>` otherwise. */
   workspaceDir: string;
   attachmentsDir: string;
+  /**
+   * Project isolation is on: this run's user belongs to ONE project, so everything of the project is private to it (0700) — the run dir is only
+   * traversable (0711), the project folder, the checkout, the worktrees' parent and the attachments are 0700.
+   */
+  isolated?: boolean;
 }
 
 /**
@@ -71,17 +76,25 @@ export interface ChownPlanInput {
  */
 export function chownPlan(p: ChownPlanInput): ChownStep[] {
   const home = join(p.runDir, 'home');
+  const iso = p.isolated === true;
   const steps: ChownStep[] = [
-    { path: p.runDir, recursive: false, mkdir: true, mode: 0o755, chown: false },
+    { path: p.runDir, recursive: false, mkdir: true, mode: iso ? 0o711 : 0o755, chown: false },
     { path: home, recursive: true, mkdir: true, mode: 0o700 },
     { path: join(home, 'tmp'), recursive: false, mkdir: true, mode: 0o700 },
     { path: join(p.runDir, 'codex-home'), recursive: true, optional: true },
-    { path: p.workspaceDir, recursive: true, mkdir: true, mode: 0o755 },
-    { path: p.attachmentsDir, recursive: true, mkdir: true, mode: 0o755 },
+    { path: p.workspaceDir, recursive: true, mkdir: true, mode: iso ? 0o700 : 0o755 },
+    { path: p.attachmentsDir, recursive: true, mkdir: true, mode: iso ? 0o700 : 0o755 },
   ];
   if (p.worktreePath) {
-    if (p.shared || p.worktreePath === p.repoPath) steps.push({ path: p.repoPath, recursive: true });
-    else steps.push({ path: join(p.repoPath, '.git'), recursive: true, optional: true }, { path: p.worktreePath, recursive: true });
+    if (p.shared || p.worktreePath === p.repoPath) {
+      steps.push({ path: p.repoPath, recursive: true });
+      if (iso) steps.push({ path: p.repoPath, recursive: false, mode: 0o700 });
+    } else {
+      steps.push({ path: join(p.repoPath, '.git'), recursive: true, optional: true });
+      // isolated: the main checkout's top folder (its files stay root's, read-only to the agent) and the project's worktrees folder are the project's alone
+      if (iso) steps.push({ path: p.repoPath, recursive: false, mode: 0o700 }, { path: dirname(p.worktreePath), recursive: false, mode: 0o700, optional: true });
+      steps.push({ path: p.worktreePath, recursive: true });
+    }
   }
   return steps;
 }
@@ -99,6 +112,8 @@ export async function applyChownPlan(plan: ChownStep[], runAs: AgentRunAs): Prom
       if (step.mode !== undefined) await chmod(step.path, step.mode);
     } else if (step.optional && !(await stat(step.path).catch(() => null))) {
       continue;
+    } else if (step.mode !== undefined) {
+      await chmod(step.path, step.mode); // a mode on an existing folder (no mkdir): the project's private folders
     }
     if (step.chown === false) continue;
     const owner = `${runAs.uid}:${runAs.gid}`;

@@ -48,6 +48,36 @@ describe('chownPlan', () => {
   });
 });
 
+describe('chownPlan — project isolation', () => {
+  const base = { runDir: '/d/runs/t1', worktreePath: '/d/worktrees/shop/t1', repoPath: '/d/projects/shop/repo', shared: false, workspaceDir: '/d/projects/shop', attachmentsDir: '/d/attachments/t1' };
+  const byPath = (steps: ReturnType<typeof chownPlan>, path: string) => steps.filter((s) => s.path === path);
+  it('without the option nothing changes: the same modes as before', () => {
+    const plain = chownPlan(base);
+    expect(plain.find((s) => s.path === '/d/runs/t1')).toMatchObject({ mode: 0o755, chown: false });
+    expect(plain.find((s) => s.path === '/d/projects/shop')).toMatchObject({ mode: 0o755 });
+    expect(plain.find((s) => s.path === '/d/attachments/t1')).toMatchObject({ mode: 0o755 });
+    expect(plain.some((s) => s.path === '/d/worktrees/shop')).toBe(false);
+  });
+  it('isolated, worktree mode: the project folder, attachments, main checkout and the worktrees folder are 0700', () => {
+    const steps = chownPlan({ ...base, isolated: true });
+    expect(steps.find((s) => s.path === '/d/runs/t1')).toMatchObject({ mode: 0o711, chown: false }); // traversable, not listable
+    expect(byPath(steps, '/d/projects/shop')[0]).toMatchObject({ mode: 0o700, recursive: true });
+    expect(byPath(steps, '/d/attachments/t1')[0]).toMatchObject({ mode: 0o700 });
+    expect(byPath(steps, '/d/projects/shop/repo')).toEqual([{ path: '/d/projects/shop/repo', recursive: false, mode: 0o700 }]); // top folder only: its files stay root's
+    expect(byPath(steps, '/d/worktrees/shop')[0]).toMatchObject({ mode: 0o700, recursive: false, optional: true });
+    expect(byPath(steps, '/d/worktrees/shop/t1')[0]).toMatchObject({ recursive: true });
+    expect(byPath(steps, '/d/projects/shop/repo/.git')[0]).toMatchObject({ recursive: true });
+  });
+  it('isolated, shared mode: the whole checkout is the project user\'s and private', () => {
+    const steps = chownPlan({ ...base, worktreePath: base.repoPath, shared: true, isolated: true });
+    expect(byPath(steps, base.repoPath)).toEqual([{ path: base.repoPath, recursive: true }, { path: base.repoPath, recursive: false, mode: 0o700 }]);
+  });
+  it('a chat agent has no checkout: only its own folders', () => {
+    const steps = chownPlan({ ...base, worktreePath: null, isolated: true });
+    expect(steps.some((s) => s.path.startsWith('/d/worktrees') || s.path.startsWith('/d/projects/shop/repo'))).toBe(false);
+  });
+});
+
 describe('isolationFor', () => {
   it('builds the runner params with HOME under the run dir', () => {
     expect(isolationFor({ uid: 1500, gid: 1500 }, '/app/infra/agent-exec.sh', '/data/agent/runs/t1')).toEqual({
