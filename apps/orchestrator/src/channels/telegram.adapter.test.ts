@@ -97,3 +97,29 @@ describe('TelegramAdapter outgoing requests', () => {
     expect(clip('abcdef', 4)).toBe('abc…');
   });
 });
+
+describe('TelegramAdapter formatting', () => {
+  const adapter = () => new TelegramAdapter('t', { botToken: 'x' });
+  it('sends the text as HTML with file names in <code> (so progress.md is not a link)', async () => {
+    const { calls } = fakeTelegram([]);
+    await adapter().sendMessage('42', '**Done**: updated english/plan.md and progress.md');
+    const sent = calls.find((c) => c.method === 'sendMessage')!.body as { text: string; parse_mode: string };
+    expect(sent.parse_mode).toBe('HTML');
+    expect(sent.text).toBe('<b>Done</b>: updated <code>english/plan.md</code> and <code>progress.md</code>');
+  });
+  it('when Telegram refuses the markup the same text is sent plain', async () => {
+    const calls: { body: Record<string, unknown> }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push({ body });
+      return body.parse_mode
+        ? new Response(JSON.stringify({ ok: false, description: "Bad Request: can't parse entities: Can't find end of the entity" }), { status: 400 })
+        : new Response(JSON.stringify({ ok: true, result: { message_id: 9 } }));
+    }));
+    const r = await adapter().sendMessage('42', 'hello **x**');
+    expect(r.messageId).toBe('9');
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.body.parse_mode).toBeUndefined();
+    expect(calls[1]!.body.text).toBe('hello **x**');
+  });
+});

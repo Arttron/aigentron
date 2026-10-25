@@ -1,3 +1,4 @@
+import { toTelegramHtml } from './telegram-html';
 import { basename } from 'node:path';
 import { Logger } from '@nestjs/common';
 import type { ChannelAdapter, ChatActivity, IncomingHandler, MessageButton, OutgoingApproval, PollingHooks } from './channel-adapter';
@@ -150,24 +151,33 @@ export class TelegramAdapter implements ChannelAdapter {
   async sendMessage(chatId: string, text: string, buttons?: MessageButton[][]): Promise<{ messageId: string }> {
     // Telegram caps a message at 4096 chars — the gateway splits long texts; this is the last line of defence.
     const body = clip(text, TELEGRAM_MAX_TEXT);
-    const msg = await this.call<{ message_id: number }>('sendMessage', {
-      chat_id: chatId,
-      text: body,
-      disable_web_page_preview: true,
-      ...(buttons?.length ? { reply_markup: this.inlineKeyboard(buttons) } : {}),
-    });
+    const msg = await this.callFormatted<{ message_id: number }>(
+      'sendMessage',
+      { chat_id: chatId, disable_web_page_preview: true, ...(buttons?.length ? { reply_markup: this.inlineKeyboard(buttons) } : {}) },
+      body,
+    );
     return { messageId: String(msg.message_id) };
+  }
+
+  /**
+   * A text call with the text shown formatted (Markdown subset, file names in code — see telegram-html.ts). If Telegram refuses the markup the same text goes out
+   * plain: a message is never lost to formatting.
+   */
+  private async callFormatted<T>(method: string, base: Record<string, unknown>, plain: string): Promise<T> {
+    try {
+      return await this.call<T>(method, { ...base, text: toTelegramHtml(plain), parse_mode: 'HTML' });
+    } catch (e) {
+      if (!/can't parse entities|can't find end|unsupported start tag/i.test((e as Error).message)) throw e;
+      this.logger.warn(`${method}: Telegram refused the formatting, sending plain text`);
+      return this.call<T>(method, { ...base, text: plain });
+    }
   }
 
   /** Replace a message's text in place — omitting reply_markup leaves any
    *  existing inline keyboard (e.g. the "⏹ Cancel" button) untouched. */
   async editMessage(chatId: string, messageId: string, text: string): Promise<void> {
     const body = clip(text, TELEGRAM_MAX_TEXT);
-    await this.call('editMessageText', {
-      chat_id: chatId,
-      message_id: Number(messageId),
-      text: body,
-    }).catch(() => undefined); // "message not modified" / message gone — best effort
+    await this.callFormatted('editMessageText', { chat_id: chatId, message_id: Number(messageId) }, body).catch(() => undefined); // "message not modified" / message gone — best effort
   }
 
   async sendImage(chatId: string, image: { data: Buffer; filename: string }, caption?: string): Promise<void> {

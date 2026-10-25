@@ -409,6 +409,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const target = await this.projects.notifyTargetFor(taskId);
     if (!target) return;
     const { channelId, chatId } = target;
+    // A chat bound to another project is not told about this task (the global fallback chat may be someone's project chat).
+    const bound = await this.projects.boundToChat(channelId, chatId).catch(() => null);
+    if (bound) {
+      const t = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } }).catch(() => null);
+      if (t && t.projectId !== bound.id) return;
+    }
     // Respect /mute on the default chat too.
     if ((await this.dest.prefs(channelId, chatId)).muted) return;
 
@@ -1043,12 +1049,13 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const state = await this.channels.chatState(channelId, e.chatId);
-    const activeTask = state.activeTaskId ? await this.liveTask(state.activeTaskId) : null;
+    const only = (await this.projects.boundToChat(channelId, e.chatId).catch(() => null))?.id;
+    const activeTask = state.activeTaskId ? await this.liveTask(state.activeTaskId, only) : null;
     const facts: RoutingFacts = { address: addr, activeTask };
     let openQuestion: AgentQuestion | null = null;
     if (!addr) {
       // Replying to (quoting) a message a task sent addresses THAT task — whichever agent wrote it, whatever the chat's active task is.
-      facts.quotedTaskId = await this.quotedTask(channelId, e.chatId, e.replyToMessageId);
+      facts.quotedTaskId = await this.quotedTask(channelId, e.chatId, e.replyToMessageId, only);
       // An agent is waiting for an answer in this conversation: a plain message IS the answer (a number picks that option).
       const waiting = spokenToTask(facts);
       const q = waiting ? await this.questions.pendingForTask(waiting).catch(() => null) : null;
@@ -1115,16 +1122,19 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** The task, when it still exists (the chat's active task may have been deleted). */
-  private async liveTask(id: string): Promise<{ id: string; agentName: string | null } | null> {
-    return this.prisma.task.findUnique({ where: { id }, select: { id: true, agentName: true } });
+  private async liveTask(id: string, onlyProjectId?: string): Promise<{ id: string; agentName: string | null } | null> {
+    const t = await this.prisma.task.findUnique({ where: { id }, select: { id: true, agentName: true, projectId: true } });
+    // a chat bound to a project works only with that project: a task of another one is as good as gone for it
+    if (!t || (onlyProjectId && t.projectId !== onlyProjectId)) return null;
+    return { id: t.id, agentName: t.agentName };
   }
 
   /** The task a quoted message came from (when it is still there), else null. */
-  private async quotedTask(channelId: string, chatId: string, replyToMessageId?: string): Promise<string | null> {
+  private async quotedTask(channelId: string, chatId: string, replyToMessageId?: string, onlyProjectId?: string): Promise<string | null> {
     if (!replyToMessageId) return null;
     const taskId = await this.channels.taskForMessage(channelId, chatId, replyToMessageId);
     if (!taskId) return null;
-    return (await this.liveTask(taskId)) ? taskId : null;
+    return (await this.liveTask(taskId, onlyProjectId)) ? taskId : null;
   }
 
   /** A photo/document from the chat → attach to the active task (or start one). A file is never the answer to a question. */
@@ -1137,9 +1147,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const buf = Buffer.from(e.data, 'base64');
     const caption = withQuote(e.caption?.trim() || 'Review the attached file.', e.replyToText);
     // a file sent as a reply goes to the task that wrote the quoted message
+    const bound = await this.projects.boundToChat(channelId, e.chatId).catch(() => null);
     const target = resolveTarget({
-      quotedTaskId: await this.quotedTask(channelId, e.chatId, e.replyToMessageId),
-      activeTask: state.activeTaskId ? await this.liveTask(state.activeTaskId) : null,
+      quotedTaskId: await this.quotedTask(channelId, e.chatId, e.replyToMessageId, bound?.id),
+      activeTask: state.activeTaskId ? await this.liveTask(state.activeTaskId, bound?.id) : null,
     });
     if (target.kind === 'follow-up') {
       if (target.switchTo) await this.channels.setChatState(channelId, e.chatId, { activeTaskId: target.taskId }).catch(() => undefined);
@@ -1154,6 +1165,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       agentName: state.agent ?? undefined,
       provider: state.model ?? undefined,
       createdByChannel: `${row.kind}:${e.userId}`,
+      project: bound?.slug,
       autostart: false,
     });
     const meta = await this.attachments.save(created.id, e.fileName, Readable.from(buf));

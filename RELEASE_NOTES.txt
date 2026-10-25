@@ -1,13 +1,13 @@
-Aigentron v0.1.89
+Aigentron v0.1.90
 
-For people who are not programmers: agents can now pull the latest code of a project that uses an SSH key, and they know the settings of the project they work in.
+For people who are not programmers: a messenger chat can now belong to one project, and messages in Telegram no longer turn file names into links.
 
 New
-- Agents can fetch the project's remote: a new `fetch_remote` tool (no approval needed). Before, an agent's own `git pull` failed with "Host key verification failed" because agents hold no keys by design; now the server fetches with the project's key, and the agent merges the new commits itself. Nothing of the agent's files or branches changes by the fetch.
-- Every agent working in a code project is told that project's settings: repository and base branch, how the remote is reached, shared or worktree mode, subdirectory and the checks that run afterwards, and that remote git goes through `fetch_remote` / `push_branch`.
+- A chat tied to a project works only with it. When a project's notification channel and chat are set (the project's settings), that chat shows only the project's tasks in /tasks, starts new tasks (a message or a file) in the project, ignores replies and buttons of other projects' tasks, and does not get escalations of other projects. /settings names the project. If two projects point at the same chat, nothing is narrowed.
+- Telegram messages are formatted: bold, italic, code, code blocks, headings, bullet lists and [text](https://…) links appear as formatting instead of stray ** and backticks.
 
 Fixed
-- Projects → Repository → "Sync now" showed a cross and no text after a successful sync. It now shows a tick, what was done and the short commit id.
-- The `git` skill told agents to switch to `develop` and `git pull`, said plain `git fetch` authenticates itself and that a local merge needs approval; all of that is corrected. The `playwright` skill no longer calls the Docker sample app "the base project".
+- File names such as progress.md or english/plan.md were shown as links to websites (.md, .sh, .py … are real internet domains). File names and paths are now shown as code and are never linked.
+- If Telegram refuses a message's formatting, the same text is sent plain, so no message is lost.
 
 Update note: no database changes.

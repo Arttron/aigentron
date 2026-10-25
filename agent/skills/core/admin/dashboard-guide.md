@@ -61,7 +61,7 @@ Shared folder for non-code work: `WORKSPACE.md` (the brief, edited with ✎; eve
 
 ## 📁 Projects (`/projects`)
 
-Many projects: each has its own repo (access Public/Token/SSH key, **Test connection**, **Sync now**), checks, default agent, notify channel, mode shared/worktree; Settings → Repository = the Default one. Task form/list get a project picker at 2+. I can't enter tokens — guide.
+Many projects: each has its own repo (access Public/Token/SSH key, **Test connection**, **Sync now**), checks, default agent, notify channel (a chat set as a project's notify chat is bound to it and works only with that project: its tasks, new tasks, replies and escalations), mode shared/worktree; Settings → Repository = the Default one. Task form/list get a project picker at 2+. I can't enter tokens — guide.
 
 A person who wants to edit and test the code on the server: `docs/work-on-server.md` — own clone (safest) or the project's checkout; a project they work in must be on **worktree** isolation, not `shared` (shared runs the agent in that folder and pushes its current branch).
 

@@ -201,6 +201,18 @@ export class ProjectsService implements OnModuleInit {
     return ctx.notifyChannelId && ctx.notifyChatId ? { channelId: ctx.notifyChannelId, chatId: ctx.notifyChatId } : null;
   }
 
+  /**
+   * The project a chat is bound to: the one whose notification channel + chat is exactly this one (Project → Notifications). Null when none is — or when
+   * several projects point at the same chat (ambiguous: nothing is narrowed, the chat sees every task).
+   */
+  async boundToChat(channelId: string, chatId: string): Promise<ProjectRow | null> {
+    if (!channelId || !chatId) return null;
+    const rows = await this.prisma.project.findMany({ where: { notifyChannelId: channelId, notifyChatId: chatId, archivedAt: null }, take: 2 });
+    if (rows.length !== 1) return null;
+    setProjectLabels(rows);
+    return rows[0]!;
+  }
+
   /** Creates the folder layout that is missing (never overwrites). The default project's layout is the workspace (WorkspaceService). */
   async ensureLayout(p: Pick<ProjectRow, 'slug' | 'isDefault' | 'name'>): Promise<string> {
     const dir = this.dirOf(p);

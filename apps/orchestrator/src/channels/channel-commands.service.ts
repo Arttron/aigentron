@@ -5,6 +5,7 @@ import { isTerminalStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { TasksService } from '../tasks/tasks.service';
+import { ProjectsService } from '../projects/projects.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { ProvidersService } from '../providers/providers.service';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
@@ -57,7 +58,13 @@ export class ChannelCommandService {
     private readonly settings: SettingsService,
     private readonly voice: VoiceService,
     private readonly moduleRef: ModuleRef,
+    private readonly projects: ProjectsService,
   ) {}
+
+  /** The project this chat is bound to (its notification chat), or null: then every project's tasks are visible and new tasks go to the default project. */
+  private boundProject(ctx: CommandCtx) {
+    return this.projects.boundToChat(ctx.channelId, ctx.chatId).catch(() => null);
+  }
 
   // ---- addressing an agent: `/pm text`, `@pm text` ----
 
@@ -207,8 +214,10 @@ export class ChannelCommandService {
       return { text: '📝 Send the task description as your next message.', taskId: null };
     }
     const state = await this.channels.chatState(ctx.channelId, ctx.chatId);
+    const bound = await this.boundProject(ctx);
     const task = await this.tasks.create({
       prompt: text,
+      project: bound?.slug,
       agentName: agentOverride ?? state.agent ?? undefined,
       provider: state.model ?? undefined,
       createdByChannel: `${ctx.kind}:${ctx.userId}`,
@@ -219,14 +228,15 @@ export class ChannelCommandService {
   }
 
   private async listTasks(ctx: CommandCtx): Promise<CommandReply> {
+    const bound = await this.boundProject(ctx);
     const [{ items: rows }, state] = await Promise.all([
-      this.tasks.list({ pageSize: 10 }),
+      this.tasks.list({ pageSize: 10, ...(bound ? { project: bound.slug } : {}) }),
       this.channels.chatState(ctx.channelId, ctx.chatId),
     ]);
-    if (!rows.length) return { text: 'No tasks yet. Use /new-task <text>.' };
+    if (!rows.length) return { text: bound ? `No tasks in «${bound.name}» yet. Use /new-task <text>.` : 'No tasks yet. Use /new-task <text>.' };
     const top = rows.slice(0, 10);
     return {
-      text: 'Recent tasks — tap one to switch:',
+      text: bound ? `Recent tasks of «${bound.name}» — tap one to switch:` : 'Recent tasks — tap one to switch:',
       buttons: top.map((t) => [taskButton(t.id, t.title, t.status, t.id === state.activeTaskId)]),
     };
   }
@@ -236,6 +246,8 @@ export class ChannelCommandService {
   async switchToTaskById(ctx: CommandCtx, taskId: string): Promise<string> {
     const task = await this.tasks.get(taskId).catch(() => null);
     if (!task) return 'Task not found (it may have been deleted). See /tasks.';
+    const bound = await this.boundProject(ctx);
+    if (bound && task.projectId !== bound.id) return `That task is not in «${bound.name}», the project of this chat. See /tasks.`;
     await this.channels.linkThread(ctx.channelId, task.id, ctx.chatId);
     await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: task.id });
     return `▶ Now on «${task.title}» (${shortId(task.id)}) — ${task.status}.\n${await this.channels.summarize(task.id)}`;
@@ -245,16 +257,17 @@ export class ChannelCommandService {
     if (!arg) return 'Usage: /task <id>';
     // Match against a recent window by id/suffix/short-id (the messenger passes
     // a short id, which the free-text search can't match on its own).
-    const { items: rows } = await this.tasks.list({ pageSize: 100 });
+    const bound = await this.boundProject(ctx);
+    const { items: rows } = await this.tasks.list({ pageSize: 100, ...(bound ? { project: bound.slug } : {}) });
     const task = rows.find((t) => t.id === arg || t.id.endsWith(arg) || shortId(t.id) === arg);
     if (!task) return `Task not found: ${arg}. See /tasks.`;
     return this.switchToTaskById(ctx, task.id);
   }
 
   private async compress(ctx: CommandCtx): Promise<string> {
-    const state = await this.channels.chatState(ctx.channelId, ctx.chatId);
-    if (!state.activeTaskId) return 'No active task. Use /task <id> or /new-task <text>.';
-    return `🗜 Active task summary:\n${await this.channels.summarize(state.activeTaskId)}`;
+    const id = await this.activeTaskId(ctx);
+    if (!id) return 'No active task. Use /task <id> or /new-task <text>.';
+    return `🗜 Active task summary:\n${await this.channels.summarize(id)}`;
   }
 
   private async listModels(ctx: CommandCtx): Promise<string> {
@@ -392,20 +405,23 @@ export class ChannelCommandService {
   }
 
   private async showSettings(ctx: CommandCtx): Promise<string> {
-    const [state, defAgent, defProvider] = await Promise.all([
+    const [state, defAgent, defProvider, activeId, bound] = await Promise.all([
       this.channels.chatState(ctx.channelId, ctx.chatId),
       this.settings.defaultAgent(),
       this.settings.defaultProvider(),
+      this.activeTaskId(ctx),
+      this.boundProject(ctx),
     ]);
     let active = 'none';
-    if (state.activeTaskId) {
+    if (activeId) {
       const t = await this.prisma.task.findUnique({
-        where: { id: state.activeTaskId },
+        where: { id: activeId },
         select: { title: true, status: true },
       });
       active = t ? `«${t.title}» (${t.status})` : '(deleted)';
     }
     return [
+      ...(bound ? [`Project: «${bound.name}» (this chat works only with it)`] : []),
       `Active task: ${active}`,
       `Agent: ${state.agent ?? `${defAgent ?? 'default'} (default)`}`,
       `Model: ${state.model ?? `${defProvider} (default)`}`,
@@ -441,8 +457,16 @@ export class ChannelCommandService {
       : '🔔 Unmuted — you will get task updates again.';
   }
 
+  /** The chat's active task; in a chat bound to a project, one of another project does not count (and is forgotten). */
   private async activeTaskId(ctx: CommandCtx): Promise<string | null> {
-    return (await this.channels.chatState(ctx.channelId, ctx.chatId)).activeTaskId ?? null;
+    const id = (await this.channels.chatState(ctx.channelId, ctx.chatId)).activeTaskId ?? null;
+    if (!id) return null;
+    const bound = await this.boundProject(ctx);
+    if (!bound) return id;
+    const t = await this.prisma.task.findUnique({ where: { id }, select: { projectId: true } }).catch(() => null);
+    if (t && t.projectId === bound.id) return id;
+    await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: null }).catch(() => undefined);
+    return null;
   }
 }
 

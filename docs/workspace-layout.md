@@ -74,7 +74,7 @@ answers approval cards in the terminal and reads secrets through a hidden prompt
   agents (the admin) run in the agent dir instead and have no file tools.
 - Verify commands and the number of fix attempts are the project's (`Project.verifyCommands` / `verifyMaxAttempts`; the default
   project's are the Settings → General values). A task without an agent gets the project's `defaultAgent`, else the global one; a
-  blocked task without a chat thread escalates to the project's notification chat, else the global one (Settings → Escalations).
+  blocked task without a chat thread escalates to the project's notification chat, else the global one (Settings → Escalations). A messenger chat that is a project's notification chat (the project's notify channel + chat) is **bound** to that project: the chat works **only** with it: `/tasks` and `/task <id>` show only its tasks; a new task (text or file) starts in it; the active task, a quoted message or a button of another project's task is ignored (a plain message then starts a new task) and switching to one is refused; escalations of other projects' tasks are not sent to it, even when it is the global fallback chat; `/settings` names the project. If two projects point at the same chat it is ambiguous and nothing is narrowed.
 - Approvals gate risky actions; reads of credential files (`.env*`, `auth.json`, `.git/config`, `/proc/*/environ`, `secrets/`, ssh/cloud keys)
   need approval. Note the project itself may contain such files (`.env.local`, `.env.production`…) — they are gated, not hidden.
 - With agent isolation on (`AGENT_RUN_AS_UID`, `docs/authentication.md`) the agent is a separate OS user: `secrets/`, the database,

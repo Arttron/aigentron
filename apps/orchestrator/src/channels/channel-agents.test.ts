@@ -13,7 +13,7 @@ function service() {
   const agents = { list: async () => agentList };
   const settings = { defaultAgent: async () => 'pm' };
   const channels = { chatState: async () => ({ agent: null }) };
-  return new ChannelCommandService({} as never, {} as never, channels as never, {} as never, {} as never, {} as never, agents as never, settings as never, {} as never);
+  return new ChannelCommandService({} as never, {} as never, channels as never, {} as never, {} as never, {} as never, agents as never, settings as never, {} as never, {} as never);
 }
 
 describe('addressing agents from a chat', () => {

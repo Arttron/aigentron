@@ -188,3 +188,7 @@ The repository card read `ok` / `message` from the sync answer, but the server r
 - `playwright` skill presented `project-dev` as "the base project": it is the Docker stack's sample app, not a registered project. Now says to use `preview_worktree` in any other project.
 - Not changed, checked: `task-splitting` (names the project slug), the admin agent and its skills (projects, per-project libraries, repository access, `fetch_remote`), the renovation agents (docs projects: resources / workspace tools, no git), the stack skills (`nestjs`, `nextjs`, `postgres`, `elasticsearch`, `i18n`, `heroku`, `code-intel`: project-agnostic).
 - Skills are only seen by agents that list them; the project's settings and the remote-git rule now travel in every code run's system prompt instead (see `agent/project-orientation.ts`).
+
+## 2026-10-25 — `progress.md` showed up as a link in Telegram (fixed)
+
+Telegram links anything shaped like `name.tld`, and `.md`, `.sh`, `.py`, `.rs`, `.zip` … are real top-level domains, so file names in an agent's message became links to websites. Messages are now sent with Telegram's HTML subset (`channels/telegram-html.ts`): file names and paths go into `<code>` (never linked), the usual Markdown (bold, italic, code, fenced code, headings, bullets, `[text](https://…)`) is shown as formatting, the rest is escaped, web addresses and e-mails are left alone. If Telegram refuses the markup the same text is sent plain.
