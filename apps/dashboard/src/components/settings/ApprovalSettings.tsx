@@ -40,7 +40,7 @@ export function ApprovalSettings() {
       {off && (
         <Muted>
           ⚠ On: shell commands, writes anywhere, outside calls, git push and starting tasks go ahead without a card, on every project that does not set its own level. Still asked even now: touching sign-in passwords / tokens / the charter
-          and CI files, and everything the admin changes on the platform (settings, providers, agents, updates). Switch it back off when you are done.
+          and CI files, and everything the admin changes on the platform (settings, providers, agents, updates). Runs that reach the step limit or the time ceiling are continued by themselves (a run that keeps hitting the step limit without finishing is still stopped after a few rounds). Switch it back off when you are done.
         </Muted>
       )}
       {msg && (msg.ok ? <Muted>{msg.text}</Muted> : <ErrorText>{msg.text}</ErrorText>)}

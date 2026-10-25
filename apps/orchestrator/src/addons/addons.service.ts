@@ -166,7 +166,9 @@ export class AddonsService {
 
   private async describe(d: AddonDescriptor): Promise<AddonInfo> {
     const { state, error } = await this.readState(d.name);
-    const health = state?.enabled && state.endpoints.view ? await this.probe(state.endpoints.view) : null;
+    // the endpoint to look at: the browser add-on's view, else the MCP server of an add-on without a view
+    const watched = state?.endpoints.view ?? state?.endpoints.mcp ?? null;
+    const health = state?.enabled && watched ? await this.probe(watched) : null;
     const hasView = d.name === 'browser';
     return {
       ...d,

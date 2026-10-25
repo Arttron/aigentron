@@ -2,12 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { api, errMsg, type AddonInfo, type AddonStatus } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { usePolling } from '@/lib/use-polling';
-import { AppHeader, BackLink, Badge, Button, ButtonLink, Card, ErrorText, Muted, Row, SectionTitle, type BadgeTone } from '@/components/ui';
+import { Badge, Button, ButtonLink, Card, ErrorText, Muted, Row, SectionTitle, type BadgeTone } from '@/components/ui';
 import { CopyButton } from '@/components/CopyButton';
 import styles from './BrowserPage.module.css';
 
 const POLL_MS = 10_000;
-const STATUS: Record<AddonStatus, { label: string; tone: BadgeTone }> = {
+export const STATUS: Record<AddonStatus, { label: string; tone: BadgeTone }> = {
   'not-installed': { label: 'Not installed', tone: 'neutral' },
   'enabled-healthy': { label: 'Running', tone: 'done' },
   'enabled-unreachable': { label: 'Not answering', tone: 'failed' },
@@ -15,7 +15,7 @@ const STATUS: Record<AddonStatus, { label: string; tone: BadgeTone }> = {
 };
 
 const pad = (n: number) => String(n).padStart(2, '0');
-const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(n % 1024 ? 1 : 0)} GB` : `${n} MB`);
+export const mb = (n: number) => (n >= 1024 ? `${(n / 1024).toFixed(n % 1024 ? 1 : 0)} GB` : `${n} MB`);
 /** "1:59:30" / "9:05" — what is left of the viewing session. */
 function left(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -25,7 +25,7 @@ function left(ms: number): string {
 }
 
 /** A command to run on the server, with a copy button (nothing runs from the dashboard). */
-function Command({ text, hint }: { text: string; hint?: string }) {
+export function Command({ text, hint }: { text: string; hint?: string }) {
   return (
     <div className={styles.cmd}>
       <code>{text}</code>
@@ -36,10 +36,10 @@ function Command({ text, hint }: { text: string; hint?: string }) {
 }
 
 /**
- * The browser add-on (docs/addons.md): a real browser on the server. Not installed → what it is and the command to run;
+ * The browser add-on's panel on the Add-ons page (docs/addons.md): a real browser on the server. Not installed → what it is and the command to run;
  * running → the live view (noVNC, proxied behind the sign-in) filling the rest of the screen; not answering → what to check.
  */
-export function BrowserPage() {
+export function BrowserAddonPanel() {
   const [info, setInfo] = useState<AddonInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
@@ -102,9 +102,6 @@ export function BrowserPage() {
 
   return (
     <>
-      <BackLink href="/">← all tasks</BackLink>
-      <AppHeader title="🌐 Browser" />
-
       {error && (
         <Card>
           <ErrorText>{error}</ErrorText>

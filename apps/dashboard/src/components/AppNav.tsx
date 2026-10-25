@@ -24,7 +24,7 @@ const LIBRARY: Item[] = [
   { to: '/workspace', icon: '📁', label: 'Workspace' },
 ];
 const SYSTEM: Item[] = [
-  { to: '/browser', icon: '🌐', label: 'Browser' },
+  { to: '/addons', icon: '🧩', label: 'Add-ons', also: '/browser' },
   { to: '/stats', icon: '📊', label: 'Stats' },
   { to: '/settings', icon: '⚙', label: 'Settings' },
 ];

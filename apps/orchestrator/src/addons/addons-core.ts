@@ -13,7 +13,8 @@ export interface AddonDescriptor {
   title: string;
   description: string;
   requires: { ramMb: number; diskMb: number };
-  ports: { view: number; cdp: number };
+  /** the browser add-on has view + cdp, the Playwright one an MCP port; a port an add-on does not have is null */
+  ports: { view: number | null; cdp: number | null; mcp: number | null };
   backends: AddonBackend[];
 }
 
@@ -26,7 +27,7 @@ export interface AddonState {
   installedAt: string | null;
   browser: string | null;
   arch: string | null;
-  endpoints: { view: string | null; cdp: string | null };
+  endpoints: { view: string | null; cdp: string | null; mcp: string | null };
   profiles: string[];
   notes: string[];
 }
@@ -53,8 +54,17 @@ export const BUILTIN_DESCRIPTORS: readonly AddonDescriptor[] = [
     description:
       'A real Chromium browser running on the server. You watch and operate it from the dashboard; agents drive the same browser. Sign in to sites once, and the agents can use them.',
     requires: { ramMb: 1536, diskMb: 1500 },
-    ports: { view: 6080, cdp: 9222 },
+    ports: { view: 6080, cdp: 9222, mcp: null },
     backends: ['bare', 'docker'],
+  },
+  {
+    name: 'playwright',
+    title: 'Playwright browser for agents',
+    description:
+      'A headless Chromium behind the Playwright MCP server, for the agents\' browser work (screenshots, checking a page, filling a form). Separate from the Browser add-on, so a personal browser stays personal.',
+    requires: { ramMb: 1536, diskMb: 1500 },
+    ports: { view: null, cdp: null, mcp: 8931 },
+    backends: ['bare'],
   },
 ];
 
@@ -73,9 +83,13 @@ export function parseDescriptor(raw: unknown): Parsed<AddonDescriptor> {
   const description = str(raw.description, 600)?.trim() ?? '';
   const req = isObj(raw.requires) ? raw.requires : {};
   const ports = isObj(raw.ports) ? raw.ports : {};
-  const view = int(ports.view, 1, 65535);
-  const cdp = int(ports.cdp, 1, 65535);
-  if (view === null || cdp === null) return { ok: false, error: 'ports.view and ports.cdp must be 1–65535' };
+  // each port is optional (the browser add-on has view + cdp, the Playwright one has mcp), but a given one must be valid and one must exist
+  const optPort = (v: unknown): number | null | 'bad' => (v === undefined || v === null ? null : (int(v, 1, 65535) ?? 'bad'));
+  const view = optPort(ports.view);
+  const cdp = optPort(ports.cdp);
+  const mcp = optPort(ports.mcp);
+  if (view === 'bad' || cdp === 'bad' || mcp === 'bad') return { ok: false, error: 'ports.view, ports.cdp and ports.mcp must be 1–65535' };
+  if (view === null && cdp === null && mcp === null) return { ok: false, error: 'the add-on needs at least one port (view, cdp or mcp)' };
   const backends = Array.isArray(raw.backends) ? raw.backends.filter((b): b is AddonBackend => (ADDON_BACKENDS as readonly unknown[]).includes(b)) : [];
   if (backends.length === 0) return { ok: false, error: 'backends must list bare and/or docker' };
   return {
@@ -85,7 +99,7 @@ export function parseDescriptor(raw: unknown): Parsed<AddonDescriptor> {
       title,
       description,
       requires: { ramMb: int(req.ramMb, 0, 1_000_000) ?? 0, diskMb: int(req.diskMb, 0, 10_000_000) ?? 0 },
-      ports: { view, cdp },
+      ports: { view, cdp, mcp },
       backends: [...new Set(backends)],
     },
   };
@@ -138,6 +152,8 @@ export function parseState(raw: unknown, name: string): Parsed<AddonState> {
   if (view && !view.ok) return { ok: false, error: `endpoints.view: ${view.error}` };
   const cdp = ep.cdp === undefined || ep.cdp === null ? null : parseEndpoint(ep.cdp);
   if (cdp && !cdp.ok) return { ok: false, error: `endpoints.cdp: ${cdp.error}` };
+  const mcp = ep.mcp === undefined || ep.mcp === null ? null : parseEndpoint(ep.mcp);
+  if (mcp && !mcp.ok) return { ok: false, error: `endpoints.mcp: ${mcp.error}` };
   return {
     ok: true,
     value: {
@@ -148,11 +164,21 @@ export function parseState(raw: unknown, name: string): Parsed<AddonState> {
       installedAt: str(raw.installedAt, 60),
       browser: str(raw.browser, 120),
       arch: str(raw.arch, 40),
-      endpoints: { view: view ? (ep.view as string) : null, cdp: cdp ? (ep.cdp as string) : null },
+      endpoints: { view: view ? (ep.view as string) : null, cdp: cdp ? (ep.cdp as string) : null, mcp: mcp ? (ep.mcp as string) : null },
       profiles: strList(raw.profiles, 20, 60),
       notes: strList(raw.notes, 20, 400),
     },
   };
+}
+
+/** The SSE address of the Playwright add-on's MCP server when it is enabled and its state is valid (what the `playwright` MCP server should point at), else null. */
+export function playwrightSseUrl(raw: unknown): string | null {
+  const r = parseState(raw, 'playwright');
+  if (!r.ok || !r.value.enabled || !r.value.endpoints.mcp) return null;
+  const ep = parseEndpoint(r.value.endpoints.mcp);
+  if (!ep.ok) return null;
+  const host = ep.value.hostname.includes(':') ? `[${ep.value.hostname}]` : ep.value.hostname;
+  return `http://${host}:${ep.value.port}${ep.value.basePath}/sse`;
 }
 
 export function addonStatus(state: AddonState | null, healthy: boolean | null): AddonStatus {

@@ -418,6 +418,14 @@ export class ApprovalsService {
         status: 'pending',
       },
     });
+    // No-approvals mode: the step limit is passed on by itself. The row is still written (and decided as approved), so the count that
+    // stops a run which never converges (AGENT maxContinuations) keeps working.
+    const mode = await this.modeFor(taskId).catch(() => ({ effective: this.mode() }));
+    if (mode.effective === 'off') {
+      this.logger.log(`Step limit of task ${taskId}: continued automatically (no-approvals mode)`);
+      await this.decide(approval.id, 'approve', { displayName: 'automatic (no-approvals mode)' });
+      return;
+    }
     this.bus.publish({ type: 'approval-created', payload: { approval: serializeApproval(approval) } });
     await this.tasks.setStatus(taskId, 'needs_approval');
     this.logger.log(`Continuation approval ${approval.id} pending for task ${taskId}`);

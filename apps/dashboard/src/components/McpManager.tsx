@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useMemo } from 'react';
+import { describeMcpServer, parseMcpInput, type ParsedMcpInput } from '@lds/shared';
 import { api, type McpServerInfo } from '@/lib/api';
 import { Card, SectionTitle, Row, Button, ErrorText, Muted } from '@/components/ui';
 import styles from './McpManager.module.css';
@@ -41,12 +43,11 @@ export function McpManager() {
     }
   };
 
+  // A saved server's own JSON; any of the usual formats is accepted when it holds exactly one server.
   const parse = (text: string): Record<string, unknown> => {
-    const obj = JSON.parse(text);
-    if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-      throw new Error('config must be a JSON object');
-    }
-    return obj as Record<string, unknown>;
+    const r = parseMcpInput(text);
+    if (r.servers.length !== 1) throw new Error('This holds several servers — save one server here, add the others as new servers below.');
+    return r.servers[0]!.config;
   };
 
   const save = (name: string) => run(() => api.updateMcp(name, parse(drafts[name] ?? '{}')));
@@ -62,10 +63,27 @@ export function McpManager() {
     void run(() => api.deleteMcp(name));
   };
 
+  // What the pasted text means (any client's format): shown under the box and used by Add.
+  const understood = useMemo((): { ok: true; value: ParsedMcpInput } | { ok: false; error: string } | null => {
+    if (!newConfig.trim() || newConfig === EXAMPLE) return null;
+    try {
+      return { ok: true, value: parseMcpInput(newConfig) };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }, [newConfig]);
+  // one server: the typed name wins over the one found in the text; several: the names come from the text
+  const toAdd = useMemo(() => {
+    if (understood?.ok !== true) return [];
+    const list = understood.value.servers;
+    return list.map((sv) => ({ name: (list.length === 1 ? newName.trim() || sv.name : sv.name)?.trim() ?? '', config: sv.config, raw: sv }));
+  }, [understood, newName]);
+  const nameOk = toAdd.length > 0 && toAdd.every((x) => /^[\w-]+$/.test(x.name) && x.name.length <= 60);
+
   const add = () => {
-    if (!newName.trim()) return;
+    if (!nameOk) return;
     void run(async () => {
-      await api.createMcp({ name: newName.trim(), config: parse(newConfig) });
+      for (const sv of toAdd) await api.createMcp({ name: sv.name, config: sv.config });
       setNewName('');
       setNewConfig(EXAMPLE);
     });
@@ -118,7 +136,7 @@ export function McpManager() {
         <Muted className={styles.addLabel}>Add an MCP server</Muted>
         <input
           className={styles.nameInput}
-          placeholder="name (e.g. github)"
+          placeholder={toAdd.length === 1 && toAdd[0]!.raw.name ? `name (found in the text: ${toAdd[0]!.raw.name})` : 'name (e.g. github)'}
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
         />
@@ -126,19 +144,34 @@ export function McpManager() {
           className={styles.config}
           value={newConfig}
           onChange={(e) => setNewConfig(e.target.value)}
-          rows={4}
+          rows={6}
+          spellCheck={false}
+          placeholder={'Paste what the server\'s page gives you: {"mcpServers": {…}}, {"url": …}, a "claude mcp add …" command or a URL'}
         />
+        {understood?.ok === false && <ErrorText>{understood.error}</ErrorText>}
+        {understood?.ok === true && (
+          <Muted role="status">
+            ✓ Understood {understood.value.servers.length === 1 ? 'one server' : `${understood.value.servers.length} servers`}:
+            {toAdd.map((x, i) => (
+              <div key={i}>
+                {describeMcpServer({ name: x.name || x.raw.name, config: x.config })}
+              </div>
+            ))}
+            {understood.value.notes.length > 0 && <div>{understood.value.notes.join(' · ')}</div>}
+            <div>The pasted token is stored in this config (admins can read it). Use <code>${'{'}KEY{'}'}</code> to take it from a secret instead.</div>
+          </Muted>
+        )}
         <Row>
           <Button
             className={styles.saveBtn}
             variant="primary"
-            disabled={busy || !newName.trim()}
-            title={newName.trim() ? undefined : 'Enter a server name first'}
+            disabled={busy || !nameOk}
+            title={nameOk ? undefined : 'Paste a config and give the server a name (letters, digits, - and _)'}
             onClick={add}
           >
-            Add
+            {toAdd.length > 1 ? `Add ${toAdd.length} servers` : 'Add'}
           </Button>
-          {!newName.trim() && <Muted>Enter a server name above to enable Add.</Muted>}
+          {understood?.ok === true && !nameOk && <Muted>Give the server a name above (letters, digits, - and _).</Muted>}
         </Row>
       </div>
 

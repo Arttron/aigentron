@@ -1,6 +1,10 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { createConnection } from 'node:net';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
+import { AppConfigService } from '../config/app-config.service';
+import { playwrightSseUrl } from '../addons/addons-core';
 
 /** A running ephemeral preview: the worktree's dev server + its allocated port. */
 interface Preview {
@@ -11,8 +15,8 @@ interface Preview {
   idleTimer: NodeJS.Timeout;
 }
 
-/** Reachable base for the preview servers (the orchestrator, on the compose net). */
-const PUBLIC_HOST = process.env.PREVIEW_PUBLIC_HOST ?? 'orchestrator';
+/** Reachable base for the preview servers: the orchestrator on the compose network, unless PREVIEW_PUBLIC_HOST says otherwise (see PreviewService.publicHost). */
+const COMPOSE_HOST = 'orchestrator';
 const PORT_BASE = parseInt(process.env.PREVIEW_PORT_BASE ?? '3200', 10);
 const POOL_SIZE = parseInt(process.env.PREVIEW_POOL_SIZE ?? '4', 10);
 const READY_TIMEOUT_MS = parseInt(process.env.PREVIEW_READY_TIMEOUT_MS ?? '120000', 10);
@@ -33,6 +37,22 @@ export class PreviewService implements OnModuleDestroy {
   private readonly logger = new Logger(PreviewService.name);
   private readonly running = new Map<string, Preview>();
 
+  constructor(private readonly config: AppConfigService) {}
+
+  /**
+   * Where the browser reaches a preview. On the compose network the dev servers are `orchestrator:<port>`. On a server with the Playwright add-on
+   * the browser runs on this very machine, where that name does not exist: `localhost`. PREVIEW_PUBLIC_HOST overrides both.
+   */
+  private publicHost(): string {
+    const fromEnv = process.env.PREVIEW_PUBLIC_HOST?.trim();
+    if (fromEnv) return fromEnv;
+    try {
+      return playwrightSseUrl(JSON.parse(readFileSync(join(this.config.addonsDir, 'playwright', 'state.json'), 'utf8'))) ? 'localhost' : COMPOSE_HOST;
+    } catch {
+      return COMPOSE_HOST;
+    }
+  }
+
   /**
    * Return a live preview URL for a task's worktree, starting the dev server if
    * one isn't already up for it. `cwd` is the directory to run (the worktree, or
@@ -48,7 +68,7 @@ export class PreviewService implements OnModuleDestroy {
     if (port == null) {
       throw new Error(`No free preview slot (max ${POOL_SIZE} concurrent previews)`);
     }
-    const url = `http://${PUBLIC_HOST}:${port}`;
+    const url = `http://${this.publicHost()}:${port}`;
     this.logger.log(`Starting preview for task ${taskId} at ${url} (cwd=${cwd})`);
 
     const proc = spawn(

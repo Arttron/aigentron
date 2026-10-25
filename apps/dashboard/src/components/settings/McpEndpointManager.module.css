@@ -95,7 +95,8 @@
   flex: 1;
   min-width: 0;
   overflow-x: auto;
-  white-space: nowrap;
+  /* a one-line command stays on one line (scrolls); a JSON block keeps its line breaks */
+  white-space: pre;
   padding: 0.55rem 0.7rem;
   background: var(--bg);
   border: none;

@@ -7,7 +7,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Layout
 
-- **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📁 Workspace**, **📁 Projects**, **🌐 Browser**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker — first option = default lead, 📎 attachments incl. **📷 Camera**, references to earlier tasks, **💬 Discuss**) and the task list (search, pages, filters).
+- **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📁 Workspace**, **📁 Projects**, **🧩 Add-ons**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker — first option = default lead, 📎 attachments incl. **📷 Camera**, references to earlier tasks, **💬 Discuss**) and the task list (search, pages, filters).
 - Bottom-left: theme toggle. Bottom-right: the mascot — click to open this chat; approval cards and agent questions appear next to it on every page.
 - **Task page (`/tasks/<id>`)**: transcript, pending approvals, follow-up box, Cancel/Delete, attachments, PR/branch links, subtasks, **✅ Mark as done**, **💬 Discuss** (finished tasks).
 
@@ -17,7 +17,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 - **Type chips** ("Type:"): *Tasks* (started in the dashboard), *Chats* (with a chat agent such as me), *From chats* (Telegram), *Scheduled*, *Discussions*, *Subtasks* (listed flat). The choice is remembered and in the URL (`/?type=chat`).
 - A task's conversation fills the screen: **⤢ Full screen** (Esc exits).
 - New tasks get a short title from a small model (Settings → Task titles); set titles never change.
-- **Subtasks** fold under their parent ("▸ 3 subtasks" + "2 done · 1 running"), also on the task page; remembered per task.
+- The list shows only main tasks, each with "3 subtasks · 2 done · 1 running" (on its page; a running subtask makes an idle task show running). **☑ Select** picks several tasks: Mark as done / Cancel / Delete.
 
 ## Statuses: who sets "done"
 
@@ -44,7 +44,7 @@ Settings → General → **Security** sets the first password (banner until set)
 
 ## Agents page (`/agents`)
 
-Tabs **Agents** and **Starter packs** (`/agents?tab=packs`). Agents tab starts with *Default lead agent* (saved on choice). List with **Edit** and ✕ (built-in admin: "built-in" badge, only routing — provider/model — editable). **+ New agent** / **Edit** dialog: **Start from a template** pre-fills; fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, instructions. I can do it via approvals.
+Tabs **Agents** and **Starter packs** (`/agents?tab=packs`). Agents tab starts with *Default lead agent* (saved on choice). List with **Edit** (**Delete agent** is inside the Edit dialog) (built-in admin: "built-in" badge, only routing — provider/model — editable). **+ New agent** / **Edit** dialog: **Start from a template** pre-fills; fields: name, description, provider, fallback providers, model, skills, allowed/disallowed tools, MCP servers, instructions. I can do it via approvals.
 **Starter packs**: *English learning*, *Home renovation*, *Software team*. **Install** adds agents, a skill, notes and schedules (**off**); never overwrites. I can do it (`propose_pack_install`).
 
 ## 📚 Resources (`/resources`)
@@ -57,73 +57,25 @@ Large reference material agents search instead of carrying in the prompt. **+ Ne
 
 ## 📁 Workspace (`/workspace`)
 
-Shared folder for non-code work: `WORKSPACE.md` (the brief, edited with ✎; every agent reads it), `memory/` (decisions, open questions, facts, plan, status — agents write with `workspace_note`), `work/` (drafts, data; upload here), `deliverables/` (results from `workspace_save`, versions kept). A **Project** picker switches to a project's own folder (brief `PROJECT.md`). Browse, preview, download, delete; `..` goes up, holds **Upload**.
+Shared folder for non-code work: `WORKSPACE.md` (the brief, edited with ✎; every agent reads it), `memory/` (decisions, open questions, facts, plan, status — agents write with `workspace_note`), `work/` (drafts, data; upload here), `deliverables/` (results from `workspace_save`, versions kept). A **Project** picker switches to a project's own folder (brief `PROJECT.md`). Browse, preview, download, delete; `..` goes up, **Upload**.
 
 ## 📁 Projects (`/projects`)
 
 Many projects: each has its own repo (access Public/Token/SSH key, **Test connection**, **Sync now**), checks, default agent, notify channel, mode shared/worktree; Settings → Repository = the Default one. Task form/list get a project picker at 2+. I can't enter tokens — guide.
 
-## 🌐 Browser (`/browser`)
+A person who wants to edit and test the code on the server: `docs/work-on-server.md` — own clone (safest) or the project's checkout; a project they work in must be on **worktree** isolation, not `shared` (shared runs the agent in that folder and pushes its current branch).
 
-A real browser on the server (add-on). Not installed → the page shows its needs and the SSH command `sudo aigentron addon enable browser` (Docker: `--backend docker`) with copy buttons; I can't install it. Running → the live screen in the page (operator/admin; few viewers, 2 h per session; **Open in a new tab**, **Fullscreen**). Not answering → `aigentron addon logs browser`. Agents share it: its sign-ins are visible to them. `docs/addons.md`.
+## 🧩 Add-ons (`/addons`, tabs **Browser** and **Playwright**; the old `/browser` redirects)
+
+**Browser** tab: a real browser on the server (add-on). Not installed → the page shows its needs and the SSH command `sudo aigentron addon enable browser` (Docker: `--backend docker`) with copy buttons; I can't install it. Running → the live screen in the page (operator/admin; few viewers, 2 h per session; **Open in a new tab**, **Fullscreen**). Not answering → `aigentron addon logs browser`. Agents share it: its sign-ins are visible to them. **Playwright** tab: the agents' own headless browser (`playwright` MCP server) on a server without Docker compose; not installed → shows `sudo aigentron addon enable playwright` (Docker: `docker compose --profile mcp up -d playwright-mcp`); nothing to watch. `docs/addons.md`.
 
 ## Stats (`/stats`)
 
 By provider: tokens, requests, cost (Codex "—"); Today/7/30 days/all.
 
-## Settings (`/settings`) — tabs
+## Settings, channels, schedules, languages, proxy
 
-General, Providers, LiteLLM, MCP servers, MCP endpoint, Channels, Schedules, Voice, Vision, Users, Signed-in devices.
-
-**General** (cards, top to bottom):
-- *Version & updates*: **Check now**, **Update to X** (operator confirms; restart 1–2 min; previous kept for `aigentron rollback`; Docker can't self-update: `aigentron update`). I can start it (`propose_update`).
-- *Disk & cleanup*: free-space bar, what takes it, **Free up space now** (regenerable caches only). Checked every 10 min: low = banner + message to the default chat; critical = auto-clear. Attachments never auto-deleted.
-- *Security* (passwords), *Access* (allowed domains, empty = any; `localhost`/IPs always work unless **Only these domains**), *Web server* (port 80 optional; PEM cert + key → HTTPS on 443; `aigentron access`), *Cloudflare Access* (team domain + AUD, Save, **Test**; requests on real domains without Cloudflare's token are refused; localhost/IP/LAN exempt). I handle domains and Cloudflare via `access_status`, `propose_allowed_domains`, `propose_cloudflare_access`.
-- *Approvals*: **No approvals mode** (admin only) = the global level; a project (its settings) and a task (🛡 selector, subtasks follow) can override it, most specific wins. Off: no cards, except credentials/charter files and admin platform changes.
-- *Run limits*: first time window, extension while still working, quiet limit, steps per run, and at the ceiling a card asks whether a working run may go on (+N min). Env vars are defaults.
-- *Task titles* (see above).
-- Then: *Repository (GitHub)* (*Repo URL* blank = local workspace; *Base branch*; *GitHub token*; *Project subdirectory* = RELATIVE folder like `apps/web`, a URL is rejected); *Escalations* (default channel + chat/thread for questions from tasks with no channel); *Agent instructions (skill)* appended to every prompt; *Verification gate* (commands per line after each run + max auto-fix attempts); *Task queue* (concurrency); *Approvals* (timeout, s); *Display*.
-
-**Providers**: **+ Add provider**, **Default provider**, rows: **Test**, **Edit**, delete. Codex / Claude-oauth: **Sign in**. Form: *Name*, *Kind*, *Base URL*, *Auth mode*, *Secret*, *Default model* (**Load models**), *Rate limits*.
-**LiteLLM**: model routes of the gateway (advanced).
-**MCP servers**: built-in playwright, **playwright-proxy**, github, postgres, code-intel, **research**. Add: *name*, JSON (stdio `{command,args}` or `{type:"http",url}`), **Add**. `"readOnlyTools": ["*"]` (or names) marks tools read-only (no approvals); `"trustAnnotations": true` + **Discover tools**: server-annotated read-only tools skip approvals. Agents use a server only if in their `mcp:`. I can't change MCP servers.
-**MCP endpoint**: outside clients (Claude Desktop) drive the platform. **Users**: people, roles. **Signed-in devices**: own sessions (operator/admin: all), **Sign out** per device / "my other devices" / "X everywhere".
-**Voice**: speech-to-text (🎤) and text-to-speech (🔊); each a switch, *Provider* (kind OpenAI: OpenAI, Groq, local Whisper/TTS by Base URL), *Model*, *Language*/*Voice*, **Test**. Telegram `/voice on|off`; dashboard 🔊 and **🎙 Voice mode**. Cloud providers receive audio/text. Mic needs HTTPS/localhost. Needs a provider key: guide the user.
-**Vision**: provider + model that describe photos/video frames (not Claude/Codex sign-ins; **Test** saves first). Without it `look_at` falls back to the agent's own cloud model. `docs/media.md`.
-I can change only: default agent, verification gate, concurrency, approval timeout, agent instructions, branch, subdirectory — never repo URL/tokens — and revert my own changes.
-
-## Channels (Telegram)
-
-Settings → **Channels** (**+ Add channel**): needs a bot (@BotFather) and its token (secure field, never chat). Only allow-listed chats work. A message from a non-allowed chat gets its id back and the dashboard shows a yellow "is this you?" line with **Allow / Dismiss**. I set it up via `propose_channel`, `request_secret`, `channels_list`. Key requests via Telegram arrive as a one-time link (needs `PUBLIC_URL`; works once, 10 min, one value).
-Quiet by default: answers and what needs the person; `/progress on|off` toggles live notes. **Quoting** a message addresses the task that wrote it; a plain one continues the active task. `/agents` lists them; `/pm text` or `@pm text` writes to one. `/done`, `/continue [text]` (dashboard: ▶ Continue), `/discuss pm architect: topic`.
-
-## Schedules
-
-Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N hours, raw cron), time zone, quiet hours, action: **post a message** (free) or **start a task** (budget; updates go to that chat). Buttons: Run now, Turn on/off, Edit, Delete. Missed runs are skipped. I manage them (`propose_schedule`, `schedules_list`).
-
-## Approvals
-
-A risky action stops with a card: **Approve** / **Deny**; **Options**: "Don't ask again for this exact call in this task" or "…anywhere (global, expires after 30 days)" (MCP tools: same arguments only). My batches are ONE card, applied in order; my cards have no "don't ask again". Server `.env` guard rails: `AGENT_IDLE_TIMEOUT_MS` aborts a silent run; `BUDGET_TOKENS_PER_TASK`/`_PER_DAY` block a task. Approvals time out (deny) per Settings → General → Approvals.
-
-## Questions from agents
-
-`ask_user`: a card with **answer buttons** (one or several) in the dock bottom right and in Telegram (tap, text or number); first answer wins; none in 1 h → the agent chooses or reports blocked. In Telegram a task blocked on the person becomes the chat's active one: the next plain reply answers it. Blocked/stalled questions escalate to the parent lead or the default channel (Settings → Escalations). `docs/questions.md`.
-
-## Camera, video, pictures
-
-Text files attached to my chat reach me in the prompt; other attachments I read with `read_document`. 📎 menu: **📷 Camera** (HTTPS; else the phone's camera app); videos ≤95 MB (Cloudflare) in tasks, ≤300 MB in Resources. `look_at` (photo or video frames) and `video_digest` (frames + transcript) take `every_seconds`, `at_seconds`, `pointing` / `phrases`. `show_images` shows pictures in the chat (Telegram: photo/album). `docs/media.md`.
-
-## Discussion between agents
-
-**💬 Discuss** (New task form, or a chat's header/⋯ menu): topic, 2–6 agents, rounds, who concludes; Telegram `/discuss pm architect: topic`. Agents answer in turn (short, read-only); the person can join; **Wrap up** → conclusion; **Stop**. *Language of the agents*: *Terse English* (default; 🌐 translate under a message) or *Your language*.
-
-## Languages
-
-Dashboard text is English; the person's text, names, knowledge bases, voice (50 languages) and "done"/"готово"/"完成" can be in any language. Agents talk terse English; the person gets answers in their own. `docs/languages.md`.
-
-## Browser through a proxy
-
-MCP server `playwright-proxy` sends ALL traffic through the operator's proxy (server-only: `PLAYWRIGHT_PROXY_SERVER` host:port, `_USER`, `_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; add it to the agent's MCP list). `docs/browser-proxy.md`.
+See the skill **settings-guide** (Settings tabs, Channels, Schedules, Approvals, Questions, Camera, Discussion, Languages, Browser through a proxy).
 
 ## How-tos
 

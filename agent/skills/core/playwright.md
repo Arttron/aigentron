@@ -7,15 +7,16 @@ description: Preview and visually review a running dev server using the `playwri
 **Applies to:** Designer, Reviewer, Frontend
 
 To use this skill you must have the `playwright` MCP server in your `mcp:` list. It runs as a
-separate browser service (compose service `playwright-mcp`, started with `--profile mcp`), so
-its tools are exposed to you as `mcp__playwright__*`. If the tools aren't available, the service
-isn't up — say so in your status report rather than falling back to guessing. **Do not** try to
+separate browser service (compose service `playwright-mcp`, started with `--profile mcp`; on a server
+without compose the Playwright add-on: `sudo aigentron addon enable playwright`), so its tools are
+exposed to you as `mcp__playwright__*`. If the tools aren't available, the service isn't up — say so
+in your status report (and which of the two fixes applies, if you can tell) rather than falling back to guessing. **Do not** try to
 install or run Playwright yourself via Bash; if the MCP isn't there, report `blocked`.
 
 **Preview target — your own worktree.** To see *your* in-progress changes (not the base app),
 first call `mcp__lds_internal__preview_worktree` (no args). It starts an ephemeral dev server for
 **this task's worktree** and returns a URL like `http://orchestrator:3200`; navigate the browser
-there. This is what you want when reviewing a change you just made. The server is torn down
+there (use the URL exactly as returned: on a server with the add-on it is `localhost`, the browser being on the same machine). This is what you want when reviewing a change you just made. The server is torn down
 automatically when the task finishes. (The target app must honor `$PORT` and bind `0.0.0.0`.)
 
 **Base app (fallback).** The always-on `project-dev` service serves the *base* project (no

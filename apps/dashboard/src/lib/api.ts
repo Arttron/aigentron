@@ -55,6 +55,8 @@ setActingHeaders((): Record<string, string> => {
 /** Task as returned by the list endpoint (with pending-approval/session counts). */
 export type TaskListItem = Task & {
   _count?: { approvals: number; sessions: number };
+  /** the task's subtasks, counted (the list never shows them): how many, and in which states */
+  subtasks?: { total: number; byStatus: Record<string, number> };
 };
 
 /** One page of the task list. */
@@ -590,7 +592,7 @@ export interface AddonInfo {
   title: string;
   description: string;
   requires: { ramMb: number; diskMb: number };
-  ports: { view: number; cdp: number };
+  ports: { view: number | null; cdp: number | null; mcp: number | null };
   backends: ('bare' | 'docker')[];
   status: AddonStatus;
   state: {
@@ -600,7 +602,7 @@ export interface AddonInfo {
     installedAt: string | null;
     browser: string | null;
     arch: string | null;
-    endpoints: { view: string | null; cdp: string | null };
+    endpoints: { view: string | null; cdp: string | null; mcp: string | null };
     profiles: string[];
     notes: string[];
   } | null;

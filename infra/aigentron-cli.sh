@@ -48,7 +48,7 @@ _aigentron() {
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = addon ]; then
-    if [ "$COMP_CWORD" -eq 2 ]; then COMPREPLY=( $(compgen -W "list enable disable status logs" -- "$cur") ); else COMPREPLY=( $(compgen -W "browser --dry-run --purge --no-cdp --browser" -- "$cur") ); fi
+    if [ "$COMP_CWORD" -eq 2 ]; then COMPREPLY=( $(compgen -W "list enable disable status logs" -- "$cur") ); else COMPREPLY=( $(compgen -W "browser playwright --dry-run --purge --no-cdp --browser" -- "$cur") ); fi
   fi
 }
 complete -F _aigentron aigentron
@@ -81,7 +81,7 @@ _aigentron() {
     'restore:restore from a backup archive'
     'backup-timer:daily automatic backup on|off'
     'reset-password:remove the dashboard password'
-    'addon:add-ons (a real browser on the server): list, enable, disable, status, logs'
+    'addon:add-ons (a real browser, a Playwright browser for agents): list, enable, disable, status, logs'
     'rollback:go back to the previous release'
     'logout:end this terminal\'s signed-in session'
     'version:the installed version'
@@ -93,7 +93,7 @@ _aigentron() {
   elif [[ ${words[2]} == completion ]]; then
     _values 'shell' bash zsh
   elif [[ ${words[2]} == addon ]]; then
-    if (( CURRENT == 3 )); then _values 'addon command' list enable disable status logs; else _values 'add-on' browser; fi
+    if (( CURRENT == 3 )); then _values 'addon command' list enable disable status logs; else _values 'add-on' browser playwright; fi
   fi
 }
 _aigentron "$@"
@@ -392,7 +392,7 @@ addon_enable() {
   # Docker backend: a separate container built from the add-on's Dockerfile. On a Docker install it joins a user-defined network so the
   # orchestrator reaches it by name (nothing published); on a bare-metal server its ports are published on loopback instead.
   command -v docker >/dev/null 2>&1 || die "docker is required for --backend docker"
-  [ -f "$dir/docker/Dockerfile" ] || die "add-on '$name' has no Docker backend (backends: $(addon_field "$dir" backends))"
+  [ -f "$dir/docker/Dockerfile" ] || die "add-on '$name' has no Docker backend (backends: $(addon_field "$dir" backends))$([ "$name" = playwright ] && printf " — on a Docker install the Playwright browser is the compose profile: docker compose --profile mcp up -d playwright-mcp")"
   v=$(version); img="aigentron-$name:$v"; cname="aigentron-$name"; vol="aigentron-$name-data"
   mount=$(addon_field "$dir" volume); ram=$(addon_field "$dir" ramMb); shm=$(addon_field "$dir" shmMb)
   view_port=$(addon_field "$dir" view); cdp_port=$(addon_field "$dir" cdp)
@@ -495,12 +495,18 @@ addon_status() {
   [ -n "$st" ] || { say "  ${D}○ not installed${N} — sudo aigentron addon enable $name"; return 0; }
   printf '%s\n' "$st" | sed 's/^/  /'
   [ "$(printf '%s' "$st" | addon_state_field enabled)" = true ] || return 0
-  view=$(printf '%s' "$st" | addon_state_field view); cdp=$(printf '%s' "$st" | addon_state_field cdp)
+  view=$(printf '%s' "$st" | addon_state_field view); cdp=$(printf '%s' "$st" | addon_state_field cdp); mcp=$(printf '%s' "$st" | addon_state_field mcp)
   if [ "$MODE" = docker ]; then probe() { docker exec "$CONTAINER" curl -fsS --max-time 3 "$1" 2>/dev/null; }; else probe() { curl -fsS --max-time 3 "$1" 2>/dev/null; }; fi
-  if probe "$view/" >/dev/null; then say "  ${G}✔${N} view answers: $view"; else say "  ${R}✘${N} view does not answer: $view  (aigentron addon logs $name)"; fi
-  if [ -n "$cdp" ] && [ "$cdp" != null ]; then
-    if ver=$(probe "$cdp/json/version" | sed -n 's/.*"Browser": *"\([^"]*\)".*/\1/p') && [ -n "$ver" ]; then say "  ${G}✔${N} CDP answers: $cdp  ${D}$ver${N}"; else say "  ${R}✘${N} CDP does not answer: $cdp  (aigentron addon logs $name)"; fi
-  else say "  ${D}CDP is off${N}"; fi
+  if [ -n "$view" ] && [ "$view" != null ]; then
+    if probe "$view/" >/dev/null; then say "  ${G}✔${N} view answers: $view"; else say "  ${R}✘${N} view does not answer: $view  (aigentron addon logs $name)"; fi
+    if [ -n "$cdp" ] && [ "$cdp" != null ]; then
+      if ver=$(probe "$cdp/json/version" | sed -n 's/.*"Browser": *"\([^"]*\)".*/\1/p') && [ -n "$ver" ]; then say "  ${G}✔${N} CDP answers: $cdp  ${D}$ver${N}"; else say "  ${R}✘${N} CDP does not answer: $cdp  (aigentron addon logs $name)"; fi
+    else say "  ${D}CDP is off${N}"; fi
+  fi
+  if [ -n "$mcp" ] && [ "$mcp" != null ]; then  # an MCP server (Playwright): an SSE stream never ends, so the HTTP code is read although curl times out
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$mcp/sse" 2>/dev/null || true)
+    if [ "$code" = 200 ]; then say "  ${G}✔${N} MCP answers: $mcp/sse"; else say "  ${R}✘${N} MCP does not answer: $mcp/sse (HTTP ${code:-none})  (aigentron addon logs $name)"; fi
+  fi
   if [ "$(printf '%s' "$st" | addon_state_field backend)" = docker ]; then
     say "  container: $(docker inspect -f '{{.State.Status}} ({{.Config.Image}})' "aigentron-$name" 2>/dev/null || echo 'not found')"
   elif command -v systemctl >/dev/null 2>&1; then

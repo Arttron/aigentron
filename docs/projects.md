@@ -9,6 +9,8 @@ This page is about one part of it: **the repository and how the server is allowe
 it: access is set up per project; the preferred way is SSH with a deploy key; tokens and keys live in **files in the secrets
 directory**, not in the database; and the person can **test** the access before any task runs.
 
+Working in the checkout yourself, on the server (a clone of your own, the project's own folder, an existing clone for the default project) and how not to collide with the agents: `docs/work-on-server.md`.
+
 ## What belongs to a project
 
 Providers and MCP servers are global. **Resources and knowledge bases** are either global (visible to the tasks of every project — what

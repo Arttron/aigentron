@@ -21,6 +21,26 @@ loopback. Both paths run the **same installer script** (`infra/addons/<name>/bar
 The first (and in stage 1 the only) add-on is the **browser**: a real Chromium on a virtual display that a person watches and operates from
 the dashboard (`🌐 Browser`) and that agents drive over the Chrome DevTools Protocol. There is no general desktop — only the browser window.
 
+## The Playwright add-on (a browser for the agents)
+
+`sudo aigentron addon enable playwright` (bare-metal servers; on a Docker install the same MCP server is the compose profile `mcp`) gives the agents'
+`playwright` MCP server a place to run when there is no compose: a headless Chromium behind **@playwright/mcp** (version pinned in `infra/addons/playwright/bare.sh`,
+it brings its own matching Chromium), as one systemd unit `aigentron-playwright.service`, listening on `127.0.0.1:8931` only.
+
+It is deliberately **not** the `browser` add-on. That one is a real, visible browser with a profile a person signs in to (and becomes part of the personal assistant);
+this one is a throw-away headless browser — `--isolated`, no profile is kept between sessions — that agents may drive freely.
+
+- **Install**: Debian 11/12/13, Ubuntu 22.04/24.04 (apt), Amazon Linux 2023, Fedora (dnf), x86_64 or aarch64. Packages (Chromium's libraries), Node ≥ 18 (NodeSource if missing),
+  `npm install @playwright/mcp` and `playwright install chromium` into `/opt/aigentron/playwright`, the system user `aigentron-playwright`, the unit, then checks: the
+  server answers on `/sse`, and Chromium starts as that user. Re-running repairs; `--dry-run` prints the plan; `--files-only` installs the files without a unit (image builds, tests).
+- **Unit**: own user, read-only system (`ProtectSystem=strict`), `PrivateTmp`, loopback only (`--host 127.0.0.1`, DNS-rebinding guard `--allowed-hosts`), `MemoryMax=1536M`,
+  `OOMScoreAdjust=500` (a memory shortage costs this browser first). `--no-sandbox`: Chromium's own sandbox needs user namespaces, which Ubuntu 24.04 and hardened kernels refuse
+  to an ordinary user; the boundary is the unit.
+- **Orchestrator**: reads `<data>/addons/playwright/state.json`; while the add-on is enabled the `playwright` MCP server entry points at `http://127.0.0.1:8931/sse` (disabled → back
+  to the compose address; an address a person typed is never changed), and `preview_worktree` hands out `localhost` URLs (`PREVIEW_PUBLIC_HOST` overrides).
+- **Memory**: a page open in Chromium takes 0.5–1.5 GB. On a 4 GB machine add a swap file first (`docs/small-servers.md`) and run one browser task at a time.
+- `aigentron addon status|logs|disable [--purge] playwright` work as for the browser.
+
 ## Layout and contract
 
 ```
@@ -125,7 +145,7 @@ endpoints `http://aigentron-browser:6080` / `:9222`) if the dashboard page shoul
 ## Orchestrator side
 
 What the server app does with an add-on — it only **reads** and **shows**; nothing is installed, enabled or disabled through the API or the
-dashboard. Code: `apps/orchestrator/src/addons/`, page: `apps/dashboard/src/pages/BrowserPage.tsx`.
+dashboard. Code: `apps/orchestrator/src/addons/`, page: `apps/dashboard/src/pages/AddonsPage.tsx` (tabs Browser — `BrowserPage.tsx`, the live view — and Playwright — `PlaywrightAddonPanel.tsx`; `/browser` redirects to `/addons?tab=browser`).
 
 ### Where it looks
 

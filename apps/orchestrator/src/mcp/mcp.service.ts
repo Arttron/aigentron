@@ -1,4 +1,8 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { normalizeMcpConfig } from '@lds/shared';
+import { playwrightSseUrl } from '../addons/addons-core';
 import { INTERNAL_MCP_SERVER } from '@lds/shared';
 import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -109,8 +113,34 @@ export class McpService {
     this.logger.log(`Seeded ${missing.length} default MCP server(s)`);
   }
 
+  /**
+   * The `playwright` server is seeded for a Docker install (the compose service `playwright-mcp`). On a server without compose, `aigentron addon
+   * enable playwright` runs the same MCP server on loopback and records it in its state file: while that add-on is enabled the `playwright`
+   * entry points there, and when it is disabled the entry goes back to the compose address — but only if it still holds one of those two
+   * addresses (a person's own edit is never touched).
+   */
+  private async syncPlaywrightAddon(): Promise<void> {
+    let target: string | null = null;
+    try {
+      target = playwrightSseUrl(JSON.parse(await readFile(join(this.appConfig.addonsDir, 'playwright', 'state.json'), 'utf8')));
+    } catch {
+      target = null; // no add-on, or an unreadable state: the compose address stays
+    }
+    const row = await this.prisma.mcpServer.findUnique({ where: { name: 'playwright' } });
+    if (!row) return;
+    const cfg = (row.config ?? {}) as Record<string, unknown>;
+    const current = typeof cfg.url === 'string' ? cfg.url : '';
+    const composeUrl = (DEFAULT_MCP_SERVERS.find((x) => x.name === 'playwright')!.config as { url: string }).url;
+    const isOurs = current === composeUrl || /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\/sse$/.test(current);
+    const want = target ?? composeUrl;
+    if (!isOurs || current === want) return;
+    await this.prisma.mcpServer.update({ where: { name: 'playwright' }, data: { config: { ...cfg, url: want } as Prisma.InputJsonValue } });
+    this.logger.log(`MCP server "playwright" now points at ${want}${target ? ' (the Playwright add-on)' : ''}`);
+  }
+
   async list(): Promise<McpRow[]> {
     await this.ensureSeeded();
+    await this.syncPlaywrightAddon().catch((e) => this.logger.warn(`playwright add-on sync failed: ${(e as Error).message}`));
     return this.prisma.mcpServer.findMany({ orderBy: { name: 'asc' } });
   }
 
@@ -130,6 +160,7 @@ export class McpService {
     secrets: Record<string, string | null> = {},
   ): Promise<Record<string, McpConfig>> {
     if (!names.length) return {};
+    if (names.includes('playwright')) await this.syncPlaywrightAddon().catch((e) => this.logger.warn(`playwright add-on sync failed: ${(e as Error).message}`));
     const rows = await this.prisma.mcpServer.findMany({ where: { name: { in: names } } });
     const map: Record<string, McpConfig> = {};
     for (const row of rows) {
@@ -190,14 +221,23 @@ export class McpService {
     if (name === INTERNAL_MCP_SERVER) {
       throw new BadRequestException(`"${INTERNAL_MCP_SERVER}" is reserved for internal tools`);
     }
-    return this.prisma.mcpServer.create({ data: { name, config: config as Prisma.InputJsonValue } });
+    return this.prisma.mcpServer.create({ data: { name, config: this.clean(config) as Prisma.InputJsonValue } });
+  }
+
+  /** The config as the SDK wants it, whichever client's format it came in (a `url` without `type` gets one, `serverUrl` / `transport` are mapped …). */
+  private clean(config: McpConfig): McpConfig {
+    try {
+      return normalizeMcpConfig(config);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
   }
 
   async update(name: string, config: McpConfig): Promise<McpRow> {
     await this.getRow(name);
     return this.prisma.mcpServer.update({
       where: { name },
-      data: { config: config as Prisma.InputJsonValue },
+      data: { config: this.clean(config) as Prisma.InputJsonValue },
     });
   }
 

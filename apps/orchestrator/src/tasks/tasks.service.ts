@@ -777,15 +777,20 @@ export class TasksService {
       this.prisma.task.count({ where }),
     ]);
 
-    let items = top;
-    if (!q && type !== 'subtask' && !status && top.length) {
-      const children = await this.prisma.task.findMany({
-        where: { parentId: { in: top.map((t) => t.id) } },
-        orderBy: { createdAt: 'asc' },
-        include,
-      });
-      items = [...top, ...children];
+    // The list shows the tasks themselves, never their subtasks: each task carries how many it has and in which states
+    // (a row says "5 subtasks · 3 done · 1 stalled"; the subtasks are on the task's own page).
+    const subtasks = new Map<string, { total: number; byStatus: Record<string, number> }>();
+    if (top.length) {
+      const rows = await this.prisma.task.groupBy({ by: ['parentId', 'status'], where: { parentId: { in: top.map((t) => t.id) } }, _count: { _all: true }, orderBy: { parentId: 'asc' } });
+      for (const r of rows) {
+        if (!r.parentId) continue;
+        const cur = subtasks.get(r.parentId) ?? { total: 0, byStatus: {} };
+        cur.total += r._count._all;
+        cur.byStatus[r.status] = (cur.byStatus[r.status] ?? 0) + r._count._all;
+        subtasks.set(r.parentId, cur);
+      }
     }
+    const items = top.map((t) => ({ ...t, subtasks: subtasks.get(t.id) ?? { total: 0, byStatus: {} } }));
     return { items, total, page, pageSize };
   }
 

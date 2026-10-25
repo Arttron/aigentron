@@ -1,6 +1,6 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { readCollapsed, statusSummary, writeCollapsed } from '@/lib/collapsed';
+import { statusSummary } from '@/lib/collapsed';
+import { listStatus } from '@/lib/bulk-actions';
 import { cn } from '@/lib/cn';
 import type { TaskListItem } from '@/lib/api';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -8,76 +8,78 @@ import { ProjectBadge } from '@/components/ProjectBadge';
 import { Badge, Button, Muted } from '@/components/ui';
 import styles from './TaskList.module.css';
 
+/** "5 subtasks · 3 done · 1 stalled" from the counts the server sends with each task. */
+const subtaskLine = (s: NonNullable<TaskListItem['subtasks']>): string =>
+  `${s.total} subtask${s.total === 1 ? '' : 's'} · ${statusSummary(Object.entries(s.byStatus).flatMap(([status, n]) => Array<string>(n).fill(status)))}`;
+
+/**
+ * The tasks themselves, one row each — a task that was split shows how many subtasks it has and in which states (its page lists them).
+ * In selection mode a row is picked instead of opened.
+ */
 export function TaskList({
   tasks = [],
   onDelete,
+  selecting = false,
+  selected,
+  onToggle,
 }: {
   tasks?: TaskListItem[];
   onDelete: (id: string) => void;
+  selecting?: boolean;
+  selected?: ReadonlySet<string>;
+  onToggle?: (id: string) => void;
 }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed);
-  const toggle = (id: string) =>
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      writeCollapsed(next);
-      return next;
-    });
-
   if (tasks.length === 0) {
     return <Muted>No tasks yet. Create one above.</Muted>;
   }
 
-  // Group subtasks under their parent. Children are indented beneath the parent
-  // row (in creation order); a subtask whose parent isn't in the list falls back
-  // to a top-level row so nothing is hidden.
-  const ids = new Set(tasks.map((t) => t.id));
-  const childrenOf = new Map<string, TaskListItem[]>();
-  for (const t of tasks) {
-    if (t.parentId && ids.has(t.parentId)) {
-      (childrenOf.get(t.parentId) ?? childrenOf.set(t.parentId, []).get(t.parentId)!).push(t);
-    }
-  }
-  for (const kids of childrenOf.values()) {
-    kids.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-  const topLevel = tasks.filter((t) => !(t.parentId && ids.has(t.parentId)));
-
-  const row = (t: TaskListItem, isChild: boolean) => {
-    const kids = childrenOf.get(t.id) ?? [];
-    return (
-      <li key={t.id} className={styles.group}>
-        <div className={cn(styles.item, isChild && styles.child)}>
-          {isChild && <span className={styles.branch} aria-hidden />}
-          <StatusBadge status={t.status} />
-          <Link className={styles.title} dir="auto" to={`/tasks/${t.id}`}>
-            {t.title}
-          </Link>
-          {!isChild && kids.length > 0 && (
-            <button
-              type="button"
-              className={styles.count}
-              aria-expanded={!collapsed.has(t.id)}
-              title={collapsed.has(t.id) ? `Show ${kids.length} subtask(s) — ${statusSummary(kids.map((k) => k.status))}` : 'Hide the subtasks'}
-              onClick={() => toggle(t.id)}
+  return (
+    <ul className={styles.list}>
+      {tasks.map((t) => {
+        const on = selected?.has(t.id) ?? false;
+        const sub = t.subtasks && t.subtasks.total > 0 ? t.subtasks : null;
+        return (
+          <li key={t.id} className={styles.group}>
+            <div
+              className={cn(styles.item, selecting && styles.selectable, on && styles.picked)}
+              onClick={selecting ? () => onToggle?.(t.id) : undefined}
+              role={selecting ? 'checkbox' : undefined}
+              aria-checked={selecting ? on : undefined}
+              tabIndex={selecting ? 0 : undefined}
+              onKeyDown={selecting ? (e) => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onToggle?.(t.id)) : undefined}
             >
-              {collapsed.has(t.id) ? '▸' : '▾'} {kids.length} subtask{kids.length === 1 ? '' : 's'}
-            </button>
-          )}
-          {(t._count?.approvals ?? 0) > 0 && <span className={styles.pill}>{t._count?.approvals} ⚠</span>}
-          <ProjectBadge project={t.project} />
-          {t.agentName && <Badge tone="neutral">{t.agentName}</Badge>}
-          <span className={styles.meta}>{new Date(t.createdAt).toLocaleTimeString()}</span>
-          <Button variant="red" size="sm" title="Delete task" onClick={() => onDelete(t.id)}>
-            ✕
-          </Button>
-        </div>
-        {kids.length > 0 && collapsed.has(t.id) && <div className={styles.summary}>{statusSummary(kids.map((k) => k.status))}</div>}
-        {kids.length > 0 && !collapsed.has(t.id) && <ul className={styles.children}>{kids.map((k) => row(k, true))}</ul>}
-      </li>
-    );
-  };
-
-  return <ul className={styles.list}>{topLevel.map((t) => row(t, false))}</ul>;
+              {selecting && <input type="checkbox" className={styles.check} checked={on} onChange={() => onToggle?.(t.id)} onClick={(e) => e.stopPropagation()} aria-label={`Select ${t.title}`} />}
+              <StatusBadge status={listStatus(t) as TaskListItem['status']} />
+              {selecting ? (
+                <span className={styles.title} dir="auto">
+                  {t.title}
+                </span>
+              ) : (
+                <Link className={styles.title} dir="auto" to={`/tasks/${t.id}`}>
+                  {t.title}
+                </Link>
+              )}
+              {sub &&
+                (selecting ? (
+                  <span className={styles.count}>{subtaskLine(sub)}</span>
+                ) : (
+                  <Link className={styles.count} to={`/tasks/${t.id}`} title="Open the task to see its subtasks">
+                    {subtaskLine(sub)}
+                  </Link>
+                ))}
+              {(t._count?.approvals ?? 0) > 0 && <span className={styles.pill}>{t._count?.approvals} ⚠</span>}
+              <ProjectBadge project={t.project} />
+              {t.agentName && <Badge tone="neutral">{t.agentName}</Badge>}
+              <span className={styles.meta}>{new Date(t.createdAt).toLocaleTimeString()}</span>
+              {!selecting && (
+                <Button variant="red" size="sm" title="Delete task" onClick={() => onDelete(t.id)}>
+                  ✕
+                </Button>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }

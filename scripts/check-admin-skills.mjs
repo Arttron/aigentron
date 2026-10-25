@@ -26,7 +26,7 @@ const inDoc = new Set([...doc.matchAll(/^\|\s*`([a-z_]+)`\s*\|/gm)].map((m) => m
 const missingInDoc = inCode.filter((n) => !inDoc.has(n));
 const staleInDoc = [...inDoc].filter((n) => !anyTool.has(n));
 const skillsLine = admin.match(/^skills:\s*(.+)$/m)?.[1] ?? '';
-const skillsOk = ['admin-tools', 'dashboard-guide'].every((s) => skillsLine.includes(s));
+const skillsOk = ['admin-tools', 'dashboard-guide', 'settings-guide'].every((s) => skillsLine.includes(s));
 
 let bad = false;
 for (const f of readdirSync(ADMIN_SKILLS_DIR).filter((n) => n.endsWith('.md')).sort()) {
@@ -39,6 +39,6 @@ for (const f of readdirSync(ADMIN_SKILLS_DIR).filter((n) => n.endsWith('.md')).s
 }
 if (missingInDoc.length) { bad = true; console.error(`admin-tools.md is missing: ${missingInDoc.join(', ')}`); }
 if (staleInDoc.length) { bad = true; console.error(`admin-tools.md documents tools that no longer exist: ${staleInDoc.join(', ')}`); }
-if (!skillsOk) { bad = true; console.error('agent/builtin/admin.md must list "admin-tools, dashboard-guide" in skills:'); }
+if (!skillsOk) { bad = true; console.error('agent/builtin/admin.md must list "admin-tools, dashboard-guide, settings-guide" in skills:'); }
 console.log(bad ? 'DRIFT detected' : `OK — ${inCode.length} admin tools documented, skills wired`);
 process.exit(bad ? 1 : 0);

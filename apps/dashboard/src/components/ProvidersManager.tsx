@@ -72,6 +72,7 @@ export function ProvidersManager() {
     setError(null);
     try {
       await api.deleteProvider(name);
+      setModal(null); // deleted from its own edit dialog
       await refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -146,9 +147,6 @@ export function ProvidersManager() {
                 <Button size="sm" onClick={() => setModal({ mode: 'edit', provider: p })}>
                   Edit
                 </Button>
-                <Button variant="red" size="sm" disabled={busy} onClick={() => remove(p.name)}>
-                  Delete
-                </Button>
               </Row>
             </Row>
             <Muted className={styles.meta}>
@@ -195,6 +193,7 @@ export function ProvidersManager() {
             autoSignIn={modal.mode === 'edit' && modal.autoSignIn}
             onSubmit={submitForm}
             onCancel={() => setModal(null)}
+            onDelete={modal.mode === 'edit' ? () => void remove(modal.provider.name) : undefined}
           />
         </Modal>
       )}

@@ -311,13 +311,7 @@ export function AgentsPage() {
                   <Button size="sm" onClick={() => edit(a.name)}>
                     Edit
                   </Button>
-                  {a.name.toLowerCase() === 'admin' ? (
-                    <Badge tone="neutral">built-in</Badge>
-                  ) : (
-                    <Button variant="red" size="sm" onClick={() => remove(a.name)}>
-                      ✕
-                    </Button>
-                  )}
+                  {a.name.toLowerCase() === 'admin' && <Badge tone="neutral">built-in</Badge>}
                 </li>
               ))}
             </ul>
@@ -461,6 +455,14 @@ export function AgentsPage() {
                 {busy ? 'Saving…' : 'Save'}
               </Button>
               <Button onClick={() => setForm(null)}>Cancel</Button>
+              {!isNew && form.name.toLowerCase() !== 'admin' && (
+                <>
+                  <span style={{ flex: 1 }} />
+                  <Button variant="red" onClick={() => void remove(form.name)} disabled={busy} title="Delete this agent">
+                    Delete agent
+                  </Button>
+                </>
+              )}
             </Row>
             {error && <ErrorText>{error}</ErrorText>}
           </form>

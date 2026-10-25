@@ -18,11 +18,11 @@ describe('approval mode', () => {
     expect(approvalWaived('off', 'mcp__github__create_issue', risky)).toBe(true);
     expect(approvalWaived('off', PUSH_BRANCH_TOOL, risky)).toBe(true);
     expect(approvalWaived('off', CREATE_TASK_TOOL, risky)).toBe(true);
+    expect(approvalWaived('off', EXTEND_RUN_TOOL, risky)).toBe(true); // more run time is granted by itself: the person chose not to be asked
   });
   it('off mode never waives credentials / protected files or admin proposals', () => {
     expect(approvalWaived('off', 'Bash', { dangerous: true, hard: true })).toBe(false);
     expect(approvalWaived('off', PROPOSE_SETTINGS_TOOL, risky)).toBe(false);
-    expect(approvalWaived('off', EXTEND_RUN_TOOL, risky)).toBe(false); // more run time is always the person's call
     expect(approvalWaived('off', `${INTERNAL_TOOL_PREFIX}request_secret`, risky)).toBe(false);
     expect(approvalWaived('off', `${INTERNAL_TOOL_PREFIX}propose_learned_skill`, risky)).toBe(false);
   });

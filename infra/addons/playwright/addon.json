@@ -1,0 +1,14 @@
+{
+  "name": "playwright",
+  "title": "Playwright browser for agents",
+  "description": "A headless Chromium behind the Playwright MCP server, for the agents' own browser work (screenshots, checking a page, filling a form). Separate from the Browser add-on, so a personal browser stays personal.",
+  "version": "1",
+  "requires": {
+    "ramMb": 1536,
+    "diskMb": 1500
+  },
+  "ports": {
+    "mcp": 8931
+  },
+  "backends": ["bare"]
+}

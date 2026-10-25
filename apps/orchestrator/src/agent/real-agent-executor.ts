@@ -1299,7 +1299,11 @@ export class RealAgentExecutor extends AgentExecutor {
       const approvals = this.moduleRef.get(ApprovalsService, { strict: false });
       const toolInput = { usedMin, limitMin: usedMin, extraMin };
       const res = await approvals.check({ taskId, agentSessionId, toolName: EXTEND_RUN_TOOL, toolInput });
-      if (res.allow) return extraMin * 60_000;
+      if (res.allow) {
+        // no-approvals mode (or an exception): granted without a card
+        onEvent({ kind: 'stderr', text: `agent has worked ${usedMin} min and is still making progress — ${extraMin} more minutes granted automatically (no-approvals mode)` });
+        return extraMin * 60_000;
+      }
       if (!res.approvalId) return 0;
       onEvent({ kind: 'stderr', text: `agent has worked ${usedMin} min and is still making progress — waiting for a person to allow ${extraMin} more minutes` });
       const verdict = await approvals.waitForVerdict(res.approvalId);

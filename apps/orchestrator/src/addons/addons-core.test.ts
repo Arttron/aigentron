@@ -16,11 +16,12 @@ import {
   upgradeResponseHeaders,
   upstreamPath,
   wsCloseFrame,
+  playwrightSseUrl,
 } from './addons-core';
 import { ROLES_KEY } from '../identity/roles.decorator';
 import { AddonsController } from './addons.controller';
 
-const descriptor = { name: 'browser', title: 'Browser', description: 'A browser.', requires: { ramMb: 1536, diskMb: 1500 }, ports: { view: 6080, cdp: 9222 }, backends: ['bare', 'docker'] };
+const descriptor = { name: 'browser', title: 'Browser', description: 'A browser.', requires: { ramMb: 1536, diskMb: 1500 }, ports: { view: 6080, cdp: 9222, mcp: null }, backends: ['bare', 'docker'] };
 const state = {
   name: 'browser',
   enabled: true,
@@ -29,7 +30,7 @@ const state = {
   installedAt: '2026-10-19T10:00:00Z',
   browser: 'chromium 131',
   arch: 'x86_64',
-  endpoints: { view: 'http://127.0.0.1:6080', cdp: 'http://127.0.0.1:9222' },
+  endpoints: { view: 'http://127.0.0.1:6080', cdp: 'http://127.0.0.1:9222', mcp: null },
   profiles: ['agent'],
   notes: ['hello'],
 };
@@ -102,7 +103,7 @@ describe('parseState', () => {
     const r = parseState({ name: 'browser', enabled: false, backend: 'docker', notes: Array(40).fill('n'), profiles: [1, 'agent'] }, 'browser');
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value.endpoints).toEqual({ view: null, cdp: null });
+      expect(r.value.endpoints).toEqual({ view: null, cdp: null, mcp: null });
       expect(r.value.notes).toHaveLength(20);
       expect(r.value.profiles).toEqual(['agent']);
       expect(r.value.version).toBe('');
@@ -195,5 +196,26 @@ describe('AddonsController', () => {
     const view = AddonsController.prototype.browserView as unknown as object;
     expect(Reflect.getMetadata(ROLES_KEY, view)).toEqual(['operator', 'admin']);
     expect(Reflect.getMetadata(ROLES_KEY, AddonsController.prototype.list as unknown as object)).toBeUndefined();
+  });
+});
+
+describe('the Playwright add-on', () => {
+  const pw = { name: 'playwright', enabled: true, backend: 'bare', version: '1', endpoints: { mcp: 'http://127.0.0.1:8931' } };
+  it('a descriptor with only an MCP port is valid; one with no port at all is not', () => {
+    expect(parseDescriptor({ name: 'playwright', title: 'P', requires: { ramMb: 1, diskMb: 1 }, ports: { mcp: 8931 }, backends: ['bare'] }).ok).toBe(true);
+    expect(parseDescriptor({ name: 'playwright', title: 'P', ports: {}, backends: ['bare'] }).ok).toBe(false);
+    expect(parseDescriptor({ name: 'playwright', title: 'P', ports: { mcp: 0 }, backends: ['bare'] }).ok).toBe(false);
+  });
+  it('its MCP endpoint is checked like the others', () => {
+    expect(parseState(pw, 'playwright').ok).toBe(true);
+    expect(parseState({ ...pw, endpoints: { mcp: 'http://example.com:8931' } }, 'playwright').ok).toBe(false);
+  });
+  it('the SSE address for the playwright MCP server: only when enabled and valid', () => {
+    expect(playwrightSseUrl(pw)).toBe('http://127.0.0.1:8931/sse');
+    expect(playwrightSseUrl({ ...pw, enabled: false })).toBeNull();
+    expect(playwrightSseUrl({ ...pw, endpoints: {} })).toBeNull();
+    expect(playwrightSseUrl({ ...pw, endpoints: { mcp: 'http://example.com:8931' } })).toBeNull();
+    expect(playwrightSseUrl({ ...pw, name: 'browser' })).toBeNull();
+    expect(playwrightSseUrl('junk')).toBeNull();
   });
 });

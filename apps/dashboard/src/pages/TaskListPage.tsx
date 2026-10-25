@@ -8,6 +8,7 @@ import { readFilterParam, withFilterParam } from '@/lib/url-filter';
 import { CreateTaskForm } from '@/components/CreateTaskForm';
 import { TaskList } from '@/components/TaskList';
 import { AppHeader, Button, Card, SectionTitle, ConnStatus, ErrorText, Muted } from '@/components/ui';
+import { BULK_LABEL, listStatus, planBulk, runBulk, type BulkAction } from '@/lib/bulk-actions';
 
 const PAGE_SIZE = 25;
 
@@ -135,6 +136,53 @@ export function TaskListPage() {
     },
     [refreshTasks],
   );
+
+  // ---- selection mode: pick several tasks, act on them at once ----
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Map<string, { id: string; status: string }>>(new Map());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
+  const toggle = (id: string) =>
+    setPicked((m) => {
+      const next = new Map(m);
+      const t = tasks.find((x) => x.id === id);
+      if (next.has(id)) next.delete(id);
+      else if (t) next.set(id, { id, status: listStatus(t) });
+      return next;
+    });
+  const leaveSelecting = () => {
+    setSelecting(false);
+    setPicked(new Map());
+    setBulkMsg(null);
+  };
+  const allOnPage = tasks.length > 0 && tasks.every((t) => picked.has(t.id));
+  const toggleAllOnPage = () =>
+    setPicked((m) => {
+      const next = new Map(m);
+      if (allOnPage) for (const t of tasks) next.delete(t.id);
+      else for (const t of tasks) next.set(t.id, { id: t.id, status: listStatus(t) });
+      return next;
+    });
+  const bulk = async (action: BulkAction) => {
+    const { ids, skipped } = planBulk(action, [...picked.values()]);
+    if (!ids.length) return;
+    const what = action === 'delete' ? 'Delete (with their branches / worktrees)' : action === 'cancel' ? 'Cancel' : 'Mark as done';
+    const msg = `${what} ${ids.length} task${ids.length === 1 ? '' : 's'}?${skipped ? ` (${skipped} selected task${skipped === 1 ? ' does' : 's do'} not fit this action and ${skipped === 1 ? 'is' : 'are'} left alone.)` : ''}${action === 'delete' ? ' This cannot be undone.' : ''}`;
+    if (!window.confirm(msg)) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const fn = action === 'delete' ? (id: string) => api.deleteTask(id) : action === 'cancel' ? (id: string) => api.cancelTask(id) : (id: string) => api.markTaskDone(id);
+    const r = await runBulk(ids, fn);
+    setPicked((m) => {
+      const next = new Map(m);
+      for (const id of ids) next.delete(id);
+      return next;
+    });
+    setBulkMsg(`${BULK_LABEL[action]}: ${r.ok} done${r.failed ? `, ${r.failed} failed (${r.errors.join('; ')})` : ''}${skipped ? `, ${skipped} skipped` : ''}.`);
+    setBulkBusy(false);
+    refreshTasks();
+  };
+  const count = (a: BulkAction) => planBulk(a, [...picked.values()]).ids.length;
 
   // Fetch on query/page change, debounced while typing so keystrokes don't spam
   // the server. The empty-query / page-change cases fire immediately.
@@ -269,7 +317,32 @@ export function TaskListPage() {
             onChange={(e) => onSearch(e.target.value)}
             style={{ maxWidth: '18rem', marginLeft: 'auto' }}
           />
+          <Button size="sm" variant={selecting ? 'primary' : undefined} aria-pressed={selecting} title="Pick several tasks and act on them at once" onClick={() => (selecting ? leaveSelecting() : setSelecting(true))}>
+            {selecting ? '✓ Done selecting' : '☑ Select'}
+          </Button>
         </div>
+        {selecting && (
+          <div role="toolbar" aria-label="Actions on the selected tasks" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <strong>{picked.size} selected</strong>
+            <Button size="sm" onClick={toggleAllOnPage} disabled={tasks.length === 0 || bulkBusy}>
+              {allOnPage ? 'Unselect this page' : 'Select this page'}
+            </Button>
+            <Button size="sm" onClick={() => setPicked(new Map())} disabled={picked.size === 0 || bulkBusy}>
+              Clear
+            </Button>
+            <span style={{ flex: 1 }} />
+            <Button size="sm" variant="primary" disabled={count('done') === 0 || bulkBusy} title="Accept the finished / blocked / stalled / failed ones" onClick={() => void bulk('done')}>
+              ✅ Mark as done {count('done') || ''}
+            </Button>
+            <Button size="sm" disabled={count('cancel') === 0 || bulkBusy} title="Stop the queued and running ones" onClick={() => void bulk('cancel')}>
+              ⏹ Cancel {count('cancel') || ''}
+            </Button>
+            <Button size="sm" variant="red" disabled={picked.size === 0 || bulkBusy} onClick={() => void bulk('delete')}>
+              🗑 Delete {picked.size || ''}
+            </Button>
+          </div>
+        )}
+        {bulkMsg && <Muted role="status" style={{ marginBottom: 8 }}>{bulkMsg}</Muted>}
 
         <div role="group" aria-label="Filter by status" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
           {[{ id: '' as const, label: 'All', hint: 'Every status' }, ...STATUSES].map((s) => {
@@ -372,7 +445,7 @@ export function TaskListPage() {
           </div>
         )}
 
-        <TaskList tasks={tasks} onDelete={removeTask} />
+        <TaskList tasks={tasks} onDelete={removeTask} selecting={selecting} selected={new Set(picked.keys())} onToggle={toggle} />
 
         {pageCount > 1 && (
           <div

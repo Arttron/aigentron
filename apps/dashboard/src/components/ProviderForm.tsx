@@ -38,12 +38,15 @@ export function ProviderForm({
   autoSignIn = false,
   onSubmit,
   onCancel,
+  onDelete,
 }: {
   initial?: ProviderInfo;
   /** open straight into sign-in (a subscription provider that was just created) */
   autoSignIn?: boolean;
   onSubmit: (values: ProviderFormValues) => Promise<void>;
   onCancel: () => void;
+  /** Editing only: delete the provider (the list has no delete button — it lives here). */
+  onDelete?: () => void;
 }) {
   const isNew = !initial;
   const [values, setValues] = useState<ProviderFormValues>({
@@ -281,6 +284,14 @@ export function ProviderForm({
         <Button onClick={onCancel} disabled={busy}>
           Cancel
         </Button>
+        {onDelete && (
+          <>
+            <span style={{ flex: 1 }} />
+            <Button variant="red" onClick={onDelete} disabled={busy} title="Delete this provider">
+              Delete provider
+            </Button>
+          </>
+        )}
         {error && <ErrorText>{error}</ErrorText>}
       </Row>
     </form>

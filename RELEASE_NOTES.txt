@@ -1,15 +1,14 @@
-Aigentron v0.1.84
+Aigentron v0.1.85
 
-For people who are not programmers: a better photo viewer, a full-screen conversation, fewer copies of the same file, and a fix for attaching files on a phone.
+For people who are not programmers: a browser for the agents on any server, easier adding of MCP servers, a tidier task list with bulk actions, and a guide to working on the code directly on the server.
 
 New
-- Photo viewer: arrow keys, PageUp/PageDown, Home/End and Esc; a click on the left or right edge of the picture steps back or forward; swipe on a phone; the whole screen on a phone; the next pictures are loaded in advance.
-- A task's conversation can fill the screen (the "Full screen" button in its card; Esc exits). A half-typed message and the scroll position are kept.
-- The task menu on a phone closes when you press outside it, press Esc or choose an action.
-- Fewer copies of files. A lead shows what its subtasks produced by reference - a picture in a message as ![caption](task:ID/file.png), another file as a link - instead of copying it into its own chat; the same works through show_images and reaches Telegram. show_images links workspace and library files instead of copying them, and showing the same picture twice no longer makes a second copy. Agents are told to report their own result instead of quoting the subtasks' answers.
-
-Fixed
-- Attaching files to a new task on a phone: the size limit now follows the file kind (photos and documents up to 10 MB like the server, video up to 95 MB) and is checked after a photo is shrunk and before the task exists; a file that cannot be read or uploaded is named with the reason; a task that did not get its files is removed and your text and files stay in the form for another try (no duplicate tasks); the button shows the upload progress.
-- Safer defaults for small servers: the low-priority wrapper is tried out before use, and the memory guard from 0.1.83 is kept as it is.
+- Playwright add-on: `sudo aigentron addon enable playwright` gives the agents a headless browser (the `playwright` MCP server) on a server without Docker compose. Separate from the Browser add-on, so a personal browser stays personal. The installer was run in a Debian 12 (aarch64) container: libraries, Node, Chromium, the MCP server starts and refuses a foreign Host. It needs 0.5-1.5 GB of memory while a page is open: on a 4 GB machine keep the swap file and run one browser task at a time.
+- The System navigation has "Add-ons" instead of "Browser": two tabs, Browser (the live view as before) and Playwright (status, what to type on the server). /browser redirects there.
+- Adding an MCP server accepts any client's format: {"mcpServers": {...}} (Claude Desktop, Cursor, LM Studio, .mcp.json, VS Code), a single {url, headers} / {command, args} object, a "claude mcp add ..." command or a URL. The form shows what it understood; a missing type is filled in. The MCP endpoint page now gives the Claude Code command with the token header and a .mcp.json block.
+- Task list: only main tasks, each with "5 subtasks - 3 done - 1 stalled" (the subtasks are on its page); a task that is idle while a subtask runs shows as running; a selection mode (Select) with Mark as done / Cancel / Delete for several tasks at once.
+- Agents and providers: no delete button in the list; deleting is in the edit dialog.
+- In the no-approvals mode a run that reaches the step limit or the time ceiling is continued by itself.
+- docs/work-on-server.md: how to edit and test the code directly on the server (your own clone, the project's checkout, an existing clone for the default project), and why a project you work in must use worktree isolation, not shared.
 
 Update note: no database changes.

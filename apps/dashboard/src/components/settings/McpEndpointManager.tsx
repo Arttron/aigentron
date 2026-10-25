@@ -61,7 +61,9 @@ export function McpEndpointManager() {
 
   const suffix = status?.tokenRequired ? '?key=<MCP_TOKEN>' : '';
   const endpoint = url + suffix;
-  const codeCmd = `claude mcp add --transport http lds-fleet ${url}`;
+  // with a token the clients need it as a header (Claude Code, Cursor, LM Studio …); claude.ai / Claude Desktop connectors take it in the URL (?key=)
+  const codeCmd = `claude mcp add --transport http lds-fleet ${url}${status?.tokenRequired ? ' --header "Authorization: Bearer <MCP_TOKEN>"' : ''}`;
+  const fileJson = JSON.stringify({ mcpServers: { 'lds-fleet': { type: 'http', url, ...(status?.tokenRequired ? { headers: { Authorization: 'Bearer <MCP_TOKEN>' } } : {}) } } }, null, 2);
 
   return (
     <Card>
@@ -127,6 +129,14 @@ export function McpEndpointManager() {
             <div className={styles.method}>
               <span className={styles.methodLabel}>⌨️ Claude Code</span>
               <CopyField value={codeCmd} copied={copied === 'cli'} onCopy={() => copy('cli', codeCmd)} />
+            </div>
+
+            <div className={styles.method}>
+              <span className={styles.methodLabel}>📄 .mcp.json (Claude Code) · Cursor · LM Studio</span>
+              <CopyField value={fileJson} copied={copied === 'json'} onCopy={() => copy('json', fileJson)} />
+              <p className={styles.hint}>
+                Claude Code needs <code>"type": "http"</code>; Cursor and LM Studio take the same block (the <code>type</code> is harmless there).
+              </p>
             </div>
 
             <div className={styles.method}>

@@ -124,3 +124,12 @@ allowlist guards against a malicious local web page.
 cancel tasks — a public URL without a token means anyone who learns it can drive
 your fleet. Use a long random value (`openssl rand -hex 32`) and keep it out of
 git; the tunnel/host URL plus `?key=<token>` is the only thing a client needs.
+
+## Adding someone else's MCP server (Settings → MCP servers)
+
+The **Add an MCP server** box takes whatever the server's own page shows, so the client's format does not matter: `{"mcpServers": {"name": {"url": …, "headers": {…}}}}`
+(Claude Desktop, Cursor, LM Studio, Claude Code `.mcp.json`; VS Code's `servers` too), a single `{url, headers}` / `{command, args}` object, Claude Code's
+`claude mcp add --transport http name https://… --header "Authorization: Bearer …"` (also `-e`, `-- command args`, `add-json`) or a bare URL. The page shows what it
+understood before adding; the name is taken from the text (type another to override it); a `url` without `type` becomes `http` (`sse` when it ends in `/sse`); client-only
+settings (`disabled`, `autoApprove`, …) are dropped. The same rules apply on the server (`PUT/POST /api/mcp-servers`). A pasted token is stored in the config; to keep it in a
+secret use `${KEY}`.

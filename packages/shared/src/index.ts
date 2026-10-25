@@ -5,3 +5,4 @@ export * from './events';
 export * from './dto';
 export * from './schedule';
 export * from './frontmatter';
+export * from './mcp-config';

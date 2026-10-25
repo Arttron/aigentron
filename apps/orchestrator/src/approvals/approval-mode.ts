@@ -1,4 +1,4 @@
-import { CREATE_TASK_TOOL, EXTEND_RUN_TOOL, INTERNAL_TOOL_PREFIX, PUSH_BRANCH_TOOL, type DangerVerdict } from '@lds/shared';
+import { CREATE_TASK_TOOL, INTERNAL_TOOL_PREFIX, PUSH_BRANCH_TOOL, type DangerVerdict } from '@lds/shared';
 
 /**
  * `ask` (default): a risky action waits for a person. `off`: the agent's own risky actions (shell, writes outside its folders, MCP calls,
@@ -15,8 +15,6 @@ const AGENT_OWN_INTERNAL = new Set([PUSH_BRANCH_TOOL.toLowerCase(), CREATE_TASK_
 export function approvalWaived(mode: ApprovalMode, toolName: string, verdict: Pick<DangerVerdict, 'dangerous' | 'hard'>): boolean {
   if (mode !== 'off' || !verdict.dangerous || verdict.hard) return false;
   const name = toolName.toLowerCase();
-  // more run time is the person's call on spending time, whatever the mode
-  if (name === EXTEND_RUN_TOOL) return false;
   if (name.startsWith(INTERNAL_TOOL_PREFIX)) return AGENT_OWN_INTERNAL.has(name);
   return true;
 }
