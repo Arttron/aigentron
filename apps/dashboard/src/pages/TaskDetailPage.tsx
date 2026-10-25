@@ -41,6 +41,24 @@ import styles from './TaskDetailPage.module.css';
 /** Keyed by the route id: parent → subtask navigation remounts the page, so no state (lines, form draft, staged files) leaks between tasks. */
 const CONTINUE_PROMPT = 'Continue the task from where you left off. Finish the remaining work, then report your status.';
 
+/** The full-screen toggle in a conversation's bottom-right corner, like a video player's. */
+function FullToggle({ full, onToggle }: { full: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={styles.fullToggle}
+      onClick={onToggle}
+      title={full ? 'Exit full screen (Esc)' : 'Full screen'}
+      aria-label={full ? 'Exit full screen' : 'Full screen'}
+      aria-pressed={full}
+    >
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {full ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+      </svg>
+    </button>
+  );
+}
+
 export function TaskDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   return <TaskDetailView key={id} id={id} />;
@@ -94,7 +112,8 @@ function TaskDetailView({ id }: { id: string }) {
   useEffect(() => {
     if (!fullChat) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) setFullChat(false);
+      // an open dialog (the picture viewer, a modal) takes the Escape first; the conversation leaves full screen only when none is open
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[aria-modal="true"]')) setFullChat(false);
     };
     document.addEventListener('keydown', onKey);
     document.documentElement.dataset.pinned = '1';
@@ -326,9 +345,10 @@ function TaskDetailView({ id }: { id: string }) {
     };
   }, [phone, !!task]);
 
+  const phoneFull = phone && fullChat && tab === 'chat';
   if (phone && task) {
     return (
-      <div className={styles.shell}>
+      <div className={`${styles.shell} ${phoneFull ? styles.shellFull : ''}`}>
         <div className={styles.shellHead}>
           <BackLink href="/">←</BackLink>
           <span className={styles.shellTitle} title={task.title}>
@@ -398,7 +418,7 @@ function TaskDetailView({ id }: { id: string }) {
           />
         </div>
 
-        <div className={tab === 'chat' ? styles.paneChat : styles.paneScroll}>
+        <div className={tab === 'chat' ? `${styles.paneChat} ${styles.chatBox}` : styles.paneScroll}>
           {tab === 'chat' && <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />}
           {tab === 'chat' && <DiscussionBar taskId={id} running={!terminal} />}
           {tab === 'chat' && (
@@ -413,6 +433,7 @@ function TaskDetailView({ id }: { id: string }) {
               onAsk={(p, a) => sendFollowUp(p, a, [])}
             />
           )}
+          {tab === 'chat' && <FullToggle full={phoneFull} onToggle={() => setFullChat((v) => !v)} />}
           {tab === 'files' && (
             <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} onAsk={(p, a) => sendFollowUp(p, a, [])} />
           )}
@@ -517,14 +538,14 @@ function TaskDetailView({ id }: { id: string }) {
                 <SectionTitle>{fullChat ? task.title : 'Conversation'}</SectionTitle>
                 <Row>
                   {fullChat && <StatusBadge status={task.status} />}
-                  <Button size="sm" onClick={() => setFullChat((v) => !v)} title={fullChat ? 'Back to the page (Esc)' : 'Make the conversation fill the screen'} aria-pressed={fullChat}>
-                    {fullChat ? '⤡ Exit full screen' : '⤢ Full screen'}
-                  </Button>
                 </Row>
               </Row>
               <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />
               <DiscussionBar taskId={id} running={!terminal} />
-              <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} fill={fullChat} onAsk={(p, a) => sendFollowUp(p, a, [])} />
+              <div className={`${styles.chatBox} ${fullChat ? styles.chatBoxFull : ''}`}>
+                <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} fill={fullChat} onAsk={(p, a) => sendFollowUp(p, a, [])} />
+                <FullToggle full={fullChat} onToggle={() => setFullChat((v) => !v)} />
+              </div>
             </Card>
             <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact={fullChat} />
           </div>

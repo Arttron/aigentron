@@ -32,7 +32,9 @@ export function cleanErrorBody(status: number, body: string): string {
     return `The server answered with a web page instead of data (HTTP ${status}).`;
   }
   const t = body.trim();
-  return t.length > 600 ? `${t.slice(0, 600)}…` : t;
+  // a JSON body (a Nest error) is kept whole up to a generous cap: the caller parses its `message`; cut text would not parse
+  const cap = t.startsWith('{') || t.startsWith('[') ? 20_000 : 600;
+  return t.length > cap ? `${t.slice(0, cap)}…` : t;
 }
 
 /** Parses a JSON answer or throws ApiError (status + the server's body text). */

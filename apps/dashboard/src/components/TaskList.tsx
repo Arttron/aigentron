@@ -27,7 +27,8 @@ export function TaskList({
   onDelete: (id: string) => void;
   selecting?: boolean;
   selected?: ReadonlySet<string>;
-  onToggle?: (id: string) => void;
+  /** `range` = Shift was held: select / unselect everything between the last row clicked and this one */
+  onToggle?: (id: string, range: boolean) => void;
 }) {
   if (tasks.length === 0) {
     return <Muted>No tasks yet. Create one above.</Muted>;
@@ -42,13 +43,13 @@ export function TaskList({
           <li key={t.id} className={styles.group}>
             <div
               className={cn(styles.item, selecting && styles.selectable, on && styles.picked)}
-              onClick={selecting ? () => onToggle?.(t.id) : undefined}
+              onClick={selecting ? (e) => onToggle?.(t.id, e.shiftKey) : undefined}
               role={selecting ? 'checkbox' : undefined}
               aria-checked={selecting ? on : undefined}
               tabIndex={selecting ? 0 : undefined}
-              onKeyDown={selecting ? (e) => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onToggle?.(t.id)) : undefined}
+              onKeyDown={selecting ? (e) => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onToggle?.(t.id, e.shiftKey)) : undefined}
             >
-              {selecting && <input type="checkbox" className={styles.check} checked={on} onChange={() => onToggle?.(t.id)} onClick={(e) => e.stopPropagation()} aria-label={`Select ${t.title}`} />}
+              {selecting && <input type="checkbox" className={styles.check} checked={on} onChange={() => undefined} onClick={(e) => { e.stopPropagation(); onToggle?.(t.id, e.shiftKey); }} aria-label={`Select ${t.title}`} />}
               <StatusBadge status={listStatus(t) as TaskListItem['status']} />
               {selecting ? (
                 <span className={styles.title} dir="auto">

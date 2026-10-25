@@ -14,6 +14,16 @@
 
 ---
 
+## 2026-10-25 (schedules)
+
+### Задача по расписанию просит апрув на то, что входит в её работу
+**Статус:** fixed (не проверено вживую).
+**Что было.** Расписание формирует картинку с графиком, отправляет в Telegram и удаляет файл — а задача ждёт карточку апрува на удаление, хотя это часть задания и ночью отвечать некому.
+**Причина.** У расписания не было своего уровня апрувов: задача шла по настройке проекта / глобальной.
+**Что сделали.** Поле `Schedule.approvalMode` (ask / off / не задано; миграции для обеих баз): задача, которую запускает расписание (и продолжаемая «одна задача»), получает этот уровень, подзадачи следуют за ней;
+в форме расписания — «Approvals for this schedule's tasks».
+**Осталось.** Админ-инструмент `propose_schedule` пока не умеет это поле (меняется в Settings → Schedules). Само правило, которое сработало на удаление (`rm` вне корней агента или с переменной), не менялось.
+
 ## 2026-10-25 (backup / move)
 
 ### `aigentron backup` не включал папки проектов (`projects/<slug>`)
@@ -154,3 +164,12 @@ LiteLLM, браузер Playwright, `tsc`). Отсюда же 520 от Cloudflar
 **Статус:** fixed (процесс). Причина: цепочка команд через `;` вместо `&&`. Лимит 16 000 символов на файл админ-навыка упирался
 несколько раз (`dashboard-guide.md`, `admin-tools.md`). Правило: проверка и коммит через `&&`; перед добавлением строки в навык —
 `node scripts/check-admin-skills.mjs`.
+
+## 2026-10-25 — review of export / MCP / schedule approvals / task list (fixed)
+
+- Export/backup: data was filtered by name (folders called build/dist were lost) → code in its own inner archive, projects restored per entry, exact-name excludes.
+- Memory guard and start holds fired on macOS (`os.freemem()` is not "available") → unknown memory disables them; 20 s grace after a stop.
+- MCP: duplicate name was a 500, `__proto__`/`constructor` accepted, trailing-comma and backslash handling in the parser, multi-server Add left a half-done list without refresh.
+- Dashboard: Esc in the full-screen conversation also closed a dialog; a JSON error body was cut so its message could not be read; `task:` file references with spaces; the create form deleted a task whose start answer was merely lost (a retry would run the work twice); bulk Cancel used a stale status and a rule different from the task page.
+- Playwright add-on: a version bump did not restart a running unit; a failed check still wrote `enabled: true`; an old distro `nodejs` (<18) was not upgraded.
+- Open (low): `dataset.pinned` is owned by two effects; `task:` references in message text are not checked against the subtask relation (matters once per-project access exists — see docs/plan-project-isolation.md).

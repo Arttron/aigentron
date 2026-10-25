@@ -192,14 +192,38 @@ export class AttachmentsService {
     const stat0 = await lstat(srcPath); // not stat: a symlink (or a hard link to a file elsewhere) must never be followed into a copy of something private
     if (!stat0.isFile() || stat0.nlink !== 1) throw new BadRequestException(`"${basename(srcPath)}" is not a plain picture file.`);
     if (stat0.size > MAX_BYTES * 3) throw new PayloadTooLargeException(`"${basename(srcPath)}" is too large to show.`);
-    // the same picture shown again (an agent calls show_images twice on one file) is the file already there, not a second copy
+    // The same picture shown again (an agent calls show_images twice on one file) is the file already there, not a second copy. A stored jpg / png / webp is
+    // recompressed after the copy, so its bytes differ from the source's: the SOURCE's hash is remembered next to the stored name.
+    const srcHash = createHash('sha256').update(await readFile(srcPath)).digest('hex');
+    const known = (await this.readSources(dir))[srcHash];
+    if (known && (await stat(join(dir, known)).catch(() => null))?.isFile()) return known;
     const same = await this.sameContent(dir, srcPath, stat0.size);
     if (same) return same;
     const name = await this.uniqueName(dir, sanitize(basename(srcPath)));
     const dest = join(dir, name);
     await copyFile(srcPath, dest);
     const r = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) ? await this.images.optimize(dest, undefined, false, (d, n) => this.uniqueName(d, n)) : { path: dest, changed: false };
-    return basename(r.path);
+    const stored = basename(r.path);
+    await this.rememberSource(dir, srcHash, stored);
+    return stored;
+  }
+
+  /** `.sources.json` (hidden): hash of a source picture → the name it was stored under. */
+  private async readSources(dir: string): Promise<Record<string, string>> {
+    try {
+      const raw = JSON.parse(await readFile(join(dir, '.sources.json'), 'utf8')) as unknown;
+      return raw && typeof raw === 'object' ? (raw as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async rememberSource(dir: string, hash: string, name: string): Promise<void> {
+    const idx = await this.readSources(dir);
+    idx[hash] = name;
+    const tmp = join(dir, `.sources.${randomBytes(4).toString('hex')}.tmp`);
+    await writeFile(tmp, JSON.stringify(idx));
+    await rename(tmp, join(dir, '.sources.json')).catch(async () => unlink(tmp).catch(() => undefined));
   }
 
   /** The name of a file already in `dir` with exactly this content (same size first, then the hash), or null. */

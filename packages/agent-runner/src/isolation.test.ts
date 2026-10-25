@@ -99,6 +99,11 @@ describe('niceness (a lower CPU priority for the agent)', () => {
     expect(plain.args.slice(2)).toEqual(['10', 'codex', 'exec']);
     expect(plain.args[1]).toContain('oom_score_adj');
     expect(plain.args[1]).toContain('exec nice -n "$0" "$@"');
+    // niceness 0 still asks to be killed first, and does not nice
+    const zero = agentCommand('codex', ['exec'], {}, undefined, 0);
+    expect(zero.command).toBe('sh');
+    expect(zero.args.slice(2)).toEqual(['0', 'codex', 'exec']);
+    expect(zero.args[1]).toContain('oom_score_adj');
     expect(agentCommand('codex', ['exec'], { A: '1' })).toEqual({ command: 'codex', args: ['exec'], env: { A: '1' } });
     const c = agentCommand('codex', ['exec'], {}, iso, 10);
     expect(c.command).toBe(iso.wrapper);

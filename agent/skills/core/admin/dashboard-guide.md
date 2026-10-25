@@ -15,7 +15,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 - **Status chips** (counts; empty hidden): *Needs attention* (approval, blocked, stalled, failed), *Active* (queued/running), *Ready*, *Done*, *Blocked*, *Approval*, *Failed*, *Stalled*, *Cancelled*. A status filter looks at every level (a blocked subtask under a finished parent is listed flat).
 - **Type chips** ("Type:"): *Tasks* (started in the dashboard), *Chats* (with a chat agent such as me), *From chats* (Telegram), *Scheduled*, *Discussions*, *Subtasks* (listed flat). The choice is remembered and in the URL (`/?type=chat`).
-- A task's conversation fills the screen: **⤢ Full screen** (Esc exits).
+- A task's conversation fills the screen: the expand icon in the conversation's bottom-right corner (on a phone it also hides the header and tabs; Esc exits).
 - New tasks get a short title from a small model (Settings → Task titles); set titles never change.
 - The list shows only main tasks, each with "3 subtasks · 2 done · 1 running" (on its page; a running subtask makes an idle task show running). **☑ Select** picks several tasks: Mark as done / Cancel / Delete.
 

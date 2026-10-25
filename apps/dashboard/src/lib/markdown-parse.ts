@@ -73,7 +73,16 @@ export interface FileRef {
 export function parseFileRef(ref: string): FileRef | null {
   const r = ref.trim().replace(/^<|>$/g, '');
   const t = /^task:([\w-]{1,64})\/([^/\\]{1,200})$/.exec(r);
-  if (t) return t[2] !== '..' && !t[2]!.startsWith('.') ? { taskId: t[1]!, name: t[2]!, media: MEDIA_EXT.test(t[2]!) } : null;
+  if (t) {
+    // a name may contain spaces (`plan v2.png`) and arrive as `plan%20v2.png`
+    let name = t[2]!;
+    try {
+      name = decodeURIComponent(name);
+    } catch {
+      /* keep as typed */
+    }
+    return name !== '..' && !name.startsWith('.') && !/[/\\]/.test(name) ? { taskId: t[1]!, name, media: MEDIA_EXT.test(name) } : null;
+  }
   if (/^attachments?:/i.test(r)) {
     const name = mediaOrFileName(r.replace(/^attachments?:\/*/i, ''));
     return name ? { name, media: MEDIA_EXT.test(name) } : null;
@@ -93,7 +102,7 @@ function mediaOrFileName(raw: string): string | null {
   return name && name !== '..' && !name.startsWith('.') ? name : null;
 }
 
-const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)/g;
+const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^\]\n]*\]\((?:(?:task|attachments?):[^)\n]+|[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)/g;
 
 export function parseInline(src: string, depth = 0): Inline[] {
   const out: Inline[] = [];

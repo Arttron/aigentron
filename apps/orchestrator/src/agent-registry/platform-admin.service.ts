@@ -1164,7 +1164,7 @@ export class PlatformAdminService {
           [
             ['CPUs', s.cpus, '—'],
             ['Load (1 min)', `${s.load1.toFixed(2)} (${s.loadPerCpu.toFixed(2)} per CPU)`, maxLoad > 0 ? `${maxLoad} per CPU = ${(maxLoad * s.cpus).toFixed(1)}  (AGENT_MAX_LOAD)` : 'off'],
-            ['Memory (available / total) and swap', `${Math.round(mem.availableMb)} / ${Math.round(mem.totalMb)} MB; swap ${mem.swapTotalMb > 0 ? `${Math.round(mem.swapTotalMb)} MB` : 'none'}`, this.config.agentOomGuardMb > 0 ? `below ${this.config.agentOomGuardMb} MB the newest run is stopped (AGENT_OOM_GUARD_MB)` : 'memory guard off'],
+            ['Memory (available / total) and swap', mem.reliable ? `${Math.round(mem.availableMb)} / ${Math.round(mem.totalMb)} MB; swap ${mem.swapTotalMb > 0 ? `${Math.round(mem.swapTotalMb)} MB` : 'none'}` : `${Math.round(mem.totalMb)} MB total; available memory is only measured on Linux (the limits below are off here)`, this.config.agentOomGuardMb > 0 ? `below ${this.config.agentOomGuardMb} MB the newest run is stopped (AGENT_OOM_GUARD_MB)` : 'memory guard off'],
             ['Free memory', `${Math.round(s.freeMemMb)} MB`, minMem > 0 ? `at least ${minMem} MB  (AGENT_MIN_FREE_MEM_MB)` : 'off'],
             ['CPU stolen by the host', `${s.stealPct.toFixed(0)}%`, maxSteal > 0 ? `${maxSteal}%  (AGENT_MAX_STEAL; high = a burstable instance out of CPU credits)` : 'off'],
             ['Memory cap for builds / tests of agents', this.config.agentNodeMaxMb > 0 ? `${this.config.agentNodeMaxMb} MB per Node process` : 'none', 'AGENT_NODE_MAX_MB (empty = automatic, 0 = none)'],
@@ -1172,9 +1172,9 @@ export class PlatformAdminService {
           ],
         ),
         '',
-        mem.totalMb < 6144 && mem.swapTotalMb === 0 ? 'This machine has little memory and NO swap: a spike makes the kernel kill a process ("oom-kill" in the service log). Add a 2 GB swap file (docs/small-servers.md) — it is the single most useful thing on a small server.' : '',
+        mem.reliable && mem.totalMb < 6144 && mem.swapTotalMb === 0 ? 'This machine has little memory and NO swap: a spike makes the kernel kill a process ("oom-kill" in the service log). Add a 2 GB swap file (docs/small-servers.md) — it is the single most useful thing on a small server.' : '',
         concurrencyNow > wanted ? `Parallel runs is ${concurrencyNow}, more than this machine suits (${wanted}) — lower it in Settings → concurrency.` : '',
-        held ? 'New runs are being held back right now (they stay "queued" until the machine calms down; none waits longer than 10 minutes). Runs also start at least ' + Math.round(this.config.agentStartGapMs / 1000) + ' s apart.' : 'The machine is inside its limits: new runs start at once.',
+        held ? 'New runs are being held back right now (they stay "queued" until the machine calms down; a run held for load or CPU waits at most 10 minutes, one held for memory up to an hour). Runs also start at least ' + Math.round(this.config.agentStartGapMs / 1000) + ' s apart.' : 'The machine is inside its limits: new runs start at once.',
         'A burstable instance (t4g / t3) slows down hard when its CPU credits run out — check CPUCreditBalance in CloudWatch; a low `concurrency` (1) and these limits keep it responsive.',
       ].join('\n');
     }

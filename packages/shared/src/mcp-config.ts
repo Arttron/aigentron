@@ -43,6 +43,13 @@ function httpType(raw: unknown, url: string): 'http' | 'sse' {
   return /\/sse\/?(\?.*)?$/i.test(url) ? 'sse' : 'http';
 }
 
+/** A header / variable value: text, a number or a boolean (as people write them in JSON); an object or a list is a mistake, not `[object Object]`. */
+function asText(v: unknown, what: string): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  throw new McpInputError(`The ${what} must be text.`);
+}
+
 /** One server's object → the SDK's config (+ notes). Throws McpInputError when it is neither a URL server nor a command. */
 export function normalizeMcpConfig(input: unknown, notes: string[] = []): McpServerConfig {
   if (!isObj(input)) throw new McpInputError('An MCP server config must be an object.');
@@ -71,7 +78,7 @@ export function normalizeMcpConfig(input: unknown, notes: string[] = []): McpSer
     delete c.args;
   } else if (typeof c.command === 'string' && c.command.trim() !== '') {
     c.command = c.command.trim();
-    if (c.args !== undefined && !Array.isArray(c.args)) throw new McpInputError('"args" must be a list of strings.');
+    if (c.args !== undefined && (!Array.isArray(c.args) || c.args.some((x) => typeof x !== 'string'))) throw new McpInputError('"args" must be a list of strings.');
     if (c.type !== undefined && c.type !== 'stdio') throw new McpInputError(`A server with a "command" is a local program (stdio), not "${String(c.type)}".`);
     delete c.url;
   } else {
@@ -79,13 +86,39 @@ export function normalizeMcpConfig(input: unknown, notes: string[] = []): McpSer
   }
   if (c.headers !== undefined) {
     if (!isObj(c.headers)) throw new McpInputError('"headers" must be an object of header names and values.');
-    c.headers = Object.fromEntries(Object.entries(c.headers).map(([k, v]) => [k, String(v)]));
+    c.headers = Object.fromEntries(Object.entries(c.headers).map(([k, v]) => [k, asText(v, `header "${k}"`)]));
   }
   if (c.env !== undefined) {
     if (!isObj(c.env)) throw new McpInputError('"env" must be an object of names and values.');
-    c.env = Object.fromEntries(Object.entries(c.env).map(([k, v]) => [k, String(v)]));
+    c.env = Object.fromEntries(Object.entries(c.env).map(([k, v]) => [k, asText(v, `variable "${k}"`)]));
   }
   return c;
+}
+
+/** A server name from a file: not one that would land on the prototype of the objects the servers are kept in. */
+function safeName(name: string): string {
+  if (name === '__proto__' || name === 'constructor' || name === 'prototype') throw new McpInputError(`"${name}" cannot be used as a server name.`);
+  return name;
+}
+
+/** Removes a comma that is followed by `}` or `]`, leaving string contents alone. */
+function stripTrailingCommas(src: string): string {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (inStr) {
+      out += ch;
+      if (ch === '\\' && i + 1 < src.length) out += src[++i];
+      else if (ch === '"') inStr = false;
+    } else if (ch === '"') {
+      inStr = true;
+      out += ch;
+    } else if (ch === ',' && /^\s*[}\]]/.test(src.slice(i + 1))) {
+      // dropped
+    } else out += ch;
+  }
+  return out;
 }
 
 /** Split a command line the way a shell would for our purposes: words, single / double quotes, backslash escapes. */
@@ -98,7 +131,7 @@ export function shellWords(line: string): string[] {
     const ch = line[i]!;
     if (quote) {
       if (ch === quote) quote = null;
-      else if (ch === '\\' && quote === '"' && i + 1 < line.length) cur += line[++i];
+      else if (ch === '\\' && quote === '"' && i + 1 < line.length && '"\\$`'.includes(line[i + 1]!)) cur += line[++i]; // inside double quotes only these four are escapes: a Windows path keeps its backslashes
       else cur += ch;
     } else if (ch === '"' || ch === "'") {
       quote = ch;
@@ -192,17 +225,21 @@ export function parseMcpInput(text: string): ParsedMcpInput {
 
   let json: unknown;
   try {
-    // tolerate what a copy from documentation brings along: a leading "…" or a trailing comma
-    json = JSON.parse(raw.replace(/,\s*([}\]])/g, '$1'));
+    json = JSON.parse(raw);
   } catch {
-    throw new McpInputError('This is not JSON, a "claude mcp add …" command or a URL.');
+    try {
+      // tolerate what a copy from documentation brings along: a trailing comma — only when the text is not valid JSON as it stands, and never inside a string
+      json = JSON.parse(stripTrailingCommas(raw));
+    } catch {
+      throw new McpInputError('This is not JSON, a "claude mcp add …" command or a URL.');
+    }
   }
   if (!isObj(json)) throw new McpInputError('Expected a JSON object.');
 
   // a client's file: the map of servers under `mcpServers` / `servers` (possibly one level deeper, e.g. VS Code settings `mcp.servers`)
   const holder = [json.mcpServers, json.servers, isObj(json.mcp) ? json.mcp.servers : undefined].find(isObj);
   if (holder) {
-    const servers = Object.entries(holder).map(([name, cfg]) => ({ name, config: normalizeMcpConfig(cfg, notes) }));
+    const servers = Object.entries(holder).map(([name, cfg]) => ({ name: safeName(name), config: normalizeMcpConfig(cfg, notes) }));
     if (!servers.length) throw new McpInputError('The "mcpServers" list is empty.');
     notes.unshift(`${servers.length} server${servers.length === 1 ? '' : 's'} found in "${'mcpServers' in json ? 'mcpServers' : 'servers'}"`);
     return { servers, notes };
@@ -212,7 +249,7 @@ export function parseMcpInput(text: string): ParsedMcpInput {
   // a bare map { name: { …config… } }
   const entries = Object.entries(json);
   if (entries.length && entries.every(([, v]) => looksLikeConfig(v))) {
-    return { servers: entries.map(([name, cfg]) => ({ name, config: normalizeMcpConfig(cfg, notes) })), notes };
+    return { servers: entries.map(([name, cfg]) => ({ name: safeName(name), config: normalizeMcpConfig(cfg, notes) })), notes };
   }
   throw new McpInputError('Could not find a server in this: expected "mcpServers", or an object with "url" or "command".');
 }

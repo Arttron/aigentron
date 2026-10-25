@@ -51,7 +51,7 @@ import { AttachmentsService } from '../attachments/attachments.service';
 import { PreviewService } from '../preview/preview.service';
 import { budgetExceeded, isIdleStuck, runExtension, runIsAlive } from './run-guards';
 import { oomVictim, readMemInfo } from '../queue/capacity-gate';
-import { parseTaskRef, taskRef } from '../attachments/task-ref';
+import { isShowableImage, parseTaskRef, taskRef } from '../attachments/task-ref';
 import { RunLimitsService } from '../settings/run-limits.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { assemblePromptLayers, withRunContext } from './prompt-layers';
@@ -99,6 +99,8 @@ const REPORTING_RESUME_PROMPT =
   'Do not do any further work — just report your status accurately.';
 
 /** The Claude CLI's answer when the session it was asked to resume is not in its store. */
+/** After the memory guard stopped a run it leaves the others alone this long (the stopped run's processes are still exiting). */
+const GUARD_GRACE_MS = 20_000;
 const SESSION_GONE = /No conversation found with session ID/i;
 
 /**
@@ -115,6 +117,8 @@ export class RealAgentExecutor extends AgentExecutor {
   /** Runs in flight for the memory guard: when each started and how to stop it (with the memory left, for the transcript). */
   private readonly guarded = new Map<string, { startedAt: number; stop: (availableMb: number) => void }>();
   private guardTimer: ReturnType<typeof setInterval> | null = null;
+  /** when the guard last stopped a run: the memory it frees is not back yet, so it waits before stopping another */
+  private lastGuardStopAt = 0;
 
   /** Abort the in-flight run for a task (used by cancel). */
   override cancel(taskId: string): void {
@@ -843,12 +847,14 @@ export class RealAgentExecutor extends AgentExecutor {
             const foreign = parseTaskRef(p);
             if (foreign) {
               if (!(await this.isDescendantTask(foreign.taskId, ctx.taskId))) throw new Error('that is not a file of one of this task\'s subtasks');
+              if (!isShowableImage(foreign.name)) throw new Error('that is not a picture (png, jpg, webp, gif) — name other files in the message instead');
               await this.attachments.filePath(foreign.taskId, foreign.name); // exists, and is a regular file
               const ref = taskRef(foreign.taskId, foreign.name);
               if (!names.includes(ref)) names.push(ref);
               continue;
             }
             const real = await this.media.safePath(await this.attachmentOrPath(ctx.taskId, p), mediaRoots, ctx.taskId);
+            if (!isShowableImage(real)) throw new Error('that is not a picture (png, jpg, webp, gif)');
             // already one of this task's attachments → just reference it; a workspace / library file is linked (shown from where it is);
             // only what lives elsewhere (a worktree, a run folder that is cleaned later) is copied in
             const own = await realpath(this.attachments.dir(ctx.taskId)).catch(() => this.attachments.dir(ctx.taskId));
@@ -1270,7 +1276,9 @@ export class RealAgentExecutor extends AgentExecutor {
   private startMemoryGuard(): void {
     if (this.guardTimer || this.config.agentOomGuardMb <= 0) return;
     this.guardTimer = setInterval(() => {
+      if (Date.now() - this.lastGuardStopAt < GUARD_GRACE_MS) return;
       const mem = readMemInfo();
+      if (!mem.reliable) return; // not Linux: no trustworthy figure
       const victim = oomVictim(
         [...this.guarded].map(([taskId, g]) => ({ taskId, startedAt: g.startedAt })),
         mem.availableMb,
@@ -1278,6 +1286,7 @@ export class RealAgentExecutor extends AgentExecutor {
       );
       if (!victim) return;
       this.logger.warn(`Memory guard: ${Math.round(mem.availableMb)} MB available (guard ${this.config.agentOomGuardMb} MB) — stopping the newest run, task ${victim}`);
+      this.lastGuardStopAt = Date.now();
       this.guarded.get(victim)?.stop(mem.availableMb);
       this.guarded.delete(victim);
       if (this.guarded.size === 0) this.stopMemoryGuard();

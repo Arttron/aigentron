@@ -11,7 +11,7 @@ a daily `aigentron backup`, the code too.
 | `secrets/` | sign-in password, provider keys and logins (Codex, Claude), every project's deploy key / token / pinned host keys, channel tokens |
 | agents, skills (core, custom, learned), resources, attachments | |
 | the shared workspace and **every project's folder** (`projects/<slug>`: memory, library, work, deliverables) | (the backup before 0.1.86 missed `projects/` — update before relying on an old backup) |
-| the code: the default project's `repo/`, every project's checkout and the agents' `worktrees/` | `aigentron export` adds them; `--no-repos` leaves them out. Without `node_modules`, build output and caches (rebuilt by one install). **Needed when a project has no remote** — a local-only repository exists nowhere else |
+| the code: the default project's `repo/`, every project's checkout and the agents' `worktrees/` | `aigentron export` adds them (as a second archive inside the first); `--no-repos` leaves them out. Without `node_modules`, `.next`, `.cache` and the like (rebuilt by one install); a folder of yours called `build` or `dist` is data and always travels. **Needed when a project has no remote** — a local-only repository exists nowhere else |
 | a copy of the server's `.env` (bare-metal) | saved on the new server as `<data>/backups/env-from-backup.txt` |
 
 **Not carried:** `runs/` and caches (rebuilt), the Claude conversation store (a task you continue starts a fresh conversation — it still has its transcript and files), the **add-ons**
@@ -22,7 +22,8 @@ a daily `aigentron backup`, the code too.
 **On the old server**
 
 ```sh
-sudo aigentron export                                  # → ./aigentron-export-<time>.tar.gz   (0600)
+sudo aigentron export                                  # → <data>/backups/aigentron-export-<time>.tar.gz (Docker: ./ in the current folder), 0600
+sudo aigentron export /root/move.tar.gz                # …or where you say (a path with spaces is fine)
 sudo aigentron export --to ubuntu@new-host:/tmp/       # …and send it with scp (or copy it yourself)
 ```
 
@@ -34,7 +35,7 @@ SSH, keep it 0600, delete it afterwards.
 1. Install Aigentron — the **same or a newer version** (an archive made by a newer version is refused: its database has migrations the older one does not know; `--force` overrides).
    Use the same data folder (`/opt/aigentron/data` by default): task rows store absolute paths to their worktrees, and the import warns when the folder differs.
 2. `sudo aigentron import /tmp/aigentron-export-<time>.tar.gz` — asks to confirm, stops the service, puts everything back (what it replaces is kept in
-   `<data>/backups/before-restore-<time>`), starts the service.
+   `<data>/backups/before-restore-<time>`), starts the service. A project's folder is merged entry by entry (memory, library, work, deliverables); a checkout that is on this server and not in the archive stays where it is, one that is in the archive replaces it (the old one is kept aside).
 3. Check: `aigentron status`, `aigentron doctor`, the dashboard (Tasks, Projects, Settings).
 
 **Then, on both**

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { cpus, freemem, loadavg, totalmem } from 'node:os';
+import { cpus, loadavg, totalmem } from 'node:os';
 
 /**
  * A small server (a 2-vCPU burstable instance) falls over when several agents compile, test and browse at once: the CPU credits run out, everything
@@ -75,6 +75,8 @@ export interface MemInfo {
   totalMb: number;
   swapTotalMb: number;
   swapFreeMb: number;
+  /** false when there is no /proc/meminfo (not Linux): `os.freemem()` is only the FREE pages there (a Mac shows a few hundred MB while gigabytes are reclaimable), so no decision may rest on it */
+  reliable: boolean;
 }
 
 /** /proc/meminfo text → MB figures (null when it has no MemAvailable: not Linux, or a very old kernel). Pure. */
@@ -86,7 +88,7 @@ export function parseMeminfo(text: string): MemInfo | null {
   const avail = kb('MemAvailable');
   const total = kb('MemTotal');
   if (avail === null || total === null) return null;
-  return { availableMb: avail / 1024, totalMb: total / 1024, swapTotalMb: (kb('SwapTotal') ?? 0) / 1024, swapFreeMb: (kb('SwapFree') ?? 0) / 1024 };
+  return { availableMb: avail / 1024, totalMb: total / 1024, swapTotalMb: (kb('SwapTotal') ?? 0) / 1024, swapFreeMb: (kb('SwapFree') ?? 0) / 1024, reliable: true };
 }
 
 /** The machine's memory now: /proc/meminfo on Linux, the OS module's figures elsewhere (no swap known). */
@@ -97,7 +99,8 @@ export function readMemInfo(): MemInfo {
   } catch {
     /* not Linux */
   }
-  return { availableMb: freemem() / 1_048_576, totalMb: totalmem() / 1_048_576, swapTotalMb: 0, swapFreeMb: 0 };
+  // unknown, not "low": the memory limits and the guard stay out of the way instead of firing on a figure that means something else
+  return { availableMb: Number.POSITIVE_INFINITY, totalMb: totalmem() / 1_048_576, swapTotalMb: 0, swapFreeMb: 0, reliable: false };
 }
 
 let lastStat: { at: number; snap: { steal: number; total: number } } | null = null;

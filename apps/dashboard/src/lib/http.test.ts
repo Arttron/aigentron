@@ -110,8 +110,11 @@ describe('an error page instead of an answer', () => {
     expect(cleanErrorBody(409, 'queue is full')).toBe('queue is full');
     expect(cleanErrorBody(400, '{"message":"bad"}')).toBe('{"message":"bad"}');
   });
-  it('a very long text is cut', () => {
+  it('a very long text is cut, a JSON error body is not (its message must stay parseable)', () => {
     expect(cleanErrorBody(500, 'x'.repeat(2000)).length).toBe(601);
+    const json = JSON.stringify({ statusCode: 400, message: ['field ' + 'y'.repeat(900)], error: 'Bad Request' });
+    expect(cleanErrorBody(400, json)).toBe(json);
+    expect(JSON.parse(cleanErrorBody(400, json)).statusCode).toBe(400);
   });
   it('unwrap and errMsg show the sentence, not the page', async () => {
     const err = await unwrap(res(520, cloudflare, '')).catch((e: unknown) => e);

@@ -120,3 +120,52 @@
   display: flex;
   flex-direction: column;
 }
+
+/* The full-screen toggle sits in the conversation's bottom-right corner, like a video player's. */
+.chatBox {
+  position: relative;
+}
+.chatBoxFull {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fullToggle {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim, inherit);
+  opacity: 0.75;
+  cursor: pointer;
+}
+.fullToggle:hover,
+.fullToggle:focus-visible {
+  opacity: 1;
+}
+
+/* Phone, conversation full screen: only the conversation and the message box stay, over the bottom bar as well. */
+.shellFull {
+  inset: 0;
+  z-index: 900;
+}
+.shellFull .shellHead,
+.shellFull .shellApprovals,
+.shellFull .shellTabs {
+  display: none;
+}
+@media (pointer: coarse) {
+  .fullToggle {
+    width: 40px;
+    height: 40px;
+  }
+}

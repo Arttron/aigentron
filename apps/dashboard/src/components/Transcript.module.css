@@ -281,8 +281,9 @@
 .jump {
   all: unset;
   position: absolute;
-  right: 18px;
-  bottom: 14px;
+  /* left of the full-screen icon that sits in the same corner (TaskDetailPage .fullToggle) */
+  right: 60px;
+  bottom: 16px;
   cursor: pointer;
   padding: 3px 12px;
   border-radius: var(--radius-pill);

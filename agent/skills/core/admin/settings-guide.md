@@ -33,7 +33,7 @@ Quiet by default: answers and what needs the person; `/progress on|off` toggles 
 
 ## Schedules
 
-Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N hours, raw cron), time zone, quiet hours, action: **post a message** (free) or **start a task** (budget; updates go to that chat). Buttons: Run now, Turn on/off, Edit, Delete. Missed runs are skipped. I manage them (`propose_schedule`, `schedules_list`).
+Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N hours, raw cron), time zone, quiet hours, action: **post a message** (free) or **start a task** (budget; updates go to that chat). Task schedules also have **Approvals for this schedule's tasks** (follow the project / No approvals / Ask): nobody is there to answer a card at 03:00, so a job that sends a chart and deletes it should be set to *No approvals* (credentials and platform changes are still asked). Buttons: Run now, Turn on/off, Edit, Delete. Missed runs are skipped. I manage them (`propose_schedule`, `schedules_list`).
 
 ## Approvals
 

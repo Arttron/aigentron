@@ -106,11 +106,16 @@ export function agentCommand(
   nice?: number,
 ): { command: string; args: string[]; env: Record<string, string> } {
   const n = cleanNice(nice);
-  // `sh -c`: first make the process the kernel's preferred victim when memory runs out ($0 = niceness, then the command and its arguments), then nice + exec
+  // `sh -c`: first make the process the kernel's preferred victim when memory runs out ($0 = niceness - 0 means "no nice" -, then the command and its
+  // arguments), then nice (if asked) + exec. `nice` undefined = the caller knows nothing of this: the command is run as it is.
   if (!iso) {
-    return n > 0
-      ? { command: 'sh', args: ['-c', 'echo 500 > /proc/self/oom_score_adj 2>/dev/null; exec nice -n "$0" "$@"', String(n), command, ...args], env }
-      : { command, args: [...args], env };
+    return nice === undefined || process.platform === 'win32'
+      ? { command, args: [...args], env }
+      : {
+          command: 'sh',
+          args: ['-c', 'echo 500 > /proc/self/oom_score_adj 2>/dev/null; if [ "$0" -gt 0 ] 2>/dev/null; then exec nice -n "$0" "$@"; fi; exec "$@"', String(n), command, ...args],
+          env,
+        };
   }
   return { command: iso.wrapper, args: [...args], env: { ...env, ...isolationEnv(iso, command), ...(n > 0 ? { [AGENT_NICE_ENV]: String(n) } : {}) } };
 }

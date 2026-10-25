@@ -197,7 +197,7 @@ do_backup() {
     case "$1" in
       --with-repos) extra="$extra --with-repos" ;;
       --export) name="aigentron-export" ;;   # set by `aigentron export`: another name, so the rotation of daily backups never deletes it
-      --to) to="${2:-}"; shift ;;
+      --to) [ $# -ge 2 ] || die "--to needs a destination: user@host:path"; to="$2"; shift ;;
       --to=*) to="${1#--to=}" ;;
       -*) die "unknown option $1 (aigentron backup [file] [--with-repos])" ;;
       *) dest="$1" ;;
@@ -209,6 +209,8 @@ do_backup() {
     # shellcheck disable=SC2086
     docker exec -e "APP_VERSION=$(version)" "$CONTAINER" sh /app/infra/backup.sh backup /data "/data/backups/$name-$ts.tar.gz" $extra
     docker cp "$CONTAINER:/data/backups/$name-$ts.tar.gz" "$dest" >/dev/null
+    # an export is a one-off (rotation only looks after the daily backups): do not leave a second copy in the volume
+    [ "$name" = aigentron-export ] && docker exec "$CONTAINER" rm -f "/data/backups/$name-$ts.tar.gz" >/dev/null 2>&1
     chmod 600 "$dest" 2>/dev/null || true
     say "${G}✔${N} $dest   ${D}(the container keeps a copy in /data/backups; the host .env with your API keys is not included - keep $INSTALL_DIR/.env yourself)${N}"
   else
@@ -230,13 +232,14 @@ do_backup() {
 # Moving to another server: the archive of everything (database, secrets, agents, skills, resources, attachments, every project's folder AND the code
 # checkouts with the agents' worktrees, without node_modules / build output). `aigentron import` on the new server puts it back.
 do_export() {
-  has_repos=1
-  for a in "$@"; do [ "$a" = --no-repos ] && has_repos=0; done
-  args=""
-  for a in "$@"; do [ "$a" = --no-repos ] || args="$args $a"; done
-  # shellcheck disable=SC2086
-  set -- --export $args
-  [ "$has_repos" = 1 ] && set -- "$@" --with-repos
+  has_repos=1; n=$#
+  # rebuilt argument by argument (never through an unquoted string): a path with a space stays one argument
+  while [ "$n" -gt 0 ]; do
+    a="$1"; shift; n=$((n - 1))
+    if [ "$a" = --no-repos ]; then has_repos=0; else set -- "$@" "$a"; fi
+  done
+  # our flags go BEFORE the person's arguments: a trailing `--to` must not swallow `--with-repos` as its value
+  if [ "$has_repos" = 1 ]; then set -- --export --with-repos "$@"; else set -- --export "$@"; fi
   do_backup "$@"
   say ""
   say "${B}To finish the move${N} (docs/moving-servers.md):"
@@ -246,12 +249,18 @@ do_export() {
 }
 
 do_restore() {
-  [ -n "${1:-}" ] || die "usage: aigentron restore <backup-file> [--force]"
-  [ -s "$1" ] || die "$1 not found"
-  restore_args=""; shift_file="$1"; shift
-  for a in "$@"; do case "$a" in --force) restore_args="--force" ;; *) die "unknown option $a" ;; esac; done
-  set -- "$shift_file"
-  say "${Y}Restoring replaces the database, secrets, agents, skills, resources, attachments and the workspace with the archive's content${N} (the replaced files are kept in backups/before-restore-*)."
+  restore_args=""; file=""
+  for a in "$@"; do
+    case "$a" in
+      --force) restore_args="--force" ;;
+      -*) die "unknown option $a (aigentron restore <backup-file> [--force])" ;;
+      *) [ -z "$file" ] || die "one archive at a time"; file="$a" ;;
+    esac
+  done
+  [ -n "$file" ] || die "usage: aigentron restore <backup-file> [--force]"
+  [ -s "$file" ] || die "$file not found"
+  set -- "$file"
+  say "${Y}Restoring replaces the database, secrets, agents, skills, resources, attachments, the workspace and the projects' folders (memory, library, work, deliverables) with the archive's content - and the code, if the archive carries it -${N} (the replaced files are kept in backups/before-restore-*)."
   printf 'Type yes to continue: '; read -r ans || ans=
   [ "$ans" = yes ] || { say "cancelled"; exit 1; }
   if [ "$MODE" = docker ]; then

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appliesTo, listStatus, planBulk, runBulk } from './bulk-actions';
+import { appliesTo, listStatus, planBulk, rangeIds, runBulk } from './bulk-actions';
 
 describe('bulk actions', () => {
   it('delete is for everything, cancel only for live tasks, done only for settled ones that wait for a person', () => {
@@ -40,5 +40,21 @@ describe('listStatus — what the task list shows', () => {
   it('no running subtask: its own status', () => {
     expect(listStatus({ status: 'review', subtasks: { byStatus: { done: 2, queued: 1 } } })).toBe('review');
     expect(listStatus({ status: 'review' })).toBe('review');
+  });
+});
+
+describe('rangeIds — shift-click selects everything between two rows', () => {
+  const ids = ['a', 'b', 'c', 'd', 'e'];
+  it('from an earlier row down, and from a later row up (inclusive)', () => {
+    expect(rangeIds(ids, 'b', 'd')).toEqual(['b', 'c', 'd']);
+    expect(rangeIds(ids, 'd', 'b')).toEqual(['b', 'c', 'd']);
+    expect(rangeIds(ids, 'c', 'c')).toEqual(['c']);
+  });
+  it('no earlier click, or one that is not on this page: just the clicked row', () => {
+    expect(rangeIds(ids, null, 'c')).toEqual(['c']);
+    expect(rangeIds(ids, 'zzz', 'c')).toEqual(['c']);
+  });
+  it('a clicked row that is not in the list gives nothing', () => {
+    expect(rangeIds(ids, 'a', 'zzz')).toEqual([]);
   });
 });

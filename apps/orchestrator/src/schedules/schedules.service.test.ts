@@ -7,6 +7,7 @@ type Row = Record<string, unknown> & { id: string };
 /** Minimal in-memory stand-in for the parts of Prisma the scheduler uses. */
 function fakeEnv(rows: Row[]) {
   const prisma = {
+    task: { update: vi.fn(async ({ where, data }: { where: { id: string }; data: Row }) => ({ id: where.id, ...data })) },
     schedule: {
       findMany: vi.fn(async ({ where }: { where: { enabled: boolean; nextRunAt: { lte: Date } } }) =>
         rows.filter((r) => r.enabled === where.enabled && r.nextRunAt && (r.nextRunAt as Date) <= where.nextRunAt.lte),
@@ -212,5 +213,36 @@ describe('SchedulesService.update — moving a "same" schedule to another chat (
     const { svc, prisma } = env();
     await svc.update('s1', { text: 'Practise 15 minutes' });
     expect(prisma.schedule.update.mock.calls[0]![0].data).not.toHaveProperty('taskId');
+  });
+});
+
+describe('approvals for the tasks a schedule starts', () => {
+  const taskRow = (over: Partial<Row> = {}) => base({ kind: 'task', agentName: 'tutor', channelId: null, chatId: null, taskMode: 'same', taskId: null, ...over });
+  const due = new Date('2026-10-08T09:30:20Z');
+
+  it('a schedule with approvals off puts that level on the task it starts', async () => {
+    const { svc, prisma } = fakeEnv([taskRow({ approvalMode: 'off' })]);
+    await svc.tick(due);
+    expect(prisma.task.update).toHaveBeenCalledWith({ where: { id: 't1' }, data: { approvalMode: 'off' } });
+  });
+  it('and on the ongoing task it continues', async () => {
+    const { svc, prisma } = fakeEnv([taskRow({ approvalMode: 'off', taskId: 't9' })]);
+    await svc.tick(due);
+    expect(prisma.task.update).toHaveBeenCalledWith({ where: { id: 't9' }, data: { approvalMode: 'off' } });
+  });
+  it('no level on the schedule: the task is left to follow the project / global setting', async () => {
+    const { svc, prisma } = fakeEnv([taskRow({ approvalMode: null })]);
+    await svc.tick(due);
+    expect(prisma.task.update).not.toHaveBeenCalled();
+  });
+  it('a level that is not ask / off is ignored, never written to a task', async () => {
+    const { svc, prisma } = fakeEnv([taskRow({ approvalMode: 'whatever' })]);
+    await svc.tick(due);
+    expect(prisma.task.update).not.toHaveBeenCalled();
+  });
+  it('the input is checked: ask, off and inherit are accepted, anything else is refused', async () => {
+    const { svc } = fakeEnv([]);
+    const ok = { name: 'Chart', cron: '30 9 * * *', kind: 'message', text: 'x', channelId: undefined };
+    expect(await svc.validate({ ...ok, approvalMode: 'bogus' } as never)).toMatch(/approvalMode must be/);
   });
 });

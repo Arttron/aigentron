@@ -8,7 +8,7 @@ for img in debian:12 alpine:3.20; do
   for t in backup-restore move; do
     echo "== $img: $t"
     out=$(docker run --rm -v "$PWD/infra:/infra:ro" -v "$PWD/infra/tests/$t.sh:/t.sh:ro" "$img" sh -c 'mkdir -p /out; sh /t.sh' 2>&1) || { echo "$out"; echo "FAILED: $img $t exited non-zero"; fail=1; continue; }
-    if echo "$out" | grep -qE 'MISSING|UNEXPECTED|^error:.*(unknown option --with)'; then echo "$out"; echo "FAILED: $img $t"; fail=1; else echo "ok"; fi
+    if echo "$out" | grep -qE 'MISSING|UNEXPECTED|^FAIL'; then echo "$out"; echo "FAILED: $img $t"; fail=1; else echo "ok"; fi
   done
 done
 exit $fail

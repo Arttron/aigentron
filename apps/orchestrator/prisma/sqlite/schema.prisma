@@ -637,6 +637,8 @@ model Schedule {
   // optional quiet hours (HH:MM, in `timezone`): runs that fall inside are skipped
   quietStart String?
   quietEnd   String?
+  // approvals for the tasks this schedule starts: ask | off; null = follow the project / global setting (a schedule has nobody to answer a card: a chart sent and then deleted must not wait for one)
+  approvalMode String?
   nextRunAt  DateTime?
   lastRunAt  DateTime?
   // ok | skipped | error

@@ -1,3 +1,4 @@
+import { parseLevel } from '../approvals/approval-mode';
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { isTerminalStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,6 +26,8 @@ export interface ScheduleInput {
   chatId?: string | null;
   quietStart?: string | null;
   quietEnd?: string | null;
+  /** approvals for the tasks this schedule starts: 'ask' | 'off', null / 'inherit' = follow the project / global setting */
+  approvalMode?: string | null;
   /** slug of the project the scheduled task is created in (null / omitted = the default project) */
   project?: string | null;
 }
@@ -55,6 +58,7 @@ export function serializeSchedule(r: ScheduleRow) {
     chatId: r.chatId,
     quietStart: r.quietStart,
     quietEnd: r.quietEnd,
+    approvalMode: parseLevel(r.approvalMode),
     projectId: r.projectId,
     project: r.projectId ? knownProjectLabel(r.projectId) : null,
     nextRunAt: r.nextRunAt?.toISOString() ?? null,
@@ -115,6 +119,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     if (v.text.length > 4000) return 'text is too long (max 4000 characters).';
     if ((v.quietStart && !isHM(v.quietStart)) || (v.quietEnd && !isHM(v.quietEnd))) return 'quiet hours are HH:MM, e.g. 22:00 and 08:00.';
     if (Boolean(v.quietStart) !== Boolean(v.quietEnd)) return 'give both quiet hours or neither.';
+    if (v.approvalMode != null && v.approvalMode !== 'inherit' && parseLevel(v.approvalMode) === null) return 'approvalMode must be "ask", "off" or "inherit".';
     if (v.kind === 'message' && (!v.channelId || !v.chatId)) return 'a message needs a channel and a chat to post to.';
     if (v.channelId || v.chatId) {
       if (!v.channelId || !v.chatId) return 'channel and chat go together.';
@@ -163,6 +168,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         chatId: input.chatId ? String(input.chatId) : null,
         quietStart: input.quietStart ?? null,
         quietEnd: input.quietEnd ?? null,
+        approvalMode: parseLevel(input.approvalMode),
         projectId: await this.projectIdOf(input.project),
         nextRunAt: nextRun(cron, tz, new Date()),
         createdBy: by ?? null,
@@ -177,7 +183,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     const next = { ...cur, ...Object.fromEntries(Object.entries(input).filter(([, x]) => x !== undefined)) } as ScheduleRow;
     const cron = next.cron.trim().replace(/\s+/g, ' ');
     const projectId = input.project === undefined ? cur.projectId : await this.projectIdOf(input.project);
-    return this.prisma.schedule.update({
+    const updated = await this.prisma.schedule.update({
       where: { id },
       data: {
         name: next.name.trim(),
@@ -197,9 +203,15 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         chatId: next.chatId ? String(next.chatId) : null,
         quietStart: next.quietStart || null,
         quietEnd: next.quietEnd || null,
+        approvalMode: input.approvalMode === undefined ? cur.approvalMode : parseLevel(input.approvalMode),
         nextRunAt: next.enabled ? nextRun(cron, next.timezone || 'UTC', new Date()) : null,
       },
     });
+    // the ongoing task of a "same" schedule takes the new level at once (also back to "follow the project"), not only at the next run
+    if (input.approvalMode !== undefined && cur.taskId && parseLevel(input.approvalMode) !== parseLevel(cur.approvalMode)) {
+      await this.prisma.task.update({ where: { id: cur.taskId }, data: { approvalMode: parseLevel(input.approvalMode) } }).catch(() => undefined);
+    }
+    return updated;
   }
 
   async remove(id: string): Promise<void> {
@@ -256,6 +268,13 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** The schedule's own approval level goes onto the task it starts (its subtasks follow it); not set = the task follows the project / global level. */
+  private async applyApprovalMode(taskId: string, row: ScheduleRow): Promise<void> {
+    const mode = parseLevel(row.approvalMode);
+    if (!mode) return;
+    await this.prisma.task.update({ where: { id: taskId }, data: { approvalMode: mode } }).catch((err) => this.logger.warn(`Schedule "${row.name}": could not set the approval level of task ${taskId}: ${(err as Error).message}`));
+  }
+
   private async execute(row: ScheduleRow, now: Date, respectQuiet: boolean): Promise<{ status: string; error?: string }> {
     const record = async (status: string, error?: string) => {
       await this.prisma.schedule
@@ -275,6 +294,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         const existing = await this.tasks.get(row.taskId).catch(() => null);
         if (existing && Date.now() - new Date(existing.createdAt).getTime() < ROLLOVER_MS) {
           try {
+            await this.applyApprovalMode(existing.id, row);
             await this.tasks.followUp(existing.id, row.text);
             return record('ok');
           } catch (err) {
@@ -286,6 +306,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       // the task goes into the schedule's project (a deleted project has set the column to null = default)
       const project = row.projectId ? (await this.projects.getById(row.projectId).catch(() => null))?.slug : undefined;
       const task = await this.tasks.create({ prompt: row.text, title: `⏰ ${row.name}`, agentName: row.agentName ?? undefined, createdByChannel: `schedule:${row.name}`, project });
+      await this.applyApprovalMode(task.id, row);
       if (row.taskMode !== 'new') await this.prisma.schedule.update({ where: { id: row.id }, data: { taskId: task.id } }).catch(() => undefined);
       if (row.channelId && row.chatId) {
         await this.channels.linkThread(row.channelId, task.id, row.chatId);

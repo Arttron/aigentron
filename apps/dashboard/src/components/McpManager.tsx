@@ -35,10 +35,10 @@ export function McpManager() {
     setError(null);
     try {
       await fn();
-      await refresh();
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      await refresh().catch(() => undefined); // also after a half-done add: what was created must show
       setBusy(false);
     }
   };
@@ -82,8 +82,21 @@ export function McpManager() {
 
   const add = () => {
     if (!nameOk) return;
+    const taken = toAdd.map((x) => x.name).find((n) => servers.some((srv) => srv.name === n));
+    if (taken) {
+      setError(`A server named "${taken}" already exists — change its name above (or remove it from the pasted text).`);
+      return;
+    }
     void run(async () => {
-      for (const sv of toAdd) await api.createMcp({ name: sv.name, config: sv.config });
+      const added: string[] = [];
+      try {
+        for (const sv of toAdd) {
+          await api.createMcp({ name: sv.name, config: sv.config });
+          added.push(sv.name);
+        }
+      } catch (e) {
+        throw new Error(`${(e as Error).message}${added.length ? ` — already added: ${added.join(', ')}; the rest were not` : ''}`);
+      }
       setNewName('');
       setNewConfig(EXAMPLE);
     });

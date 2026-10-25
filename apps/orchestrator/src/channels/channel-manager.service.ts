@@ -434,8 +434,17 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const metas = (await this.attachments.list(taskId)).filter((m) => names.includes(m.name));
     for (const m of metas) await this.channels.markAttachmentSent(dest.channelId, dest.chatId, taskId, m.name);
     // pictures of a subtask shown by reference (`task:<id>/<name>`) are sent from where they are
-    const items: { taskId: string; name: string }[] = [...metas.map((m) => ({ taskId, name: m.name })), ...names.map(parseTaskRef).filter((r): r is NonNullable<typeof r> => r !== null)];
+    // …unless that chat already got them (a subtask's pictures are sent to the lead's thread when the subtask settles, and again when the lead shows them)
+    const foreign: { taskId: string; name: string }[] = [];
+    const already = new Map<string, Set<string>>();
+    for (const ref of names.map(parseTaskRef)) {
+      if (!ref) continue;
+      if (!already.has(ref.taskId)) already.set(ref.taskId, await this.channels.sentAttachments(ref.taskId));
+      if (!already.get(ref.taskId)!.has(ref.name)) foreign.push(ref);
+    }
+    const items: { taskId: string; name: string }[] = [...metas.map((m) => ({ taskId, name: m.name })), ...foreign];
     await this.sendPictures(dest.channelId, dest.chatId, items, caption.trim());
+    for (const f of foreign) await this.channels.markAttachmentSent(dest.channelId, dest.chatId, f.taskId, f.name);
   }
 
   /** Pictures as ONE album when the transport can (2–10), else one by one; the caption goes on the first. */

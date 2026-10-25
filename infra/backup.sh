@@ -22,10 +22,13 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 
 # What is archived, relative to the data dir.
 PATHS="secrets agent/agents agent/skills agent/learned agent/resources agent/attachments agent/research.json workspace projects"
-# With --with-repos (what a move needs): the checkouts and the worktrees too.
+# With --with-repos (what a move needs): the code goes into a SECOND archive inside the first (backups/.stage/repos.tar.gz), so the rules that leave
+# rebuildable folders out apply to the code only - never to your data (a folder of yours called "build" or "dist" is data).
 REPO_PATHS="repo worktrees"
-# Never worth carrying: rebuilt by one install / build.
-HEAVY_EXCLUDES="--exclude=node_modules --exclude=.next --exclude=.nuxt --exclude=.turbo --exclude=.cache --exclude=.venv --exclude=__pycache__ --exclude=target --exclude=dist --exclude=build --exclude=coverage"
+# Rebuilt by one install / build, and never tracked: left out of the code archive. (Not `dist`, `build`, `target`: those can be tracked.)
+HEAVY_EXCLUDES="--exclude=node_modules --exclude=.next --exclude=.nuxt --exclude=.turbo --exclude=.cache --exclude=.venv --exclude=__pycache__"
+# GNU tar matches an --exclude anywhere in a path unless told to anchor it; busybox always matches the whole path and does not know the flag.
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then ANCHOR="--anchored"; else ANCHOR=""; fi
 STAGE_REL="backups/.stage"
 
 die() { echo "backup: $1" >&2; exit 1; }
@@ -63,13 +66,24 @@ do_backup() {
   esac
   found=""
   for p in $PATHS; do [ -e "$DATA/$p" ] && found="$found $p"; done
+  # The projects' code checkouts (projects/<slug>/repo) are left out of the data archive - by their exact names (never a pattern that could also match
+  # a folder of yours somewhere else); --with-repos carries them in the code archive instead.
   excludes=""
-  if [ "$WITH_REPOS" = 1 ]; then
-    for p in $REPO_PATHS; do [ -e "$DATA/$p" ] && found="$found $p"; done
-    excludes="$HEAVY_EXCLUDES"
-  else
-    # the other projects' folders hold their checkouts (projects/<slug>/repo): left out, a git clone
-    excludes="--exclude=projects/*/repo"
+  repo_members=""
+  for p in $REPO_PATHS; do [ -e "$DATA/$p" ] && repo_members="$repo_members $p"; done
+  if [ -d "$DATA/projects" ]; then
+    for d in "$DATA"/projects/*/; do
+      [ -d "$d" ] || continue
+      slug=$(basename "$d")
+      if [ -e "$DATA/projects/$slug/repo" ]; then
+        excludes="$excludes --exclude=projects/$slug/repo"
+        repo_members="$repo_members projects/$slug/repo"
+      fi
+    done
+  fi
+  if [ "$WITH_REPOS" = 1 ] && [ -n "$repo_members" ]; then
+    # shellcheck disable=SC2086
+    tar -czf "$stage/repos.tar.gz" $HEAVY_EXCLUDES -C "$DATA" $repo_members || die "tar failed (the code archive)"
   fi
   if [ -n "${BACKUP_ENV_FILE:-}" ] && [ -f "$BACKUP_ENV_FILE" ]; then cp "$BACKUP_ENV_FILE" "$stage/env"; fi
   {
@@ -78,14 +92,14 @@ do_backup() {
     echo "version=${APP_VERSION:-unknown}"
     echo "database=$db_note"
     echo "paths=$found"
-    echo "repos=$([ "$WITH_REPOS" = 1 ] && echo yes || echo no)"
+    echo "repos=$([ -f "$stage/repos.tar.gz" ] && echo yes || echo no)"
     echo "dataDir=$DATA"
     echo "host=$(hostname 2>/dev/null || echo unknown)"
   } > "$stage/MANIFEST"
   tmp="$FILE.tmp"
   rm -f "$tmp"
   # shellcheck disable=SC2086
-  tar -czf "$tmp" $excludes -C "$DATA" "$STAGE_REL" $found || { rm -f "$tmp"; die "tar failed"; }
+  tar -czf "$tmp" $ANCHOR $excludes -C "$DATA" "$STAGE_REL" $found || { rm -f "$tmp"; die "tar failed"; }
   mv "$tmp" "$FILE"
   chmod 600 "$FILE" 2>/dev/null || true
   echo "backup: $FILE ($(du -h "$FILE" | cut -f1)) database=$db_note"
@@ -120,12 +134,38 @@ do_restore() {
   fi
   aside="$DATA/backups/before-restore-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$aside"
+  # Everything except the projects' folders is replaced as a whole (what was there is kept in $aside). `repo` / `worktrees` are here for archives made by 0.1.86.
   for p in $PATHS $REPO_PATHS; do
+    [ "$p" = projects ] && continue
     [ -e "$tmp/$p" ] || continue
     if [ -e "$DATA/$p" ]; then mkdir -p "$aside/$(dirname "$p")"; mv "$DATA/$p" "$aside/$p"; fi
     mkdir -p "$DATA/$(dirname "$p")"
     mv "$tmp/$p" "$DATA/$p"
   done
+  # The projects: entry by entry (memory, library, work, deliverables …). A checkout (projects/<slug>/repo) that is on this server and not in the archive stays where it is.
+  if [ -d "$tmp/projects" ]; then
+    mkdir -p "$DATA/projects"
+    for pdir in "$tmp"/projects/*/; do
+      [ -d "$pdir" ] || continue
+      slug=$(basename "$pdir")
+      mkdir -p "$DATA/projects/$slug"
+      for e in "$pdir".[!.]* "$pdir"*; do
+        [ -e "$e" ] || continue
+        name=$(basename "$e")
+        if [ -e "$DATA/projects/$slug/$name" ]; then mkdir -p "$aside/projects/$slug"; mv "$DATA/projects/$slug/$name" "$aside/projects/$slug/$name"; fi
+        mv "$e" "$DATA/projects/$slug/$name"
+      done
+    done
+  fi
+  # The code archive (an export): each checkout in it replaces the one here (kept in $aside).
+  if [ -f "$tmp/$STAGE_REL/repos.tar.gz" ]; then
+    roots=$(tar -tzf "$tmp/$STAGE_REL/repos.tar.gz" | sed -n 's#^\(repo\|worktrees\|projects/[^/][^/]*/repo\)\(/.*\)\{0,1\}$#\1#p' | sort -u)
+    for r in $roots; do
+      if [ -e "$DATA/$r" ]; then mkdir -p "$aside/$(dirname "$r")"; mv "$DATA/$r" "$aside/$r"; fi
+    done
+    tar -xzf "$tmp/$STAGE_REL/repos.tar.gz" -C "$DATA" || die "could not unpack the code archive"
+    echo "restore: the code (checkouts and worktrees) is back"
+  fi
   [ -d "$DATA/secrets" ] && chmod 700 "$DATA/secrets" 2>/dev/null || true
   snap="$tmp/$STAGE_REL/db/pre-backup.db"
   case "$DB_URL" in

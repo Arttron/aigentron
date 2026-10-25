@@ -134,6 +134,19 @@ describe('adopt / writeImage', () => {
     expect((await svc.list('t1')).map((m) => m.name).sort()).toEqual([first, other].sort());
   });
 
+  it('a picture that the optimizer recompresses is still recognised when it is shown again (the source is remembered, not the stored bytes)', async () => {
+    const shrinking = new AttachmentsService(
+      { attachmentsDir: join(base, 'attachments2'), workspaceDir: join(base, 'ws'), agentDir: join(base, 'agent') } as AppConfigService,
+      { optimize: async (path: string) => (await writeFile(path, 'shrunk'), { path, changed: true, size: 6 }) } as unknown as ImageOptimizer,
+    );
+    await mkdir(join(base, 'ws'), { recursive: true });
+    await writeFile(join(base, 'ws', 'photo.jpg'), 'a-large-original-photo');
+    const first = await shrinking.adopt('t1', join(base, 'ws', 'photo.jpg'));
+    expect(await readFile(join(shrinking.dir('t1'), first), 'utf8')).toBe('shrunk'); // the stored bytes are NOT the source's
+    expect(await shrinking.adopt('t1', join(base, 'ws', 'photo.jpg'))).toBe(first);
+    expect((await shrinking.list('t1')).map((m) => m.name)).toEqual([first]);
+  });
+
   it('writeImage refuses an oversized base64 string before decoding it', async () => {
     await expect(svc.writeImage('t1', 'shot.png', 'A'.repeat(15 * 1024 * 1024))).rejects.toThrow(/exceeds/);
   });

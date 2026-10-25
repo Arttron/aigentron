@@ -119,9 +119,14 @@ describe('memory', () => {
     expect(Math.round(m.availableMb)).toBe(1465);
     expect(Math.round(m.totalMb)).toBe(3921);
     expect(Math.round(m.swapTotalMb)).toBe(2048);
+    expect(m.reliable).toBe(true);
     expect(parseMeminfo('MemTotal: 100 kB\n')).toBeNull();
     expect(parseMeminfo('')).toBeNull();
     expect(parseMeminfo('MemTotal: 4000000 kB\nMemAvailable: 1000 kB\n')!.swapTotalMb).toBe(0);
+  });
+  it('memory that is not known (not Linux) never triggers the guard or a hold', () => {
+    expect(oomVictim([{ taskId: 'a', startedAt: 1 }], Number.POSITIVE_INFINITY, 200)).toBeNull();
+    expect(capacityVerdict(s({ freeMemMb: Number.POSITIVE_INFINITY }), { maxLoadPerCpu: 0, minFreeMemMb: 300 }).ok).toBe(true);
   });
   it('the newest run is stopped when memory runs out, nobody when it does not', () => {
     const runs = [{ taskId: 'old', startedAt: 1 }, { taskId: 'new', startedAt: 9 }, { taskId: 'mid', startedAt: 5 }];

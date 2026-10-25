@@ -66,7 +66,7 @@ export function RunLimitSettings() {
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
         <input type="checkbox" checked={cfg.askToExceed} onChange={(e) => setCfg({ ...cfg, askToExceed: e.target.checked })} style={{ width: 'auto', margin: 0 }} /> At the ceiling, ask me whether a run that is still working may go on
       </label>
-      <Muted>Off: such a run stops at the ceiling (the task becomes stalled; the work done stays). Not answered in time counts as “no”.</Muted>
+      <Muted>Off: such a run stops at the ceiling (the task becomes stalled; the work done stays). Not answered in time counts as “no”. With approvals switched off, nobody is asked: a run that keeps producing output goes on past the ceiling, bounded only by the number of turns × continuations.</Muted>
       <Row wrap>
         <Button variant={dirty ? 'primary' : undefined} disabled={busy || !dirty} onClick={save}>
           Save

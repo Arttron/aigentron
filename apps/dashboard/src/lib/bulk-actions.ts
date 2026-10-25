@@ -2,16 +2,18 @@
  * Bulk actions on the selected tasks of the list. Which task an action makes sense for depends on its status; the rest are skipped (and counted),
  * never failed one by one with an error each.
  */
+import { isTerminalStatus, type TaskStatus } from '@lds/shared';
+
 export type BulkAction = 'delete' | 'cancel' | 'done';
 
-const LIVE = new Set(['queued', 'running', 'needs_approval']);
 const ACCEPTABLE = new Set(['review', 'blocked', 'stalled', 'failed']);
 
 export const BULK_LABEL: Record<BulkAction, string> = { delete: 'Delete', cancel: 'Cancel', done: 'Mark as done' };
 
 export function appliesTo(action: BulkAction, status: string): boolean {
   if (action === 'delete') return true;
-  if (action === 'cancel') return LIVE.has(status);
+  // the same rule as the task page's Cancel button: anything not settled
+  if (action === 'cancel') return !isTerminalStatus(status as TaskStatus);
   return ACCEPTABLE.has(status);
 }
 
@@ -50,4 +52,13 @@ export async function runBulk(ids: readonly string[], fn: (id: string) => Promis
 export function listStatus(t: { status: string; subtasks?: { byStatus: Record<string, number> } }): string {
   const idle = t.status === 'queued' || t.status === 'review' || t.status === 'stalled';
   return idle && (t.subtasks?.byStatus.running ?? 0) > 0 ? 'running' : t.status;
+}
+
+/** The ids from `from` to `to` inclusive, in list order (either may come first). An id that is not in the list gives just `to`. */
+export function rangeIds(ids: readonly string[], from: string | null, to: string): string[] {
+  const b = ids.indexOf(to);
+  const a = from === null ? -1 : ids.indexOf(from);
+  if (b < 0) return [];
+  if (a < 0) return [to];
+  return ids.slice(Math.min(a, b), Math.max(a, b) + 1);
 }

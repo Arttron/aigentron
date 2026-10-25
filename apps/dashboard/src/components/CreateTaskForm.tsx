@@ -79,6 +79,7 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
     setBusy(true);
     setError(null);
     let createdId: string | null = null;
+    let phase: 'create' | 'upload' | 'start' = 'create';
     try {
       const text = prompt.trim() || 'Review the attached file(s).';
       // With attachments: create deferred, upload, then start — so the run never
@@ -91,6 +92,7 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
         project: projects.length > 1 ? project : undefined,
       });
       createdId = task.id;
+      phase = 'upload';
       if (staged.length) {
         const names: string[] = [];
         for (const [i, file] of staged.entries()) {
@@ -102,6 +104,7 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
           }
         }
         setProgress('Starting…');
+        phase = 'start';
         await api.startTask(task.id, names);
       }
       createdId = null;
@@ -112,8 +115,17 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
       onCreated?.();
     } catch (err) {
       // a task that never got its files must not stay behind (and a retry must not make a second one): drop it, keep what the person typed and picked
-      if (createdId) await api.deleteTask(createdId).catch(() => undefined);
-      setError(`${errMsg(err)}${createdId ? ' — nothing was created; your message and files are still here, try again.' : ''}`);
+      // Only a failure while the files were going up removes the task (nothing ran yet). Once the start was sent the answer may simply have been lost
+      // (a proxy error after the server accepted it): deleting then would cancel a running task and a retry would run the work twice — say so and keep it.
+      if (createdId && phase === 'upload') {
+        await api.deleteTask(createdId).catch(() => undefined);
+        setError(`${errMsg(err)} — nothing was created; your message and files are still here, try again.`);
+      } else if (createdId && phase === 'start') {
+        setError(`${errMsg(err)} — the task was created and its files uploaded, but the answer to the start was lost: look for it in the list below before sending it again.`);
+        setPrompt('');
+        setStaged([]);
+        onCreated?.();
+      } else setError(errMsg(err));
     } finally {
       setBusy(false);
       setProgress(null);

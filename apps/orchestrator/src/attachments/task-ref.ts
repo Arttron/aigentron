@@ -13,3 +13,6 @@ export function parseTaskRef(ref: string): TaskFileRef | null {
 }
 
 export const taskRef = (taskId: string, name: string): string => `task:${taskId}/${name}`;
+
+/** show_images shows pictures: png, jpg, webp, gif (a document or a note is named in the message, it is not a picture to put in a chat album). */
+export const isShowableImage = (name: string): boolean => /\.(png|jpe?g|webp|gif)$/i.test(name);

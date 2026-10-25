@@ -20,6 +20,7 @@ interface Draft {
   text: string;
   agentName: string;
   taskMode: 'same' | 'new';
+  approvalMode: 'inherit' | 'ask' | 'off';
   channelId: string;
   chatId: string;
   timezone: string;
@@ -36,13 +37,14 @@ const localTz = () => {
     return 'UTC';
   }
 };
-const newDraft = (): Draft => ({ name: '', kind: 'message', text: '', agentName: '', taskMode: 'same', channelId: '', chatId: '', timezone: localTz(), quiet: false, quietStart: '22:00', quietEnd: '08:00', when: DEFAULT_FORM });
+const newDraft = (): Draft => ({ name: '', kind: 'message', text: '', agentName: '', taskMode: 'same', approvalMode: 'inherit', channelId: '', chatId: '', timezone: localTz(), quiet: false, quietStart: '22:00', quietEnd: '08:00', when: DEFAULT_FORM });
 const fromSchedule = (s: ScheduleInfo): Draft => ({
   name: s.name,
   kind: s.kind,
   text: s.text,
   agentName: s.agentName ?? '',
   taskMode: s.taskMode ?? 'same',
+  approvalMode: s.approvalMode ?? 'inherit',
   channelId: s.channelId ?? '',
   chatId: s.chatId ?? '',
   timezone: s.timezone,
@@ -113,6 +115,7 @@ export function SchedulesManager() {
         timezone: d.timezone.trim() || 'UTC',
         agentName: d.kind === 'task' ? d.agentName || null : null,
         taskMode: d.taskMode,
+        approvalMode: d.kind === 'task' ? d.approvalMode : 'inherit',
         channelId: d.channelId || null,
         chatId: d.channelId ? d.chatId || chatsOf(d.channelId)[0] || null : null,
         quietStart: d.quiet ? d.quietStart : null,
@@ -161,7 +164,7 @@ export function SchedulesManager() {
           <div className={styles.facts}>
             <span>🕒 {s.when}</span>
             {s.quietStart && <span>🌙 quiet {s.quietStart}–{s.quietEnd}</span>}
-            <span>{s.kind === 'task' ? `🤖 task → ${s.agentName} (${s.taskMode === 'new' ? 'new task each time' : 'one ongoing task'})` : '💬 message'}</span>
+            <span>{s.kind === 'task' ? `🤖 task → ${s.agentName} (${s.taskMode === 'new' ? 'new task each time' : 'one ongoing task'}${s.approvalMode === 'off' ? ', no approvals' : ''})` : '💬 message'}</span>
             {s.channelId && (
               <span>
                 → {channelName(s.channelId)} · chat {s.chatId}
@@ -234,6 +237,16 @@ export function SchedulesManager() {
                 <option value="same">Continue ONE ongoing task (the agent remembers earlier runs) — recommended</option>
                 <option value="new">Start a separate new task every time</option>
               </select>
+            </Field>
+          )}
+          {d.kind === 'task' && (
+            <Field label="Approvals for this schedule's tasks">
+              <select value={d.approvalMode} onChange={(e) => setDraft({ approvalMode: e.target.value as 'inherit' | 'ask' | 'off' })}>
+                <option value="inherit">Follow the project / global setting</option>
+                <option value="off">No approvals — nobody is there to answer a card (a chart sent and then deleted, a report written)</option>
+                <option value="ask">Ask before risky actions (the task waits for you)</option>
+              </select>
+              <Muted>Credentials, the charter files and the admin's platform changes are asked even then. The task's subtasks follow it.</Muted>
             </Field>
           )}
           <Field label={d.kind === 'task' ? 'Prompt (what the agent should do each time)' : 'Message text'}>

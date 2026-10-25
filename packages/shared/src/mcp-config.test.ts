@@ -98,6 +98,28 @@ describe('what is refused, with a reason', () => {
   });
 });
 
+describe('review findings', () => {
+  it('a trailing comma is dropped only outside strings (a header value keeps its comma and bracket)', () => {
+    const s = one('{"url":"https://a.example/mcp","headers":{"X":"a, }","Y":"b,]"},}');
+    expect(s.config.headers).toEqual({ X: 'a, }', Y: 'b,]' });
+  });
+  it('a Windows path in double quotes keeps its backslashes', () => {
+    const s = one('claude mcp add x -- node "C:\\tools\\s.js"');
+    expect(s.config.args).toEqual(['C:\\tools\\s.js']);
+    expect(shellWords('a "C:\\x\\y" "q\\"r"')).toEqual(['a', 'C:\\x\\y', 'q"r']);
+  });
+  it('args must be strings; header / env values must be text, never [object Object]', () => {
+    expect(() => parseMcpInput('{"command":"x","args":["a",1]}')).toThrow(/list of strings/);
+    expect(() => parseMcpInput('{"url":"https://a.example","headers":{"X":{"a":1}}}')).toThrow(/header "X" must be text/);
+    expect(() => parseMcpInput('{"command":"x","env":{"K":["v"]}}')).toThrow(/variable "K" must be text/);
+    expect(one('{"command":"x","env":{"PORT":8080,"DEBUG":true}}').config.env).toEqual({ PORT: '8080', DEBUG: 'true' });
+  });
+  it('a server called __proto__ / constructor is refused', () => {
+    expect(() => parseMcpInput('{"mcpServers":{"__proto__":{"url":"https://a.example"}}}')).toThrow(/cannot be used as a server name/);
+    expect(() => parseMcpInput('{"constructor":{"url":"https://a.example"}}')).toThrow(/cannot be used/);
+  });
+});
+
 describe('helpers', () => {
   it('shellWords handles quotes and escapes', () => {
     expect(shellWords(`a "b c" 'd e' f\\ g ""`)).toEqual(['a', 'b c', 'd e', 'f g', '']);

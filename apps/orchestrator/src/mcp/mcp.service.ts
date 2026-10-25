@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeMcpConfig } from '@lds/shared';
@@ -74,6 +74,11 @@ const DEFAULT_MCP_SERVERS = [
 /** A Claude Agent SDK MCP server config (stdio | http | sse). */
 export type McpConfig = Record<string, unknown>;
 
+/** The Playwright add-on's address on its default port — what the entry holds while the add-on runs (and until it is switched back after a disable). */
+const ADDON_DEFAULT_SSE = 'http://127.0.0.1:8931/sse';
+/** Names that would hit the prototype of the plain-object maps the servers are put in. */
+const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Registry of MCP servers agents can use. Seeded with `playwright` on first use.
  * Agents reference servers by name; the executor resolves them into the SDK's
@@ -131,7 +136,8 @@ export class McpService {
     const cfg = (row.config ?? {}) as Record<string, unknown>;
     const current = typeof cfg.url === 'string' ? cfg.url : '';
     const composeUrl = (DEFAULT_MCP_SERVERS.find((x) => x.name === 'playwright')!.config as { url: string }).url;
-    const isOurs = current === composeUrl || /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\/sse$/.test(current);
+    // only the two addresses this code itself puts there: the compose service, and the add-on's default port (a person's own local address is never rewritten)
+    const isOurs = current === composeUrl || current === ADDON_DEFAULT_SSE || (target !== null && current === target);
     const want = target ?? composeUrl;
     if (!isOurs || current === want) return;
     await this.prisma.mcpServer.update({ where: { name: 'playwright' }, data: { config: { ...cfg, url: want } as Prisma.InputJsonValue } });
@@ -221,7 +227,13 @@ export class McpService {
     if (name === INTERNAL_MCP_SERVER) {
       throw new BadRequestException(`"${INTERNAL_MCP_SERVER}" is reserved for internal tools`);
     }
-    return this.prisma.mcpServer.create({ data: { name, config: this.clean(config) as Prisma.InputJsonValue } });
+    if (RESERVED_NAMES.has(name)) throw new BadRequestException(`"${name}" cannot be used as a server name`);
+    try {
+      return await this.prisma.mcpServer.create({ data: { name, config: this.clean(config) as Prisma.InputJsonValue } });
+    } catch (err) {
+      if ((err as { code?: string }).code === 'P2002') throw new ConflictException(`An MCP server named "${name}" already exists`);
+      throw err;
+    }
   }
 
   /** The config as the SDK wants it, whichever client's format it came in (a `url` without `type` gets one, `serverUrl` / `transport` are mapped …). */

@@ -144,3 +144,15 @@ describe('files of other tasks, by reference', () => {
     expect(parseInline('[](attachment:a.zip)')).toEqual([{ t: 'file', name: 'a.zip', label: 'a.zip' }]);
   });
 });
+
+describe('names with spaces in file references', () => {
+  it('a task: or attachment: target may contain spaces (and %20)', () => {
+    expect(parseInline('![the plan](task:cm1/plan v2.png)')).toEqual([{ t: 'media', name: 'plan v2.png', alt: 'the plan', taskId: 'cm1' }]);
+    expect(parseInline('[spec](task:cm1/the%20spec.md)')).toEqual([{ t: 'file', name: 'the spec.md', label: 'spec', taskId: 'cm1' }]);
+    expect(parseInline('![x](attachment:my photo.jpg) and text')).toEqual([{ t: 'media', name: 'my photo.jpg', alt: 'x' }, { t: 'text', v: ' and text' }]);
+  });
+  it('an encoded separator or dot-file is still refused', () => {
+    expect(parseFileRef('task:cm1/a%2Fb.png')).toBeNull();
+    expect(parseFileRef('task:cm1/%2e%2e')).toBeNull();
+  });
+});

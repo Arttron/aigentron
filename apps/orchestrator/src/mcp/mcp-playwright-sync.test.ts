@@ -54,6 +54,14 @@ describe('the playwright MCP server follows the Playwright add-on', () => {
     await svc().syncPlaywrightAddon();
     expect(row!.config.url).toBe('https://my.example/sse');
   });
+  it('a person’s own LOCAL address is not touched either (only the compose and the add-on addresses are ours)', async () => {
+    row = { name: 'playwright', config: { type: 'sse', url: 'http://127.0.0.1:9333/sse' } };
+    await svc().syncPlaywrightAddon();
+    expect(row!.config.url).toBe('http://127.0.0.1:9333/sse');
+    await state(true);
+    await svc().syncPlaywrightAddon();
+    expect(row!.config.url).toBe('http://127.0.0.1:9333/sse');
+  });
   it('other settings of the entry (readOnlyTools …) are kept', async () => {
     row = { name: 'playwright', config: { type: 'sse', url: COMPOSE, readOnlyTools: ['*'] } };
     await state(true);

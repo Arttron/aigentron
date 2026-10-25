@@ -351,13 +351,15 @@ export interface ScheduleInfo {
   chatId: string | null;
   quietStart: string | null;
   quietEnd: string | null;
+  /** approvals for the tasks it starts: null = follow the project / global setting */
+  approvalMode: 'ask' | 'off' | null;
   nextRunAt: string | null;
   lastRunAt: string | null;
   lastStatus: string | null;
   lastError: string | null;
 }
 
-export type ScheduleInput = Partial<Pick<ScheduleInfo, 'name' | 'enabled' | 'cron' | 'timezone' | 'kind' | 'text' | 'agentName' | 'taskMode' | 'channelId' | 'chatId' | 'quietStart' | 'quietEnd'>>;
+export type ScheduleInput = Partial<Pick<ScheduleInfo, 'name' | 'enabled' | 'cron' | 'timezone' | 'kind' | 'text' | 'agentName' | 'taskMode' | 'channelId' | 'chatId' | 'quietStart' | 'quietEnd'>> & { approvalMode?: 'ask' | 'off' | 'inherit' };
 
 export interface ChannelInfo {
   id: string;

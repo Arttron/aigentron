@@ -287,13 +287,14 @@ export async function runAgent(
     claudeExecutable = params.isolation.wrapper;
   }
 
-  // Lower CPU priority without a separate agent user: the SDK spawns a small wrapper that `nice`s the real CLI (infra/agent-exec.sh does the same with one).
+  // Without a separate agent user the SDK spawns a small wrapper that makes the CLI the kernel's first victim when memory runs out (always) and lowers its CPU
+  // priority (when niceness > 0); infra/agent-exec.sh does the same with a separate user.
   const nice = cleanNice(params.niceness);
-  if (nice > 0 && !params.isolation) {
+  if (!params.isolation && params.niceness !== undefined && process.platform !== 'win32') {
     try {
       const wrapper = niceWrapperPath();
       if (wrapper) {
-        Object.assign(env, { [AGENT_EXEC_ENV]: resolveClaudeExecutable(), [AGENT_NICE_ENV]: String(nice) });
+        Object.assign(env, { [AGENT_EXEC_ENV]: resolveClaudeExecutable(), ...(nice > 0 ? { [AGENT_NICE_ENV]: String(nice) } : {}) });
         claudeExecutable = wrapper;
       }
     } catch {

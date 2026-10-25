@@ -141,6 +141,16 @@ ensure_node() {
     apt) run sh -c "curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash -" && pkg_install nodejs ;;
     dnf) run sh -c "curl -fsSL https://rpm.nodesource.com/setup_${NODE_MAJOR}.x | bash -" && pkg_install nodejs ;;
   esac
+  [ "$DRY_RUN" = 1 ] && return 0
+  # an older distro `nodejs` is already "installed", so the install above did nothing: ask for the upgrade explicitly
+  if ! node -e "process.exit(parseInt(process.versions.node) >= 18 ? 0 : 1)" 2>/dev/null; then
+    log "the installed node is older than 18 — upgrading it from NodeSource"
+    case "$PKG" in
+      apt) env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --only-upgrade nodejs </dev/null || true ;;
+      dnf) dnf upgrade -y nodejs </dev/null || dnf install -y nodejs </dev/null || true ;;
+    esac
+    node -e "process.exit(parseInt(process.versions.node) >= 18 ? 0 : 1)" 2>/dev/null || die "node >= 18 could not be installed (the system's node is $(node -v 2>/dev/null || echo missing))"
+  fi
 }
 create_user() {
   if ! getent passwd "$SVC_USER" >/dev/null; then
@@ -170,6 +180,7 @@ install_mcp() {
     [ -f "$(mcp_cli)" ] || die "npm reported success but $(mcp_cli) is missing"
     rm -rf "$PREFIX/browsers" ; mkdir -p "$PREFIX/browsers"   # a new version brings its own Chromium revision
     echo "$MCP_VERSION" > "$PREFIX/.version"
+    FILES_CHANGED=1   # a running unit still holds the old version in memory: write_unit restarts it
   fi
   if ! ls -d "$PREFIX"/browsers/chromium* >/dev/null 2>&1; then
     log "Chromium for Playwright → $PREFIX/browsers (a few hundred MB)"
@@ -242,7 +253,7 @@ write_unit() {
   if ! cmp -s "$tmp" "/etc/systemd/system/$UNIT" 2>/dev/null; then install -m 644 "$tmp" "/etc/systemd/system/$UNIT"; changed=1; fi
   rm -f "$tmp"
   systemctl daemon-reload
-  if [ "$changed" = 1 ]; then log "systemd unit written/updated — (re)starting $UNIT"; systemctl enable "$UNIT" >/dev/null 2>&1; systemctl restart "$UNIT"
+  if [ "$changed" = 1 ] || [ "${FILES_CHANGED:-0}" = 1 ]; then log "systemd unit or MCP files updated — (re)starting $UNIT"; systemctl enable "$UNIT" >/dev/null 2>&1; systemctl restart "$UNIT"
   elif ! systemctl is-active --quiet "$UNIT"; then systemctl enable --now "$UNIT" >/dev/null 2>&1 || systemctl start "$UNIT"
   else log "systemd unit unchanged — $UNIT already running"; fi
 }
@@ -303,7 +314,8 @@ do_install() {
     write_state true "headless Chromium, isolated sessions (nothing kept between them)"
     log "done: agents with the playwright MCP server now use this browser (the orchestrator picks the address up by itself)"
   else
-    write_state true "installed, but a check failed — see aigentron addon logs playwright"
+    # not "enabled": the orchestrator must not point agents at a server that does not answer
+    write_state false "installed, but a check failed — see aigentron addon logs playwright"
     die "installed, but something did not come up — aigentron addon logs playwright"
   fi
 }

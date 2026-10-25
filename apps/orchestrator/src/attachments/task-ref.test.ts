@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTaskRef, taskRef } from './task-ref';
+import { isShowableImage, parseTaskRef, taskRef } from './task-ref';
 
 describe('task file references', () => {
   it('parses task:<id>/<name> and rebuilds it', () => {
@@ -8,5 +8,12 @@ describe('task file references', () => {
   });
   it('refuses paths, hidden files and anything else', () => {
     for (const v of ['task:abc/../x', 'task:abc/a/b.png', 'task:abc/.links.json', 'task:/a.png', 'task:abc', 'plan.png', '/etc/passwd', 'task:ab c/a.png', 'task:abc/']) expect(parseTaskRef(v), v).toBeNull();
+  });
+});
+
+describe('isShowableImage', () => {
+  it('pictures yes, documents and notes no', () => {
+    for (const n of ['a.png', 'B.JPG', 'c.jpeg', 'd.webp', 'e.gif', '/x/y/shot-1.PNG']) expect(isShowableImage(n), n).toBe(true);
+    for (const n of ['report.pdf', 'notes.md', 'clip.mp4', 'png', 'a.png.exe', 'archive.zip']) expect(isShowableImage(n), n).toBe(false);
   });
 });

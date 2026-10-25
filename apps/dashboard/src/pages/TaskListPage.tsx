@@ -8,7 +8,7 @@ import { readFilterParam, withFilterParam } from '@/lib/url-filter';
 import { CreateTaskForm } from '@/components/CreateTaskForm';
 import { TaskList } from '@/components/TaskList';
 import { AppHeader, Button, Card, SectionTitle, ConnStatus, ErrorText, Muted } from '@/components/ui';
-import { BULK_LABEL, listStatus, planBulk, runBulk, type BulkAction } from '@/lib/bulk-actions';
+import { BULK_LABEL, listStatus, planBulk, rangeIds, runBulk, type BulkAction } from '@/lib/bulk-actions';
 
 const PAGE_SIZE = 25;
 
@@ -142,15 +142,26 @@ export function TaskListPage() {
   const [picked, setPicked] = useState<Map<string, { id: string; status: string }>>(new Map());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkMsg, setBulkMsg] = useState<string | null>(null);
-  const toggle = (id: string) =>
+  // The row clicked last: Shift-click selects (or unselects) everything between it and the one clicked now, like a file manager.
+  const lastClicked = useRef<string | null>(null);
+  const toggle = (id: string, range = false) => {
+    const anchor = lastClicked.current;
+    lastClicked.current = id;
     setPicked((m) => {
       const next = new Map(m);
-      const t = tasks.find((x) => x.id === id);
-      if (next.has(id)) next.delete(id);
-      else if (t) next.set(id, { id, status: listStatus(t) });
+      const wanted = !m.has(id); // what the clicked row becomes; the range follows it
+      const ids = range ? rangeIds(tasks.map((x) => x.id), anchor, id) : [id];
+      for (const rid of ids) {
+        const t = tasks.find((x) => x.id === rid);
+        if (!t) continue;
+        if (wanted) next.set(rid, { id: rid, status: listStatus(t) });
+        else next.delete(rid);
+      }
       return next;
     });
+  };
   const leaveSelecting = () => {
+    lastClicked.current = null;
     setSelecting(false);
     setPicked(new Map());
     setBulkMsg(null);
@@ -163,9 +174,27 @@ export function TaskListPage() {
       else for (const t of tasks) next.set(t.id, { id: t.id, status: listStatus(t) });
       return next;
     });
+  // The status of the picked tasks NOW (they may have moved on since they were picked); a task that is gone is dropped.
+  const freshPicked = async (): Promise<{ id: string; status: string }[]> => {
+    const now = new Map<string, string>();
+    await runBulk([...picked.keys()], async (id) => {
+      const t = await api.getTask(id);
+      const byStatus: Record<string, number> = {};
+      for (const sub of t.subtasks ?? []) byStatus[sub.status] = (byStatus[sub.status] ?? 0) + 1;
+      now.set(id, listStatus({ status: t.status, subtasks: { byStatus } }));
+    });
+    return [...now].map(([id, status]) => ({ id, status }));
+  };
   const bulk = async (action: BulkAction) => {
-    const { ids, skipped } = planBulk(action, [...picked.values()]);
-    if (!ids.length) return;
+    setBulkBusy(true);
+    const current = await freshPicked().catch(() => [...picked.values()]);
+    setBulkBusy(false);
+    const { ids, skipped: unfit } = planBulk(action, current);
+    const skipped = unfit + (picked.size - current.length);
+    if (!ids.length) {
+      setBulkMsg(`${BULK_LABEL[action]}: nothing to do — none of the ${picked.size} selected task${picked.size === 1 ? '' : 's'} is in a state this applies to now.`);
+      return;
+    }
     const what = action === 'delete' ? 'Delete (with their branches / worktrees)' : action === 'cancel' ? 'Cancel' : 'Mark as done';
     const msg = `${what} ${ids.length} task${ids.length === 1 ? '' : 's'}?${skipped ? ` (${skipped} selected task${skipped === 1 ? ' does' : 's do'} not fit this action and ${skipped === 1 ? 'is' : 'are'} left alone.)` : ''}${action === 'delete' ? ' This cannot be undone.' : ''}`;
     if (!window.confirm(msg)) return;
@@ -324,6 +353,7 @@ export function TaskListPage() {
         {selecting && (
           <div role="toolbar" aria-label="Actions on the selected tasks" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <strong>{picked.size} selected</strong>
+            <Muted style={{ fontSize: 11 }}>Shift-click selects a range</Muted>
             <Button size="sm" onClick={toggleAllOnPage} disabled={tasks.length === 0 || bulkBusy}>
               {allOnPage ? 'Unselect this page' : 'Select this page'}
             </Button>

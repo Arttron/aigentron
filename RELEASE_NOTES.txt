@@ -1,12 +1,21 @@
-Aigentron v0.1.86
+Aigentron v0.1.87
 
-For people who are not programmers: moving to another server is now two commands, and the backup no longer misses your projects' folders.
+For people who are not programmers: moving to another server is now safe (0.1.86's export could lose folders), and the conversation can go full screen, also on the phone.
+
+If you made an export or backup with 0.1.86, make a new one with this version before moving: the old archive may be missing folders named build, dist and similar.
 
 New
-- Moving to another server: `sudo aigentron export` on the old one (or `--to user@host:path` to send it over SSH) and `sudo aigentron import <archive>` on the new one (the same or a newer version, the same data folder). It carries the database, secrets, agents, skills, resources, attachments, every project's folder and the code (the checkouts and the agents' worktrees, without node_modules and build output; `--no-repos` leaves the code out). Add-ons and the Browser add-on's profile are not carried: re-enable the add-ons on the new server. Stop the old server afterwards (a Telegram bot and repository pushes must not run from two places). Step by step: docs/moving-servers.md.
-- `aigentron backup --with-repos` adds the code to an ordinary backup. A restore refuses an archive made by a newer version (use --force to override) and warns when the data folder differs.
+- Full-screen conversation: an icon in the bottom-right corner of the chat, like a video player's. On the phone it hides the header, tabs and bottom bar (Esc or the same icon exits).
+- Approvals for scheduled tasks: each schedule can ask for approvals, never ask, or follow its project; its subtasks follow the same choice. A field in the schedule form.
+- Task list: shift-click selects a range of tasks.
 
 Fixed
-- `aigentron backup` did not include the projects' own folders (`projects/<slug>`: the project's memory, library, results). They are in the archive now; backups made by older versions do not have them, so take a fresh export before moving.
+- Export / backup / restore: no folder is dropped by its name any more; a restore keeps the code you already have on the server and merges project folders; paths with spaces and `--to` / `--force` in any order work.
+- Small servers: the memory guard and start holds no longer misfire where the free memory is unknown (macOS), and they wait 20 s after a stop.
+- MCP servers: a duplicate name is refused with a clear message, odd formats (trailing commas, Windows paths) are read correctly, adding several servers at once reports which were added.
+- A picture that a subtask already sent is not sent to Telegram twice; `show_images` only shows pictures.
+- Creating a task: if only the answer to "start" was lost, the task is kept (before, a retry could run the work twice).
+- Error messages from the server are no longer cut off; file links with spaces in the name work; Esc in the full-screen chat no longer closes an open dialog; bulk Cancel uses the current status.
+- Playwright add-on: restarts after a version change, is marked off when its check fails, and an old Node is upgraded.
 
-Update note: no database changes.
+Update note: two small database migrations (a new field on schedules); they run by themselves.
