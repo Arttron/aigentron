@@ -120,8 +120,10 @@ export function buildProjectContext(row: ProjectContextRow, paths: ProjectContex
     briefFile: row.isDefault ? BRIEF_FILE : 'PROJECT.md',
     briefTemplate: row.isDefault ? BRIEF_TEMPLATE : projectBriefTemplate(row.name),
     defaultAgent: row.defaultAgent?.trim() || fallback.defaultAgent?.trim() || null,
+    // the project's channel (with its chat, or without: then the whole channel is the project's) — or, when it names none, the installation's pair; never one
+    // from here and the other from there (a project's channel with the global chat id would speak to the wrong conversation)
     notifyChannelId: row.notifyChannelId?.trim() || fallback.notifyChannelId?.trim() || null,
-    notifyChatId: row.notifyChatId?.trim() || fallback.notifyChatId?.trim() || null,
+    notifyChatId: row.notifyChannelId?.trim() ? row.notifyChatId?.trim() || null : fallback.notifyChatId?.trim() || null,
     git: { slug: row.slug, repoUrl, repoAuth: auth },
   };
 }

@@ -249,7 +249,7 @@ describe('contextFor / defaultAgentFor / notifyTargetFor (the runtime view)', ()
     expect(def).toMatchObject({ slug: 'default', isDefault: true, repoPath: config.workspaceRepoPath, workspaceRoot: config.workspaceDir, briefFile: 'WORKSPACE.md', repoSubdir: 'apps/api', verifyCommands: ['pnpm test'], isolation: 'shared', defaultAgent: 'pm', notifyChannelId: 'c1', notifyChatId: '42' });
     const p = await svc.create({ name: 'Shop', repoUrl: 'https://github.com/a/b', repoAuth: 'token', isolation: 'worktree', verifyCommands: 'pnpm lint', defaultAgent: 'dev', notifyChannelId: 'c2' });
     const shop = await svc.contextFor({ projectId: p.id });
-    expect(shop).toMatchObject({ slug: 'shop', repoPath: join(config.projectsDir, 'shop', 'repo'), workspaceRoot: join(config.projectsDir, 'shop'), briefFile: 'PROJECT.md', repoUrl: 'https://github.com/a/b', isolation: 'worktree', verifyCommands: ['pnpm lint'], defaultAgent: 'dev', notifyChannelId: 'c2', notifyChatId: '42', git: { slug: 'shop', repoUrl: 'https://github.com/a/b', repoAuth: 'token' } });
+    expect(shop).toMatchObject({ slug: 'shop', repoPath: join(config.projectsDir, 'shop', 'repo'), workspaceRoot: join(config.projectsDir, 'shop'), briefFile: 'PROJECT.md', repoUrl: 'https://github.com/a/b', isolation: 'worktree', verifyCommands: ['pnpm lint'], defaultAgent: 'dev', notifyChannelId: 'c2', notifyChatId: null, git: { slug: 'shop', repoUrl: 'https://github.com/a/b', repoAuth: 'token' } });
     expect((await svc.contextFor('shop')).id).toBe(p.id);
     expect((await svc.contextFor(p)).id).toBe(p.id);
     expect(await svc.defaultAgentFor(p)).toBe('dev');
@@ -267,7 +267,7 @@ describe('contextFor / defaultAgentFor / notifyTargetFor (the runtime view)', ()
     prisma.task.findUnique = async ({ where }: { where: { id: string } }) => tasks.find((t) => t.id === where.id) ?? null;
     expect(await svc.notifyTargetFor('t1')).toEqual({ channelId: 'c9', chatId: '7' });
     expect(await svc.notifyTargetFor('t2')).toEqual({ channelId: 'c1', chatId: '42' });
-    expect(await svc.notifyTargetFor('t3')).toEqual({ channelId: 'c9', chatId: '42' }); // field by field, like the global fallback
+    expect(await svc.notifyTargetFor('t3')).toEqual({ channelId: 'c9', chatId: null }); // a channel without a chat: the whole channel is the project's — NOT mixed with the global chat id (that spoke to the wrong conversation)
     expect(await svc.notifyTargetFor('nope')).toEqual({ channelId: 'c1', chatId: '42' }); // an unknown task → the default project's target
   });
 });

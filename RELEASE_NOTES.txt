@@ -1,9 +1,10 @@
-Aigentron v0.1.98
+Aigentron v0.1.99
 
-For people who are not programmers: a channel tied to a project now really belongs to that project, and the admin in such a chat only talks about that project.
+For people who are not programmers: a project that has its own channel no longer sends its messages into the main chat.
 
 Fixed
-- A channel tied to a project showed every task of the service. A chat counted as tied only when the project named both the channel and a chat id; now choosing just the channel (the chat id left empty) gives the project every chat of that channel. A project that names the chat itself wins over one that names only the channel. In these chats /tasks, new tasks, replies, approvals and questions are limited to the project.
-- The admin in the chat of a project (any project except the default one) greeted with everything it knew about the whole fleet. It is now that project's assistant: it sees only the project's tasks, usage and notes, lists only the project's own agents, refuses platform administration (agents, providers, channels, schedules, settings, updates, access, secrets) and does not tour the platform. This is a limit of its tools and instructions, not an isolation boundary (see docs/plan-project-isolation.md).
+- A project that named a channel but no chat got that channel together with the chat id from the global escalation setting, so a blocked, stalled or failed task of the project spoke into the wrong conversation (the main chat). Now the project's channel stands for all of its allowed chats when no chat id is given, and the global chat is used only when the project names no channel at all.
+- Notices for the operators that belong to no project (low disk space and the like) are no longer sent into chats a project owns.
+- Tasks already started in a chat keep that chat (their results, replies and approvals stay there); binding a channel afterwards does not move them. Tasks started from the dashboard are announced through the project's channel.
 
-Update note: no database changes. Set the project's Default agent so the right agent answers in the project's chat.
+Update note: no database changes.

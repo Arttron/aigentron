@@ -406,10 +406,20 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     error: string | null,
     status: TaskStatus,
   ): Promise<void> {
-    // The task's project's notification chat, else the global one (Settings → Work → Escalations).
+    // The task's project's notification chat(s) — one chat, or every chat of the channel the project owns — else the global one (Settings → Work → Escalations).
     const target = await this.projects.notifyTargetFor(taskId);
     if (!target) return;
-    const { channelId, chatId } = target;
+    const chats = target.chatId ? [target.chatId] : await this.allowedChatsOf(target.channelId);
+    for (const chatId of chats) await this.escalateTo(target.channelId, chatId, taskId, title, error, status);
+  }
+
+  /** The chats a channel lets us talk to (none when it is off or not configured). */
+  private async allowedChatsOf(channelId: string): Promise<string[]> {
+    const row = (await this.channels.list()).find((r) => r.id === channelId && r.enabled && this.channels.isConfigured(r));
+    return row ? this.channels.allowedChatIds(row) : [];
+  }
+
+  private async escalateTo(channelId: string, chatId: string, taskId: string, title: string, error: string | null, status: TaskStatus): Promise<void> {
     // A chat bound to another project is not told about this task (the global fallback chat may be someone's project chat).
     const bound = await this.projects.boundToChat(channelId, chatId).catch(() => null);
     if (bound) {
@@ -643,6 +653,17 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   /** Projects whose missing chat was already reported (once per process, the sweep would repeat it every few seconds). */
   private readonly warnedNoChat = new Set<string>();
 
+  /** Which chats projects own: the chat a project names, or — when it names only a channel — every allowed chat of that channel. */
+  private async projectBindings(allowed: ChatRef[]): Promise<{ projectId: string; channelId: string; chatId: string }[]> {
+    const owned = await this.prisma.project.findMany({
+      where: { archivedAt: null, notifyChannelId: { not: null } },
+      select: { id: true, notifyChannelId: true, notifyChatId: true },
+    });
+    return owned.flatMap((p) =>
+      p.notifyChatId ? [{ projectId: p.id, channelId: p.notifyChannelId!, chatId: p.notifyChatId }] : allowed.filter((c) => c.channelId === p.notifyChannelId).map((c) => ({ projectId: p.id, channelId: c.channelId, chatId: c.chatId })),
+    );
+  }
+
   private async chatsForTask(taskId: string): Promise<{ chats: ChatRef[]; own: boolean }> {
     const allowed: ChatRef[] = [];
     for (const row of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
@@ -650,14 +671,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     }
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } }).catch(() => null);
     if (!task) return { chats: [], own: false }; // the task is gone (deleted): nothing is waiting for an answer, and nothing is announced anywhere
-    const owned = await this.prisma.project.findMany({
-      where: { archivedAt: null, notifyChannelId: { not: null } },
-      select: { id: true, notifyChannelId: true, notifyChatId: true },
-    });
-    // a project that names a channel without a chat owns every allowed chat of that channel
-    const bindings = owned.flatMap((p) =>
-      p.notifyChatId ? [{ projectId: p.id, channelId: p.notifyChannelId!, chatId: p.notifyChatId }] : allowed.filter((c) => c.channelId === p.notifyChannelId).map((c) => ({ projectId: p.id, channelId: c.channelId, chatId: c.chatId })),
-    );
+    const bindings = await this.projectBindings(allowed);
     const own = bindings.some((b) => b.projectId === task.projectId);
     const chats = chatTargets(task.projectId, allowed, bindings);
     if (own && !chats.length && !this.warnedNoChat.has(task.projectId)) {
@@ -843,14 +857,19 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
    * is set — to every allowed chat of every enabled channel.
    */
   async notifyOperators(text: string): Promise<void> {
+    // Platform notices (disk space, …) are for the operators: never into a chat a project owns — a client's project chat must not hear about the server.
+    const allowed: ChatRef[] = [];
+    for (const row of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
+      for (const chatId of this.channels.allowedChatIds(row)) allowed.push({ channelId: row.id, chatId });
+    }
+    const owned = new Set((await this.projectBindings(allowed)).map((b) => `${b.channelId}\u0000${b.chatId}`));
+    const free = allowed.filter((c) => !owned.has(`${c.channelId}\u0000${c.chatId}`));
     const settings = await this.prisma.appSettings.findUnique({ where: { id: 'singleton' }, select: { notifyChannelId: true, notifyChatId: true } });
-    if (settings?.notifyChannelId && settings.notifyChatId) {
+    if (settings?.notifyChannelId && settings.notifyChatId && !owned.has(`${settings.notifyChannelId}\u0000${settings.notifyChatId}`)) {
       await this.gateway.send(settings.notifyChannelId, settings.notifyChatId, text);
       return;
     }
-    for (const row of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
-      for (const chatId of this.channels.allowedChatIds(row)) await this.gateway.send(row.id, chatId, text);
-    }
+    for (const c of free) await this.gateway.send(c.channelId, c.chatId, text);
   }
 
   /** Post plain text to a chat of a channel (scheduled reminders, pairing replies). False when it could not be delivered (channel off, transport error). */
