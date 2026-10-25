@@ -1,21 +1,14 @@
-Aigentron v0.1.87
+Aigentron v0.1.88
 
-For people who are not programmers: moving to another server is now safe (0.1.86's export could lose folders), and the conversation can go full screen, also on the phone.
-
-If you made an export or backup with 0.1.86, make a new one with this version before moving: the old archive may be missing folders named build, dist and similar.
+For people who are not programmers: sign-in can now ask for a code from an authenticator app, and the chat has a full-screen icon.
 
 New
-- Full-screen conversation: an icon in the bottom-right corner of the chat, like a video player's. On the phone it hides the header, tabs and bottom bar (Esc or the same icon exits).
-- Approvals for scheduled tasks: each schedule can ask for approvals, never ask, or follow its project; its subtasks follow the same choice. A field in the schedule form.
-- Task list: shift-click selects a range of tasks.
+- Two-factor sign-in (optional). Each person turns it on once in Settings → General → Security → Two-factor sign-in: scan a QR code with Google / Microsoft Authenticator, 1Password, Aegis or similar, type the code, and save the ten recovery codes (shown once). After that, signing in asks for the password and then a 6-digit code.
+- An operator or admin can require it for a user (a checkbox when adding or editing the user). That person sets it up at their next sign-in and cannot turn it off themselves. "Reset 2FA" in Users helps when a phone is lost.
+- The command-line console asks for the code too; for scripts set LDS_ADMIN_TOTP. Details: docs/authentication.md.
+- The conversation's full-screen toggle is an icon in the chat's bottom-right corner, like a video player's. On the phone it also hides the header, tabs and bottom bar.
 
 Fixed
-- Export / backup / restore: no folder is dropped by its name any more; a restore keeps the code you already have on the server and merges project folders; paths with spaces and `--to` / `--force` in any order work.
-- Small servers: the memory guard and start holds no longer misfire where the free memory is unknown (macOS), and they wait 20 s after a stop.
-- MCP servers: a duplicate name is refused with a clear message, odd formats (trailing commas, Windows paths) are read correctly, adding several servers at once reports which were added.
-- A picture that a subtask already sent is not sent to Telegram twice; `show_images` only shows pictures.
-- Creating a task: if only the answer to "start" was lost, the task is kept (before, a retry could run the work twice).
-- Error messages from the server are no longer cut off; file links with spaces in the name work; Esc in the full-screen chat no longer closes an open dialog; bulk Cancel uses the current status.
-- Playwright add-on: restarts after a version change, is marked off when its check fails, and an old Node is upgraded.
+- The "jump to latest" button no longer sits on top of the full-screen icon.
 
-Update note: two small database migrations (a new field on schedules); they run by themselves.
+Update note: no database changes.

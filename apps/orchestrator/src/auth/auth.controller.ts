@@ -60,6 +60,7 @@ export class AuthController {
       // The login screen lists who can sign in (names only) — pick one, type the password.
       users: configured && !uid ? await this.auth.loginUsers() : [],
       me: uid ? await this.auth.userById(uid) : null,
+      twoFactor: uid ? this.auth.twoFactorStatus(uid) : null,
     };
   }
 
@@ -77,15 +78,15 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(200)
-  async login(@Body() body: { user?: unknown; password?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const r = await this.auth.login(body?.user, body?.password, await this.clientKey(req), await this.meta(req));
+  async login(@Body() body: { user?: unknown; password?: unknown; code?: unknown }, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.login(body?.user, body?.password, await this.clientKey(req), await this.meta(req), body?.code);
     if (!r.ok) {
       res.status(r.status ?? 401);
-      return { ok: false, error: r.error };
+      return { ok: false, error: r.error, ...(r.needsCode ? { needsCode: true } : {}), ...(r.needsSetup ? { needsSetup: r.needsSetup } : {}) };
     }
     this.setCookie(req, res, r.token);
     // The token is also returned so the console client can use it as a bearer token.
-    return { ok: true, token: r.token };
+    return { ok: true, token: r.token, ...(r.recoveryCodes ? { recoveryCodes: r.recoveryCodes } : {}) };
   }
 
   @Post('logout')
@@ -110,6 +111,79 @@ export class AuthController {
       return { ok: false, error: r.error };
     }
     this.setCookie(req, res, r.token);
+    return { ok: true };
+  }
+
+  /** Two-factor sign-in with an authenticator app (TOTP). Everything here is about YOUR account and needs a session. */
+  private need(req: AuthedRequest, res: Response): string | null {
+    if (req.authUserId) return req.authUserId;
+    res.status(400);
+    return null;
+  }
+
+  @Post('2fa/begin')
+  @HttpCode(200)
+  async twoFactorBegin(@Body() body: { password?: unknown }, @Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response) {
+    const uid = this.need(req, res);
+    if (!uid) return { ok: false, error: 'Sign in first.' };
+    const r = await this.auth.beginTwoFactor(uid, body?.password, await this.clientKey(req));
+    if (!r.ok) res.status(r.status ?? 400);
+    return r;
+  }
+
+  @Post('2fa/enable')
+  @HttpCode(200)
+  async twoFactorEnable(@Body() body: { code?: unknown }, @Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response) {
+    const uid = this.need(req, res);
+    if (!uid) return { ok: false, error: 'Sign in first.' };
+    const r = this.auth.enableTwoFactor(uid, body?.code, await this.clientKey(req));
+    if (!r.ok) res.status(r.status ?? 400);
+    return r;
+  }
+
+  @Post('2fa/disable')
+  @HttpCode(200)
+  async twoFactorDisable(@Body() body: { password?: unknown; code?: unknown }, @Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response) {
+    const uid = this.need(req, res);
+    if (!uid) return { ok: false, error: 'Sign in first.' };
+    const r = this.auth.disableTwoFactor(uid, body?.password, body?.code, await this.clientKey(req));
+    if (!r.ok) res.status(r.status ?? 400);
+    return r;
+  }
+
+  @Post('2fa/recovery-codes')
+  @HttpCode(200)
+  async twoFactorRecovery(@Body() body: { password?: unknown; code?: unknown }, @Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response) {
+    const uid = this.need(req, res);
+    if (!uid) return { ok: false, error: 'Sign in first.' };
+    const r = this.auth.newRecoveryCodes(uid, body?.password, body?.code, await this.clientKey(req));
+    if (!r.ok) res.status(r.status ?? 400);
+    return r;
+  }
+
+  /** Managers: require (or stop requiring) two-factor sign-in for a user; it is set up at their next sign-in. */
+  @Put('users/:id/2fa-required')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  async setRequireTwoFactor(@Param('id') id: string, @Body() body: { required?: unknown }, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.setRequireTwoFactor(id, body?.required === true);
+    if (!r.ok) {
+      res.status(r.status ?? 400);
+      return { ok: false, error: r.error };
+    }
+    return { ok: true };
+  }
+
+  /** Managers: take someone's second factor away (a lost phone); they are signed out everywhere. */
+  @Delete('users/:id/2fa')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  async resetUserTwoFactor(@Param('id') id: string, @Res({ passthrough: true }) res: Response) {
+    const r = await this.auth.resetUserTwoFactor(id);
+    if (!r.ok) {
+      res.status(r.status ?? 400);
+      return { ok: false, error: r.error };
+    }
     return { ok: true };
   }
 

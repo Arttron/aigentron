@@ -142,8 +142,18 @@ async function signIn() {
   }
   const password = process.env.LDS_ADMIN_PASSWORD || (isTTY ? await ask('Password › ', { hidden: true }) : null);
   if (!password) throw new Error('Sign-in required: run this in a terminal, or set LDS_ADMIN_PASSWORD.');
-  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'aigentron-cli' }, body: JSON.stringify({ user: user || undefined, password }) });
-  const j = await r.json().catch(() => ({}));
+  const login = async (code) => {
+    const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'aigentron-cli' }, body: JSON.stringify({ user: user || undefined, password, ...(code ? { code } : {}) }) });
+    return { r, j: await r.json().catch(() => ({})) };
+  };
+  let { r, j } = await login();
+  if (j.needsSetup) throw new Error('Two-factor sign-in is required for this account but not set up yet: sign in once in the dashboard (it shows the QR code), then run this again.');
+  if (j.needsCode) {
+    // two-factor sign-in: the code from the authenticator app (or a recovery code)
+    const code = process.env.LDS_ADMIN_TOTP || (isTTY ? await ask('Code from your authenticator app › ', { hidden: true }) : null);
+    if (!code) throw new Error('This account uses two-factor sign-in: run this in a terminal, or set LDS_ADMIN_TOTP to the current code.');
+    ({ r, j } = await login(code.trim()));
+  }
   if (!r.ok || !j.token) throw new Error(j.error || `sign-in failed (${r.status})`);
   sessionToken = j.token;
   try {

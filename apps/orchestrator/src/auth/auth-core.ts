@@ -236,3 +236,89 @@ export function describeAgent(ua: string | undefined | null): string {
   if (browser && os) return `${browser} on ${os}`;
   return browser ?? os ?? s.slice(0, 40);
 }
+
+// ---- Two-factor sign-in: TOTP (RFC 6238, SHA-1, 6 digits, 30 s — what every authenticator app speaks) + one-time recovery codes ----
+
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+export const TOTP_STEP_S = 30;
+
+export function base32Encode(buf: Buffer): string {
+  let bits = 0;
+  let value = 0;
+  let out = '';
+  for (const byte of buf) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += B32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out;
+}
+
+export function base32Decode(text: string): Buffer {
+  const clean = text.replace(/[\s=-]/g, '').toUpperCase();
+  const bytes: number[] = [];
+  let bits = 0;
+  let value = 0;
+  for (const ch of clean) {
+    const i = B32.indexOf(ch);
+    if (i < 0) throw new Error('not base32');
+    value = (value << 5) | i;
+    bits += 5;
+    if (bits >= 8) {
+      bytes.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(bytes);
+}
+
+export const newTotpSecret = (): string => base32Encode(randomBytes(20));
+
+/** The 6-digit code of a time step (RFC 4226 on the step counter). */
+export function totpCode(secret: string, step: number): string {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const h = createHmac('sha1', base32Decode(secret)).update(counter).digest();
+  const o = h[h.length - 1]! & 15;
+  const n = ((h[o]! & 127) << 24) | (h[o + 1]! << 16) | (h[o + 2]! << 8) | h[o + 3]!;
+  return String(n % 1_000_000).padStart(6, '0');
+}
+
+/**
+ * The time step this code belongs to (±1 step of clock drift), or null. `lastStep` is the newest step already accepted: a code of that step
+ * or an older one is refused, so a code seen over a shoulder or in a log cannot be used twice.
+ */
+export function verifyTotp(secret: string, code: unknown, now = Date.now(), lastStep = 0): number | null {
+  if (typeof code !== 'string') return null;
+  const c = code.replace(/\s/g, '');
+  if (!/^\d{6}$/.test(c)) return null;
+  const cur = Math.floor(now / 1000 / TOTP_STEP_S);
+  let hit: number | null = null;
+  for (const step of [cur - 1, cur, cur + 1]) {
+    const want = Buffer.from(totpCode(secret, step));
+    // no early exit: every window is compared, in constant time
+    if (timingSafeEqual(want, Buffer.from(c)) && step > lastStep) hit = step;
+  }
+  return hit;
+}
+
+export function otpauthUri(secret: string, account: string, issuer = 'Aigentron'): string {
+  const label = `${encodeURIComponent(issuer)}:${encodeURIComponent(account)}`;
+  return `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=${TOTP_STEP_S}`;
+}
+
+/** Ten one-time codes like `k3f9-x7qm`; only their hashes are stored. */
+export function newRecoveryCodes(n = 10): string[] {
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+  return Array.from({ length: n }, () => {
+    const b = randomBytes(8);
+    const s = Array.from(b, (x) => alphabet[x % alphabet.length]).join('');
+    return `${s.slice(0, 4)}-${s.slice(4)}`;
+  });
+}
+export const normaliseRecovery = (c: string): string => c.toLowerCase().replace(/[^a-z0-9]/g, '');
+export const hashRecovery = (c: string): string => createHmac('sha256', 'aigentron-recovery').update(normaliseRecovery(c)).digest('base64url');

@@ -44,7 +44,7 @@ Wrong passwords are rate-limited (5 misses, then a growing wait up to 15 minutes
 ## Console (`aigentron-admin` / `make admin`)
 
 Asks who you are (a numbered list, skipped when only one user has a password) and the password (hidden), then keeps a session token
-in `~/.local/state/aigentron/admin-session.json` (mode 0600). For scripts set `LDS_ADMIN_USER` (name) and `LDS_ADMIN_PASSWORD`.
+in `~/.local/state/aigentron/admin-session.json` (mode 0600). For scripts set `LDS_ADMIN_USER` (name) and `LDS_ADMIN_PASSWORD` (and `LDS_ADMIN_TOTP` when the account uses two-factor sign-in).
 
 ## Signed-in devices (sessions)
 
@@ -59,6 +59,19 @@ session in `~/.local/state/aigentron/admin-session.json` (mode 0600) and reuses 
 Sessions signed in before this feature
 keep working until they expire, but are not listed.
 
+## Two-factor sign-in (authenticator app)
+
+Optional, per user. Each person turns it on for themselves, once: Settings → General → Security → **Two-factor sign-in → Turn on**. Confirm with your password, scan the QR (or open the link on the phone, or type the key) in
+any TOTP app (Google / Microsoft Authenticator, 1Password, Aegis …), type the code it shows, and save the **ten recovery codes** (shown once; each works one time instead of a code).
+From then on the sign-in asks for the password and then a 6-digit code. Details:
+
+- **Required for a user:** an operator/admin ticks *Require two-factor sign-in* when adding or editing the user (Settings → Users). That person's next sign-in does not open the app: it shows the QR code, and the first code they type turns it on and signs them in (the recovery codes are shown then). They cannot turn it off themselves; **Reset 2FA** (lost phone) makes them set it up again at the next sign-in. The console tells such an account to sign in once in the dashboard first.
+- A code works once (the same one is refused a second time) and a minute of clock drift is tolerated. Wrong codes count towards the same attempt limits as wrong passwords.
+- Turning it off, or making new recovery codes, needs the password **and** a code — a stolen session alone cannot remove it. Changing the password keeps it.
+- Lost phone: use a recovery code, or an operator/admin presses **Reset 2FA** for that user in Settings → Users (they are signed out everywhere and can set it up again).
+- Console / scripts: the console asks for the code; set `LDS_ADMIN_TOTP` to the current code for a non-interactive run (`LDS_ADMIN_PASSWORD` as before). API: `POST /api/auth/login` answers `401 {needsCode: true}` after a right password; send the same request again with `code`.
+- It lives in `secrets/auth.json` with the password hashes (the TOTP secret is stored there in the clear, like the session-signing key: the file is mode 0600 and closed to agents). `make reset-password` removes it with the passwords.
+
 ## Forgot the password
 
 Someone else (an operator/admin) can reset it in Settings → Users. If it is the only operator, `make reset-password` (or delete
@@ -67,7 +80,7 @@ Changing your password signs your other browsers out; "Sign out other browsers" 
 
 ## Where it lives
 
-`<secrets dir>/auth.json` (mode 0600; read through a ~2 s cache, so a manual edit or `make reset-password` takes effect within a couple of seconds, a change made by the server itself at once): a scrypt hash per user and the key that signs session cookies. It sits in the
+`<secrets dir>/auth.json` (mode 0600; read through a ~2 s cache, so a manual edit or `make reset-password` takes effect within a couple of seconds, a change made by the server itself at once): a scrypt hash per user (and the two-factor secret and recovery-code hashes of those who turned it on) and the key that signs session cookies. It sits in the
 credentials directory that the approval gate guards and that agent isolation (below) closes to agents by OS permissions, outside the agent tree. No database change.
 
 ## Routes and roles

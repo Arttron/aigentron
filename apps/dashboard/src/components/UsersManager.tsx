@@ -9,10 +9,10 @@ import styles from './UsersManager.module.css';
 const CHANNELS: ChannelKind[] = ['dashboard', 'slack', 'telegram', 'email'];
 
 type Identity = { channel: ChannelKind; externalId: string };
-type FormState = { displayName: string; role: UserRole; identities: Identity[] };
+type FormState = { displayName: string; role: UserRole; identities: Identity[]; require2fa: boolean };
 type ModalState = { mode: 'add' } | { mode: 'edit'; user: User } | null;
 
-const emptyForm: FormState = { displayName: '', role: 'task_setter', identities: [] };
+const emptyForm: FormState = { displayName: '', role: 'task_setter', identities: [], require2fa: false };
 
 export function UsersManager() {
   const [users, setUsers] = useState<User[]>([]);
@@ -23,6 +23,8 @@ export function UsersManager() {
   const { status } = useAuth();
   const signInOn = !!status?.configured;
   const [hasPw, setHasPw] = useState<Record<string, boolean>>({});
+  const [has2fa, setHas2fa] = useState<Record<string, boolean>>({});
+  const [req2fa, setReq2fa] = useState<Record<string, boolean>>({});
   const [pwFor, setPwFor] = useState<User | null>(null);
   const [pw, setPw] = useState('');
   const [pwError, setPwError] = useState<string | null>(null);
@@ -31,6 +33,8 @@ export function UsersManager() {
     if (!signInOn) return;
     const rows = await passwordsApi.overview();
     setHasPw(Object.fromEntries(rows.map((r) => [r.id, r.hasPassword])));
+    setHas2fa(Object.fromEntries(rows.map((r) => [r.id, r.twoFactor])));
+    setReq2fa(Object.fromEntries(rows.map((r) => [r.id, r.twoFactorRequired])));
   }, [signInOn]);
   useEffect(() => {
     void loadPw();
@@ -49,6 +53,13 @@ export function UsersManager() {
     if (!window.confirm(`Remove ${user.displayName}'s password? They will not be able to sign in.`)) return;
     const r = await passwordsApi.remove(user.id).catch(() => null);
     if (!r?.ok) setError(r?.data.error ?? 'Could not remove the password.');
+    await loadPw();
+  };
+
+  const reset2fa = async (user: User) => {
+    if (!window.confirm(`Turn off ${user.displayName}'s two-factor sign-in (a lost phone)? They are signed out everywhere and can set it up again.`)) return;
+    const r = await passwordsApi.resetTwoFactor(user.id).catch(() => null);
+    if (!r?.ok) setError(r?.data.error ?? 'Could not reset two-factor sign-in.');
     await loadPw();
   };
 
@@ -73,6 +84,7 @@ export function UsersManager() {
       displayName: user.displayName,
       role: user.role,
       identities: user.identities.map((i) => ({ channel: i.channel, externalId: i.externalId })),
+      require2fa: !!req2fa[user.id],
     });
     setModal({ mode: 'edit', user });
   };
@@ -82,13 +94,22 @@ export function UsersManager() {
     setError(null);
     try {
       const identities = form.identities.filter((i) => i.externalId.trim());
+      let id: string;
+      let was = false;
       if (modal?.mode === 'edit') {
-        await api.updateUser(modal.user.id, { displayName: form.displayName.trim(), role: form.role, identities });
+        id = modal.user.id;
+        was = !!req2fa[id];
+        await api.updateUser(id, { displayName: form.displayName.trim(), role: form.role, identities });
       } else {
-        await api.createUser({ displayName: form.displayName.trim(), role: form.role, identities });
+        id = (await api.createUser({ displayName: form.displayName.trim(), role: form.role, identities })).id;
+      }
+      if (signInOn && form.require2fa !== was) {
+        const r = await passwordsApi.setRequireTwoFactor(id, form.require2fa).catch(() => null);
+        if (!r?.ok) throw new Error(`The user was saved, but the two-factor requirement was not: ${r?.data.error ?? 'no answer'}`);
       }
       setModal(null);
       await refresh();
+      await loadPw();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -165,6 +186,7 @@ export function UsersManager() {
               </Button>
             )}
             {signInOn && hasPw[u.id] && <Button onClick={() => removePw(u)}>Remove password</Button>}
+            {signInOn && has2fa[u.id] && <Button onClick={() => reset2fa(u)} title="For a lost phone: turns their two-factor sign-in off">Reset 2FA</Button>}
             <Button onClick={() => openEdit(u)}>Edit</Button>
             <Button variant="red" disabled={busy} onClick={() => remove(u)}>
               Delete
@@ -215,6 +237,16 @@ export function UsersManager() {
               ))}
             </select>
           </Field>
+
+          {signInOn && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', margin: '4px 0 12px' }}>
+              <input type="checkbox" checked={form.require2fa} onChange={(e) => setForm((f) => ({ ...f, require2fa: e.target.checked }))} style={{ marginTop: 3 }} />
+              <span>
+                Require two-factor sign-in
+                <Muted>The person sets up an authenticator app (a QR code) at their first sign-in and cannot turn it off themselves.</Muted>
+              </span>
+            </label>
+          )}
 
           <Field label="Channel identities">
             <div className={styles.identities}>

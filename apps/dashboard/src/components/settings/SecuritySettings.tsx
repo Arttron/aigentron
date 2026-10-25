@@ -3,6 +3,7 @@ import { authApi } from '@/lib/auth';
 import { useAuth } from '@/lib/auth-context';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
 import { SetPasswordForm, reconnectSocket } from '@/components/AuthGate';
+import { TwoFactorSettings } from './TwoFactorSettings';
 
 /** Settings → General → Security: set the first password, or change YOUR password / sign out. */
 export function SecuritySettings() {
@@ -74,6 +75,7 @@ export function SecuritySettings() {
               </Button>
             </Row>
           </form>
+          <TwoFactorSettings />
         </>
       )}
       {msg && (msg.ok ? <Muted>{msg.text}</Muted> : <ErrorText>{msg.text}</ErrorText>)}

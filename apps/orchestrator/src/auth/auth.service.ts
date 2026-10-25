@@ -11,6 +11,11 @@ import {
   canRemovePassword,
   hashPassword,
   signSession,
+  hashRecovery,
+  newRecoveryCodes,
+  newTotpSecret,
+  otpauthUri,
+  verifyTotp,
   tokenFromRequest,
   validatePassword,
   verifyPassword,
@@ -21,6 +26,10 @@ interface UserCred {
   hash: string;
   /** Bumped when this user's password changes or is removed — signs that user out everywhere. */
   epoch: number;
+  /** Two-factor sign-in (an authenticator app). `lastStep` = newest accepted time step (a code works once); `recovery` = hashes of unused one-time codes. */
+  totp?: { secret: string; lastStep: number; recovery: string[] };
+  /** A secret shown to the user but not confirmed yet (it only becomes `totp` when a code from the app proves it was scanned). */
+  pendingTotp?: string;
 }
 interface AuthState {
   /** HMAC key for session cookies. */
@@ -28,6 +37,8 @@ interface AuthState {
   /** Global epoch ("sign out everyone"). */
   epoch: number;
   users: Record<string, UserCred>;
+  /** Users whose two-factor sign-in is required: they set it up at their next sign-in and cannot turn it off themselves. */
+  requireTwoFactor?: Record<string, boolean>;
   /** Pre-multi-user file: one password for the default operator. Migrated at startup. */
   passwordHash?: string;
 }
@@ -38,7 +49,7 @@ export interface LoginUser {
   role: string;
 }
 
-type Result<T> = ({ ok: true } & T) | { ok: false; error: string; status?: number };
+type Result<T> = ({ ok: true } & T) | { ok: false; error: string; status?: number; needsCode?: boolean; needsSetup?: { secret: string; uri: string } };
 
 /**
  * Built-in sign-in: each user has their own password. Hashes and the session-signing key live in
@@ -71,7 +82,7 @@ export class AuthService implements OnModuleInit {
       parse: (raw) => {
         const s = raw as Partial<AuthState>;
         return s.secret && Number.isFinite(s.epoch)
-          ? { secret: s.secret, epoch: s.epoch!, users: s.users && typeof s.users === 'object' ? s.users : {}, passwordHash: s.passwordHash }
+          ? { secret: s.secret, epoch: s.epoch!, users: s.users && typeof s.users === 'object' ? s.users : {}, passwordHash: s.passwordHash, requireTwoFactor: s.requireTwoFactor && typeof s.requireTwoFactor === 'object' ? s.requireTwoFactor : undefined }
           : null;
       },
     }));
@@ -178,9 +189,9 @@ export class AuthService implements OnModuleInit {
   }
 
   /** Every user plus whether they have a password (for the Users tab; managers only). */
-  async passwordOverview(): Promise<{ id: string; hasPassword: boolean }[]> {
+  async passwordOverview(): Promise<{ id: string; hasPassword: boolean; twoFactor: boolean; twoFactorRequired: boolean }[]> {
     const s = this.state();
-    return (await this.users.list()).map((u) => ({ id: u.id, hasPassword: !!s?.users[u.id] }));
+    return (await this.users.list()).map((u) => ({ id: u.id, hasPassword: !!s?.users[u.id], twoFactor: !!s?.users[u.id]?.totp, twoFactorRequired: !!s?.requireTwoFactor?.[u.id] }));
   }
 
   /** First password ever: belongs to the default operator. Only while sign-in is off. */
@@ -196,7 +207,7 @@ export class AuthService implements OnModuleInit {
   }
 
   /** `user` is an id or (for scripts) a display name; omitted = the only user who has a password. */
-  async login(user: unknown, password: unknown, key: string, meta?: SessionMeta): Promise<Result<{ token: string; uid: string }>> {
+  async login(user: unknown, password: unknown, key: string, meta?: SessionMeta, code?: unknown): Promise<Result<{ token: string; uid: string; recoveryCodes?: string[] }>> {
     const s = this.state();
     if (!s) return { ok: false, error: 'No password is set.' };
     const wait = this.limiter.wait(key);
@@ -219,9 +230,175 @@ export class AuthService implements OnModuleInit {
       if (u) this.accountLimiter.fail(u.id);
       return { ok: false, error: 'Wrong password.', status: 401 };
     }
+    let recoveryCodes: string[] | undefined;
+    if (!cred.totp && s.requireTwoFactor?.[u.id]) {
+      // Required for this person but not set up yet: no session until it is. The password was right, so the setup is offered (secret kept as `pendingTotp`, the same one on a retry);
+      // the next request carries the first code, which proves the app was set up, turns it on and signs in.
+      const pending = cred.pendingTotp ?? newTotpSecret();
+      if (!cred.pendingTotp) {
+        s.users[u.id] = { ...cred, pendingTotp: pending };
+        this.write(s);
+      }
+      const offer = { secret: pending, uri: otpauthUri(pending, u.displayName) };
+      if (code === undefined || code === null || code === '') return { ok: false, error: 'Two-factor sign-in is required: set it up in your authenticator app, then type the code it shows.', status: 401, needsSetup: offer };
+      const step = verifyTotp(pending, code);
+      if (step === null) {
+        this.limiter.fail(key);
+        this.accountLimiter.fail(u.id);
+        return { ok: false, error: 'That code does not match — check the time on your phone and try the next code.', status: 401, needsSetup: offer };
+      }
+      recoveryCodes = this.activate(s, u.id, step);
+    } else if (cred.totp) {
+      // The password was right; the second factor is asked for without counting it as a failure — the limiters reset only once the code is right too.
+      if (code === undefined || code === null || code === '') return { ok: false, error: 'Enter the 6-digit code from your authenticator app (or a recovery code).', status: 401, needsCode: true };
+      if (!this.acceptSecondFactor(s, u.id, code)) {
+        this.limiter.fail(key);
+        this.accountLimiter.fail(u.id);
+        return { ok: false, error: 'Wrong code.', status: 401, needsCode: true };
+      }
+    }
     this.limiter.ok(key);
     this.accountLimiter.ok(u.id);
-    return { ok: true, token: this.issue(s, u.id, meta), uid: u.id };
+    return { ok: true, token: this.issue(s, u.id, meta), uid: u.id, ...(recoveryCodes ? { recoveryCodes } : {}) };
+  }
+
+  /** Turns two-factor on from a confirmed pending secret; returns the recovery codes (shown once). */
+  private activate(s: AuthState, uid: string, step: number): string[] {
+    const cred = s.users[uid]!;
+    const codes = newRecoveryCodes();
+    const { pendingTotp, ...rest } = cred;
+    s.users[uid] = { ...rest, totp: { secret: pendingTotp!, lastStep: step, recovery: codes.map(hashRecovery) } };
+    this.write(s);
+    return codes;
+  }
+
+  /** A current authenticator code (never the same step twice) or an unused recovery code (spent here). Saves what it consumed. */
+  private acceptSecondFactor(s: AuthState, uid: string, code: unknown): boolean {
+    const cred = s.users[uid];
+    const t = cred?.totp;
+    if (!cred || !t) return false;
+    const step = verifyTotp(t.secret, code, Date.now(), t.lastStep);
+    if (step !== null) {
+      s.users[uid] = { ...cred, totp: { ...t, lastStep: step } };
+      this.write(s);
+      return true;
+    }
+    if (typeof code === 'string' && /^[a-z0-9]{4}[\s-]?[a-z0-9]{4}$/i.test(code.trim())) {
+      const h = hashRecovery(code);
+      if (t.recovery.includes(h)) {
+        s.users[uid] = { ...cred, totp: { ...t, recovery: t.recovery.filter((x) => x !== h) } };
+        this.write(s);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  twoFactorStatus(uid: string): { enabled: boolean; recoveryLeft: number; required: boolean } {
+    const st = this.state();
+    const t = st?.users[uid]?.totp;
+    return { enabled: !!t, recoveryLeft: t?.recovery.length ?? 0, required: !!st?.requireTwoFactor?.[uid] };
+  }
+
+  /** Step 1 of turning it on: needs your password; returns the secret (and the link an authenticator app opens). Nothing is active yet. */
+  async beginTwoFactor(uid: string, password: unknown, key: string): Promise<Result<{ secret: string; uri: string }>> {
+    const s = this.state();
+    const cred = s?.users[uid];
+    if (!s || !cred) return { ok: false, error: 'No password is set for you.' };
+    if (cred.totp) return { ok: false, error: 'Two-factor sign-in is already on. Turn it off first to set it up again.' };
+    const wait = this.limiter.wait(key);
+    if (wait > 0) return { ok: false, error: `Too many attempts — try again in ${wait}s.`, status: 429 };
+    if (typeof password !== 'string' || !verifyPassword(password, cred.hash)) {
+      this.limiter.fail(key);
+      return { ok: false, error: 'The password is wrong.', status: 401 };
+    }
+    const secret = newTotpSecret();
+    s.users[uid] = { ...cred, pendingTotp: secret };
+    this.write(s);
+    const me = await this.userById(uid);
+    return { ok: true, secret, uri: otpauthUri(secret, me?.displayName ?? uid) };
+  }
+
+  /** Step 2: a code from the app proves it was scanned; two-factor turns on and the recovery codes are shown once. */
+  enableTwoFactor(uid: string, code: unknown, key: string): Result<{ recoveryCodes: string[] }> {
+    const s = this.state();
+    const cred = s?.users[uid];
+    if (!s || !cred?.pendingTotp) return { ok: false, error: 'Start the setup first.' };
+    const wait = this.limiter.wait(key);
+    if (wait > 0) return { ok: false, error: `Too many attempts — try again in ${wait}s.`, status: 429 };
+    const step = verifyTotp(cred.pendingTotp, code);
+    if (step === null) {
+      this.limiter.fail(key);
+      return { ok: false, error: 'That code does not match — check the time on your phone and try the next code.' };
+    }
+    const codes = this.activate(s, uid, step);
+    return { ok: true, recoveryCodes: codes };
+  }
+
+  /** Needs the password AND a code (or recovery code): a stolen session alone cannot switch it off. */
+  disableTwoFactor(uid: string, password: unknown, code: unknown, key: string): Result<object> {
+    if (this.state()?.requireTwoFactor?.[uid]) return { ok: false, error: 'An administrator requires two-factor sign-in for your account — it cannot be turned off here.' };
+    const checked = this.checkBoth(uid, password, code, key);
+    if (!checked.ok) return checked;
+    const s = this.state()!;
+    const { totp, pendingTotp, ...rest } = s.users[uid]!;
+    void totp;
+    void pendingTotp;
+    s.users[uid] = rest;
+    this.write(s);
+    return { ok: true };
+  }
+
+  /** A fresh set of recovery codes (the old ones stop working). Same proof as turning it off. */
+  newRecoveryCodes(uid: string, password: unknown, code: unknown, key: string): Result<{ recoveryCodes: string[] }> {
+    const checked = this.checkBoth(uid, password, code, key);
+    if (!checked.ok) return checked;
+    const s = this.state()!;
+    const cred = s.users[uid]!;
+    const codes = newRecoveryCodes();
+    s.users[uid] = { ...cred, totp: { ...cred.totp!, recovery: codes.map(hashRecovery) } };
+    this.write(s);
+    return { ok: true, recoveryCodes: codes };
+  }
+
+  private checkBoth(uid: string, password: unknown, code: unknown, key: string): Result<object> {
+    const s = this.state();
+    const cred = s?.users[uid];
+    if (!s || !cred?.totp) return { ok: false, error: 'Two-factor sign-in is not on.' };
+    const wait = this.limiter.wait(key);
+    if (wait > 0) return { ok: false, error: `Too many attempts — try again in ${wait}s.`, status: 429 };
+    if (typeof password !== 'string' || !verifyPassword(password, cred.hash) || !this.acceptSecondFactor(s, uid, code)) {
+      this.limiter.fail(key);
+      return { ok: false, error: 'The password or the code is wrong.', status: 401 };
+    }
+    return { ok: true };
+  }
+
+  /** A manager makes two-factor sign-in required for a user (or not): they set it up at their next sign-in. Needs sign-in to be on. */
+  async setRequireTwoFactor(targetId: string, required: boolean): Promise<Result<object>> {
+    const s = this.state();
+    if (!s) return { ok: false, error: 'Set the first password in Security before requiring two-factor sign-in.' };
+    if (!(await this.userById(targetId))) return { ok: false, error: 'No such user.', status: 404 };
+    const map = { ...(s.requireTwoFactor ?? {}) };
+    if (required) map[targetId] = true;
+    else delete map[targetId];
+    s.requireTwoFactor = Object.keys(map).length ? map : undefined;
+    this.write(s);
+    return { ok: true };
+  }
+
+  /** A manager removes someone's second factor (a lost phone). That person is signed out everywhere and sets it up again if they want. */
+  async resetUserTwoFactor(targetId: string): Promise<Result<object>> {
+    const s = this.state();
+    const cred = s?.users[targetId];
+    if (!s || !cred?.totp) return { ok: false, error: 'That user has no two-factor sign-in.', status: 404 };
+    const { totp, pendingTotp, ...rest } = cred;
+    void totp;
+    void pendingTotp;
+    s.users[targetId] = { ...rest, epoch: cred.epoch + 1 };
+    this.write(s);
+    await this.sessions.purge(targetId);
+    return { ok: true };
   }
 
   /** Change your own password (needs the current one). Signs your other browsers out. */
@@ -237,7 +414,7 @@ export class AuthService implements OnModuleInit {
     }
     const bad = validatePassword(next);
     if (bad) return { ok: false, error: bad };
-    s.users[uid] = { hash: hashPassword(next as string), epoch: cred.epoch + 1 };
+    s.users[uid] = { ...cred, hash: hashPassword(next as string), epoch: cred.epoch + 1 };
     this.write(s);
     await this.sessions.purge(uid); // every other cookie of this user just stopped working
     return { ok: true, token: this.issue(s, uid, meta) };
@@ -250,7 +427,7 @@ export class AuthService implements OnModuleInit {
     if (!(await this.userById(targetId))) return { ok: false, error: 'No such user.', status: 404 };
     const bad = validatePassword(password);
     if (bad) return { ok: false, error: bad };
-    s.users[targetId] = { hash: hashPassword(password as string), epoch: (s.users[targetId]?.epoch ?? 0) + 1 };
+    s.users[targetId] = { ...s.users[targetId], hash: hashPassword(password as string), epoch: (s.users[targetId]?.epoch ?? 0) + 1 };
     this.write(s);
     await this.sessions.purge(targetId);
     return { ok: true };
@@ -278,7 +455,7 @@ export class AuthService implements OnModuleInit {
     const s = this.state();
     const cred = s?.users[targetId];
     if (!s || !cred) return { ok: false, error: 'That user has no sessions (no password).', status: 404 };
-    s.users[targetId] = { hash: cred.hash, epoch: cred.epoch + 1 };
+    s.users[targetId] = { ...cred, epoch: cred.epoch + 1 };
     this.write(s);
     await this.sessions.purge(targetId);
     return { ok: true, ...(keepMeta ? { token: this.issue(s, targetId, keepMeta) } : {}) };

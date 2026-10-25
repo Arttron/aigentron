@@ -381,8 +381,14 @@ async function ensureSignedIn(rl) {
     users.length > 1 ? await promptChoice(rl, 'Who are you?', users.map((u) => ({ value: u.id, label: u.displayName, hint: `(${u.role})` })), users[0].id) : users[0]?.id;
   for (let attempt = 0; attempt < 3; attempt++) {
     const password = await promptSecret(rl, 'Password: ');
-    const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA }, body: JSON.stringify({ user, password }) });
-    const j = await r.json().catch(() => ({}));
+    let r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA }, body: JSON.stringify({ user, password }) });
+    let j = await r.json().catch(() => ({}));
+    if (j.needsSetup) throw new Error('Two-factor sign-in is required for this account but not set up yet: sign in once in the dashboard (it shows the QR code), then run this again.');
+    if (j.needsCode) {
+      const code = await promptSecret(rl, 'Code from your authenticator app: ');
+      r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA }, body: JSON.stringify({ user, password, code: code.trim() }) });
+      j = await r.json().catch(() => ({}));
+    }
     if (r.ok && j.token) {
       sessionToken = j.token;
       saveToken(sessionToken);
@@ -398,8 +404,16 @@ async function ensureSignedIn(rl) {
 async function signInFromEnv() {
   const password = process.env.LDS_ADMIN_PASSWORD;
   if (!password) throw new Error('The server has a sign-in password. Re-run with LDS_ADMIN_PASSWORD=<password> (and LDS_ADMIN_USER=<name> if several users have one) in the environment.');
-  const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA }, body: JSON.stringify({ user: process.env.LDS_ADMIN_USER || undefined, password }) });
-  const j = await r.json().catch(() => ({}));
+  const attempt = async (code) => {
+    const r = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': UA }, body: JSON.stringify({ user: process.env.LDS_ADMIN_USER || undefined, password, ...(code ? { code } : {}) }) });
+    return { r, j: await r.json().catch(() => ({})) };
+  };
+  let { r, j } = await attempt();
+  if (j.needsSetup) throw new Error('Two-factor sign-in is required for this account but not set up yet: sign in once in the dashboard (it shows the QR code), then try again.');
+  if (j.needsCode) {
+    if (!process.env.LDS_ADMIN_TOTP) throw new Error('This account uses two-factor sign-in: also set LDS_ADMIN_TOTP to the current code from the authenticator app.');
+    ({ r, j } = await attempt(process.env.LDS_ADMIN_TOTP.trim()));
+  }
   if (!r.ok || !j.token) throw new Error(`sign-in failed: ${j.error || r.status}`);
   sessionToken = j.token;
   saveToken(sessionToken);
