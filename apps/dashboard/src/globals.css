@@ -54,6 +54,8 @@
   --red: #e2685f;
   --red-soft: rgba(226, 104, 95, 0.16);
   --on-accent: #06231f; /* text color for solid accent/green fills — accent is bright here, so dark text */
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2306231f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.6 8.4l2.7 2.7 6-6.2'/%3E%3C/svg%3E");
+  --dash-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2306231f' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
   --backdrop: rgba(10, 12, 15, 0.7);
   --pastel-purple: #d2a8ff;
   --pastel-blue: #a5d6ff;
@@ -82,6 +84,8 @@
     --red: #af4238;
     --red-soft: rgba(175, 66, 56, 0.16);
     --on-accent: #f6f1e4;
+    --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23f6f1e4' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.6 8.4l2.7 2.7 6-6.2'/%3E%3C/svg%3E");
+    --dash-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23f6f1e4' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
     --backdrop: rgba(44, 40, 32, 0.45);
     --pastel-purple: #7c4fb0;
     --pastel-blue: #2f6fa8;
@@ -110,6 +114,8 @@
   --red: #af4238;
   --red-soft: rgba(175, 66, 56, 0.16);
   --on-accent: #f6f1e4;
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23f6f1e4' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.6 8.4l2.7 2.7 6-6.2'/%3E%3C/svg%3E");
+  --dash-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23f6f1e4' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
   --backdrop: rgba(44, 40, 32, 0.45);
   --pastel-purple: #7c4fb0;
   --pastel-blue: #2f6fa8;
@@ -137,6 +143,8 @@
   --red: #e2685f;
   --red-soft: rgba(226, 104, 95, 0.16);
   --on-accent: #06231f; /* text color for solid accent/green fills — accent is bright here, so dark text */
+  --check-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2306231f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.6 8.4l2.7 2.7 6-6.2'/%3E%3C/svg%3E");
+  --dash-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2306231f' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M4 8h8'/%3E%3C/svg%3E");
   --backdrop: rgba(10, 12, 15, 0.7);
   --pastel-purple: #d2a8ff;
   --pastel-blue: #a5d6ff;
@@ -186,18 +194,62 @@ select {
   font: inherit;
 }
 
-/* Checkboxes and radios are not text fields: without this they inherit the full-width inset "groove" above and render as long slider-like bars. */
+/* Checkboxes and radios are not text fields: without this they inherit the full-width inset "groove" above and render as long slider-like bars.
+ * They are drawn here instead of by the browser so they belong to the rest of the surface: an empty box is a small groove (like a field), a ticked one
+ * rises and fills with the accent, the tick is drawn in the same ink the accent buttons use (--check-mark per theme). */
 input[type='checkbox'],
 input[type='radio'] {
-  width: 16px;
-  height: 16px;
+  appearance: none;
+  -webkit-appearance: none;
+  /* an empty box: the groove plus a faint rim, so it still reads on the page background */
+  --cb-shadow: var(--inset-sm), inset 0 0 0 1.5px color-mix(in srgb, var(--text-dim) 40%, transparent);
+  width: 18px;
+  height: 18px;
   padding: 0;
   margin: 0;
   flex: none;
-  background: transparent;
-  box-shadow: none;
-  accent-color: var(--accent);
+  vertical-align: middle;
+  background-color: var(--bg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 78%;
+  border-radius: 6px;
+  box-shadow: var(--cb-shadow);
   cursor: pointer;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+input[type='radio'] {
+  border-radius: 50%;
+}
+input[type='checkbox']:hover:not(:disabled),
+input[type='radio']:hover:not(:disabled) {
+  background-color: var(--bg-elev-2);
+}
+input[type='checkbox']:checked,
+input[type='checkbox']:indeterminate,
+input[type='radio']:checked {
+  --cb-shadow: var(--raised-xs);
+  background-color: var(--accent);
+}
+input[type='checkbox']:checked:hover:not(:disabled),
+input[type='checkbox']:indeterminate:hover:not(:disabled),
+input[type='radio']:checked:hover:not(:disabled) {
+  background-color: var(--accent-strong);
+}
+input[type='checkbox']:checked {
+  background-image: var(--check-mark);
+}
+input[type='checkbox']:indeterminate {
+  background-image: var(--dash-mark);
+}
+input[type='radio']:checked {
+  background-image: radial-gradient(circle, var(--on-accent) 0 30%, transparent 34%);
+  background-size: 100%;
+}
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 textarea:focus,
@@ -205,6 +257,10 @@ input:focus,
 select:focus {
   outline: none;
   box-shadow: var(--inset-sm), 0 0 0 2px var(--accent-soft);
+}
+input[type='checkbox']:focus,
+input[type='radio']:focus {
+  box-shadow: var(--cb-shadow), 0 0 0 2px var(--accent-soft);
 }
 
 /* keyboard focus: a clearly visible ring that takes no space (outline does not move layout) */

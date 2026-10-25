@@ -19,5 +19,9 @@ describe('buildItems', () => {
     expect(items[0]).toMatchObject({ type: 'tool', use: { id: 'u' }, result: null });
     expect(items[2]).toMatchObject({ type: 'tool', use: null, result: { id: 'r' } });
   });
+  it('a subtask report is a message from that agent, not from the person', () => {
+    const items = buildItems([{ id: 'r', kind: 'subtask_report', text: '**Design** · done', speaker: 'designer' }]);
+    expect(items).toEqual([{ type: 'agent', line: expect.objectContaining({ speaker: 'designer' }), final: false }]);
+  });
   it('is empty for no lines', () => expect(buildItems([])).toEqual([]));
 });

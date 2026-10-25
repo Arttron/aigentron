@@ -1,9 +1,12 @@
-Aigentron v0.1.92
+Aigentron v0.1.93
 
-For people who are not programmers: the Playwright and Browser add-ons now install on newer servers, such as Ubuntu 26.04.
+For people who are not programmers: a project's chat gets its approvals at once, a subtask's answer reads as that agent's message, long answers fold, and picking tasks in the list is simpler.
 
-Fixed
-- `sudo aigentron addon enable playwright` (and the Browser add-on) refused any system that was not on a fixed list, so Ubuntu 26.04 was rejected with "this add-on supports Debian 11/12/13, Ubuntu 22.04/24.04 …". Debian 11 or newer and Ubuntu 22.04 or newer are accepted now; a version newer than the ones it was tried on gets a warning and the install goes ahead.
-- A library renamed by a newer release (the `t64` suffix) is found by itself, and one that no longer exists is skipped with a warning instead of stopping the install. At the end the add-on starts the browser as a self-test, which shows whether everything works.
+New
+- Approvals and questions of a project that has its own chat go to that chat immediately (before: after about 10 seconds, and not at all while the dashboard was open). A project without a chat, the default one too, is announced only in a free chat that no project owns. The project's chat must be among the channel's allowed chats.
+- In the conversation of a lead task, the report of each subtask now shows as a message from that subtask's agent (for example "designer>") instead of "you>", without the instructions that were sent to the lead. Older reports keep their old look.
+- Long messages of agents with a name (subtask reports, discussion turns) fold to ten lines with "Show more".
+- Picking tasks in the list has no mode any more: every row has a checkbox on the left, the bar above the list is always there and its buttons (Mark as done, Cancel, Delete) switch on once something is ticked, so the page no longer jumps. Shift-click ticks a range.
+- Checkboxes and radio buttons everywhere are drawn in the style of the interface (both themes).
 
-Update note: no database changes. After updating, run `sudo aigentron addon enable playwright` again.
+Update note: no database changes. A new type of conversation entry is stored (a subtask's report); nothing needs to be done.

@@ -102,6 +102,11 @@
   .item > :last-child {
     margin-left: auto;
   }
+  /* the checkbox stays at the left edge of the first line */
+  .check {
+    align-self: flex-start;
+    margin-top: 2px;
+  }
   .children {
     padding-left: 12px;
   }
@@ -114,18 +119,7 @@
   color: var(--text-dim);
 }
 
-/* selection mode: the whole row is the target */
-.selectable {
-  cursor: pointer;
-  user-select: none;
-}
 .picked {
   box-shadow: var(--raised-sm), 0 0 0 2px var(--accent);
 }
-.check {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--accent);
-}
+

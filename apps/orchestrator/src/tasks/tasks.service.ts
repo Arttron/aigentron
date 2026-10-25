@@ -1,3 +1,4 @@
+import { ESCALATION_TAIL_MARK, FAN_IN_TAIL_MARK, subtaskBlock } from './subtask-report';
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { TERMINAL_TASK_STATUSES, isTerminalStatus, type PendingFollowUp, type Task, type TaskStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
@@ -373,9 +374,9 @@ export class TasksService {
     const question = (task.error || '').trim() || 'no details provided';
     await this.followUp(
       task.parentId,
-      `Your subtask «${task.title}» (id ${taskId}) is blocked and needs a decision before it can continue:\n\n` +
-        `${question}\n\n` +
-        `Handle it now — don't wait for your other subtasks: answer with follow_up on that subtask so it ` +
+      `A subtask you created is blocked and needs a decision before it can continue:\n\n` +
+        `${subtaskBlock({ id: taskId, title: task.title, status: 'blocked', body: question })}\n\n` +
+        `${ESCALATION_TAIL_MARK} — don't wait for your other subtasks: answer with follow_up on that subtask so it ` +
         `resumes, or adjust the plan. If you can't decide either, report yourself blocked with the question.`,
     );
     this.logger.log(`Task ${taskId} needs input — escalated to lead ${task.parentId}`);
@@ -424,12 +425,13 @@ export class TasksService {
     });
     if (claimed.count === 0) return;
 
-    const lines = await Promise.all(
-      parent.subtasks.map(async (s) => `- «${s.title}» → ${s.status}: ${await this.summarizeTask(s.id)}${await this.subtaskFilesNote(s.id)}`),
+    // one block per subtask (subtask-report.ts): the conversation shows each as a message from that subtask's agent
+    const blocks = await Promise.all(
+      parent.subtasks.map(async (s) => subtaskBlock({ id: s.id, title: s.title, status: s.status, body: `${await this.summarizeTask(s.id)}${await this.subtaskFilesNote(s.id)}` })),
     );
     const prompt =
-      `All ${parent.subtasks.length} subtasks you created have finished:\n${lines.join('\n')}\n\n` +
-      `Review their results and continue — integrate them, start the next phase, or report the task done. Write your own result: do not quote or retell the subtasks' answers, and do not copy or re-attach their files — the person sees them already.`;
+      `All ${parent.subtasks.length} subtasks you created have finished:\n\n${blocks.join('\n\n')}\n\n` +
+      `${FAN_IN_TAIL_MARK} — integrate them, start the next phase, or report the task done. Write your own result: do not quote or retell the subtasks' answers, and do not copy or re-attach their files — the person sees them already.`;
     this.logger.log(`Task ${parentId}: subtasks complete — resuming lead`);
     await this.followUp(parentId, prompt);
   }

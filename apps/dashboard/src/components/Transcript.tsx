@@ -10,6 +10,7 @@ import { Markdown, MediaTaskContext } from './Markdown';
 import { UserText } from './UserText';
 import { SpeakButton } from './SpeakButton';
 import { CopyButton } from './CopyButton';
+import { Collapsible } from './Collapsible';
 import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
 import { buildItems, type Item, type LogLine } from '@/lib/transcript-items';
 import styles from './Transcript.module.css';
@@ -325,9 +326,18 @@ export function Transcript({
                 </span>
                 {ts(it.line)}
                 <div className={styles.agentBody}>
-                  <MediaTaskContext.Provider value={taskId}>
+                  {it.line.speaker && it.line.speaker !== 'system' ? (
+                    // a subtask's report or a discussion turn: long ones fold to ten lines
+                    <Collapsible resetKey={it.line.id}>
+                      <MediaTaskContext.Provider value={taskId}>
+                        <Markdown text={it.line.text} />
+                      </MediaTaskContext.Provider>
+                    </Collapsible>
+                  ) : (
+                    <MediaTaskContext.Provider value={taskId}>
                       <Markdown text={it.line.text} />
                     </MediaTaskContext.Provider>
+                  )}
                   {it.line.speaker && it.line.speaker !== 'system' && (
                     <div>
                       {translated[it.line.id] === undefined ? (

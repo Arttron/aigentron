@@ -204,3 +204,11 @@ The only way to learn a chat id was to enable the channel, write to the bot and 
 ## 2026-10-25 — the add-ons refused Ubuntu 26.04 (fixed)
 
 `sudo aigentron addon enable playwright` stopped with "this add-on supports Debian 11/12/13, Ubuntu 22.04/24.04 …" on Ubuntu 26.04: the supported systems were an exact list, so every new release was refused until someone edited it. Debian 11+ and Ubuntu 22.04+ are now accepted (a version newer than the tried ones gets a warning), library names are resolved (`name`, else `nameT64`, else skipped with a warning), and the browser self-test at the end of the install is what says whether it really works. Both add-ons (`playwright`, `browser`). Checked in an Ubuntu 24.04 container (dry run); 26.04 itself was not available to test.
+
+## 2026-10-25 — a project's chat got its approvals late, or not at all while the dashboard was open (fixed)
+
+Approvals and questions of a dashboard task waited ~10 s and were dropped when anyone had the dashboard open, also for a project that owns a chat. A project's own chat is its feed, so the request now goes there at once (and the sweep posts it there if the first send failed); the default project / a project without a chat keeps the delay and is announced only in free chats (none owned by a project). A project chat that is not among the channel's allowed chats is reported once in the log (the buttons could not be used there). The routing of approvals is now covered by a test (`channel-approval-routing.test.ts`).
+
+## 2026-10-25 — a subtask's report showed as `you>` in its lead's conversation (fixed)
+
+When the subtasks of a lead finished, the orchestrator woke the lead with a prompt holding their results, and the conversation showed that prompt as the person's message (`you>`), instructions to the lead included, however long the results were. The prompt is now built from one block per subtask (`tasks/subtask-report.ts`); the conversation shows each block as a message from the subtask's own agent (event kind `subtask_report`, `speaker` = that agent; only the lead's real subtasks count), leaves the instructions out, and keeps a person's message queued behind it as theirs. Messages with a speaker (subtask reports, discussion turns) fold to ten lines with "Show more" (`Collapsible`). Telegram messages are not folded.

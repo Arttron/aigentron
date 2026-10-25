@@ -546,6 +546,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       await this.postQuestion(dest.channelId, dest.chatId, q);
       return;
     }
+    // A project with its own chat: ask there at once.
+    const mine = await this.chatsForTask(q.taskId);
+    if (mine.own) {
+      for (const t of mine.chats) await this.postQuestion(t.channelId, t.chatId, q);
+      return;
+    }
     // A dashboard task: give whoever is looking at the page a moment, then ask in the chats if it is still open and nobody is watching.
     const timer = setTimeout(() => {
       this.escalationTimers.delete(timer);
@@ -559,7 +565,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     if (this.presence.anyoneFocused()) return;
     const row = await this.prisma.agentQuestion.findUnique({ where: { id: q.id }, select: { status: true } });
     if (row?.status !== 'pending') return;
-    for (const t of await this.chatsForTask(q.taskId)) await this.postQuestion(t.channelId, t.chatId, q);
+    for (const t of (await this.chatsForTask(q.taskId)).chats) await this.postQuestion(t.channelId, t.chatId, q);
   }
 
   /** Post a question with one button per option; the person can also just reply with text. */
@@ -598,6 +604,12 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       await this.postApproval(dest.channelId, dest.chatId, approval);
       return;
     }
+    // A project with its own chat: that chat is the project's feed — the request goes there at once, nobody has to be away from the dashboard first.
+    const mine = await this.chatsForTask(approval.taskId);
+    if (mine.own) {
+      for (const t of mine.chats) await this.postApproval(t.channelId, t.chatId, approval);
+      return;
+    }
     // Dashboard task (no thread): give the operator a grace period to act in the
     // UI; escalate to channels only if it's still pending and no window is
     // focused (nobody actively watching) after the delay. Track the timer so it
@@ -624,23 +636,32 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
    * dashboard task needs a decision but no one is online to see the UI).
    */
   private async broadcastApproval(approval: ApprovalMsg): Promise<void> {
-    for (const t of await this.chatsForTask(approval.taskId)) await this.postApproval(t.channelId, t.chatId, approval);
+    for (const t of (await this.chatsForTask(approval.taskId)).chats) await this.postApproval(t.channelId, t.chatId, approval);
   }
 
   /** The chats an unthreaded task may be announced in: its project's own chat, else every allowed chat no other project owns (project-chats.ts). */
-  private async chatsForTask(taskId: string): Promise<ChatRef[]> {
+  /** Projects whose missing chat was already reported (once per process, the sweep would repeat it every few seconds). */
+  private readonly warnedNoChat = new Set<string>();
+
+  private async chatsForTask(taskId: string): Promise<{ chats: ChatRef[]; own: boolean }> {
     const allowed: ChatRef[] = [];
     for (const row of (await this.channels.list()).filter((r) => r.enabled && this.channels.isConfigured(r))) {
       for (const chatId of this.channels.allowedChatIds(row)) allowed.push({ channelId: row.id, chatId });
     }
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } }).catch(() => null);
-    if (!task) return allowed;
+    if (!task) return { chats: allowed, own: false };
     const owned = await this.prisma.project.findMany({
       where: { archivedAt: null, notifyChannelId: { not: null }, notifyChatId: { not: null } },
       select: { id: true, notifyChannelId: true, notifyChatId: true },
     });
     const bindings = owned.map((p) => ({ projectId: p.id, channelId: p.notifyChannelId!, chatId: p.notifyChatId! }));
-    return chatTargets(task.projectId, allowed, bindings);
+    const own = bindings.some((b) => b.projectId === task.projectId);
+    const chats = chatTargets(task.projectId, allowed, bindings);
+    if (own && !chats.length && !this.warnedNoChat.has(task.projectId)) {
+      this.warnedNoChat.add(task.projectId);
+      this.logger.warn(`the chat of the task's project is not in its channel's allowed chats (or the channel is off): approvals and questions cannot reach it — add the chat in Settings → Channels`);
+    }
+    return { chats, own };
   }
 
   /**
@@ -662,6 +683,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         if (await this.anyMessageFor('approval', a.id)) continue;
         const dest = await this.dest.destForTask(a.taskId);
         if (dest) await this.postApproval(dest.channelId, dest.chatId, a);
+        else if ((await this.chatsForTask(a.taskId)).own) for (const t of (await this.chatsForTask(a.taskId)).chats) await this.postApproval(t.channelId, t.chatId, a);
         else await this.escalateIfUnattended(a);
       }
       const questions = (await this.questions.list('pending')).filter((q) => new Date(q.createdAt) < since);
@@ -669,6 +691,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         if (await this.anyMessageFor('question', q.id)) continue;
         const dest = await this.dest.destForTask(q.taskId);
         if (dest) await this.postQuestion(dest.channelId, dest.chatId, q);
+        else if ((await this.chatsForTask(q.taskId)).own) for (const t of (await this.chatsForTask(q.taskId)).chats) await this.postQuestion(t.channelId, t.chatId, q);
         else await this.escalateQuestion(q);
       }
     } finally {

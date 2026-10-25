@@ -67,6 +67,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { extraWriteRootsFor, resolveWorkDir, type ProjectContext } from '../projects/project-context';
 import { parsePushRefs } from '../projects/push-core';
 import { GitHubService } from '../worktrees/github.service';
+import { splitSubtaskReport } from '../tasks/subtask-report';
 import { projectFacts } from './project-orientation';
 import { GIT_CREDENTIALS, type GitCredentialsProvider } from '../projects/git-credentials.port';
 import type { Workspace } from '../workspace/workspace.service';
@@ -332,14 +333,14 @@ export class RealAgentExecutor extends AgentExecutor {
         const fresh = await this.buildReferencesContext(ctx.taskId, undefined);
         // The model's own memory is gone, the transcript is not: hand over the last exchanges (messages and answers, no tool noise).
         const past = await this.prisma.agentEvent.findMany({
-          where: { taskId: ctx.taskId, kind: { in: ['prompt', 'result'] }, text: { not: '' } },
+          where: { taskId: ctx.taskId, kind: { in: ['prompt', 'result', 'subtask_report'] }, text: { not: '' } },
           orderBy: { createdAt: 'desc' },
           take: 12,
-          select: { kind: true, text: true },
+          select: { kind: true, text: true, speaker: true },
         });
         const history = past
           .reverse()
-          .map((e) => `${e.kind === 'prompt' ? 'Person' : 'You'}: ${e.text.replace(/\s+/g, ' ').slice(0, 700)}`)
+          .map((e) => `${e.kind === 'prompt' ? 'Person' : e.kind === 'subtask_report' ? `Subtask (${e.speaker ?? 'agent'})` : 'You'}: ${e.text.replace(/\s+/g, ' ').slice(0, 700)}`)
           .join('\n')
           .slice(-6000);
         const lost = `(The earlier session of this task could not be resumed. Its original request: ${task.prompt.slice(0, 1500)}\nThe conversation so far, oldest first:\n${history}\nContinue from here with the person's new message below.)\n`;
@@ -515,6 +516,25 @@ export class RealAgentExecutor extends AgentExecutor {
     return r.message;
   }
 
+  /**
+   * The message that starts this run, as the conversation shows it. Normally the person's words ("you>"); when it is the report of the lead's own subtasks it
+   * is shown as what it is — one message from each subtask's agent — and the instructions to the lead are left out (the model still gets the whole text).
+   */
+  private async recordPrompt(taskId: string, raw: string, shown: string, attachments: string[], onEvent: (e: AgentEvent) => void): Promise<void> {
+    const split = splitSubtaskReport(raw);
+    if (split) {
+      const kids = await this.prisma.task.findMany({ where: { parentId: taskId, id: { in: split.reports.map((r) => r.id) } }, select: { id: true, agentName: true } }).catch(() => []);
+      const agentOf = new Map(kids.map((k) => [k.id, k.agentName]));
+      const real = split.reports.filter((r) => agentOf.has(r.id)); // only this task's own subtasks count (the id in a text proves nothing)
+      if (real.length) {
+        for (const r of real) onEvent({ kind: 'subtask_report', speaker: agentOf.get(r.id) || 'agent', text: `**${r.title}** · ${r.status}\n\n${r.text}` });
+        if (split.rest) onEvent({ kind: 'prompt', text: split.rest, attachments });
+        return;
+      }
+    }
+    onEvent({ kind: 'prompt', text: shown, attachments });
+  }
+
   /** Providers that just failed with a used-up quota / rate limit / bad credentials (in memory — a hint for ordering, not state). */
   private readonly cooldown = new ProviderCooldown();
 
@@ -613,7 +633,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // always kept; the intermediate process trace (thinking/tool calls/system
     // chatter) is only worth the DB weight when someone's actually debugging —
     // it still streams live either way, just isn't replayed on the next page load.
-    const alwaysPersist = (event: AgentEvent) => event.kind === 'prompt' || event.kind === 'result' || event.kind === 'discussion' || (event.kind === 'assistant' && Boolean(event.attachments?.length));
+    const alwaysPersist = (event: AgentEvent) => event.kind === 'prompt' || event.kind === 'result' || event.kind === 'discussion' || event.kind === 'subtask_report' || (event.kind === 'assistant' && Boolean(event.attachments?.length));
 
     let lastEventAt = Date.now();
     let lastEventKind = 'system';
@@ -663,7 +683,7 @@ export class RealAgentExecutor extends AgentExecutor {
           kind: event.kind,
           text: event.text,
           attachments,
-          ...(event.kind === 'discussion' ? { speaker: event.speaker } : {}),
+          ...(event.kind === 'discussion' || event.kind === 'subtask_report' ? { speaker: event.speaker } : {}),
           seq: current,
           ts,
         },
@@ -682,7 +702,7 @@ export class RealAgentExecutor extends AgentExecutor {
               // the app is compiled against the postgres-typed client (the
               // canonical, narrower shape — same tradeoff as PrismaModule's cast).
               attachments: encodeAttachments(this.config, attachments) as string[],
-              speaker: event.kind === 'discussion' ? event.speaker : null,
+              speaker: event.kind === 'discussion' || event.kind === 'subtask_report' ? event.speaker : null,
             },
           })
           .catch((err) => this.logger.warn(`Failed to persist event: ${(err as Error).message}`)),
@@ -695,7 +715,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // run: a failover attempt re-sends the same message to the next provider,
     // which is not a second message from the person.
     if (opts.firstAttempt) {
-      if (!ctx.discussion) onEvent({ kind: 'prompt', text: prompt, attachments: opts.messageAttachments });
+      if (!ctx.discussion) await this.recordPrompt(ctx.taskId, rawPrompt, prompt, opts.messageAttachments, onEvent);
       else if (ctx.discussion.opening) onEvent({ kind: 'prompt', text: ctx.discussion.opening.text, attachments: ctx.discussion.opening.attachments });
     }
 

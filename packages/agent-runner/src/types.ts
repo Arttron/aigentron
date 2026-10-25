@@ -348,6 +348,8 @@ export type AgentEvent =
   | { kind: 'prompt'; text: string; attachments?: string[] }
   | { kind: 'system'; sessionId: string; model: string; text: string }
   | { kind: 'discussion'; speaker: string; text: string }
+  /** A subtask's report as shown in its lead's conversation: a message FROM the subtask's agent (not from the person). */
+  | { kind: 'subtask_report'; speaker: string; text: string }
   | { kind: 'assistant'; text: string; /** pictures shown with this message (task attachment names) — show_images */ attachments?: string[] }
   | { kind: 'tool_use'; toolName: string; input: Record<string, unknown>; text: string }
   | { kind: 'delegation'; text: string }

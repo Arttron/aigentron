@@ -17,7 +17,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 - **Type chips** ("Type:"): *Tasks* (started in the dashboard), *Chats* (with a chat agent such as me), *From chats* (Telegram), *Scheduled*, *Discussions*, *Subtasks* (listed flat). The choice is remembered and in the URL (`/?type=chat`).
 - A task's conversation fills the screen: the expand icon in the conversation's bottom-right corner (on a phone it also hides the header and tabs; Esc exits).
 - New tasks get a short title from a small model (Settings → Task titles); set titles never change.
-- The list shows only main tasks, each with "3 subtasks · 2 done · 1 running" (on its page; a running subtask makes an idle task show running). **☑ Select** picks several tasks: Mark as done / Cancel / Delete.
+- The list shows only main tasks, each with "3 subtasks · 2 done · 1 running" (on its page; a running subtask makes an idle task show running). Every row has a checkbox on the left (Shift-click selects a range; the box above the list ticks the page); the bar above the list is always there and its buttons — Mark as done / Cancel / Delete — switch on once something is ticked.
 
 ## Statuses: who sets "done"
 
@@ -25,7 +25,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Subtasks
 
-Leads call `check_subtasks` and reuse an existing subtask; max 25 per task. New work from inside a task is a **subtask**. A lead closes a handled one with `complete_subtask`.
+In a lead's conversation each subtask's report shows as a message from that subtask's agent (`designer>`, not `you>`), folded to ten lines with **Show more**. Leads call `check_subtasks` and reuse an existing subtask; max 25 per task. New work from inside a task is a **subtask**. A lead closes a handled one with `complete_subtask`.
 
 ## The chat window (task page, this admin chat)
 

@@ -59,12 +59,13 @@ export interface AgentLogEvent {
     | 'tool_result'
     | 'result'
     | 'discussion'
+    | 'subtask_report'
     | 'stderr';
   /** Rendered text for display. */
   text: string;
   /** Attachment filenames sent with a `prompt` message (for inline thumbnails). */
   attachments?: string[];
-  /** Who said it (kind `discussion`: the agent taking part). */
+  /** Who said it (kind `discussion`: the agent taking part; `subtask_report`: the subtask's agent). */
   speaker?: string;
   /** Monotonic sequence number within the session, for ordering. */
   seq: number;

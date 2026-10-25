@@ -1,0 +1,24 @@
+.wrap {
+  position: relative;
+}
+.collapsed {
+  max-height: var(--collapsed-height, 15em);
+  overflow: hidden;
+  /* the last visible line fades out so the cut reads as intentional */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2.2em), transparent);
+}
+.toggle {
+  margin-top: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.toggle:hover,
+.toggle:focus-visible {
+  text-decoration: underline;
+}
