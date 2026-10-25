@@ -336,16 +336,11 @@ export class ApprovalsService {
 
     const isContinuation = current.toolName === CONTINUE_RUN_TOOL;
 
-    // On approve, optionally remember this call so it isn't asked again
-    // (meaningless for a continuation prompt — skip it there).
-    if (decision === 'approve' && !isContinuation) {
-      if (options?.taskException) await this.addException('task', current.taskId, current);
-      if (options?.globalException) await this.addException('global', null, current);
-    }
-
     const status: ApprovalStatus = decision === 'approve' ? 'approved' : 'denied';
-    const updated = await this.prisma.approvalRequest.update({
-      where: { id },
+    // Claim the decision atomically: the dock, a Telegram button and a 👍 can all answer within the same moment, and only the first one counts
+    // (the others learn it is already resolved). Everything with a side effect comes after this.
+    const claimed = await this.prisma.approvalRequest.updateMany({
+      where: { id, status: 'pending' },
       data: {
         status,
         resolvedBy: resolver?.displayName?.trim() || 'human',
@@ -353,6 +348,18 @@ export class ApprovalsService {
         resolvedAt: new Date(),
       },
     });
+    if (claimed.count === 0) {
+      const now = await this.prisma.approvalRequest.findUnique({ where: { id }, select: { status: true } }).catch(() => null);
+      throw new ConflictException(`Approval ${id} already resolved (${now?.status ?? 'gone'})`);
+    }
+    const updated = await this.getRow(id);
+
+    // On approve, optionally remember this call so it isn't asked again
+    // (meaningless for a continuation prompt — skip it there).
+    if (decision === 'approve' && !isContinuation) {
+      if (options?.taskException) await this.addException('task', current.taskId, current);
+      if (options?.globalException) await this.addException('global', null, current);
+    }
 
     this.bus.publish({
       type: 'approval-resolved',

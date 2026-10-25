@@ -4,9 +4,13 @@
  * instant messengers. The choice is per browser (localStorage) — a phone and an office desktop want different things.
  */
 
-export type AlertSoundName = 'uhoh' | 'chime' | 'ping' | 'knock' | 'bell';
+import { customIdOf, getCustomSoundData, isCustomName, MAX_SOUND_SECONDS } from './custom-sounds';
 
-export const ALERT_SOUNDS: { id: AlertSoundName; label: string }[] = [
+export type BuiltinSoundName = 'uhoh' | 'chime' | 'ping' | 'knock' | 'bell';
+/** A built-in sound, or `custom:<id>` for one the person uploaded (lib/custom-sounds.ts). */
+export type AlertSoundName = BuiltinSoundName | `custom:${string}`;
+
+export const ALERT_SOUNDS: { id: BuiltinSoundName; label: string }[] = [
   { id: 'uhoh', label: 'Uh-oh (falling two notes, like the old messengers)' },
   { id: 'chime', label: 'Chime (two rising notes)' },
   { id: 'ping', label: 'Ping (one short high note)' },
@@ -34,7 +38,7 @@ const clamp01 = (n: unknown, fallback: number): number => (typeof n === 'number'
 /** A stored value → settings, with anything missing or broken replaced by the default. */
 export function parseAlertSettings(raw: unknown): AlertSettings {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const known = ALERT_SOUNDS.some((s) => s.id === o.sound);
+  const known = ALERT_SOUNDS.some((s) => s.id === o.sound) || isCustomName(o.sound);
   return {
     enabled: typeof o.enabled === 'boolean' ? o.enabled : DEFAULT_ALERT.enabled,
     sound: known ? (o.sound as AlertSoundName) : DEFAULT_ALERT.sound,
@@ -72,7 +76,7 @@ export interface Note {
 }
 
 /** The notes of a sound. Pure: this is what the tests look at and what `playAlert` plays. */
-export function soundScore(name: AlertSoundName): Note[] {
+export function soundScore(name: BuiltinSoundName): Note[] {
   switch (name) {
     case 'chime':
       return [
@@ -135,10 +139,22 @@ export async function playSound(name: AlertSoundName, volume: number): Promise<b
   if ((c.state as string) !== 'running') return false;
   const master = c.createGain();
   // the ear is not linear: 0–1 on the slider maps to a gentler curve, topping out well below clipping
-  master.gain.value = Math.pow(clamp01(volume, 0.6), 2) * 0.5;
+  master.gain.value = Math.pow(clamp01(volume, 0.6), 2) * (customIdOf(name) ? 1 : 0.5);
   master.connect(c.destination);
+  const customId = customIdOf(name);
+  if (customId) {
+    const buffer = await decodedCustom(c, customId);
+    if (buffer) {
+      const src = c.createBufferSource();
+      src.buffer = buffer;
+      src.connect(master);
+      src.start();
+      return true;
+    }
+    name = DEFAULT_ALERT.sound; // the uploaded file is gone (another browser profile, cleared data): the default sound instead of silence
+  }
   const t0 = c.currentTime + 0.02;
-  for (const n of soundScore(name)) {
+  for (const n of soundScore(name as BuiltinSoundName)) {
     const osc = c.createOscillator();
     const env = c.createGain();
     const start = t0 + n.at / 1000;
@@ -154,6 +170,46 @@ export async function playSound(name: AlertSoundName, volume: number): Promise<b
     osc.stop(end + 0.03);
   }
   return true;
+}
+
+const decoded = new Map<string, AudioBuffer>();
+
+/** decodeAudioData, but never waiting forever on a file the browser cannot make sense of (or an audio device that is not there). */
+function decode(c: AudioContext, data: ArrayBuffer, ms = 8000): Promise<AudioBuffer> {
+  return Promise.race([c.decodeAudioData(data.slice(0)), new Promise<never>((_, no) => setTimeout(() => no(new Error('decode timed out')), ms))]);
+}
+
+/** The decoded audio of an uploaded sound (cached; null when it is not there or cannot be decoded). */
+async function decodedCustom(c: AudioContext, id: string): Promise<AudioBuffer | null> {
+  const hit = decoded.get(id);
+  if (hit) return hit;
+  const data = await getCustomSoundData(id);
+  if (!data) return null;
+  try {
+    const buf = await decode(c, data);
+    decoded.set(id, buf);
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+/** Forget a decoded sound (it was removed). */
+export function forgetCustomSound(id: string): void {
+  decoded.delete(id);
+}
+
+/** Decode a file to check it really is audio of a sensible length; resolves to an error text, or null when it is fine. */
+export async function checkSoundData(data: ArrayBuffer): Promise<string | null> {
+  const c = audioContext();
+  if (!c) return 'This browser cannot play sounds.';
+  try {
+    const buf = await decode(c, data);
+    if (buf.duration > MAX_SOUND_SECONDS) return `That sound is ${buf.duration.toFixed(1)} s long — at most ${MAX_SOUND_SECONDS} s.`;
+    return null;
+  } catch {
+    return 'The browser could not read that file as audio.';
+  }
 }
 
 let lastAlertAt = 0;

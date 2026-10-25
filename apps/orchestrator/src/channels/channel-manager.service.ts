@@ -649,7 +649,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       for (const chatId of this.channels.allowedChatIds(row)) allowed.push({ channelId: row.id, chatId });
     }
     const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } }).catch(() => null);
-    if (!task) return { chats: allowed, own: false };
+    if (!task) return { chats: [], own: false }; // the task is gone (deleted): nothing is waiting for an answer, and nothing is announced anywhere
     const owned = await this.prisma.project.findMany({
       where: { archivedAt: null, notifyChannelId: { not: null }, notifyChatId: { not: null } },
       select: { id: true, notifyChannelId: true, notifyChatId: true },

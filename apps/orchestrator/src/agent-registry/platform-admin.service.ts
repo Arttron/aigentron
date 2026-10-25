@@ -1323,16 +1323,20 @@ export class PlatformAdminService {
     ].join('\n');
   }
 
-  async usageReport(input: { days?: number }): Promise<string> {
+  async usageReport(input: { days?: number; project?: string }): Promise<string> {
     const days = Math.min(365, Math.max(1, Math.round(input.days ?? 7)));
     const stats = this.moduleRef.get(StatsService, { strict: false });
-    const r = await stats.usageByProvider({ from: new Date(Date.now() - days * 86_400_000) });
-    if (!r.providers.length) return `No agent runs in the last ${days} day(s).`;
+    const r = await stats.usageByProvider({ from: new Date(Date.now() - days * 86_400_000), project: input.project });
+    if (!r.providers.length) return `No agent runs in the last ${days} day(s)${input.project ? ` in project "${input.project}"` : ''}.`;
     const n = (x: number) => x.toLocaleString('en-US');
+    const byProject = !input.project && (r.projects?.length ?? 0) > 1
+      ? ['', 'By project — project | runs | requests | input tok | output tok | cache tok | est. cost', ...r.projects!.map((p) => `${p.slug} | ${p.totals.sessions} | ${p.totals.requests} | ${n(p.totals.inputTokens)} | ${n(p.totals.outputTokens)} | ${n(p.totals.cacheTokens)} | $${p.totals.estCostUsd.toFixed(2)}`)]
+      : [];
     return [
-      `Usage over the last ${days} day(s) — provider | runs | requests | input tok | output tok | cache tok | est. cost`,
+      `Usage over the last ${days} day(s)${input.project ? ` in project "${input.project}"` : ''} — provider | runs | requests | input tok | output tok | cache tok | est. cost`,
       ...r.providers.map((p) => `${p.provider} | ${p.sessions} | ${p.requests} | ${n(p.inputTokens)} | ${n(p.outputTokens)} | ${n(p.cacheTokens)} | $${p.estCostUsd.toFixed(2)}`),
       `TOTAL | ${r.totals.sessions} | ${r.totals.requests} | ${n(r.totals.inputTokens)} | ${n(r.totals.outputTokens)} | ${n(r.totals.cacheTokens)} | $${r.totals.estCostUsd.toFixed(2)}`,
+      ...byProject,
       'Cost is an estimate (exact for Anthropic, approximate/0 through LiteLLM, 0 for subscription providers such as Codex).',
     ].join('\n');
   }

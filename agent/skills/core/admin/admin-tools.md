@@ -23,7 +23,7 @@ Reading tools run at once. **Every `propose_*` opens an approval card; nothing h
 | `task_diagnose` | `taskId` | Why a task ended as it did: status, error, agent/provider, reported summary, approvals + outcome, subtasks, last messages |
 | `current_context` | – | The page the person is on now: a task page → that task's diagnosis (as `task_diagnose`), a project page → the project, else the page name. Use it for "this task" / "here" / "why did it fail" without an id |
 | `metrics_report` | `topic` (`approvals`\|`tasks`\|`agents`\|`config`\|`system`), `days?`, `project?`, `agent?` | Tables to check a complaint against: approval cards by reason/tool/repeated command and wait time; task outcomes and why they stopped; per-agent runs, steps, failures, cost; the settings that shape behaviour. Use before and after a change |
-| `usage_report` | `days?` (default 7) | Requests, tokens, estimated cost per provider (Stats page) |
+| `usage_report` | `days?` (default 7), `project?` (slug) | Requests, tokens, est. cost per provider (Stats page); also per project, or for one `project` |
 | `provider_test` | `name` | Connectivity check with stored credentials: OK / FAILED + reason |
 
 ## Changes (always approved by the user first)
@@ -110,7 +110,7 @@ Kinds: `anthropic` (api-key or oauth-token), `openai` (compatible endpoints; `ba
 
 **Undo.** `admin_history` → `propose_undo` with the id. Deleted tasks, cleanups, secrets can't be restored.
 
-**Free disk space.** The server watches the disk itself (every 10 min; banner + chat warning). Settings → General → **Disk & cleanup** has the numbers and **Free up space now**. `maintenance_report` → tell what is there (old worktrees are the big one) → on a clear yes `propose_cleanup` with `worktrees: true`. `deleteBranches` false unless the user explicitly agrees to discard branches (unpushed work).
+**Free disk space.** The server watches the disk (every 10 min). Settings → General → **Disk & cleanup** has the numbers and **Free up space now**. `maintenance_report` → say what is there (old worktrees: the big one) → on a clear yes `propose_cleanup` with `worktrees: true`. `deleteBranches` false unless the user agrees to discard branches (unpushed work).
 
 **Diagnose.** `providers_list` + `provider_test` for model problems; `tasks_list` `status: "failed"`/`stalled` → `task_diagnose` → explain the cause plainly and what to change (provider, key, prompt/tools). Costs: `usage_report`. No server logs or full transcripts: point to the task page.
 

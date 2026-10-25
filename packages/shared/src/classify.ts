@@ -1,3 +1,7 @@
+import { analyzeShell, isMainRef, type ShellFacts } from './shell-guard';
+
+// `URL` exists in every runtime this runs in (the server, the hook, the browser); the package is compiled without the DOM / node typings.
+declare const URL: new (url: string, base?: string) => { protocol: string; hostname: string };
 import { parseFrontmatter } from './frontmatter';
 /**
  * DANGER CLASSIFIER — the single source of truth for what counts as a
@@ -207,12 +211,20 @@ export interface ClassifyOptions {
 
 export type BrowserPage = 'blank' | 'local' | 'external';
 
-/** Where the browser is after this call: a navigation moves it (local dev addresses are `local`, anything else `external`); every other call leaves it where it was. */
+/**
+ * Where the browser is after this call. A navigation moves it (a local dev address → `local`, anything else → `external`); a path on the page it is already
+ * on leaves it where it was. Going back, or switching / opening / closing tabs, puts it on a page nobody has looked at: `external` (= not known to be local)
+ * until the next navigation to a local address. Every other call leaves it as it was.
+ */
 export function browserPageAfter(toolName: string, toolInput: Record<string, unknown>, current: BrowserPage = 'blank'): BrowserPage {
-  if (!/^mcp__playwright(?:-proxy)?__browser_navigate$/i.test(toolName)) return current;
-  const url = typeof toolInput.url === 'string' ? toolInput.url.trim() : '';
-  if (!url || url.toLowerCase() === 'about:blank') return 'blank';
-  return isLocalNavUrl(url) ? 'local' : 'external';
+  const m = /^mcp__playwright(?:-proxy)?__(browser_[a-z_]+)$/i.exec(toolName);
+  if (!m) return current;
+  const tool = m[1]!.toLowerCase();
+  if (tool === 'browser_navigate_back') return 'external';
+  if (tool === 'browser_tabs') return typeof toolInput.action === 'string' && toolInput.action.toLowerCase() === 'list' ? current : 'external';
+  if (tool !== 'browser_navigate') return current;
+  const kind = classifyNavUrl(typeof toolInput.url === 'string' ? toolInput.url : '');
+  return kind === 'relative' ? current : kind;
 }
 
 export interface DangerVerdict {
@@ -238,38 +250,57 @@ const GUARD_LABEL: Record<Guard, string> = {
   outside: 'an action outside the working directory',
 };
 
-/** git verbs that change something or bring something in; `main` / `master` named as a ref of one of them (origin main, HEAD:main, origin/main) is an action on that branch. */
-const MAIN_BRANCH_GIT = /\bgit\b[^\n;&|]*\b(push|merge|pull|reset|cherry-pick|revert|branch|update-ref|checkout|switch|tag)\b[^\n;&|]*(?:^|[\s:/+])(?:main|master)\b/i;
-const MERGE_COMMANDS = /\bgit\s+merge\b(?![^\n;&|]*--(?:abort|quit))|\bgh\s+pr\s+merge\b|\bgh\s+api\b[^\n;&|]*\/merge\b/i;
-/** A command word that writes, moves or deletes — only these make an absolute path in the command an action "outside". */
-const MUTATING_VERB = /(^|[\s;&|(])(rm|rmdir|mv|cp|mkdir|touch|chmod|chown|ln|tee|dd|truncate|install|rsync|unlink|shred)\b|\bsed\s+-[a-z]*i|>>?\s*[^\s&|]/;
-
-/** Does a shell command write / move / delete something outside the agent's write roots? (A heuristic over the paths named in the command.) */
-export function shellActsOutside(command: string, opts: ClassifyOptions): boolean {
-  if (!opts.workspaceRoot || !MUTATING_VERB.test(command)) return false;
-  const named = Array.from(command.matchAll(/(?:^|[\s"'=<>:])((?:~|\.\.?)?\/[^\s"'|;&<>)]*|\.\.(?=\s|$))/g), (m) => m[1]!);
-  return named.some((t) => {
-    if (/^\/dev\/(null|stdout|stderr|stdin|tty)$/.test(t)) return false;
-    if (t === '/' || t === '/*') return true;
-    const abs = t.startsWith('~') ? t : normalize(t.startsWith('/') ? t : `${opts.workspaceRoot!.replace(/\/$/, '')}/${t}`);
-    if (abs.startsWith('~')) return true;
-    return !insideWriteRoots(abs, opts);
-  });
+/** Is a path written by a command beyond the agent's write roots? A path that cannot be known (`$HOME/x`, `~/x`, after a `cd` into the unknown) counts as beyond. */
+function mutatesOutside(m: ShellFacts['mutated'][number], opts: ClassifyOptions): boolean {
+  if (!opts.workspaceRoot) return false;
+  if (m.dynamic) return true;
+  if (m.path === '/' || m.path === '/*') return true;
+  if (!m.path.startsWith('/') && m.cwd === null) return true;
+  return !insideWriteRoots(normalize(m.path.startsWith('/') ? m.path : `${(m.cwd ?? opts.workspaceRoot).replace(/\/$/, '')}/${m.path}`), opts);
 }
 
-/** The merge / main-branch / outside guard a shell command falls under, if any. */
+/** Does a shell command write / move / delete something outside the agent's write roots? */
+export function shellActsOutside(command: string, opts: ClassifyOptions): boolean {
+  return analyzeShell(command, opts.workspaceRoot ?? null).mutated.some((m) => mutatesOutside(m, opts));
+}
+
+/** The merge / main-branch / outside guard a shell command falls under, if any, and whether it writes a protected or credentials file. */
 function shellGuard(command: string, opts: ClassifyOptions): { guard: Guard; reason: string } | null {
-  if (MAIN_BRANCH_GIT.test(command)) return { guard: 'main-branch', reason: GUARD_LABEL['main-branch'] };
-  if (MERGE_COMMANDS.test(command)) return { guard: 'merge', reason: GUARD_LABEL.merge };
-  if (shellActsOutside(command, opts)) return { guard: 'outside', reason: GUARD_LABEL.outside };
+  const facts = analyzeShell(command, opts.workspaceRoot ?? null);
+  if (facts.mainBranch) return { guard: 'main-branch', reason: GUARD_LABEL['main-branch'] };
+  if (facts.merge) return { guard: 'merge', reason: GUARD_LABEL.merge };
+  if (facts.mutated.some((m) => mutatesOutside(m, opts))) return { guard: 'outside', reason: GUARD_LABEL.outside };
+  return null;
+}
+
+/** The first protected / credentials file a shell command writes, moves or deletes (relative paths are read against the directory they run in). */
+function shellProtectedTarget(command: string, opts: ClassifyOptions): { path: string; secret: boolean } | null {
+  for (const m of analyzeShell(command, opts.workspaceRoot ?? null).mutated) {
+    if (m.dynamic) continue;
+    const abs = normalize(m.path.startsWith('/') ? m.path : `${(m.cwd ?? opts.workspaceRoot ?? '').replace(/\/$/, '')}/${m.path}`);
+    if (isSecretPath(abs)) return { path: abs, secret: true };
+    if (isProtectedPath(abs) || abs.split('/').some((seg) => seg === '.git' || seg === '.github')) return { path: abs, secret: false };
+  }
   return null;
 }
 
 /** Shell command patterns that are destructive, irreversible, or outbound. */
 const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string; hard?: boolean }> = [
   {
-    re: /\/proc\/[^\s/]+\/environ|\.codex-home|codex-home\/|(^|[\s/])auth\.json\b|\.git\/config\b|(^|[\s/])\.env(?!\.example)\b|\/\.(ssh|aws|gnupg|docker|kube)\/|\/run\/secrets\/|\/(workspace|data)\/secrets\b/,
+    re: /\/proc\/[^\s/]+\/environ|\.codex-home|codex-home\/|(^|[\s/])auth\.json\b|\.git\/config\b|(^|[\s/"'=])\.env(?!\.example)\b|\.credentials\.json|(^|[\s/"'=~])\.claude\.json|\/\.(ssh|aws|gnupg|docker|kube)\/|\/run\/secrets\/|\/(workspace|data)\/secrets\b/,
     reason: 'touches a credentials file (env/tokens/secrets)',
+    hard: true,
+  },
+  // The model's credentials are in the agent's own environment: listing it, or putting a variable named like a secret into a command, is how they leak.
+  {
+    re: /(^|[\s;&|(`"'])printenv\b|(^|[\s;&|(`"'])env\s*($|[|;&>)`"'])|\bexport\s+-p\b|\bdeclare\s+-[a-z]*x\b|\bcompgen\s+-e\b|\$\{?[A-Z0-9_]*(TOKEN|SECRET|PASSWORD|API_?KEY|OAUTH|CREDENTIALS?|PRIVATE_?KEY)[A-Z0-9_]*/,
+    reason: 'reads secrets from the environment (the model keys / hook secret live there)',
+    hard: true,
+  },
+  // `git config` that makes git run something (hooks, pagers, editors, credential helpers, aliases) is a way to run code later, outside the card.
+  {
+    re: /\bgit\b[^\n;&|]*\bconfig\b[^\n;&|]*\b(core\.(hooksPath|sshCommand|fsmonitor|editor|pager|askPass)|credential\.|alias\.|url\.[^\s]*insteadOf|include(If)?\.path|gpg\.program|diff\.external)/i,
+    reason: 'git config that makes git run a program (hooks, credential helper, alias)',
     hard: true,
   },
   // The sign-in password lives in a `secrets` directory as auth.json: also catch the ways around a literal path
@@ -293,6 +324,7 @@ const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string; hard
   // Outbound network — broadened beyond `curl -X`.
   { re: /\bcurl\b[^\n]*\s(-d|--data\S*|--upload-file|-T|-F|--form|-X|--request)\b/i, reason: 'outbound curl request/upload' },
   { re: /\bwget\b[^\n]*--(post-data|post-file|method)\b/i, reason: 'outbound wget post' },
+  { re: /\b(curl|wget)\b[^\n]*(\$\{?\w|\$\(|`)/i, reason: 'outbound request with a value taken from the shell (a variable or command output in the address)' },
   { re: /\b(curl|wget|fetch)\b[^\n]*\|\s*(sudo\s+)?(ba|z|da|k)?sh\b|\b(ba|z|da|k)?sh\s+-c\s+["']?\$\(\s*(curl|wget)\b/i, reason: 'downloads and executes remote code (curl | sh)' },
   { re: /\b(nc|ncat|netcat|socat)\b/i, reason: 'raw network (netcat/socat)' },
   { re: /\/dev\/(tcp|udp)\//i, reason: 'bash /dev/tcp network socket' },
@@ -375,15 +407,29 @@ const PLAYWRIGHT_LOCAL_INTERACTIONS = new Set([
   'browser_mouse_up',
 ]);
 
-/** Hosts a browser may navigate to without approval (local dev only). Anything
- *  else is gated so navigation can't become an outbound-exfil channel that
- *  bypasses the shell's outbound-network gate. */
+/** Where an address leads, read the way the browser reads it (tabs and newlines dropped, `\` as `/`, scheme-relative `//host` is a host). */
+export function classifyNavUrl(raw: string): 'blank' | 'relative' | 'local' | 'external' {
+  const cleaned = raw.replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, '').replace(/[\t\r\n]/g, '').replace(/\\/g, '/');
+  if (!cleaned) return 'relative';
+  if (cleaned.toLowerCase() === 'about:blank') return 'blank';
+  let u: { protocol: string; hostname: string };
+  try {
+    u = new URL(cleaned, 'http://relative.invalid/');
+  } catch {
+    return 'external'; // not an address the browser can read: not ours to wave through
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'external';
+  if (u.hostname === 'relative.invalid') return 'relative'; // a path on the page it is already on
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return LOCAL_HOSTS.has(host) ? 'local' : 'external';
+}
+
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0', 'host.docker.internal', 'dashboard', 'orchestrator', 'project-dev', 'playwright-mcp']);
+
+/** Hosts a browser may navigate to without approval (local dev only). Anything else is gated so navigation can't become an outbound-exfil channel. */
 function isLocalNavUrl(url: string): boolean {
-  if (!url) return true;
-  if (!/^[a-z]+:\/\//i.test(url)) return true; // relative path → same origin
-  return /^https?:\/\/(localhost|127\.0\.0\.1|\[?::1\]?|0\.0\.0\.0|host\.docker\.internal|dashboard|orchestrator|project-dev|playwright-mcp)(:\d+)?(\/|$)/i.test(
-    url,
-  );
+  const k = classifyNavUrl(url);
+  return k === 'relative' || k === 'local' || k === 'blank';
 }
 
 /**
@@ -423,7 +469,8 @@ function isReadOnlyMcpTool(
       // pull_requests_get, actions_download_*). Mutating verbs (create/update/
       // merge/push/delete/run/rerun/cancel/dispatch) stay gated. The server is
       // also configured read-only, so write tools aren't even exposed.
-      return /(^|_)(get|list|search|read|download)(_|$)/i.test(tool);
+      // a read verb — but `mark_all_notifications_read`, `set_…`, `update_…` and the like end in one and write
+      return !/^(mark|set|update|create|delete|add|remove|merge|push|dismiss|star|unstar|fork|run|rerun|cancel|dispatch|assign|close|reopen|lock|unlock|enable|disable|archive|transfer)_/i.test(tool) && /(^|_)(get|list|search|read|download)(_|$)/i.test(tool);
     case 'playwright':
     case 'playwright-proxy': // the same browser behind a proxy — same rules (non-local navigation stays gated)
       if (tool === 'browser_navigate') {
@@ -477,6 +524,11 @@ const SECRET_PATH_PATTERNS: ReadonlyArray<RegExp> = [
 function isSecretPath(path: string): boolean {
   const n = normalize(path);
   return SECRET_PATH_PATTERNS.some((re) => re.test(n));
+}
+
+/** A path as typed → absolute: relative ones are read against the working directory (the project root), `..` resolved. */
+function absolutePath(p: string, opts: ClassifyOptions): string {
+  return normalize(p.startsWith('/') ? p : `${(opts.workspaceRoot ?? '').replace(/\/$/, '')}/${p}`);
 }
 
 function extractCommand(toolInput: Record<string, unknown>): string {
@@ -794,6 +846,9 @@ export function classifyToolCall(
     }
     // merging a pull request (GitHub MCP `merge_pull_request`, …) is asked about even without approvals
     if (/(^|_)merge(_|$)/i.test(name.split('__').slice(2).join('__'))) return { dangerous: true, summary: toolName, reason: 'MCP tool call (external server): a merge', guard: 'merge' };
+    // a write that names main / master as its branch (push_files, create_or_update_file, delete_file, create_branch from … into main)
+    const target = ['branch', 'base', 'base_branch', 'target_branch', 'ref', 'head'].map((k) => toolInput[k]).find((v) => typeof v === 'string' && isMainRef(v));
+    if (target) return { dangerous: true, summary: toolName, reason: `MCP tool call (external server) on the ${String(target).replace(/^refs\/heads\//, '')} branch`, guard: 'main-branch' };
     return { dangerous: true, summary: toolName, reason: 'MCP tool call (external server)' };
   }
 
@@ -801,6 +856,11 @@ export function classifyToolCall(
     const command = extractCommand(toolInput);
     const summary = command ? `$ ${command}` : `${toolName} (no command)`;
     const safeRm = isSafeRmInRoots(command, opts);
+    // a command that writes, moves or deletes a credentials / protected file — wherever it is named from (a relative `.github/…`, `cd x && …`, `sh -c '…'`)
+    const touched = shellProtectedTarget(command, opts);
+    if (touched) {
+      return { dangerous: true, summary, reason: touched.secret ? 'write to a credentials file (sign-in password / tokens)' : 'write to a protected file (SOUL.md/.github/.git/agent definitions)', hard: true };
+    }
     const guarded = shellGuard(command, opts);
     for (const { re, reason, hard } of DANGEROUS_SHELL_PATTERNS) {
       if (safeRm && RM_REASONS.has(reason)) continue;
@@ -822,10 +882,12 @@ export function classifyToolCall(
     const paths = Array.from(patch.matchAll(/^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm), (m) => m[1]!.trim());
     const summary = `apply_patch ${paths.join(', ') || '(no paths)'}`;
     for (const filePath of paths) {
-      if (isSecretPath(filePath)) {
+      // judged by where it really is: a relative `.github/workflows/ci.yml` is the project's own
+      const where = absolutePath(filePath, opts);
+      if (isSecretPath(where)) {
         return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)', hard: true };
       }
-      if (isProtectedPath(filePath)) {
+      if (isProtectedPath(where)) {
         return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)', hard: true };
       }
       if (opts.workspaceRoot) {
@@ -842,11 +904,11 @@ export function classifyToolCall(
     const filePath = extractPath(toolInput);
     const summary = `${toolName} ${filePath}`;
     // Overwriting a credentials file (e.g. the sign-in password) is gated wherever the worktree boundary sits.
-    if (filePath && isSecretPath(filePath)) {
+    if (filePath && isSecretPath(absolutePath(filePath, opts))) {
       return { dangerous: true, summary, reason: 'write to a credentials file (sign-in password / tokens)', hard: true };
     }
-    // Protected files (charter / CI / git internals) must not be written silently.
-    if (filePath && isProtectedPath(filePath)) {
+    // Protected files (charter / CI / git internals) must not be written silently (a relative path is read against the working directory).
+    if (filePath && isProtectedPath(absolutePath(filePath, opts))) {
       return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)', hard: true };
     }
     // Writes outside the confined worktree are dangerous.

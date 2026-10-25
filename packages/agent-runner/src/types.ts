@@ -303,7 +303,7 @@ export interface AdminToolsWiring {
   /** The dashboard page the person is on while talking to the admin (a task page → that task's details; a project page → the project). */
   currentContext: () => Promise<string>;
   /** Token / request / cost usage per provider over the last N days. */
-  usageReport: (input: { days?: number }) => Promise<string>;
+  usageReport: (input: { days?: number; project?: string }) => Promise<string>;
   /** Approvals / tasks / agents / config numbers over the last N days, as Markdown tables. Read-only. */
   metricsReport: (input: { topic: string; days?: number; project?: string; agent?: string }) => Promise<string>;
   /** Ask the human to enter a secret in a secure field; resolves with whether it was saved (never the value). */

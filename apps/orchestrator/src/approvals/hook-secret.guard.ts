@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
 import { AppConfigService } from '../config/app-config.service';
@@ -15,9 +16,16 @@ export class HookSecretGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const req = context.switchToHttp().getRequest<Request>();
     const provided = req.header('x-lds-hook-secret');
-    if (!provided || provided !== this.config.hookSecret) {
+    if (!provided || !sameSecret(provided, this.config.hookSecret)) {
       throw new UnauthorizedException('invalid or missing hook secret');
     }
     return true;
   }
+}
+
+/** Equal without leaking, by timing, how much of the secret was right. */
+function sameSecret(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
 }

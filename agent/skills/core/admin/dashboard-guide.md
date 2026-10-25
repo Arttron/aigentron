@@ -17,6 +17,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 - **Type chips** ("Type:"): *Tasks* (started in the dashboard), *Chats* (with a chat agent such as me), *From chats* (Telegram), *Scheduled*, *Discussions*, *Subtasks* (listed flat). The choice is remembered and in the URL (`/?type=chat`).
 - A task's conversation fills the screen: the expand icon in the conversation's bottom-right corner (on a phone it also hides the header and tabs; Esc exits).
 - New tasks get a short title from a small model (Settings → Task titles); set titles never change.
+- **📁 Project** selector at the top (with 2+ projects) is the page's context: the list, its counts and the new-task form belong to the chosen project (**All projects** = everything; the form then has its own project picker). A status filter lists main tasks whose own status or a subtask's matches.
 - The list shows only main tasks, each with "3 subtasks · 2 done · 1 running" (on its page; a running subtask makes an idle task show running). Every row has a checkbox on the left (Shift-click selects a range; the box above the list ticks the page); the bar above the list is always there and its buttons — Mark as done / Cancel / Delete — switch on once something is ticked.
 
 ## Statuses: who sets "done"
@@ -71,7 +72,7 @@ A person who wants to edit and test the code on the server: `docs/work-on-server
 
 ## Stats (`/stats`)
 
-By provider: tokens, requests, cost (Codex "—"); Today/7/30 days/all.
+Tokens, requests, cost (Codex "—"); Today/7/30 days/all. Three views: **By provider** (with the stacked chart), **By project** (click a project to see it by provider), **By day** (columns per day, your time zone). A **Project** selector (2+ projects) limits the numbers to one project; the **Show:** tick boxes switch the columns off — Sessions, Requests, Input, Output, Cache, Est. cost (remembered in that browser; the charts follow the token ones).
 
 ## Settings, channels, schedules, languages, proxy
 

@@ -127,7 +127,10 @@ async function main() {
     } catch {
       verdict = null; // fall through to the orchestrator on classifier error
     }
-    if (verdict && !verdict.dangerous) {
+    // A browser navigation (or going back, or a tab change) always goes to the orchestrator, even when it is benign: it keeps track of where each
+    // task's browser is, and that decides whether clicks and typing on the page need a card.
+    const tracksBrowser = /^mcp__playwright(-proxy)?__browser_(navigate|navigate_back|tabs)$/i.test(toolName);
+    if (verdict && !verdict.dangerous && !tracksBrowser) {
       return decide('allow', 'auto-allowed (benign)');
     }
   }

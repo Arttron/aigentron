@@ -242,11 +242,31 @@ export interface ProviderUsage {
   estCostUsd: number;
 }
 
+/** Usage of one project over the range: its totals and what each provider took. */
+export interface ProjectUsage {
+  slug: string;
+  name: string;
+  totals: Omit<ProviderUsage, 'provider'>;
+  providers: ProviderUsage[];
+}
+
+/** One calendar day of usage (the viewer's day: `date` is YYYY-MM-DD). */
+export interface DayUsage {
+  date: string;
+  totals: Omit<ProviderUsage, 'provider'>;
+}
+
 /** Fleet usage over a time range: per-provider rows plus their totals. */
 export interface UsageReport {
   /** Range echoed from the query (ISO 8601; null = unbounded on that side). */
   from: string | null;
   to: string | null;
+  /** The project the rows below are limited to (its slug), or null for every project. */
+  project?: string | null;
   totals: Omit<ProviderUsage, 'provider'>;
   providers: ProviderUsage[];
+  /** Every project's share of the range (not limited by `project`: it is how to choose one). Busiest first. */
+  projects?: ProjectUsage[];
+  /** Usage per day (limited by `project` like the provider rows), oldest first, quiet days included as zeros. */
+  days?: DayUsage[];
 }

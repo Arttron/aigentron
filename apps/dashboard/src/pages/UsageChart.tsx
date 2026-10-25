@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ProviderUsage } from '@lds/shared';
+import type { StatCol } from '@/lib/stats-view';
 import { Muted } from '@/components/ui';
 import styles from './UsageChart.module.css';
 
@@ -20,16 +21,16 @@ type Tip = { x: number; y: number; provider: string; series: string; value: numb
  * the table below is the full, accessible data view. Per-segment values live in
  * the hover tooltip (segments are never individually labeled).
  */
-export function UsageChart({ providers }: { providers: ProviderUsage[] }) {
+export function UsageChart({ providers, hidden = new Set() }: { providers: ProviderUsage[]; hidden?: ReadonlySet<StatCol> }) {
   const [tip, setTip] = useState<Tip | null>(null);
 
   const rows = providers
     .map((p) => ({
       provider: p.provider,
-      input: p.inputTokens,
-      output: p.outputTokens,
-      cache: p.cacheTokens,
-      total: p.inputTokens + p.outputTokens + p.cacheTokens,
+      input: hidden.has('inputTokens') ? 0 : p.inputTokens,
+      output: hidden.has('outputTokens') ? 0 : p.outputTokens,
+      cache: hidden.has('cacheTokens') ? 0 : p.cacheTokens,
+      total: (hidden.has('inputTokens') ? 0 : p.inputTokens) + (hidden.has('outputTokens') ? 0 : p.outputTokens) + (hidden.has('cacheTokens') ? 0 : p.cacheTokens),
     }))
     .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total);
@@ -47,7 +48,7 @@ export function UsageChart({ providers }: { providers: ProviderUsage[] }) {
   return (
     <div className={styles.wrap}>
       <div className={styles.legend}>
-        {SERIES.map((s) => (
+        {SERIES.filter((s) => !hidden.has(s.key)).map((s) => (
           <span key={s.key} className={styles.legendItem}>
             <span className={styles.swatch} style={{ background: s.color }} />
             {s.label}

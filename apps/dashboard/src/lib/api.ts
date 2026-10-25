@@ -672,8 +672,8 @@ export const api = {
       signal,
     }).then((data): TaskPage => (Array.isArray(data) ? { items: data, total: data.length, page: 1, pageSize: data.length || 1 } : data)),
 
-  taskStatusCounts: (type?: TaskTypeFilter, signal?: AbortSignal) => request<Record<TaskStatusFilter, number>>('GET', '/tasks/status-counts', { query: { type: type || undefined }, signal }),
-  taskTypeCounts: (signal?: AbortSignal) => request<Record<TaskTypeFilter | 'all', number>>('GET', '/tasks/type-counts', { signal }),
+  taskStatusCounts: (type?: TaskTypeFilter, signal?: AbortSignal, project?: string) => request<Record<TaskStatusFilter, number>>('GET', '/tasks/status-counts', { query: { type: type || undefined, project: project || undefined }, signal }),
+  taskTypeCounts: (signal?: AbortSignal, project?: string) => request<Record<TaskTypeFilter | 'all', number>>('GET', '/tasks/type-counts', { query: { project: project || undefined }, signal }),
 
   getTask: (id: string) => request<TaskDetail>('GET', `/tasks/${id}`),
   transcript: (id: string) => request<TranscriptEvent[]>('GET', `/tasks/${id}/transcript`),
@@ -865,7 +865,8 @@ export const api = {
   updateUser: (id: string, body: UserInput) => request<User>('PUT', `/users/${e(id)}`, { body }),
   deleteUser: (id: string) => request<{ id: string }>('DELETE', `/users/${e(id)}`),
 
-  getUsage: (params: { from?: string; to?: string } = {}) => request<UsageReport>('GET', '/stats/usage', { query: { from: params.from || undefined, to: params.to || undefined } }),
+  getUsage: (params: { from?: string; to?: string; project?: string } = {}) =>
+    request<UsageReport>('GET', '/stats/usage', { query: { from: params.from || undefined, to: params.to || undefined, project: params.project || undefined, tz: new Date().getTimezoneOffset() } }),
 
   getSettings: () => request<Settings>('GET', '/settings'),
   updateSettings: (body: SettingsUpdate) => request<Settings>('PUT', '/settings', { body }),

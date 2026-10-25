@@ -27,14 +27,14 @@ export class TasksController {
 
   /** Counts per task type (the filter chips). */
   @Get('type-counts')
-  typeCounts() {
-    return this.tasks.typeCounts();
+  typeCounts(@Query('project') project?: string) {
+    return this.tasks.typeCounts(project);
   }
 
   /** Counts per status (the status chips), optionally within one `type`. */
   @Get('status-counts')
-  statusCounts(@Query('type') type?: string) {
-    return this.tasks.statusCounts(type);
+  statusCounts(@Query('type') type?: string, @Query('project') project?: string) {
+    return this.tasks.statusCounts(type, project);
   }
 
   @Get(':id')

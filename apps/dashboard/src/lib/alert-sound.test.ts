@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_CUSTOM_SOUNDS, customIdOf, isCustomName, validateSoundFile } from './custom-sounds';
 import { ALERT_SOUNDS, DEFAULT_ALERT, parseAlertSettings, soundScore } from './alert-sound';
 
 describe('alert sound settings', () => {
@@ -35,5 +36,33 @@ describe('the sounds', () => {
     expect(soundScore('uhoh')).toHaveLength(2);
     expect(b!.from).toBeLessThan(a!.to); // the second note is lower
     expect(b!.at + b!.ms).toBeLessThan(1000);
+  });
+});
+
+describe('uploaded sounds', () => {
+  it('a custom sound id is accepted in the stored settings, a broken one is not', () => {
+    expect(parseAlertSettings({ sound: 'custom:sk3j9abc' }).sound).toBe('custom:sk3j9abc');
+    expect(parseAlertSettings({ sound: 'custom:' }).sound).toBe('uhoh');
+    expect(parseAlertSettings({ sound: 'custom:../../x' }).sound).toBe('uhoh');
+  });
+});
+
+describe('which files may become a sound', () => {
+  const f = (name: string, size: number, type = '') => ({ name, size, type });
+  it('audio of a sensible size is fine', () => {
+    expect(validateSoundFile(f('ding.mp3', 50_000, 'audio/mpeg'), 0)).toBeNull();
+    expect(validateSoundFile(f('ding.m4a', 50_000), 0)).toBeNull(); // no type given: the extension decides
+  });
+  it('anything else says why not', () => {
+    expect(validateSoundFile(f('cat.png', 1000, 'image/png'), 0)).toMatch(/not an audio/);
+    expect(validateSoundFile(f('big.wav', 5_000_000, 'audio/wav'), 0)).toMatch(/at most/);
+    expect(validateSoundFile(f('empty.mp3', 0, 'audio/mpeg'), 0)).toMatch(/empty/);
+    expect(validateSoundFile(f('one.mp3', 1000, 'audio/mpeg'), MAX_CUSTOM_SOUNDS)).toMatch(/remove one first/);
+  });
+  it('names of custom sounds', () => {
+    expect(customIdOf('custom:abc123')).toBe('abc123');
+    expect(customIdOf('uhoh')).toBeNull();
+    expect(isCustomName('custom:abc123')).toBe(true);
+    expect(isCustomName('custom:')).toBe(false);
   });
 });

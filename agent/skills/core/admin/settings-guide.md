@@ -11,7 +11,7 @@ General, Work, Security, Providers, LiteLLM, MCP, Channels, Schedules, Voice & v
 
 **General** (everyday look and upkeep; cards top to bottom):
 - *Display*: **Theme** (per browser), **Assistant** (put the mascot back), debug mode.
-- *Alert sound* (per browser): a short sound when an approval card appears — a falling "uh-oh" by default; pick another (chime, ping, knock, bell), set the volume, also for agent questions, only while the tab is in the background; **Test the sound**. The browser plays it only after one click on the page.
+- *Alert sound* (per browser): a short sound when an approval card appears — a falling "uh-oh" by default; pick another (chime, ping, knock, bell), set the volume, also for agent questions, only while the tab is in the background; **⬆ Upload your own sound** (mp3/wav/ogg/m4a, up to 1 MB and 15 s, five at most; kept in that browser only — not on the server); **Test the sound**. The browser plays it only after one click on the page.
 - *Task titles* (see above).
 - *Version & updates*: **Check now**, **Update to X** (operator confirms; restart 1–2 min; previous kept for `aigentron rollback`; Docker can't self-update: `aigentron update`). I can start it (`propose_update`).
 - *Disk & cleanup*: free-space bar, what takes it, **Free up space now** (regenerable caches only). Checked every 10 min: low = banner + message to the default chat; critical = auto-clear. Attachments never auto-deleted.

@@ -13,7 +13,7 @@ import { DiscussionModal } from '@/components/DiscussionModal';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import styles from './CreateTaskForm.module.css';
 
-export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () => void; projects?: Project[] }) {
+export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }: { onCreated?: () => void; projects?: Project[]; /** the project the page is set to ('' = all): a new task goes there and the form does not ask */ contextProject?: string }) {
   const [prompt, setPrompt] = useState('');
   const { onPaste, notice: pasteNotice } = useSmartPaste(setPrompt);
   const [agentName, setAgentName] = useState('');
@@ -149,7 +149,8 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
   };
 
   // only offered when there is a choice; the remembered one if it still exists, else the default project
-  const project = pickProject(projects, projectPick);
+  const inContext = contextProject !== '' && projects.some((p) => p.slug === contextProject);
+  const project = inContext ? contextProject : pickProject(projects, projectPick);
   // The agents pinned to the chosen project (none pinned = every agent); a pick that is no longer offered falls back to the default.
   const projectRow = projects.find((p) => p.slug === project);
   const offered = offeredAgents(agents, projectRow?.pinnedAgents);
@@ -214,7 +215,7 @@ export function CreateTaskForm({ onCreated, projects = [] }: { onCreated?: () =>
             ))}
           </select>
         )}
-        {projects.length > 1 && (
+        {projects.length > 1 && !inContext && (
           <select
             className={styles.agentSelect}
             aria-label="Project"

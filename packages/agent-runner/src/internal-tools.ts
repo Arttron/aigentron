@@ -821,9 +821,9 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'usage_report',
         description:
-          'Token, request and estimated-cost usage per provider over the last N days (default 7, max 365) — the numbers behind the Stats page. Subscription-based providers (Codex/ChatGPT) record tokens but no cost.',
-        shape: { days: z.number().optional() },
-        handler: (args) => admin.usageReport({ days: typeof args.days === 'number' ? args.days : undefined }),
+          'Token, request and estimated-cost usage per provider over the last N days (default 7, max 365) — the numbers behind the Stats page; `project` (a slug) limits them to one project and adds a per-project breakdown. Subscription-based providers (Codex/ChatGPT) record tokens but no cost.',
+        shape: { days: z.number().optional(), project: z.string().optional() },
+        handler: (args) => admin.usageReport({ days: typeof args.days === 'number' ? args.days : undefined, project: typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined }),
       },
       {
         name: 'request_secret',

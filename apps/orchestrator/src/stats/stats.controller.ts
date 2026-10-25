@@ -17,6 +17,8 @@ export class StatsController {
     return this.stats.usageByProvider({
       from: q.from ? new Date(q.from) : undefined,
       to: q.to ? new Date(q.to) : undefined,
+      project: q.project || undefined,
+      tzOffsetMin: q.tz,
     });
   }
 }

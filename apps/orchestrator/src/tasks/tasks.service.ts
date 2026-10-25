@@ -715,21 +715,40 @@ export class TasksService {
   }
 
   /** How many tasks of each type there are (the numbers on the filter chips). */
-  async typeCounts(): Promise<Record<string, number> & { all: number }> {
+  /** `{ projectId }` for a project slug (an unknown slug matches nothing rather than everything), or null for "every project". */
+  private async projectWhere(slug?: string): Promise<{ projectId: string } | null> {
+    const s = slug?.trim();
+    return s ? { projectId: (await this.projects.get(s).catch(() => null))?.id ?? '' } : null;
+  }
+
+  async typeCounts(project?: string): Promise<Record<string, number> & { all: number }> {
     const chat = await this.chatAgentNames();
-    const counts = await Promise.all(TASK_TYPES.map((tp) => this.prisma.task.count({ where: typeWhere(tp, chat) as never })));
+    const inProject = await this.projectWhere(project);
+    const counts = await Promise.all(TASK_TYPES.map((tp) => this.prisma.task.count({ where: (inProject ? { AND: [typeWhere(tp, chat), inProject] } : typeWhere(tp, chat)) as never })));
     const out: Record<string, number> = {};
     TASK_TYPES.forEach((tp, i) => (out[tp] = counts[i]!));
     return { ...out, all: counts.reduce((a, b) => a + b, 0) } as Record<string, number> & { all: number };
   }
 
   /** How many tasks are in each status (and the two groups) — the numbers on the status chips. Optionally within one type. */
-  async statusCounts(type?: string): Promise<Record<string, number>> {
-    const typed = isTaskType(type) ? typeWhere(type, await this.chatAgentNames()) : {};
-    const rows = await this.prisma.task.groupBy({ by: ['status'], where: typed as never, _count: { _all: true } });
+  async statusCounts(type?: string, project?: string): Promise<Record<string, number>> {
+    const inProject = await this.projectWhere(project);
+    const out: Record<string, number> = {};
+    if (!isTaskType(type)) {
+      // the numbers of the list below: top-level tasks whose own status, or a subtask's, is in the group (see `list`)
+      await Promise.all(
+        STATUS_FILTERS.map(async (f) => {
+          const inStatus = { in: statusesOf(f) };
+          const where = { AND: [{ parentId: null }, { OR: [{ status: inStatus }, { subtasks: { some: { status: inStatus } } }] }, ...(inProject ? [inProject] : [])] };
+          out[f] = await this.prisma.task.count({ where: where as never });
+        }),
+      );
+      return out;
+    }
+    const typed = typeWhere(type, await this.chatAgentNames());
+    const rows = await this.prisma.task.groupBy({ by: ['status'], where: (inProject ? { AND: [typed, inProject] } : typed) as never, _count: { _all: true } });
     const by: Record<string, number> = {};
     for (const r of rows) by[r.status] = r._count._all;
-    const out: Record<string, number> = {};
     for (const f of STATUS_FILTERS) out[f] = statusesOf(f).reduce((n, s) => n + (by[s] ?? 0), 0);
     return out;
   }
@@ -743,9 +762,7 @@ export class TasksService {
       project: PROJECT_SELECT,
     } as const;
     // A project filter (by slug): an unknown slug lists nothing rather than everything.
-    const byProject = params.project?.trim()
-      ? { projectId: (await this.projects.get(params.project.trim()).catch(() => null))?.id ?? '' }
-      : null;
+    const byProject = await this.projectWhere(params.project);
 
     // `mode: 'insensitive'` isn't supported on SQLite (Prisma rejects the
     // argument outright) — SQLite's own `contains`/LIKE is already ASCII
@@ -759,13 +776,17 @@ export class TasksService {
     const search = {
       OR: [...spellings.flatMap((s) => [{ title: { contains: s, ...insensitive } }, { prompt: { contains: s, ...insensitive } }]), { id: q ?? '' }],
     };
-    // A type filter decides the shape itself (subtasks are listed flat; the others are top-level tasks); without one, no search = top-level only.
+    // A type filter or a search decides the shape itself (they look at every level and list flat: subtasks are found by what they say); without them
+    // the list is the top-level tasks — also under a status filter.
     const status = isStatusFilter(params.status) ? params.status : null;
-    const byStatus = status ? { status: { in: statusesOf(status) } } : null;
-    // A status filter looks at ALL levels (a blocked subtask under a finished parent must be found), so it also lists tasks flat.
-    // The project filter narrows whichever shape the other filters chose (top-level only when it is alone).
+    const flat = Boolean(typed || q);
+    const inStatus = status ? { in: statusesOf(status) } : null;
+    // Flat: the task's own status. Top-level: the task's own status OR that of one of its subtasks — a blocked subtask under a finished parent is found
+    // through its parent, and the row (which carries the subtask counts) shows where it is, instead of listing the subtask by itself.
+    const byStatus = inStatus ? (flat ? { status: inStatus } : { OR: [{ status: inStatus }, { subtasks: { some: { status: inStatus } } }] }) : null;
+    // The project filter narrows whichever shape the other filters chose.
     const parts = [typed, byStatus, q ? search : null].filter(Boolean);
-    const shape = parts.length ? (parts.length === 1 ? parts[0] : { AND: parts }) : { parentId: null };
+    const shape = flat ? (parts.length === 1 ? parts[0] : { AND: parts }) : { AND: [{ parentId: null }, ...(byStatus ? [byStatus] : [])] };
     const where = (byProject ? { AND: [shape, byProject] } : shape) as never;
 
     const [top, total] = await this.prisma.$transaction([

@@ -1,0 +1,73 @@
+.wrap {
+  margin-bottom: 16px;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.max {
+  margin-left: auto;
+}
+.plot {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 180px;
+  padding: 8px 8px 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  box-shadow: var(--inset-sm);
+}
+.col {
+  flex: 1 1 0;
+  min-width: 3px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  position: relative;
+}
+.stack {
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 3px 3px 0 0;
+  overflow: hidden;
+  min-height: 0;
+}
+.tick {
+  height: 22px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: visible;
+}
+.tip {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-sm);
+  font-size: 12px;
+}
+.empty {
+  display: block;
+  padding: 16px 0;
+}

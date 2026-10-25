@@ -119,8 +119,8 @@ export function TaskListPage() {
       .catch((e) => {
         if (fresh()) setError((e as Error).message);
       });
-    api.taskTypeCounts(ctl.signal).then((c) => fresh() && setCounts(c)).catch(() => undefined);
-    api.taskStatusCounts(type || undefined, ctl.signal).then((c) => fresh() && setStatusCounts(c)).catch(() => undefined);
+    api.taskTypeCounts(ctl.signal, project || undefined).then((c) => fresh() && setCounts(c)).catch(() => undefined);
+    api.taskStatusCounts(type || undefined, ctl.signal, project || undefined).then((c) => fresh() && setStatusCounts(c)).catch(() => undefined);
   }, [q, type, status, project, page]);
   useEffect(() => () => inflight.current?.abort(), []);
 
@@ -319,7 +319,28 @@ export function TaskListPage() {
         </Card>
       )}
 
-      <CreateTaskForm onCreated={refreshTasks} projects={projects ? selectableProjects(projects) : []} />
+      {(projects?.length ?? 0) > 1 && (
+        // The project is the context of this page: what the list shows and where a new task goes.
+        <div role="group" aria-label="Project context" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+          <strong style={{ fontSize: 13 }}>📁 Project</strong>
+          <select
+            aria-label="Project of this page"
+            value={project}
+            onChange={(e) => pickProject(e.target.value)}
+            style={{ width: 'auto', minWidth: '12em', maxWidth: '100%', fontWeight: 600 }}
+          >
+            <option value="">All projects</option>
+            {(projects ?? []).filter((x) => !x.archivedAt || x.slug === project).map((x) => (
+              <option key={x.slug} value={x.slug}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+          <Muted style={{ fontSize: 12 }}>{project ? 'The list below and every new task belong to this project.' : 'Every project is listed; choose one for a new task in the form.'}</Muted>
+        </div>
+      )}
+
+      <CreateTaskForm onCreated={refreshTasks} projects={projects ? selectableProjects(projects) : []} contextProject={project} />
 
       <Card>
         <div
@@ -439,41 +460,6 @@ export function TaskListPage() {
           })}
         </div>
 
-        {(projects?.length ?? 0) > 1 && (
-          <div role="group" aria-label="Filter by project" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12, alignItems: 'center' }}>
-            <Muted style={{ fontSize: 11 }}>Project:</Muted>
-            {[{ slug: '', name: 'All' }, ...(projects ?? []).filter((x) => !x.archivedAt || x.slug === project)].map((x) => {
-              const on = project === x.slug;
-              return (
-                <button
-                  key={x.slug || 'all'}
-                  type="button"
-                  aria-pressed={on}
-                  title={x.slug ? `Only tasks of ${x.name}` : 'Tasks of every project'}
-                  onClick={() => pickProject(x.slug)}
-                  style={{
-                    border: 'none',
-                    borderRadius: 999,
-                    padding: '4px 12px',
-                    font: 'inherit',
-                    fontSize: 12,
-                    cursor: 'pointer',
-                    maxWidth: '14em',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    background: on ? 'linear-gradient(155deg, var(--accent-strong), var(--accent))' : 'var(--bg-elev-2)',
-                    color: on ? 'var(--on-accent)' : 'var(--text-dim)',
-                    fontWeight: on ? 600 : 400,
-                    boxShadow: on ? undefined : 'var(--raised-xs)',
-                  }}
-                >
-                  {x.name}
-                </button>
-              );
-            })}
-          </div>
-        )}
 
         <TaskList tasks={tasks} onDelete={removeTask} selected={new Set(picked.keys())} onToggle={toggle} />
 

@@ -60,3 +60,42 @@
   max-width: 100%;
   overflow-x: auto;
 }
+
+.sep {
+  flex: 0 0 1px;
+  align-self: stretch;
+  margin: 0 4px;
+  background: var(--border);
+}
+.projectSelect {
+  width: auto;
+  min-width: 10em;
+  max-width: 100%;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.show {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: -4px 0 14px;
+  font-size: 13px;
+}
+.showItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.link:hover {
+  text-decoration: underline;
+}
