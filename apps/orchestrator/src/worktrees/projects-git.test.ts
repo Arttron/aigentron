@@ -214,6 +214,27 @@ describe('per-project git', () => {
     expect(await github.pushBranch(project('local', null), 'develop', 'develop')).toMatchObject({ ok: false });
   });
 
+  it('fetch_remote: brings origin/<branch> up to date with the project credentials, moves no local branch, and says why when it cannot', async () => {
+    const a = project('alpha', remotes.a);
+    await worktrees.useSharedRepo(a);
+    const before = await git(a.repoPath, 'rev-parse', 'HEAD');
+    const other = join(base, 'other-fetch');
+    await git(base, 'clone', '-q', remotes.a, other);
+    await writeFile(join(other, 'new.txt'), 'upstream');
+    await git(other, 'add', '.');
+    await git(other, 'commit', '-q', '-m', 'upstream work');
+    await git(other, 'push', '-q', 'origin', 'HEAD');
+    const theirs = await git(other, 'rev-parse', 'HEAD');
+    const r = await github.fetchRemote(a);
+    expect(r.ok).toBe(true);
+    expect(r.message).toContain(`Fetched origin/${a.repoBranch}`);
+    expect(await git(a.repoPath, 'rev-parse', `origin/${a.repoBranch}`)).toBe(theirs);
+    expect(await git(a.repoPath, 'rev-parse', 'HEAD')).toBe(before); // nothing of the agent's moved
+    expect((await github.fetchRemote(a, 'all')).ok).toBe(true);
+    expect(await github.fetchRemote(a, '--upload-pack=x')).toMatchObject({ ok: false, message: expect.stringContaining('not a plain branch name') });
+    expect(await github.fetchRemote(project('local', null))).toMatchObject({ ok: false });
+  });
+
   it('ensure() of one project is serialised; the other project is not waiting behind it', async () => {
     project('alpha', remotes.a);
     const b = project('beta', remotes.b);

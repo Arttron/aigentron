@@ -7,7 +7,7 @@
 
 **Step limit.** An agent's file may have `maxTurns: 80` (5–500; default 40 for everyone): how many steps one run may take before it must report or ask the person to continue. Give leads that plan big work more; the Agents form has the field.
 
-**Pushing code.** Agents of a code project with a remote have `push_branch {branch, to?, reason}`: a person approves each push, the orchestrator pushes with the project's key (agents hold none, so a `git push` from their shell always fails). Never forced; works on local branches only.
+**Fetching code.** The same agents have `fetch_remote {branch?}` (no approval): the orchestrator runs `git fetch` with the project's key, then the agent merges `origin/<branch>` itself — a `git fetch` / `git pull` from an agent's shell always fails (`Host key verification failed`) because it holds no credentials. **Pushing code.** Agents of a code project with a remote have `push_branch {branch, to?, reason}`: a person approves each push, the orchestrator pushes with the project's key (agents hold none, so a `git push` from their shell always fails). Never forced; works on local branches only.
 
 **Where a task lives.** A task's project is set when it is created (New task form, the project's default agent, or `create_task`); its subtasks inherit it. `propose_task` (mine) makes a subtask of this chat by default (when this chat is itself top-level), or with `standalone: true` a top-level task in the DEFAULT project — it has no project option.
 

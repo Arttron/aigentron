@@ -33,7 +33,7 @@ describe('internal tool registry', () => {
   // Every callback wired; `admin` is a Proxy so every admin handler exists.
   const noop = async () => '';
   const full = {
-    onReportStatus: () => {}, onHeartbeat: () => {}, onCreateSubtask: noop, onCreateTask: noop, onPushBranch: noop, onCheckSubtasks: noop, onCompleteSubtask: noop,
+    onReportStatus: () => {}, onHeartbeat: () => {}, onCreateSubtask: noop, onCreateTask: noop, onPushBranch: noop, onFetchRemote: noop, onCheckSubtasks: noop, onCompleteSubtask: noop,
     onScheduleCheck: noop, onSearchResources: noop, onShowImages: noop, onCurrentTime: noop, onReadDocument: noop,
     onAskUser: noop, onLookAt: noop, onVideoDigest: noop, onStartPreview: noop, onProposeLearnedSkill: noop,
     workspace: { info: noop, files: noop, note: noop, save: noop },

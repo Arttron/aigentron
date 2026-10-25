@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Project } from '@lds/shared';
-import { deployKeyPlace, formatDuration, pickProject, previewSlug, providerTokenPage, relativeTime, repoLabel, repoLine, selectableProjects, slugFromName, stepMark, stepTone, testSummary } from './projects';
+import { deployKeyPlace, formatDuration, pickProject, previewSlug, providerTokenPage, relativeTime, repoLabel, repoLine, selectableProjects, slugFromName, stepMark, stepTone, syncSummary, testSummary } from './projects';
 
 describe('slug preview', () => {
   it('transliterates unicode names like the server', () => {
@@ -167,5 +167,12 @@ describe('offeredAgents', () => {
   it('a pinned agent that was deleted is ignored; all of them gone offers everything', () => {
     expect(offeredAgents(all, ['dev', 'ghost'])).toEqual([{ name: 'dev' }]);
     expect(offeredAgents(all, ['ghost'])).toEqual(all);
+  });
+});
+
+describe('syncSummary', () => {
+  it('a finished sync is a success with what was done and the short head', () => {
+    expect(syncSummary({ action: 'fetched', branch: 'main', head: 'f99905d1234', detail: 'fetched origin/main' })).toEqual({ ok: true, message: 'fetched origin/main · f99905d' });
+    expect(syncSummary({ action: 'skipped', branch: 'main', head: null, detail: '' })).toEqual({ ok: true, message: 'skipped' });
   });
 });

@@ -36,6 +36,11 @@ export const CREATE_TASK_TOOL = `${INTERNAL_TOOL_PREFIX}create_task`;
  * the credentials, so a `git push` from its shell cannot work; this is the way, and a person approves each push on a card.
  */
 export const PUSH_BRANCH_TOOL = `${INTERNAL_TOOL_PREFIX}push_branch`;
+/**
+ * An agent asks the orchestrator to `git fetch` its project's remote with the project's credentials (a `git fetch` from its own shell cannot
+ * authenticate). Read-only for the remote and for the agent's files (only remote-tracking refs move), so it needs no approval.
+ */
+export const FETCH_REMOTE_TOOL = `${INTERNAL_TOOL_PREFIX}fetch_remote`;
 export const COMPLETE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}complete_subtask`;
 export const CHECK_SUBTASKS_TOOL = `${INTERNAL_TOOL_PREFIX}check_subtasks`;
 /**

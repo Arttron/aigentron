@@ -1,14 +1,13 @@
-Aigentron v0.1.88
+Aigentron v0.1.89
 
-For people who are not programmers: sign-in can now ask for a code from an authenticator app, and the chat has a full-screen icon.
+For people who are not programmers: agents can now pull the latest code of a project that uses an SSH key, and they know the settings of the project they work in.
 
 New
-- Two-factor sign-in (optional). Each person turns it on once in Settings → General → Security → Two-factor sign-in: scan a QR code with Google / Microsoft Authenticator, 1Password, Aegis or similar, type the code, and save the ten recovery codes (shown once). After that, signing in asks for the password and then a 6-digit code.
-- An operator or admin can require it for a user (a checkbox when adding or editing the user). That person sets it up at their next sign-in and cannot turn it off themselves. "Reset 2FA" in Users helps when a phone is lost.
-- The command-line console asks for the code too; for scripts set LDS_ADMIN_TOTP. Details: docs/authentication.md.
-- The conversation's full-screen toggle is an icon in the chat's bottom-right corner, like a video player's. On the phone it also hides the header, tabs and bottom bar.
+- Agents can fetch the project's remote: a new `fetch_remote` tool (no approval needed). Before, an agent's own `git pull` failed with "Host key verification failed" because agents hold no keys by design; now the server fetches with the project's key, and the agent merges the new commits itself. Nothing of the agent's files or branches changes by the fetch.
+- Every agent working in a code project is told that project's settings: repository and base branch, how the remote is reached, shared or worktree mode, subdirectory and the checks that run afterwards, and that remote git goes through `fetch_remote` / `push_branch`.
 
 Fixed
-- The "jump to latest" button no longer sits on top of the full-screen icon.
+- Projects → Repository → "Sync now" showed a cross and no text after a successful sync. It now shows a tick, what was done and the short commit id.
+- The `git` skill told agents to switch to `develop` and `git pull`, said plain `git fetch` authenticates itself and that a local merge needs approval; all of that is corrected. The `playwright` skill no longer calls the Docker sample app "the base project".
 
 Update note: no database changes.

@@ -1,3 +1,4 @@
+import { isSafeBranchName } from '../projects/push-core';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { GIT_CREDENTIALS, type GitAuth, type GitCredentialsProvider } from '../projects/git-credentials.port';
 import { runGit } from '../projects/git/git-runner';
@@ -120,6 +121,34 @@ export class GitHubService {
     const link = slug ? `https://github.com/${slug.owner}/${slug.repo}/tree/${to}` : redactUrl(repoUrl);
     this.logger.log(`[${project.slug}] push_branch: ${branch} → origin/${to}`);
     return { ok: true, message: `Pushed "${branch}" to origin as "${to}" — ${link}` };
+  }
+
+  /**
+   * `fetch_remote` (an agent asked): `git fetch --prune origin <branch>` in the project's checkout with the project's credentials, so `origin/<branch>` is current
+   * in the checkout the agent's worktree shares. Moves only remote-tracking refs. Returns a sentence for the agent — success or the reason it did not work.
+   */
+  async fetchRemote(project: PublishTarget, branch?: string): Promise<{ ok: boolean; message: string }> {
+    const repoUrl = project.repoUrl;
+    if (!repoUrl) return { ok: false, message: 'This project has no repository URL: there is no remote to fetch from (set it in the project settings).' };
+    const all = branch === 'all';
+    const want = all ? null : (branch ?? project.repoBranch);
+    if (want !== null && !isSafeBranchName(want)) return { ok: false, message: `Refused: "${want}" is not a plain branch name.` };
+    const auth = await this.authOf(project, 'fetch');
+    if (!auth) return { ok: false, message: 'Fetch refused: the project has no usable credentials (open the project page and fix the repository access / test the repo).' };
+    if (auth.anonymous && needsHttpCredentials(repoUrl)) return { ok: false, message: 'Fetch refused: this project has no GitHub token or SSH key configured (project page → Repository → access).' };
+    const repo = project.repoPath;
+    await this.git(repo, ['remote', 'set-url', 'origin', repoUrl]).catch(() => this.git(repo, ['remote', 'add', 'origin', repoUrl]).catch(() => undefined));
+    try {
+      await this.git(repo, ['fetch', '--prune', 'origin', ...(want ? [want] : [])], auth);
+    } catch (err) {
+      const full = auth.redact((err as Error).message);
+      const why = full.split('\n').find((l) => /denied|permission|fatal|host key|could not|couldn't/i.test(l)) ?? full.split('\n')[0] ?? '';
+      this.logger.warn(`[${project.slug}] fetch_remote ${want ?? 'all'} failed: ${why}`);
+      return { ok: false, message: `The fetch failed: ${why.slice(0, 300)}. Nothing was changed. If this is about access, a person must fix the project's repository access (project page → Repository → Test).` };
+    }
+    const head = want ? await this.git(repo, ['rev-parse', '--short', '--verify', '--quiet', `refs/remotes/origin/${want}`]).then((r) => r.trim(), () => '') : '';
+    this.logger.log(`[${project.slug}] fetch_remote: ${want ?? 'all'}`);
+    return { ok: true, message: want ? `Fetched origin/${want}${head ? ` — now at ${head}` : ''}. Your files and branches are unchanged: bring it in with \`git merge origin/${want}\` (or rebase).` : 'Fetched every branch of origin. Your files and branches are unchanged: bring what you need in with git merge / rebase.' };
   }
 
   /** The project's HTTPS token for the GitHub API (the port), else the installation's legacy one. */

@@ -67,6 +67,7 @@ import { ProjectsService } from '../projects/projects.service';
 import { extraWriteRootsFor, resolveWorkDir, type ProjectContext } from '../projects/project-context';
 import { parsePushRefs } from '../projects/push-core';
 import { GitHubService } from '../worktrees/github.service';
+import { projectFacts } from './project-orientation';
 import { GIT_CREDENTIALS, type GitCredentialsProvider } from '../projects/git-credentials.port';
 import type { Workspace } from '../workspace/workspace.service';
 
@@ -200,7 +201,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // static for a task (paths, branch) — it lives in the system append.
     const workspaceOn = !chat; // chat agents and discussion participants get the tools, not the prompt block
     const orientation =
-      (chat ? buildChatOrientation(workDir) : docs ? buildDocsOrientation(workDir, project) : buildOrientation(workDir, ctx.worktreePath, task.branch, project.isolation === 'shared', project)) +
+      (chat ? buildChatOrientation(workDir) : docs ? buildDocsOrientation(workDir, project) : buildOrientation(workDir, ctx.worktreePath, task.branch, project.isolation === 'shared', project, !ctx.discussion && !!project.repoUrl)) +
       (workspaceOn ? `\n\n${workspace.orientation()}` : '');
     // What changes between runs (the project map, the workspace memory) goes into
     // the run's MESSAGE, never into the system append: a changed system block
@@ -508,6 +509,12 @@ export class RealAgentExecutor extends AgentExecutor {
     return r.message;
   }
 
+  /** `fetch_remote`: fetch the project's remote with the project's credentials (no approval — it only downloads). */
+  private async fetchRemoteFor(project: ProjectContext, input: { branch?: string }): Promise<string> {
+    const r = await this.github.fetchRemote(project, input.branch);
+    return r.message;
+  }
+
   /** Providers that just failed with a used-up quota / rate limit / bad credentials (in memory — a hint for ordering, not state). */
   private readonly cooldown = new ProviderCooldown();
 
@@ -786,6 +793,7 @@ export class RealAgentExecutor extends AgentExecutor {
       onReportStatus,
       onHeartbeat,
       // Publishing goes through the orchestrator (it holds the project's key/token; the agent holds none): a person approves each push.
+      onFetchRemote: opts.project.kind === 'code' && opts.project.repoUrl && !ctx.discussion ? (input) => this.fetchRemoteFor(opts.project, input) : undefined,
       onPushBranch: opts.project.kind === 'code' && opts.project.repoUrl && !ctx.discussion ? (input) => this.pushBranchFor(ctx.taskId, session.id, opts.project, input) : undefined,
       onCreateSubtask: ctx.onCreateSubtask,
       // A LEAD (a top-level task — the one that may create subtasks) whose file says `createTasks: true` may start new tasks in a project (each approved by a person).
@@ -1663,7 +1671,7 @@ function buildChatOrientation(workDir: string): string {
  * Static for a task (no file list): the project map travels in the run's message
  * (prompt-layers.ts), and a sub-agent runs `git ls-files` itself.
  */
-function buildOrientation(workDir: string, worktreeRoot: string, branch: string | null, shared = false, project?: Pick<ProjectContext, 'name' | 'slug' | 'isDefault'>): string {
+function buildOrientation(workDir: string, worktreeRoot: string, branch: string | null, shared = false, project?: ProjectContext, remoteTools = false): string {
   const kind = shared
     ? 'the project repository (the shared main working directory)'
     : 'a dedicated git worktree (an isolated checkout of the project repository) created for this task';
@@ -1687,6 +1695,7 @@ function buildOrientation(workDir: string, worktreeRoot: string, branch: string 
     'launch collides with it and corrupts the `.next` build cache. Use `preview_worktree` to',
     'render a page if you have it; otherwise report and let the lead preview.',
   );
+  if (project) lines.push('', ...projectFacts(project, { fetch: remoteTools, push: remoteTools }));
   return lines.join('\n');
 }
 

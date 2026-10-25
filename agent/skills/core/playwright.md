@@ -19,8 +19,8 @@ first call `mcp__lds_internal__preview_worktree` (no args). It starts an ephemer
 there (use the URL exactly as returned: on a server with the add-on it is `localhost`, the browser being on the same machine). This is what you want when reviewing a change you just made. The server is torn down
 automatically when the task finishes. (The target app must honor `$PORT` and bind `0.0.0.0`.)
 
-**Base app (fallback).** The always-on `project-dev` service serves the *base* project (no
-worktree changes) at `http://project-dev:3080` — use it only when you explicitly want the
+**Base app (fallback).** The always-on `project-dev` service is a sample app of the Docker stack (the `./project` folder), not a registered project: it exists only on a Docker install
+and only for the default project's stack. In any other project use `preview_worktree`; use `project-dev` (`http://project-dev:3080`) only when it is there and you explicitly want the
 baseline. `localhost` is NOT correct in either case: from the browser container `localhost` is
 itself, not the app.
 

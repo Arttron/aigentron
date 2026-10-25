@@ -133,6 +133,11 @@ export interface RunAgentParams {
    */
   onPushBranch?: (input: { branch: string; to?: string; reason?: string }) => Promise<string>;
   /**
+   * When set (a code project with a remote), the agent gets a `fetch_remote` tool: update the remote-tracking branches (`origin/<branch>`) with the project's
+   * credentials, which the agent's own shell does not have. No approval: it only downloads. Resolves with a message for the model.
+   */
+  onFetchRemote?: (input: { branch?: string }) => Promise<string>;
+  /**
    * When set (the agent's file says `createTasks: true`), the agent gets a `create_task` tool: start a NEW top-level task in a project.
    * Resolves with a message for the model (created / reused / refused).
    */

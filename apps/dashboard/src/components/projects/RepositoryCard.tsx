@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Project, ProjectRepoAuth } from '@lds/shared';
 import { api, type RepoInfo, type RepoTestResult } from '@/lib/api';
-import { PROVIDER_NAME, apiMessage, checkRepoUrl, deployKeyPlace, providerTokenPage, relativeTime, repoLabel, stepMark, stepTone, testSummary } from '@/lib/projects';
+import { PROVIDER_NAME, apiMessage, checkRepoUrl, deployKeyPlace, providerTokenPage, relativeTime, repoLabel, syncSummary, stepMark, stepTone, testSummary } from '@/lib/projects';
 import { Button, Card, ErrorText, Field, Muted, SectionTitle } from '@/components/ui';
 import { CopyButton } from '@/components/CopyButton';
 import styles from './projects.module.css';
@@ -299,7 +299,7 @@ export function RepositoryCard({ project, onChanged }: { project: Project; onCha
         <label className={styles.status} style={{ display: 'inline-flex', gap: 6, alignItems: 'center', cursor: 'pointer' }}>
           <input type="checkbox" style={{ width: 'auto' }} checked={checkWrite} onChange={(e) => setCheckWrite(e.target.checked)} /> also check write access
         </label>
-        <Button disabled={!hasUrl || busy !== null || dirty} onClick={() => void run('sync', () => api.syncProjectRepo(slug), (r) => setSync(r))}>
+        <Button disabled={!hasUrl || busy !== null || dirty} onClick={() => void run('sync', () => api.syncProjectRepo(slug), (r) => setSync(syncSummary(r)))}>
           {busy === 'sync' ? 'Syncing…' : 'Sync now'}
         </Button>
       </div>

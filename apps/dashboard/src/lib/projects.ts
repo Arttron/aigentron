@@ -272,3 +272,9 @@ export function offeredAgents<T extends { name: string }>(all: readonly T[], pin
   const kept = all.filter((a) => set.has(a.name));
   return kept.length ? kept : [...all];
 }
+
+/** The line shown after "Sync now": the server answers with what it did (a failure never gets here — it is an HTTP error). */
+export function syncSummary(r: { action: string; branch: string; head: string | null; detail: string }): { ok: boolean; message: string } {
+  const head = r.head ? ` · ${r.head.slice(0, 7)}` : '';
+  return { ok: true, message: `${r.detail || r.action}${head}` };
+}

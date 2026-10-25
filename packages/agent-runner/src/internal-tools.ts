@@ -23,6 +23,7 @@ export type InternalToolHandlers = Pick<
   | 'onCreateSubtask'
   | 'onCreateTask'
   | 'onPushBranch'
+  | 'onFetchRemote'
   | 'onCheckSubtasks'
   | 'onCompleteSubtask'
   | 'onScheduleCheck'
@@ -98,6 +99,16 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           to: typeof args.to === 'string' && args.to.trim() ? args.to.trim() : undefined,
           reason: typeof args.reason === 'string' ? args.reason : undefined,
         }),
+    });
+  }
+
+  if (params.onFetchRemote) {
+    specs.push({
+      name: 'fetch_remote',
+      description:
+        "Download the latest commits of this project's remote (origin) so `origin/<branch>` is current. This is the ONLY way to fetch or pull: `git fetch` / `git pull` from Bash cannot authenticate (you have no credentials and no SSH key — a `Host key verification failed` or `Permission denied` from your shell is expected: do not try to fix it, do not ask for a token). `branch` (optional): one branch (default: the project's branch; `all` fetches every branch). It changes none of your files or branches — afterwards bring the commits in yourself with plain git, e.g. `git merge origin/<branch>` or `git rebase origin/<branch>`. No approval needed. Returns what happened and the new head.",
+      shape: { branch: z.string().optional() },
+      handler: (args) => params.onFetchRemote!({ branch: typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined }),
     });
   }
 

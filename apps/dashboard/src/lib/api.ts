@@ -643,6 +643,16 @@ type TitleCfg = { enabled: boolean; provider: string; model: string };
 type VisionCfg = { provider: string; model: string };
 
 // Every method is one request() call: the path, the verb and the result type. Nothing else lives here.
+/** What POST /projects/:slug/repo/sync answers (a failure is an HTTP error, not a field here). */
+export interface RepoSyncResult {
+  action: 'cloned' | 'fetched' | 'initialized' | 'unchanged' | 'skipped';
+  path: string;
+  branch: string;
+  head: string | null;
+  durationMs: number;
+  detail: string;
+}
+
 export const api = {
   getMcpStatus: () => request<McpHostStatus>('GET', '/mcp/status'),
 
@@ -751,7 +761,7 @@ export const api = {
   setProjectRepo: (slug: string, body: { url?: string | null; branch?: string; subdir?: string | null }) => request<RepoInfo>('PUT', `/projects/${e(slug)}/repo`, { body }),
   setProjectRepoCredentials: (slug: string, body: RepoCredentials) => request<RepoInfo>('PUT', `/projects/${e(slug)}/repo/credentials`, { body }),
   testProjectRepo: (slug: string, checkWrite = false) => request<RepoTestResult>('POST', `/projects/${e(slug)}/repo/test`, { body: { checkWrite } }),
-  syncProjectRepo: (slug: string) => request<{ ok: boolean; message: string; head?: string }>('POST', `/projects/${e(slug)}/repo/sync`),
+  syncProjectRepo: (slug: string) => request<RepoSyncResult>('POST', `/projects/${e(slug)}/repo/sync`),
   createSchedule: (body: ScheduleInput) => request<ScheduleInfo>('POST', '/schedules', { body }),
   updateSchedule: (id: string, body: ScheduleInput) => request<ScheduleInfo>('PUT', `/schedules/${e(id)}`, { body }),
   deleteSchedule: (id: string) => request<{ id: string }>('DELETE', `/schedules/${e(id)}`),

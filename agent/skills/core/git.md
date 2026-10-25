@@ -1,12 +1,18 @@
 ---
 name: git
-description: Commit message format, branch naming, and git workflow conventions for this team. Use when writing commit messages, creating branches, or describing git operations.
+description: Git in a project - commit messages, branch naming, and the remote (fetch_remote to fetch / pull, push_branch to push: agents hold no credentials, so git fetch / pull / push from the shell fail). Use for any git operation, especially pulling, fetching, pushing or a remote error such as Host key verification failed.
 ---
 
 # Skill: Git
 **Applies to:** all coder agents, PM, Architect
 
 ---
+
+## You work inside a project
+
+Every task belongs to one project, and its settings apply to you: repository and base branch, how the remote is reached, `shared` or `worktree` isolation, the subdirectory you work in, and the
+verification commands the orchestrator runs after you. They are listed in your system prompt under **The project's settings** — read them before you plan git work instead of guessing
+(do not change the remote, the branch or credentials yourself; the project's settings are a person's to change). The rest of this skill assumes them.
 
 ## Pushing: use `push_branch`, never `git push`
 
@@ -51,6 +57,11 @@ chore(deps): update nestjs to v10.3
 
 ## Branches
 
+The project's base branch and isolation mode (your system prompt, **The project's settings**) decide where you are: in `worktree` mode you already stand on your own branch
+`agent/task-<id>` made from `origin/<base branch>` — stay on it, do not create or switch branches unless the task asks (the orchestrator publishes that branch when you finish);
+in `shared` mode you work on the branch checked out in the project, and your commits stay on it. The names below are the team's convention for branches you are *asked* to create;
+`main` / `develop` here are examples — the project's own base branch wins.
+
 ```
 main       — production
 develop    — integration branch
@@ -62,10 +73,10 @@ hotfix/    — hotfix/payment-crash
 ## Workflow
 
 ```bash
-# Start a task
-git checkout develop
-git pull origin develop
-git checkout -b feature/task-name
+# Start a task: you are already on the right branch (see above). Look, do not switch:
+git status
+git branch --show-current
+# need newer commits of the base branch?  call fetch_remote, then:  git merge origin/<base branch>
 
 # Work
 git add .
@@ -81,8 +92,8 @@ git commit -m "feat(scope): description"
 git diff HEAD
 git status
 git reset --soft HEAD~1     # undo last commit, keep changes
-git fetch origin
-git rebase origin/develop
+# fetch_remote (the tool), then:
+git rebase origin/<base branch>
 git stash / git stash pop
 git log --oneline -10
 ```
@@ -115,21 +126,25 @@ find — not to push or merge.
 > (`create_*`, `update_*`, `merge_*`, `push_*`, `add_*`, `delete_*`) is approval-gated. Use the
 > reads for context you actually need, not as a substitute for the task description you have.
 
+## Fetching and pulling: use `fetch_remote`, never `git fetch` / `git pull`
+
+Your shell has no credentials for the remote, so `git fetch` / `git pull` / `git ls-remote` from Bash fail (`Host key verification failed`, `Permission denied`) — that is expected, not a
+fault to fix: do not retry, do not look for keys, do not ask for a token or report "blocked". Call the tool `fetch_remote {branch?}` (default: the project's branch; `all` = every branch).
+The orchestrator fetches with the project's key and `origin/<branch>` becomes current; none of your files or branches change. Then bring the commits in with plain git
+(`git merge origin/<branch>` or `git rebase origin/<branch>`). No approval is needed. A task starts from an up-to-date `origin/<branch>` already, so call it only when asked to pull or when
+you need commits that arrived while you work.
+
 ## Authentication — do NOT look for a token
 
-Pushing/fetching to `origin` is **already authenticated** for you: the GitHub token is baked into
-the repo's git config (`http.extraHeader`). So:
+You hold no credentials for the remote, by design:
 
-- Just run plain git — `git push origin HEAD:main`, `git fetch origin` — it authenticates itself.
-- **Do NOT search for a token** in env vars, `.env`, files, or `gh auth`. There is none in your
-  environment by design, and you do not need one. A missing `$GITHUB_TOKEN` / `gh` login is
+- Remote commands from your shell (`git push`, `git fetch`, `git pull`, `git ls-remote`) do NOT authenticate: use `push_branch` and `fetch_remote` (above). Local git (commit, merge, rebase, log, diff) is plain git.
+- **Do NOT search for a token** in env vars, `.env`, files, or `gh auth`. There is none in your environment by design, and you do not need one. A missing `$GITHUB_TOKEN` / `gh` login is
   EXPECTED — it is not an error and not a "network problem".
-- If a git remote command fails, read the actual error: `403 Write access not granted` = the
-  token lacks permission (a human must fix the token), NOT a network issue. Report precisely.
+- If `push_branch` or `fetch_remote` reports a failure, read its message: `Permission denied` / `403 Write access not granted` = the project's key or token lacks the permission
+  (a person must fix it under the project's Repository settings), NOT a network issue. Report it precisely and report `blocked` — do not try to work around it.
 
 ## Reminder
 
-`git push` (any remote/branch), `git merge`, and any force operation are classified as dangerous
-by the runtime and require human approval — so a push pauses for approval, then proceeds. (The
-orchestrator also pushes automatically when a task finishes, so pushing yourself is usually
-unnecessary unless the task explicitly asks for it.)
+`push_branch` always waits for a person's approval (unless approvals are switched off for the task); `fetch_remote` and local git do not. Force operations (`--force`, `reset --hard` on shared
+history) are classified as dangerous by the runtime. The orchestrator also publishes your task's branch when it finishes, so pushing yourself is usually unnecessary unless the task explicitly asks for it.

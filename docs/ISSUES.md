@@ -173,3 +173,18 @@ LiteLLM, браузер Playwright, `tsc`). Отсюда же 520 от Cloudflar
 - Dashboard: Esc in the full-screen conversation also closed a dialog; a JSON error body was cut so its message could not be read; `task:` file references with spaces; the create form deleted a task whose start answer was merely lost (a retry would run the work twice); bulk Cancel used a stale status and a rule different from the task page.
 - Playwright add-on: a version bump did not restart a running unit; a failed check still wrote `enabled: true`; an old distro `nodejs` (<18) was not upgraded.
 - Open (low): `dataset.pinned` is owned by two effects; `task:` references in message text are not checked against the subtask relation (matters once per-project access exists — see docs/plan-project-isolation.md).
+
+## 2026-10-25 — "Sync now" showed ✕ after a successful sync (fixed)
+
+The repository card read `ok` / `message` from the sync answer, but the server returns `{action, branch, head, detail, …}` (a failure is an HTTP error). So every successful sync looked like a failure with an empty message. The card now shows the server's `detail` and the short head with a ✓ (`syncSummary`, tested).
+
+## 2026-10-25 — an agent could not `git pull` a project with an SSH key (fixed)
+
+"Sync now" worked (the orchestrator fetches with the project's key and pinned host key), but an agent's own `git fetch` / `git pull` failed with `Host key verification failed`: agents hold no credentials, by design, and only `push_branch` had an orchestrator-side route. The git skill still said plain `git fetch` "authenticates itself". Now there is a `fetch_remote {branch?}` tool (no approval: it only downloads and moves no local branch), the skill and docs say to use it, and the agent merges `origin/<branch>` itself.
+
+## 2026-10-25 — audit of skills and agents against projects (fixed)
+
+- `git` skill: the workflow told agents to `git checkout develop` / `git pull origin develop` (wrong in a worktree, and `pull` cannot authenticate), the "Authentication" section claimed the token was baked into the git config and that plain `git fetch` works, and the reminder said `git merge` needs approval (it does not; only `git push` and force operations do). Rewritten around the project's base branch / isolation, `fetch_remote`, `push_branch`.
+- `playwright` skill presented `project-dev` as "the base project": it is the Docker stack's sample app, not a registered project. Now says to use `preview_worktree` in any other project.
+- Not changed, checked: `task-splitting` (names the project slug), the admin agent and its skills (projects, per-project libraries, repository access, `fetch_remote`), the renovation agents (docs projects: resources / workspace tools, no git), the stack skills (`nestjs`, `nextjs`, `postgres`, `elasticsearch`, `i18n`, `heroku`, `code-intel`: project-agnostic).
+- Skills are only seen by agents that list them; the project's settings and the remote-git rule now travel in every code run's system prompt instead (see `agent/project-orientation.ts`).
