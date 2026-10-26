@@ -25,7 +25,9 @@ const OPEN = '';
 const CLOSE = '';
 
 /** Formatting of one stretch of text that holds no code. */
-function inline(text: string): string {
+function inline(rawText: string): string {
+  // the markers are private-use characters: any that the text itself contains must not be taken for one of ours
+  const text = rawText.replace(/[\uE000\uE001]/g, '');
   const keep: string[] = [];
   const hold = (html: string): string => {
     keep.push(html);
@@ -39,9 +41,9 @@ function inline(text: string): string {
   s = s.replace(/^(\s*)#{1,6}\s+(.+)$/gm, '$1<b>$2</b>'); // headings
   s = s.replace(/^(\s*)[-*]\s+(?=\S)/gm, '$1• '); // bullets
   s = s.replace(/\*\*(?=\S)([^\n]+?)(?<=\S)\*\*/g, '<b>$1</b>');
-  s = s.replace(/(?<![\w_])__(?=\S)([^\n]+?)(?<=\S)__(?![\w_])/g, '<b>$1</b>');
+  s = s.replace(/(?<![\w_])__(?=\S)([^\n]+?)(?<=\S)__(?![\w_]|\.\w)/g, '<b>$1</b>');
   s = s.replace(/(?<![\w*])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![\w*])/g, '<i>$1</i>');
-  s = s.replace(/(?<![\w_])_(?=[^\s_])([^_\n]+?)(?<=[^\s_])_(?![\w_])/g, '<i>$1</i>');
+  s = s.replace(/(?<![\w_])_(?=[^\s_])([^_\n]+?)(?<=[^\s_])_(?![\w_]|\.\w)/g, '<i>$1</i>');
   s = s.replace(FILE_RE, '<code>$1</code>');
   return s.replace(new RegExp(`${OPEN}(\\d+)${CLOSE}`, 'g'), (_m, i: string) => keep[Number(i)]!);
 }

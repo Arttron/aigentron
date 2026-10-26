@@ -159,3 +159,17 @@ describe('TelegramAdapter.probeSender ("find my id")', () => {
     expect(await new TelegramAdapter('t', { botToken: 'x' }).probeSender(1)).toBeNull();
   });
 });
+
+describe('a stranger\'s file is never downloaded (the allow-list is asked first)', () => {
+  it('a photo from a chat that is not allowed arrives as a plain message, no getFile call, no reply', async () => {
+    const photo = { update_id: 1, message: { message_id: 5, chat: { id: 99 }, from: { id: 9, username: 'eve' }, caption: 'hi', photo: [{ file_id: 'f1' }] } };
+    const { calls } = fakeTelegram([[photo]]);
+    const adapter = new TelegramAdapter('t', { botToken: 'x' });
+    const events: { type: string; text?: string; chatId: string }[] = [];
+    adapter.startPolling(async (e) => void events.push(e as never), { isAllowed: (chat) => chat === '42' });
+    for (let i = 0; i < 30 && !events.length; i++) await new Promise((r) => setTimeout(r, 20));
+    await adapter.stop();
+    expect(events).toEqual([expect.objectContaining({ type: 'message', chatId: '99', text: 'hi' })]);
+    expect(calls.some((c) => c.method === 'getFile' || c.method === 'sendMessage')).toBe(false);
+  });
+});

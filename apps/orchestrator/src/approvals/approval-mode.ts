@@ -1,4 +1,4 @@
-import { CREATE_TASK_TOOL, INTERNAL_TOOL_PREFIX, PUSH_BRANCH_TOOL, type DangerVerdict } from '@lds/shared';
+import { CREATE_TASK_TOOL, INTERNAL_TOOL_PREFIX, PROPOSE_TASK_TOOL, PUSH_BRANCH_TOOL, type DangerVerdict } from '@lds/shared';
 
 /**
  * `ask` (default): a risky action waits for a person. `off`: the agent's own risky actions (shell, MCP calls, git push, starting a task) go ahead
@@ -9,8 +9,8 @@ export type ApprovalMode = 'ask' | 'off';
 
 export const parseApprovalMode = (raw: unknown): ApprovalMode => (raw === 'off' ? 'off' : 'ask');
 
-/** The internal tools an agent may run without a card in `off` mode (they are the agent's own work, not a platform change). */
-const AGENT_OWN_INTERNAL = new Set([PUSH_BRANCH_TOOL.toLowerCase(), CREATE_TASK_TOOL.toLowerCase()]);
+/** The internal tools an agent may run without a card in `off` mode (they are the agent's own work, not a platform change; `propose_task` starts a task for an agent of the same project — a project's admin cannot reach further). */
+const AGENT_OWN_INTERNAL = new Set([PUSH_BRANCH_TOOL.toLowerCase(), CREATE_TASK_TOOL.toLowerCase(), PROPOSE_TASK_TOOL.toLowerCase()]);
 
 export function approvalWaived(mode: ApprovalMode, toolName: string, verdict: Pick<DangerVerdict, 'dangerous' | 'hard' | 'guard'>): boolean {
   // a merge, an action on main / master and anything outside the working directory are asked about even here (verdict.guard)

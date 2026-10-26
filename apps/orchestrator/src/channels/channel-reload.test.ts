@@ -8,7 +8,9 @@ type Row = { id: string; name: string; kind: string; enabled: boolean; config: R
 function make(rows: Row[]) {
   const built: { row: Row; adapter: { startPolling: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> } }[] = [];
   const channels = {
-    list: vi.fn(async () => rows),
+    list: vi.fn(async () => rows.map((r) => ({ ...r }))), // a snapshot, like a query
+    getRow: vi.fn(async (id: string) => rows.find((r) => r.id === id)),
+    allowedChatIds: (r: Row) => (r.config.allowedChatIds as string[]) ?? [],
     isConfigured: (r: Row) => Boolean(r.config.botToken),
     buildAdapter: vi.fn((row: Row) => {
       const adapter = { kind: row.kind, startPolling: vi.fn(), stop: vi.fn(async () => undefined) };
@@ -91,5 +93,23 @@ describe('channel config: the runtime cursor is kept across edits and ignored by
     expect(adapterSignature(row({ config: { botToken: 'tok', allowedChatIds: ['42'], lastUpdateId: 5 } }))).toBe(a);
     expect(adapterSignature(row({ config: { botToken: 'tok2', allowedChatIds: ['42'] } }))).not.toBe(a);
     expect(adapterSignature(row({ name: 'other' }))).not.toBe(a);
+  });
+});
+
+describe('reload hands the replacement the cursor the old adapter left (a re-read row, not the list)', () => {
+  it('an edited channel is rebuilt from the row as it is NOW, so an update handled meanwhile is not fetched again', async () => {
+    const { svc, channels, built, rows } = make([row()]);
+    await svc.reload();
+    // the form is saved (allow-list changes) ...
+    rows[0]!.config = { ...rows[0]!.config, allowedChatIds: ['42', '43'] };
+    // ... and the old adapter's cursor lands in the row only after the list was read
+    channels.list.mockImplementationOnce(async () => {
+      const snapshot = rows.map((r) => ({ ...r, config: { ...r.config } }));
+      rows[0]!.config = { ...rows[0]!.config, lastUpdateId: 777 };
+      return snapshot;
+    });
+    await svc.reload();
+    expect(built).toHaveLength(2);
+    expect(built[1]!.row.config.lastUpdateId).toBe(777);
   });
 });

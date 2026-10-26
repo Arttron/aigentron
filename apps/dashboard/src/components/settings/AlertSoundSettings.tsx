@@ -50,9 +50,30 @@ export function AlertSoundSettings() {
   // a browser keeps the page silent until it was touched once; the Test button is such a touch
   useEffect(() => setSilent(false), [s.sound, s.volume]);
 
+  const soundSelect = (value: AlertSoundName, disabled: boolean, onPick: (sound: AlertSoundName) => void) => (
+    <select value={value} disabled={disabled} onChange={(e) => onPick(e.target.value as AlertSoundName)}>
+      <optgroup label="Built in">
+        {ALERT_SOUNDS.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.label}
+          </option>
+        ))}
+      </optgroup>
+      {mine.length > 0 && (
+        <optgroup label="Your sounds">
+          {mine.map((c) => (
+            <option key={c.id} value={`${CUSTOM_PREFIX}${c.id}`}>
+              {c.name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  );
+
   return (
     <Card>
-      <SectionTitle>Alert sound</SectionTitle>
+      <SectionTitle>Alert sounds</SectionTitle>
       <Muted>
         A short sound when an agent needs you — a new approval card (and, if you like, a question). It is chosen per browser: a phone and a desktop can differ. The browser plays it only after you have clicked
         on the page once.
@@ -62,24 +83,7 @@ export function AlertSoundSettings() {
       </label>
       <div style={{ opacity: s.enabled ? 1 : 0.5, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Field label="Sound">
-          <select value={s.sound} disabled={!s.enabled} onChange={(e) => { const sound = e.target.value as AlertSoundName; change({ sound }); void test(sound); }}>
-            <optgroup label="Built in">
-              {ALERT_SOUNDS.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label}
-                </option>
-              ))}
-            </optgroup>
-            {mine.length > 0 && (
-              <optgroup label="Your sounds">
-                {mine.map((c) => (
-                  <option key={c.id} value={`${CUSTOM_PREFIX}${c.id}`}>
-                    {c.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
+          {soundSelect(s.sound, !s.enabled, (sound) => { change({ sound }); void test(sound); })}
         </Field>
         <div>
           <Row wrap>
@@ -119,6 +123,32 @@ export function AlertSoundSettings() {
           </Button>
           {silent && <Muted>The browser kept the page silent — click anywhere on the page once and try again.</Muted>}
           {!silent && !alertSoundReady() && s.enabled && <Muted>Click anywhere on the page once so the browser lets it play by itself.</Muted>}
+        </Row>
+      </div>
+
+      <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: '18px 0' }} />
+      <strong>New messages</strong>
+      <Muted>
+        A sound when an agent writes to you in the conversation you have open — its words and its answer. Never for what it does (tool calls and their results), also when the conversation is switched to
+        “all steps”. Uses the volume above.
+      </Muted>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
+        <input type="checkbox" checked={s.messages} onChange={(e) => change({ messages: e.target.checked })} /> Play a sound for a new message
+      </label>
+      <div style={{ opacity: s.messages ? 1 : 0.5, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Field label="Sound for messages">
+          {soundSelect(s.messageSound, !s.messages, (messageSound) => { change({ messageSound }); void test(messageSound); })}
+        </Field>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="checkbox" checked={s.messagesOnlyFinal} disabled={!s.messages} onChange={(e) => change({ messagesOnlyFinal: e.target.checked })} /> Only for the agent&apos;s final answer (not every line it narrates)
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="checkbox" checked={s.messagesOnlyWhenAway} disabled={!s.messages} onChange={(e) => change({ messagesOnlyWhenAway: e.target.checked })} /> Only when this tab is not the one I am looking at
+        </label>
+        <Row wrap>
+          <Button onClick={() => void test(s.messageSound)} disabled={!s.messages}>
+            ▶ Test
+          </Button>
         </Row>
       </div>
     </Card>

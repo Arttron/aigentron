@@ -113,7 +113,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
         <Field label="Approvals for this project's tasks (a task can override it; Inherit follows Settings → Work → Approvals)">
           <ApprovalModePicker scope={{ project: project.slug }} compact />
         </Field>
-        <Field label="Notification channel — where a question from a task of this project is posted. A channel (or chat) chosen here belongs to this project: it shows only its tasks and its admin talks only about it">
+        <Field label="Notification channel — where a question from a task of this project is posted. A channel (or chat) chosen here belongs to this project: it shows only its tasks, and the admin there talks only about it (not for the default project)">
           <select className={styles.narrow} value={channelId} onChange={(e) => setChannelId(e.target.value)}>
             <option value="">(none — the global escalation setting)</option>
             {channelId && !channels.some((c) => c.id === channelId) && <option value={channelId}>{channelId}</option>}

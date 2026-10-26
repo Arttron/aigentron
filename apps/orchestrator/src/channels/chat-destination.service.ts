@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { ProjectsService } from '../projects/projects.service';
 
 /** The chat a task's messages go to. `own` = false: a subtask shown in its parent's chat. */
 export interface ChatDest {
@@ -28,16 +29,40 @@ const NO_PREFS: ChatPrefs = { muted: false, progress: false, voice: false };
 export class ChatDestinationService {
   private readonly prefsCache = new Map<string, { at: number; value: ChatPrefs }>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  /** which project owns a chat (null = none), served from memory for a few seconds */
+  private readonly owners = new Map<string, { at: number; project: string | null }>();
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly projects?: ProjectsService,
+  ) {}
 
   /** The chat of a task, falling back to its parent's chat for a subtask. Null = no chat (a dashboard task). */
   async destForTask(taskId: string): Promise<ChatDest | null> {
     const own = await this.thread(taskId);
-    if (own) return { ...own, own: true };
-    const t = await this.prisma.task.findUnique({ where: { id: taskId }, select: { parentId: true } });
-    if (!t?.parentId) return null;
-    const parent = await this.thread(t.parentId);
-    return parent ? { ...parent, own: false } : null;
+    let found: ChatDest | null = own ? { ...own, own: true } : null;
+    if (!found) {
+      const t = await this.prisma.task.findUnique({ where: { id: taskId }, select: { parentId: true } });
+      if (!t?.parentId) return null;
+      const parent = await this.thread(t.parentId);
+      found = parent ? { ...parent, own: false } : null;
+    }
+    // A chat that belongs to ANOTHER project hears nothing about this task, whatever thread it was linked to before the chat was bound.
+    if (found && (await this.belongsToOtherProject(found, taskId))) return null;
+    return found;
+  }
+
+  private async belongsToOtherProject(dest: { channelId: string; chatId: string }, taskId: string): Promise<boolean> {
+    if (!this.projects) return false;
+    const key = `${dest.channelId}\u0000${dest.chatId}`;
+    let hit = this.owners.get(key);
+    if (!hit || Date.now() - hit.at > PREFS_TTL_MS) {
+      hit = { at: Date.now(), project: (await this.projects.boundToChat(dest.channelId, dest.chatId).catch(() => null))?.id ?? null };
+      this.owners.set(key, hit);
+    }
+    if (!hit.project) return false;
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { projectId: true } }).catch(() => null);
+    return !!task?.projectId && task.projectId !== hit.project;
   }
 
   /** The chat's switches, served from a short cache. */
@@ -54,6 +79,7 @@ export class ChatDestinationService {
   /** The chat's switches changed (setChatState): forget what was cached. */
   invalidate(channelId: string, chatId: string): void {
     this.prefsCache.delete(`${channelId}\u0000${chatId}`);
+    this.owners.delete(`${channelId}\u0000${chatId}`);
   }
 
   private async thread(taskId: string): Promise<{ channelId: string; chatId: string } | null> {

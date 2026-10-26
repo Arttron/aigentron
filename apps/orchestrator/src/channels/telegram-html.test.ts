@@ -33,4 +33,12 @@ describe('toTelegramHtml', () => {
   it('a file name inside bold works', () => {
     expect(h('**Updated plan.md**')).toBe('<b>Updated <code>plan.md</code></b>');
   });
+  it('private-use characters in the text are not taken for the converter\'s own markers', () => {
+    expect(h('a \uE0000\uE001 b')).toBe('a 0 b');
+    expect(h('see [x](https://a.io) and \uE0000\uE001')).toBe('see <a href="https://a.io">x</a> and 0');
+  });
+  it('a dunder file name stays a file name, not bold', () => {
+    expect(h('edit __init__.py now')).toBe('edit <code>__init__.py</code> now');
+    expect(h('this is __bold__ text')).toBe('this is <b>bold</b> text');
+  });
 });

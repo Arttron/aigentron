@@ -201,7 +201,9 @@ export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }
             title={selected?.description}
           >
             <option value="">
-              {defaultAgent
+              {projectRow?.defaultAgent?.trim()
+                ? `${projectRow.defaultAgent.trim()} (this project's default)`
+                : defaultAgent
                 ? `${defaultAgent} (default lead)`
                 : defaultProvider
                   ? `${defaultProvider} (default)`

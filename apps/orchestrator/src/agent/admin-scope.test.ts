@@ -9,7 +9,7 @@ function fake() {
   return { tools, calls };
 }
 const owns = vi.fn(async (id: string) => id.startsWith('mine'));
-const scope = { slug: 'shop', name: 'Shop', agents: ['support', 'writer'], owns };
+const scope = { slug: 'shop', name: 'Shop', agents: ['support', 'writer'], canStartFor: (a: string) => ['support', 'writer'].includes(a), owns };
 
 describe('the admin in a project chat', () => {
   it('platform administration is refused, read or change, and the real tool is never reached', async () => {
@@ -59,5 +59,18 @@ describe('the admin in a project chat', () => {
     expect(p).toContain('«Shop»');
     expect(p).toContain('ONLY this project');
     expect(p).toContain('no tour');
+  });
+});
+
+describe('starting work from a project chat', () => {
+  it("a task is always the project's own, never a standalone one of the default project, and only for the project's agents", async () => {
+    const { tools, calls } = fake();
+    const t = scopeAdminTools(tools, scope);
+    expect(await t.proposeTask({ agentName: 'support', prompt: 'p', standalone: true, reason: 'r' })).toMatchObject({ ok: true });
+    expect(calls.proposeTask![0]).toEqual([{ agentName: 'support', prompt: 'p', standalone: false, reason: 'r' }]);
+    const refused = await t.proposeTask({ agentName: 'devops', prompt: 'p', reason: 'r' });
+    expect(refused).toMatchObject({ ok: false });
+    expect(refused.message).toContain('support, writer');
+    expect(calls.proposeTask).toHaveLength(1);
   });
 });

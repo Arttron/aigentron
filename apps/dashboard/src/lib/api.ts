@@ -227,6 +227,19 @@ export interface LitellmRoute {
   managed: boolean;
 }
 
+/** Skills that can travel with an agent (GET /api/agents/:name/export-options). */
+export interface AgentExportOptions {
+  custom: { name: string; listed: boolean; bytes: number }[];
+  learned: { name: string; listed: boolean; bytes: number }[];
+}
+/** Result of POST /api/agents/import (a dry run only plans). */
+export interface AgentImportResult {
+  applied: boolean;
+  plan: { key: string; kind: 'agent' | 'custom' | 'learned'; name: string; status: 'new' | 'same' | 'different' | 'blocked'; note?: string; write: boolean }[];
+  agent: { provider?: string; model?: string; mcp?: string[]; skills?: string[] };
+  warnings: string[];
+}
+
 /** A named agent definition (summary, from GET /api/agents). */
 export interface AgentInfo {
   name: string;
@@ -707,6 +720,10 @@ export const api = {
   getAgent: (name: string) => request<AgentDetail>('GET', `/agents/${e(name)}`),
   createAgent: (body: { name: string } & AgentBody) => request<AgentDetail>('POST', '/agents', { body }),
   updateAgent: (name: string, body: AgentBody) => request<AgentDetail>('PUT', `/agents/${e(name)}`, { body }),
+  agentExportOptions: (name: string) => request<AgentExportOptions>('GET', `/agents/${e(name)}/export-options`),
+  exportAgent: (name: string, learned: string[], custom: string[]) =>
+    request<unknown>('GET', `/agents/${e(name)}/export`, { query: { learned: learned.join(',') || undefined, custom: custom.join(',') || undefined } }),
+  importAgent: (bundle: unknown, opts: { agentName?: string; overwrite?: string[]; dryRun?: boolean }) => request<AgentImportResult>('POST', '/agents/import', { body: { bundle, ...opts } }),
   deleteAgent: (name: string) => request<{ name: string }>('DELETE', `/agents/${e(name)}`),
 
   listMcp: () => request<McpServerInfo[]>('GET', '/mcp-servers'),

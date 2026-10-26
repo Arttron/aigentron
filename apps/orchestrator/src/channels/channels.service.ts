@@ -135,6 +135,12 @@ export class ChannelsService {
     const current = input.id ? ((await this.getRow(input.id)).config as ChannelConfig) : {};
     const config = normalizeConfig(def.fields, input.config, current);
     for (const f of def.fields) if (f.required && !config[f.key]) throw new BadRequestException(`${f.label} is required`);
+    // a bot that a RUNNING channel already reads: a second reader would take (and confirm) the messages that channel is waiting for
+    const secretKey = def.fields.find((f) => f.secret)?.key;
+    if (secretKey && config[secretKey]) {
+      const used = (await this.list()).find((r) => r.id !== input.id && r.enabled && (r.config as ChannelConfig)?.[secretKey] === config[secretKey]);
+      if (used) throw new BadRequestException(`This bot is already used by the running channel "${used.name}" — look at its list of waiting chats instead, or switch that channel off first.`);
+    }
     const adapter = def.build('probe', config);
     if (!adapter.probeSender) throw new BadRequestException('this kind of channel cannot be probed');
     const wait = Math.min(25, Math.max(1, Math.floor(input.waitSeconds ?? 20)));

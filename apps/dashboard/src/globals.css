@@ -252,6 +252,17 @@ input[type='radio']:disabled {
   cursor: not-allowed;
 }
 
+/* Number fields: no browser spin arrows (they ignore the surface and look out of place); typing, the keyboard's up / down and the mouse wheel on a focused field still step the value. */
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 textarea:focus,
 input:focus,
 select:focus {

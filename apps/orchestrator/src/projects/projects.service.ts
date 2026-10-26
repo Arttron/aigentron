@@ -209,7 +209,8 @@ export class ProjectsService implements OnModuleInit {
   async boundToChat(channelId: string, chatId: string): Promise<ProjectRow | null> {
     if (!channelId || !chatId) return null;
     const rows = await this.prisma.project.findMany({
-      where: { notifyChannelId: channelId, archivedAt: null, OR: [{ notifyChatId: chatId }, { notifyChatId: null }, { notifyChatId: '' }] },
+      // the default project never owns a chat (it carries the installation's own escalation pair, which belongs to nobody); an archived project keeps its chat
+      where: { notifyChannelId: channelId, isDefault: false, OR: [{ notifyChatId: chatId }, { notifyChatId: null }, { notifyChatId: '' }] },
       take: 20,
     });
     const exact = rows.filter((r) => r.notifyChatId === chatId);

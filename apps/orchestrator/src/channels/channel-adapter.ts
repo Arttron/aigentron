@@ -149,6 +149,8 @@ export type IncomingHandler = (event: IncomingEvent) => void | Promise<void>;
 export interface PollingHooks {
   /** The transport's cursor moved past an inbound update (Telegram `update_id`); persisted so a restart/reload does not replay it. */
   onOffset?: (lastUpdateId: number) => void;
+  /** Is this chat on the allow-list? Asked BEFORE a file or a voice message is downloaded (a stranger must not make the bot fetch 20 MB at a time). */
+  isAllowed?: (chatId: string) => boolean;
 }
 
 /** What the bot appears to be doing (Telegram's sendChatAction actions). */

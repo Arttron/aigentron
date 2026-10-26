@@ -1,3 +1,4 @@
+import { parsePinnedAgents } from '../projects/project-core';
 import { VoiceService } from '../voice/voice.service';
 import { ModuleRef } from '@nestjs/core';
 import { Injectable } from '@nestjs/common';
@@ -73,11 +74,21 @@ export class ChannelCommandService {
     return new Set([...COMMAND_MENU.map((c) => c.command), 'start', 'help', 'new', 'me', 'mute', 'unmute']);
   }
 
+  /**
+   * The agents a chat may see and address: all of them in an ordinary chat; in a chat bound to a project only that project's (its pinned agents, else its
+   * default agent) and the admin — the fleet is not shown to a project's people. `project` is the bound project row, if any.
+   */
+  async visibleAgents(project: { pinnedAgents?: unknown; defaultAgent?: string | null } | null): Promise<Set<string> | null> {
+    if (!project) return null;
+    const pinned = parsePinnedAgents(project.pinnedAgents as string | null | undefined);
+    return new Set([...(pinned.length ? pinned : project.defaultAgent?.trim() ? [project.defaultAgent.trim()] : []), 'admin']);
+  }
+
   /** Every agent with the command it can be reached by (null = no command of its own: a clash with a built-in or another agent). */
-  async agentDirectory(): Promise<{ name: string; description: string; key: string | null }[]> {
+  async agentDirectory(visible: Set<string> | null = null): Promise<{ name: string; description: string; key: string | null }[]> {
     const builtin = this.builtinKeys();
     const used = new Set<string>();
-    return (await this.agents.list()).map((a) => {
+    return (await this.agents.list()).filter((a) => !visible || visible.has(a.name)).map((a) => {
       const k = commandKey(a.name);
       const key = k && !builtin.has(k) && !used.has(k) ? k : null;
       if (key) used.add(key);
@@ -86,9 +97,11 @@ export class ChannelCommandService {
   }
 
   /** The command menu entries for the agents (Telegram shows them, with autocomplete, when the person types `/`). */
-  async agentCommands(): Promise<{ command: string; description: string }[]> {
+  async agentCommands(channelId?: string): Promise<{ command: string; description: string }[]> {
     const room = Math.max(0, 100 - COMMAND_MENU.length);
-    return (await this.agentDirectory())
+    // a channel that belongs to a project shows only that project's agents in its menu
+    const owner = channelId ? await this.projects.boundToChat(channelId, '\u0000channel').catch(() => null) : null;
+    return (await this.agentDirectory(await this.visibleAgents(owner)))
       .filter((a) => a.key)
       .slice(0, room)
       .map((a) => ({ command: a.key!, description: (a.description || `Talk to ${a.name}`).slice(0, 100) }));
@@ -98,12 +111,12 @@ export class ChannelCommandService {
    * Is this message addressed to an agent (`/pm …` or `@pm …`)? Typos in the name are forgiven. Returns the agent and the rest of the
    * message, or a `reply` when it cannot tell which one was meant. `null` = not an address (an ordinary message or a built-in command).
    */
-  async resolveAddress(text: string): Promise<{ agent: string; rest: string; typed: string; fuzzy: boolean } | { reply: string } | null> {
+  async resolveAddress(text: string, ctx?: CommandCtx): Promise<{ agent: string; rest: string; typed: string; fuzzy: boolean } | { reply: string } | null> {
     const addr = parseAddress(text);
     if (!addr) return null;
     const key = commandKey(addr.typed);
     if (addr.symbol === '/' && key && this.builtinKeys().has(key)) return null; // a built-in command
-    const dir = await this.agentDirectory();
+    const dir = await this.agentDirectory(await this.visibleAgents(ctx ? await this.boundProject(ctx) : null));
     const m = matchAgent(addr.typed, dir);
     const link = (name: string) => {
       const a = dir.find((d) => d.name === name);
@@ -215,16 +228,32 @@ export class ChannelCommandService {
     }
     const state = await this.channels.chatState(ctx.channelId, ctx.chatId);
     const bound = await this.boundProject(ctx);
+    const agent = await this.agentForNewTask(ctx, state.agent ?? null, agentOverride, bound?.defaultAgent ?? null);
     const task = await this.tasks.create({
       prompt: text,
       project: bound?.slug,
-      agentName: agentOverride ?? state.agent ?? undefined,
+      agentName: agent.name,
       provider: state.model ?? undefined,
       createdByChannel: `${ctx.kind}:${ctx.userId}`,
     });
     await this.channels.linkThread(ctx.channelId, task.id, ctx.chatId);
     await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: task.id });
-    return { text: `✅ New task «${task.title}» (${shortId(task.id)}). Updates will appear here.`, taskId: task.id };
+    const who = task.agentName ?? agent.name ?? 'the default lead';
+    const why = agent.source === 'chat' ? ` — this chat's agent (/agent default goes back to the project's)` : '';
+    return { text: `✅ New task «${task.title}» (${shortId(task.id)}) → ${who}${why}. Updates will appear here.`, taskId: task.id };
+  }
+
+  /**
+   * Who a new task from this chat goes to: the agent addressed in the message, else the one this chat was set to (`/agent`, or an agent addressed by name alone),
+   * else the bound project's default agent (applied by the task itself), else the channel's own default agent, else the installation's default lead.
+   */
+  async agentForNewTask(ctx: CommandCtx, chat: string | null, override: string | undefined, projectDefault: string | null): Promise<{ name: string | undefined; source: 'message' | 'chat' | 'channel' | 'default' }> {
+    if (override) return { name: override, source: 'message' };
+    // the chat's own choice — unless that agent has been deleted since (then the default, instead of a failure on every message)
+    if (chat && (await this.agents.get(chat).then(() => true, () => false))) return { name: chat, source: 'chat' };
+    if (projectDefault?.trim()) return { name: undefined, source: 'default' }; // the project's own default lead: the task applies it
+    const channel = await this.channels.getRow(ctx.channelId).then((r) => this.channels.defaultAgent(r)).catch(() => undefined);
+    return channel ? { name: channel, source: 'channel' } : { name: undefined, source: 'default' };
   }
 
   private async listTasks(ctx: CommandCtx): Promise<CommandReply> {
@@ -292,7 +321,7 @@ export class ChannelCommandService {
   }
 
   private async listAgents(ctx: CommandCtx): Promise<string> {
-    const [dir, def, state] = await Promise.all([this.agentDirectory(), this.settings.defaultAgent(), this.channels.chatState(ctx.channelId, ctx.chatId)]);
+    const [dir, def, state] = await Promise.all([this.boundProject(ctx).then((b) => this.visibleAgents(b)).then((v) => this.agentDirectory(v)), this.settings.defaultAgent(), this.channels.chatState(ctx.channelId, ctx.chatId)]);
     const current = state.agent ?? def;
     // `/name` is a tappable link in Telegram: tapping it picks the agent; `/name text` (or `@name text`) sends it a message.
     const lines = dir.map((a) => {
@@ -322,7 +351,7 @@ export class ChannelCommandService {
     if (names.length < 2 || !topic) return usage;
     const { DiscussionService } = await import('../discussion/discussion.service');
     try {
-      const { taskId } = await this.moduleRef.get(DiscussionService, { strict: false }).start({ topic, agents: names, rounds, language: lang, summaryBy: names[0], createdByChannel: `${ctx.kind}:${ctx.userId}` });
+      const { taskId } = await this.moduleRef.get(DiscussionService, { strict: false }).start({ topic, agents: names, rounds, language: lang, summaryBy: names[0], createdByChannel: `${ctx.kind}:${ctx.userId}`, project: (await this.boundProject(ctx))?.slug });
       await this.channels.linkThread(ctx.channelId, taskId, ctx.chatId);
       await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: taskId });
       return `💬 Discussion started: ${names.join(', ')}. Their messages appear here one by one — write in this chat to join in (they answer you first); /cancel stops it.`;
@@ -332,8 +361,13 @@ export class ChannelCommandService {
   }
 
   private async setAgent(ctx: CommandCtx, arg: string): Promise<string> {
-    if (!arg) return 'Usage: /agent <name>. See /agents.';
-    const agent = await this.agents.get(arg).catch(() => null);
+    if (!arg) return 'Usage: /agent <name> (or /agent default to go back to the project\'s / channel\'s default). See /agents.';
+    if (/^(default|reset|none|-)$/i.test(arg)) {
+      await this.channels.setChatState(ctx.channelId, ctx.chatId, { agent: null });
+      return '✅ New tasks in this chat go to the default agent again (the project\'s, else the channel\'s, else the main lead).';
+    }
+    const visible = await this.visibleAgents(await this.boundProject(ctx));
+    const agent = visible && !visible.has(arg) ? null : await this.agents.get(arg).catch(() => null);
     if (!agent) return `Agent not found: ${arg}. See /agents.`;
     await this.channels.setChatState(ctx.channelId, ctx.chatId, { agent: arg });
     return `✅ Agent set to ${arg} for new tasks in this chat.`;
@@ -423,7 +457,7 @@ export class ChannelCommandService {
     return [
       ...(bound ? [`Project: «${bound.name}» (this chat works only with it)`] : []),
       `Active task: ${active}`,
-      `Agent: ${state.agent ?? `${defAgent ?? 'default'} (default)`}`,
+      `Agent: ${state.agent ?? `${bound?.defaultAgent?.trim() || (await this.channels.getRow(ctx.channelId).then((r) => this.channels.defaultAgent(r)).catch(() => undefined)) || defAgent || 'default'} (default)`}`,
       `Model: ${state.model ?? `${defProvider} (default)`}`,
       `Muted: ${state.muted ? 'yes' : 'no'}`,
     ].join('\n');

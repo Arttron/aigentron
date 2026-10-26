@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
 import { AgentRegistryService } from './agent-registry.service';
 import { AgentCatalogService } from './agent-catalog.service';
+import { AgentBundleService } from './agent-bundle.service';
 import { AgentBodyDto, CreateAgentDto } from './dto/agent.dto';
 
 function split(csv?: string): string[] | undefined {
@@ -34,6 +35,7 @@ export class AgentRegistryController {
   constructor(
     private readonly registry: AgentRegistryService,
     private readonly catalog: AgentCatalogService,
+    private readonly bundles: AgentBundleService,
   ) {}
 
   /** List available named agents (without their full instructions). */
@@ -57,6 +59,28 @@ export class AgentRegistryController {
   @Get('catalog/:name')
   template(@Param('name') name: string) {
     return this.catalog.getDef(name);
+  }
+
+  /** Import a bundle exported from another Aigentron (declared before :name). `dryRun` only plans. */
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  @Post('import')
+  importBundle(@Body() body: { bundle: unknown; agentName?: string; overwrite?: string[]; dryRun?: boolean }) {
+    return this.bundles.importBundle(body?.bundle, { agentName: body?.agentName, overwrite: body?.overwrite, dryRun: body?.dryRun });
+  }
+
+  /** Skills that can travel with an agent (the custom / learned ones). */
+  @Get(':name/export-options')
+  exportOptions(@Param('name') name: string) {
+    return this.bundles.candidates(name);
+  }
+
+  /** The agent + its custom/learned skills as one JSON file; `learned` / `custom` (comma lists) add skills it does not list itself. */
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  @Get(':name/export')
+  exportBundle(@Param('name') name: string, @Query('learned') learned?: string, @Query('custom') custom?: string) {
+    return this.bundles.export(name, split(learned) ?? [], split(custom) ?? []);
   }
 
   /** Full agent definition (including instructions) for editing. */

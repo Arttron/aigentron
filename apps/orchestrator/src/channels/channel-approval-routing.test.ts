@@ -5,12 +5,12 @@ import { ChannelManagerService } from './channel-manager.service';
 const rows = [{ id: 'tg', enabled: true, kind: 'telegram', config: { botToken: 't', allowedChatIds: ['A', 'B'] } }];
 const approval = (taskId: string) => ({ id: `ap-${taskId}`, taskId, summary: 's', reason: 'r', toolName: 'Bash', toolInput: {} });
 
-function make(opts: { focused: boolean; taskProject: string }) {
+function make(opts: { focused: boolean; taskProject: string; status?: string }) {
   const sendApproval = vi.fn(async () => ({ messageId: 'm1' }));
   const prisma = {
     task: { findUnique: vi.fn(async () => ({ projectId: opts.taskProject })) },
     project: { findMany: vi.fn(async () => [{ id: 'shop', notifyChannelId: 'tg', notifyChatId: 'A' }]) },
-    approvalRequest: { findUnique: vi.fn(async () => ({ status: 'pending' })) },
+    approvalRequest: { findUnique: vi.fn(async () => ({ status: opts.status ?? 'pending' })) },
   };
   const channels = {
     list: async () => rows,
@@ -25,26 +25,43 @@ function make(opts: { focused: boolean; taskProject: string }) {
   return { svc: svc as unknown as { onApprovalCreated(a: ReturnType<typeof approval>): Promise<void>; escalationTimers: Set<unknown> }, sendApproval };
 }
 const chatsOf = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls.map((c) => c[1]);
+const settle = () => new Promise((r) => setImmediate(r));
 
 afterEach(() => vi.useRealTimers());
 
-describe('where an approval of a dashboard task goes', () => {
-  it("a project with its own chat: straight to that chat, even with the dashboard open, and nowhere else", async () => {
+describe('where an approval of a dashboard task goes: the dashboard first, the chats after 10 s', () => {
+  it("a browser in front: nothing goes out for 10 s; if nobody has reacted by then it goes to the project's own chat, and nowhere else", async () => {
+    vi.useFakeTimers();
     const { svc, sendApproval } = make({ focused: true, taskProject: 'shop' });
     await svc.onApprovalCreated(approval('t1'));
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(sendApproval).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
     expect(chatsOf(sendApproval)).toEqual(['A']);
   });
-  it('the default project (no chat of its own): only the free chat, and only when nobody is at the dashboard', async () => {
+  it('answered on the page within those 10 s: the chats never hear of it', async () => {
     vi.useFakeTimers();
-    const watched = make({ focused: true, taskProject: 'default' });
-    await watched.svc.onApprovalCreated(approval('t2'));
+    const { svc, sendApproval } = make({ focused: true, taskProject: 'shop', status: 'approved' });
+    await svc.onApprovalCreated(approval('t1'));
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(watched.sendApproval).not.toHaveBeenCalled();
-
+    expect(sendApproval).not.toHaveBeenCalled();
+  });
+  it('nobody has the dashboard in front: straight to the project chat', async () => {
+    const { svc, sendApproval } = make({ focused: false, taskProject: 'shop' });
+    await svc.onApprovalCreated(approval('t1'));
+    await settle();
+    expect(chatsOf(sendApproval)).toEqual(['A']);
+  });
+  it("the default project (no chat of its own) goes only to the free chat — never to one a project owns", async () => {
+    vi.useFakeTimers();
     const away = make({ focused: false, taskProject: 'default' });
     await away.svc.onApprovalCreated(approval('t3'));
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(chatsOf(away.sendApproval)).toEqual(['B']); // never A: it belongs to "shop"
+    await vi.advanceTimersByTimeAsync(100);
+    expect(chatsOf(away.sendApproval)).toEqual(['B']);
+    const watched = make({ focused: true, taskProject: 'default' });
+    await watched.svc.onApprovalCreated(approval('t4'));
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(chatsOf(watched.sendApproval)).toEqual(['B']);
   });
 });
 
@@ -69,8 +86,9 @@ describe('a channel tied to a project (no chat id) owns every chat of it', () =>
     return { svc: svc as unknown as { onApprovalCreated(a: ReturnType<typeof approval>): Promise<void>; notifyOperators(t: string): Promise<void>; notifyDefaultChannel(id: string, title: string, err: string | null, st: string): Promise<void> }, sendApproval, send };
   }
   it("the project's approvals go to the client channel's chats only", async () => {
-    const mine = makeChannelWide('shop');
+    const mine = makeChannelWide('shop', { focused: false });
     await mine.svc.onApprovalCreated(approval('t1'));
+    await settle();
     expect(chatsOf(mine.sendApproval).sort()).toEqual(['C1', 'C2']);
   });
   it("another project's approvals never reach the client channel, only the free chat", async () => {

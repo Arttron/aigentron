@@ -4,6 +4,7 @@ import { AgentRegistryService } from './agent-registry.service';
 import { SkillsLearnedService } from './skills-learned.service';
 import { AgentFilesSyncService } from './agent-files-sync.service';
 import { AgentCatalogService } from './agent-catalog.service';
+import { AgentBundleService } from './agent-bundle.service';
 import { AgentProposalsService } from './agent-proposals.service';
 import { AdminAgentSeedService } from './admin-agent-seed.service';
 import { PlatformAdminService } from './platform-admin.service';
@@ -22,6 +23,7 @@ import { AdminContextService } from './admin-context.service';
     AgentFilesSyncService,
     AgentCatalogService,
     AgentProposalsService,
+    AgentBundleService,
     AdminAgentSeedService,
     PlatformAdminService,
     AdminAuditService,

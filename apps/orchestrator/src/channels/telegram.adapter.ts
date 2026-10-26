@@ -79,6 +79,7 @@ export class TelegramAdapter implements ChannelAdapter {
   private readonly logger: Logger;
   private readonly token: string;
   private polling = false;
+  private isAllowed?: (chatId: string) => boolean;
   /** The next update_id to ask for: one past the last one handled (persisted across restarts via config.lastUpdateId). */
   private offset: number;
   private abort?: AbortController;
@@ -311,6 +312,7 @@ export class TelegramAdapter implements ChannelAdapter {
   startPolling(onEvent: IncomingHandler, hooks: PollingHooks = {}): void {
     if (this.polling) return;
     this.polling = true;
+    this.isAllowed = hooks.isAllowed;
     void this.registerCommands();
     this.loopDone = this.loop(onEvent, hooks);
   }
@@ -392,6 +394,20 @@ export class TelegramAdapter implements ChannelAdapter {
 
   private async dispatch(u: TelegramUpdate, onEvent: IncomingHandler): Promise<void> {
     const m = u.message;
+    // A file or a voice message from a chat that is not allowed: nothing is downloaded and nothing is answered here — the manager sees a plain message from a stranger
+    // (it records the pairing request and stays quiet), so a stranger cannot make the bot fetch 20 MB at a time.
+    if (m && this.isAllowed && !this.isAllowed(String(m.chat.id)) && (m.photo?.length || m.document || m.video || m.video_note || m.animation || m.voice || m.audio)) {
+      await onEvent({
+        type: 'message',
+        chatId: String(m.chat.id),
+        userId: String(m.from?.id ?? m.chat.id),
+        userName: m.from?.username ?? m.from?.first_name,
+        text: m.caption?.trim() || '[a file]',
+        isReply: Boolean(m.reply_to_message),
+        messageId: String(m.message_id),
+      });
+      return;
+    }
     // A photo, video, round video message (video note), GIF/animation or document → download it and emit an attachment event.
     // A video's soundtrack is transcribed later by the video_digest tool, so a video note needs no special voice path.
     if (m && (m.photo?.length || m.document || m.video || m.video_note || m.animation)) {

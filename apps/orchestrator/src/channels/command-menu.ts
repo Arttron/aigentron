@@ -27,7 +27,7 @@ export const COMMAND_MENU: CommandDef[] = [
   { command: 'web', description: 'Open in the dashboard' },
   { command: 'agents', description: 'List agents' },
   { command: 'discuss', description: 'Agents discuss a topic', usage: '/discuss pm architect: topic' },
-  { command: 'agent', description: 'Set the agent for new tasks', usage: '/agent <name>' },
+  { command: 'agent', description: 'Set the agent for new tasks', usage: '/agent <name | default>' },
   { command: 'models', description: 'List models' },
   { command: 'model', description: 'Set the model for new tasks', usage: '/model <name>' },
   { command: 'settings', description: 'Show what is selected' },

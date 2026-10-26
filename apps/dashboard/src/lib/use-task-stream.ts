@@ -3,6 +3,7 @@ import { CLIENT_EVENT, SERVER_EVENT, type AgentLogEvent } from '@lds/shared';
 import { api } from './api';
 import { getSocket } from './socket';
 import { mergeLines } from './merge-lines';
+import { alertForMessage } from './alert-sound';
 
 /** A transcript entry in the neutral shape both the history fetch and the socket produce. */
 export interface StreamEntry {
@@ -78,6 +79,7 @@ export function useTaskStream<T extends { id: string }>(
       if (it && !seen.has(it.id)) {
         seen.add(it.id);
         setItems((prev) => [...prev, it]);
+        void alertForMessage(e.kind); // a sound for a new message of an agent — never for its steps
       }
       optsRef.current.onLive?.(e);
     };

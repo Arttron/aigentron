@@ -227,7 +227,7 @@ export function analyzeShell(command: string, cwd: string | null, depth = 0): Sh
       merge(facts, analyzeShell(operands.map((t) => t.text).join(' '), dir, depth + 1));
       continue;
     }
-    if (bare === 'git') gitFacts(facts, args, mut);
+    if (bare === 'git') gitFacts(facts, args, mut, dir);
     else if (bare === 'gh') ghFacts(facts, args);
     else if (['rm', 'rmdir', 'unlink', 'shred', 'touch', 'mkdir', 'chmod', 'chown', 'chgrp', 'truncate', 'tee', 'mv'].includes(bare)) {
       // chmod / chown take a mode or owner first
@@ -286,6 +286,11 @@ function resolve(p: string, base: string | null): string {
   return `/${segs.join('/')}`;
 }
 
+/** `git merge agent/task-…` (only such refs) while the shell is inside a task worktree. */
+function ownTaskMerge(operands: Tok[], dir: string | null): boolean {
+  return !!dir && /[\\/]worktrees[\\/]/.test(dir) && operands.length > 0 && operands.every((t) => !t.dynamic && /^agent\/task-[\w-]+$/.test(t.text));
+}
+
 /** A ref the way a person writes it (`origin/main`, `HEAD:main`, `+refs/heads/main`, `refs/remotes/origin/master`) → is it main or master? */
 export function isMainRef(raw: string): boolean {
   return raw
@@ -294,7 +299,7 @@ export function isMainRef(raw: string): boolean {
     .some((part) => MAIN.test(part.replace(/^refs\/(heads|remotes\/[^/]+)\//, '').replace(/^(origin|upstream)\//i, '')));
 }
 
-function gitFacts(facts: ShellFacts, args: Tok[], mut: (t: Tok) => void): void {
+function gitFacts(facts: ShellFacts, args: Tok[], mut: (t: Tok) => void, dir: string | null): void {
   let i = 0;
   while (i < args.length && isOption(args[i]!)) {
     const o = args[i]!.text;
@@ -308,7 +313,8 @@ function gitFacts(facts: ShellFacts, args: Tok[], mut: (t: Tok) => void): void {
   const unknownRef = operands.some((t) => t.dynamic);
   switch (sub) {
     case 'merge':
-      if (!flags.has('--abort') && !flags.has('--quit')) facts.merge = true;
+      // an agent's own task branches merged inside a task worktree are routine (the branch they land in is not main there)
+      if (!flags.has('--abort') && !flags.has('--quit') && !ownTaskMerge(operands, dir)) facts.merge = true;
       if (anyMain) facts.mainBranch = true;
       break;
     case 'push':

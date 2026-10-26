@@ -27,9 +27,16 @@ export interface AlertSettings {
   questions: boolean;
   /** stay quiet while this tab is the one you are looking at */
   onlyWhenAway: boolean;
+  /** a sound for a new MESSAGE of an agent in the conversation you have open (never for its steps: tool calls, results of tools) */
+  messages: boolean;
+  messageSound: AlertSoundName;
+  /** only for the agent's final answer, not for every narrated line */
+  messagesOnlyFinal: boolean;
+  /** only while this tab is not the one you are looking at */
+  messagesOnlyWhenAway: boolean;
 }
 
-export const DEFAULT_ALERT: AlertSettings = { enabled: true, sound: 'uhoh', volume: 0.6, questions: true, onlyWhenAway: false };
+export const DEFAULT_ALERT: AlertSettings = { enabled: true, sound: 'uhoh', volume: 0.6, questions: true, onlyWhenAway: false, messages: true, messageSound: 'ping', messagesOnlyFinal: false, messagesOnlyWhenAway: false };
 
 const KEY = 'lds.alertSound';
 
@@ -45,6 +52,10 @@ export function parseAlertSettings(raw: unknown): AlertSettings {
     volume: clamp01(o.volume, DEFAULT_ALERT.volume),
     questions: typeof o.questions === 'boolean' ? o.questions : DEFAULT_ALERT.questions,
     onlyWhenAway: typeof o.onlyWhenAway === 'boolean' ? o.onlyWhenAway : DEFAULT_ALERT.onlyWhenAway,
+    messages: typeof o.messages === 'boolean' ? o.messages : DEFAULT_ALERT.messages,
+    messageSound: ALERT_SOUNDS.some((s) => s.id === o.messageSound) || isCustomName(o.messageSound) ? (o.messageSound as AlertSoundName) : DEFAULT_ALERT.messageSound,
+    messagesOnlyFinal: typeof o.messagesOnlyFinal === 'boolean' ? o.messagesOnlyFinal : DEFAULT_ALERT.messagesOnlyFinal,
+    messagesOnlyWhenAway: typeof o.messagesOnlyWhenAway === 'boolean' ? o.messagesOnlyWhenAway : DEFAULT_ALERT.messagesOnlyWhenAway,
   };
 }
 
@@ -224,4 +235,26 @@ export function alertForRequest(kind: 'approval' | 'question', settings: AlertSe
   if (now - lastAlertAt < 2500) return Promise.resolve(false);
   lastAlertAt = now;
   return playSound(settings.sound, settings.volume);
+}
+
+/** The kinds of conversation entries that are MESSAGES of an agent: its words and its answer (not its steps: tool calls and their results, system notes, errors). */
+export const MESSAGE_KINDS: ReadonlySet<string> = new Set(['assistant', 'result', 'discussion', 'subtask_report']);
+
+export function isMessageKind(kind: string): boolean {
+  return MESSAGE_KINDS.has(kind);
+}
+
+let lastMessageAt = 0;
+
+/**
+ * A new message of an agent appeared in the conversation that is open. Sounds only for messages (isMessageKind) — the "all steps" view of the conversation
+ * does not change that: a tool call is a step, not a message. Lines in a burst make one sound.
+ */
+export function alertForMessage(kind: string, settings: AlertSettings = loadAlertSettings(), now = Date.now()): Promise<boolean> {
+  if (!settings.messages || !isMessageKind(kind)) return Promise.resolve(false);
+  if (settings.messagesOnlyFinal && kind !== 'result') return Promise.resolve(false);
+  if (settings.messagesOnlyWhenAway && typeof document !== 'undefined' && document.hasFocus() && !document.hidden) return Promise.resolve(false);
+  if (now - lastMessageAt < 3000) return Promise.resolve(false);
+  lastMessageAt = now;
+  return playSound(settings.messageSound, settings.volume);
 }

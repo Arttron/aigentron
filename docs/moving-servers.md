@@ -59,3 +59,7 @@ SSH, keep it 0600, delete it afterwards.
 
 `infra/backup.sh` (the archive and restore; `--with-repos`, the version guard, the data-dir warning), `infra/aigentron-cli.sh` (`export`, `import`, `backup`, `restore`).
 Shell tests in throw-away Debian and Alpine containers: `sh scripts/test-infra.sh` (needs Docker).
+
+## One agent with its experience
+
+To move a single agent (not the whole server): **Agents → Export** downloads `<name>.agent.json` — the agent file, the custom skills it lists and the custom / learned skills you tick (learned skills are shared by all agents and may mention your projects or clients, so tick only what should leave). On the other installation **Agents → Import** shows what is new, identical, different or blocked and writes only the new items; a different local item is replaced only if you tick "overwrite mine" (the old copy is kept in `.snapshots`). The agent can be renamed on import; the built-in `admin`, names of shipped skills and `createTasks` are never imported. Provider keys are not in the file — make sure the provider and MCP servers it uses exist on the target. API: `GET /api/agents/:name/export`, `POST /api/agents/import` (`dryRun`).

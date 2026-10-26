@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Project, ProjectIsolation, ProjectKind } from '@lds/shared';
-import { api } from '@/lib/api';
+import { api, type AgentInfo } from '@/lib/api';
 import { ISOLATION_HELP, apiMessage, previewSlug, repoLine } from '@/lib/projects';
 import { Button, ErrorText, Field, Modal, Muted } from '@/components/ui';
 import styles from './projects.module.css';
@@ -13,6 +13,11 @@ export function NewProjectModal({ existing, defaultIsolation, onClose, onCreated
   const [branch, setBranch] = useState('main');
   const [subdir, setSubdir] = useState('');
   const [mode, setMode] = useState<'' | ProjectIsolation>('');
+  const [agent, setAgent] = useState('');
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  useEffect(() => {
+    api.listAgents().then(setAgents).catch(() => undefined);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +39,7 @@ export function NewProjectModal({ existing, defaultIsolation, onClose, onCreated
         repoBranch: code && branch.trim() ? branch.trim() : undefined,
         repoSubdir: code && subdir.trim() ? subdir.trim() : undefined,
         isolation: code && mode ? mode : undefined,
+        defaultAgent: agent || undefined,
       });
       onCreated(p);
     } catch (err) {
@@ -51,6 +57,16 @@ export function NewProjectModal({ existing, defaultIsolation, onClose, onCreated
         <Muted className={styles.note} style={{ minHeight: '1.4em' }}>
           Folder name (slug): <code>{slug}</code>
         </Muted>
+        <Field label="Default agent — the lead of the tasks started in this project (a task from the form, from Telegram, from a schedule); can be changed later">
+          <select className={styles.narrow} value={agent} onChange={(e) => setAgent(e.target.value)}>
+            <option value="">(the main lead of the server)</option>
+            {agents.filter((a) => a.name !== 'admin').map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Kind">
           <select className={styles.narrow} value={kind} onChange={(e) => setKind(e.target.value as ProjectKind)}>
             <option value="code">Code — a git repository, checks, branches</option>

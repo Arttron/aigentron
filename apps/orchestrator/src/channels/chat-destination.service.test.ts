@@ -49,3 +49,22 @@ describe('ChatDestinationService.prefs cache (C-23)', () => {
     expect(await svc.prefs('c1', '1')).toEqual({ muted: false, progress: false, voice: false });
   });
 });
+
+describe('a thread that points into a chat owned by another project (a binding added later)', () => {
+  function withProjects(taskProject: string, owner: string | null) {
+    const prisma = {
+      channelThread: { findFirst: vi.fn(async () => ({ channelId: 'c1', externalThreadId: '42' })) },
+      task: { findUnique: vi.fn(async () => ({ parentId: null, projectId: taskProject })) },
+      channelChatState: { findUnique: vi.fn(async () => null) },
+    };
+    const projects = { boundToChat: vi.fn(async () => (owner ? { id: owner } : null)) };
+    return new ChatDestinationService(prisma as never, projects as never);
+  }
+  it("is not used: the chat hears nothing about a task of a different project", async () => {
+    expect(await withProjects('p-main', 'p-shop').destForTask('t1')).toBeNull();
+  });
+  it("is used when the chat belongs to the task's project, or to nobody", async () => {
+    expect(await withProjects('p-shop', 'p-shop').destForTask('t1')).toMatchObject({ channelId: 'c1', chatId: '42' });
+    expect(await withProjects('p-main', null).destForTask('t1')).toMatchObject({ chatId: '42' });
+  });
+});

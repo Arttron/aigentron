@@ -14,3 +14,6 @@
 **To let an agent start tasks in projects:** `propose_agent` with the skill `task-splitting` in `skills:` (or `createTasks: true`) in its frontmatter (the dashboard form cannot set it; a later edit in the form keeps it). Tell the person each task still needs their approval.
 
 **Accuracy rule.** Say what the references above and `admin-tools` document. If something is not documented there (a tool option, a file name, a setting), say "I don't see that documented" and offer to check with `agents_list` / `agent_get` — do not invent options, flags or file paths.
+
+## Moving an agent to another Aigentron
+**Agents → Export** on an agent downloads `<name>.agent.json`: the agent file + the custom skills it lists + any custom/learned skills the person ticks (learned skills are shared by all agents and may hold project/client details — warn). No keys or secrets. **Agents → Import** reads the file, shows a plan (new / same / different / blocked), and writes only new items; a differing local item is replaced only when "overwrite mine" is ticked (old copy snapshotted). The name can be changed; `admin` and shipped skill names are blocked; `createTasks` is not carried over. Check the provider/MCP/skills the agent uses exist on the target. The whole server: `aigentron export/import`.

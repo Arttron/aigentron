@@ -1,3 +1,4 @@
+import { ExportAgentModal, ImportAgentModal } from '@/components/AgentBundle';
 import { PacksCard } from '@/components/PacksCard';
 import { useCallback, useEffect, useState } from 'react';
 import { api, type AgentInfo, type McpServerInfo, type ProviderInfo } from '@/lib/api';
@@ -64,6 +65,8 @@ export function AgentsPage() {
   const [mcpOptions, setMcpOptions] = useState<McpServerInfo[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Models advertised by the currently-selected provider (for the model picker).
@@ -298,9 +301,12 @@ export function AgentsPage() {
           <Card>
             <Row spaceBetween>
               <SectionTitle className={styles.flush}>Agents ({agents.length})</SectionTitle>
-              <Button variant="primary" onClick={startNew}>
-                + New agent
-              </Button>
+              <Row>
+                <Button onClick={() => setImporting(true)}>Import</Button>
+                <Button variant="primary" onClick={startNew}>
+                  + New agent
+                </Button>
+              </Row>
             </Row>
             <ul className={styles.list}>
               {agents.map((a) => (
@@ -311,6 +317,9 @@ export function AgentsPage() {
                   <Button size="sm" onClick={() => edit(a.name)}>
                     Edit
                   </Button>
+                  <Button size="sm" onClick={() => setExporting(a.name)} title="Download the agent with its skills as a file">
+                    Export
+                  </Button>
                   {a.name.toLowerCase() === 'admin' && <Badge tone="neutral">built-in</Badge>}
                 </li>
               ))}
@@ -319,6 +328,8 @@ export function AgentsPage() {
         </>
       )}
 
+      {exporting && <ExportAgentModal name={exporting} onClose={() => setExporting(null)} />}
+      {importing && <ImportAgentModal onClose={() => setImporting(false)} onDone={() => void refresh()} />}
       {form && (
         <Modal
           title={isNew ? 'New agent' : `Edit agent: ${form.name}`}

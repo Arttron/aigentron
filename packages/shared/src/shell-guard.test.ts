@@ -34,6 +34,20 @@ describe('merge', () => {
   });
 });
 
+describe('merging the agent\'s own task branches', () => {
+  const W = '/opt/aigentron/data/worktrees/p/t1';
+  it('is routine inside a task worktree', () => {
+    expect(analyzeShell('git merge --no-edit agent/task-abc1 agent/task-abc2', W).merge).toBe(false);
+    expect(analyzeShell(`cd ${W}; git merge agent/task-abc1 2>&1 | tail -2`, null).merge).toBe(false);
+  });
+  it('is still asked about elsewhere, with other refs, or into main', () => {
+    expect(analyzeShell('git merge agent/task-abc1', '/srv/repo').merge).toBe(true);
+    expect(analyzeShell('git merge agent/task-abc1 feature', W).merge).toBe(true);
+    expect(analyzeShell('git merge agent/task-abc1 main', W).mainBranch).toBe(true);
+    expect(analyzeShell('git merge agent/task-$X', W).merge).toBe(true);
+  });
+});
+
 describe('main / master', () => {
   it('pushes, resets, checkouts and the like that name it', () => {
     for (const c of ['git push origin main', 'git push origin "main"', "git push origin 'master'", 'git push origin HEAD:main', 'git push --force origin main', 'git push origin \\\n main', 'git push --all origin', 'git push --mirror', 'BR=main; git push origin $BR', 'git -C /x push origin main', 'git reset --hard origin/main', 'git checkout main', 'git switch master', 'git checkout -B main origin/x', 'git branch -D main', 'git branch -M main', 'git fetch origin main:main', 'git merge main', 'git pull origin main', 'git cherry-pick abc && git push origin main', 'git update-ref refs/heads/main abc'])

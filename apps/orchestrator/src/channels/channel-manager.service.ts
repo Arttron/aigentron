@@ -160,11 +160,14 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       // let it finish the update it is handling (its cursor is persisted per update), so the replacement does not see it twice
       if (adapter) await Promise.race([adapter.stop(), delay(STOP_WAIT_MS)]).catch(() => undefined);
     }
-    for (const row of wanted.values()) {
-      if (this.adapterSignatures.has(row.id)) continue;
+    for (const wantedRow of wanted.values()) {
+      if (this.adapterSignatures.has(wantedRow.id)) continue;
+      // the replacement starts from the cursor the old adapter left, not from the one the list was read with: let its last write land, then read the row again
+      for (let i = 0; i < 50 && (this.offsetWriting.has(wantedRow.id) || this.pendingOffset.has(wantedRow.id)); i++) await delay(40);
+      const row = (await this.channels.getRow(wantedRow.id).catch(() => null)) ?? wantedRow;
       try {
         const adapter = this.channels.buildAdapter(row);
-        adapter.startPolling((e) => this.handleIncoming(row, e), { onOffset: (last) => this.rememberOffset(row.id, last) });
+        adapter.startPolling((e) => this.handleIncoming(row, e), { onOffset: (last) => this.rememberOffset(row.id, last), isAllowed: (chatId) => this.channels.allowedChatIds(row).includes(chatId) });
         this.gateway.adapters.set(row.id, adapter);
         this.adapterSignatures.set(row.id, adapterSignature(row));
         this.logger.log(`Channel "${row.name}" (${row.kind}) polling`);
@@ -195,10 +198,10 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
 
   /** Publish the command menu (built-ins + one command per agent) to every channel that has one. Skips an unchanged menu. */
   private async refreshCommandMenus(): Promise<void> {
-    const extra = await this.commands.agentCommands().catch(() => []);
-    const list = [...COMMAND_MENU.map((c) => ({ command: c.command, description: c.description })), ...extra];
-    const hash = JSON.stringify(list);
     for (const [id, adapter] of this.gateway.adapters) {
+      const extra = await this.commands.agentCommands(id).catch(() => []);
+      const list = [...COMMAND_MENU.map((c) => ({ command: c.command, description: c.description })), ...extra];
+      const hash = JSON.stringify(list);
       if (!adapter.setCommands || this.menuHash.get(id) === hash) continue;
       this.menuHash.set(id, hash);
       await adapter.setCommands(list).catch((e) => {
@@ -355,7 +358,11 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       // notifying the channel too would double-deliver and a human reply would
       // race the lead's own handling of the same question.
       if (!task.parentId && ['blocked', 'stalled', 'failed'].includes(status)) {
-        await this.notifyDefaultChannel(taskId, task.title, task.error, status);
+        // the dashboard first, like an approval: the chats hear about it only if the task is still in this state when nobody has reacted
+        this.whenUnanswered(
+          async () => (await this.prisma.task.findUnique({ where: { id: taskId }, select: { status: true } }).catch(() => null))?.status === status,
+          () => this.notifyDefaultChannel(taskId, task.title, task.error, status),
+        );
       }
       return;
     }
@@ -410,7 +417,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const target = await this.projects.notifyTargetFor(taskId);
     if (!target) return;
     const chats = target.chatId ? [target.chatId] : await this.allowedChatsOf(target.channelId);
-    for (const chatId of chats) await this.escalateTo(target.channelId, chatId, taskId, title, error, status);
+    for (const chatId of chats) await this.escalateTo(target.channelId, chatId, taskId, title, error, status, chats.length === 1);
   }
 
   /** The chats a channel lets us talk to (none when it is off or not configured). */
@@ -419,7 +426,8 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     return row ? this.channels.allowedChatIds(row) : [];
   }
 
-  private async escalateTo(channelId: string, chatId: string, taskId: string, title: string, error: string | null, status: TaskStatus): Promise<void> {
+  /** `link`: bind the task to this chat (its later messages come here). Not when the same notice went to several chats: a task speaks in ONE chat, the one that answers is bound by its reply. */
+  private async escalateTo(channelId: string, chatId: string, taskId: string, title: string, error: string | null, status: TaskStatus, link = true): Promise<void> {
     // A chat bound to another project is not told about this task (the global fallback chat may be someone's project chat).
     const bound = await this.projects.boundToChat(channelId, chatId).catch(() => null);
     if (bound) {
@@ -439,7 +447,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // at this task. Last escalation wins the chat, matching "reply answers the
     // most recent ask". linkThread additionally binds for outbound updates.
     await this.channels.setChatState(channelId, chatId, { activeTaskId: taskId }).catch(() => undefined);
-    await this.channels.linkThread(channelId, taskId, chatId).catch(() => undefined);
+    if (link) await this.channels.linkThread(channelId, taskId, chatId).catch(() => undefined);
     await this.gateway.send(channelId, chatId, text, undefined, taskId);
   }
 
@@ -556,23 +564,15 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       await this.postQuestion(dest.channelId, dest.chatId, q);
       return;
     }
-    // A project with its own chat: ask there at once.
-    const mine = await this.chatsForTask(q.taskId);
-    if (mine.own) {
-      for (const t of mine.chats) await this.postQuestion(t.channelId, t.chatId, q);
-      return;
-    }
-    // A dashboard task: give whoever is looking at the page a moment, then ask in the chats if it is still open and nobody is watching.
-    const timer = setTimeout(() => {
-      this.escalationTimers.delete(timer);
-      void this.escalateQuestion(q).catch((err) => this.logger.warn(`question escalation failed: ${(err as Error).message}`));
-    }, ESCALATE_DELAY_MS);
-    this.escalationTimers.add(timer);
+    // A dashboard task: the dashboard first, then the chats of its project (or the free ones) if it is still open.
+    this.whenUnanswered(
+      async () => (await this.prisma.agentQuestion.findUnique({ where: { id: q.id }, select: { status: true } }).catch(() => null))?.status === 'pending',
+      () => this.escalateQuestion(q),
+    );
   }
 
-  /** Ask in every allowed chat of every enabled channel — unless someone is watching the dashboard or it has been answered meanwhile. */
+  /** Ask in the chats of the question's project (or the free ones) — unless it has been answered meanwhile. */
   private async escalateQuestion(q: AgentQuestion): Promise<void> {
-    if (this.presence.anyoneFocused()) return;
     const row = await this.prisma.agentQuestion.findUnique({ where: { id: q.id }, select: { status: true } });
     if (row?.status !== 'pending') return;
     for (const t of (await this.chatsForTask(q.taskId)).chats) await this.postQuestion(t.channelId, t.chatId, q);
@@ -614,25 +614,35 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       await this.postApproval(dest.channelId, dest.chatId, approval);
       return;
     }
-    // A project with its own chat: that chat is the project's feed — the request goes there at once, nobody has to be away from the dashboard first.
-    const mine = await this.chatsForTask(approval.taskId);
-    if (mine.own) {
-      for (const t of mine.chats) await this.postApproval(t.channelId, t.chatId, approval);
+    // Dashboard task (no thread): the dashboard first (see whenUnanswered), then the chats of its project (or the free ones).
+    this.whenUnanswered(
+      async () => (await this.prisma.approvalRequest.findUnique({ where: { id: approval.id }, select: { status: true } }).catch(() => null))?.status === 'pending',
+      () => this.broadcastApproval(approval),
+    );
+  }
+
+  /**
+   * "The dashboard first": with a dashboard window in front of someone, a request waits ESCALATE_DELAY_MS for them to answer on the page and goes to the
+   * chats only if it is still open then; with nobody looking at the dashboard it goes to the chats at once. `still` says the request is still waiting.
+   */
+  private whenUnanswered(still: () => Promise<boolean>, send: () => Promise<void>): void {
+    const run = async (): Promise<void> => {
+      if (await still()) await send();
+    };
+    const failed = (err: unknown) => this.logger.warn(`escalation to the chats failed: ${(err as Error).message}`);
+    if (!this.presence.anyoneFocused()) {
+      void run().catch(failed);
       return;
     }
-    // Dashboard task (no thread): give the operator a grace period to act in the
-    // UI; escalate to channels only if it's still pending and no window is
-    // focused (nobody actively watching) after the delay. Track the timer so it
-    // can be cancelled on shutdown.
     const timer = setTimeout(() => {
       this.escalationTimers.delete(timer);
-      void this.escalateIfUnattended(approval);
+      void run().catch(failed);
     }, ESCALATE_DELAY_MS);
     this.escalationTimers.add(timer);
   }
 
+  /** A request nobody answered (the sweep, or the timer of a restarted process): to the chats if it is still pending. */
   private async escalateIfUnattended(approval: ApprovalMsg): Promise<void> {
-    if (this.presence.anyoneFocused()) return; // someone is watching the dock
     const row = await this.prisma.approvalRequest.findUnique({
       where: { id: approval.id },
       select: { status: true },
@@ -656,7 +666,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   /** Which chats projects own: the chat a project names, or — when it names only a channel — every allowed chat of that channel. */
   private async projectBindings(allowed: ChatRef[]): Promise<{ projectId: string; channelId: string; chatId: string }[]> {
     const owned = await this.prisma.project.findMany({
-      where: { archivedAt: null, notifyChannelId: { not: null } },
+      where: { isDefault: false, notifyChannelId: { not: null } },
       select: { id: true, notifyChannelId: true, notifyChatId: true },
     });
     return owned.flatMap((p) =>
@@ -700,7 +710,6 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         if (await this.anyMessageFor('approval', a.id)) continue;
         const dest = await this.dest.destForTask(a.taskId);
         if (dest) await this.postApproval(dest.channelId, dest.chatId, a);
-        else if ((await this.chatsForTask(a.taskId)).own) for (const t of (await this.chatsForTask(a.taskId)).chats) await this.postApproval(t.channelId, t.chatId, a);
         else await this.escalateIfUnattended(a);
       }
       const questions = (await this.questions.list('pending')).filter((q) => new Date(q.createdAt) < since);
@@ -708,7 +717,6 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
         if (await this.anyMessageFor('question', q.id)) continue;
         const dest = await this.dest.destForTask(q.taskId);
         if (dest) await this.postQuestion(dest.channelId, dest.chatId, q);
-        else if ((await this.chatsForTask(q.taskId)).own) for (const t of (await this.chatsForTask(q.taskId)).chats) await this.postQuestion(t.channelId, t.chatId, q);
         else await this.escalateQuestion(q);
       }
     } finally {
@@ -934,6 +942,9 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
   /** A tap on a "⏹ Cancel" button — same logic as the /cancel command, just
    *  reachable without knowing the taskId is implicitly "the active one". */
   private async cancelViaButton(channelId: string, chatId: string, taskId: string): Promise<void> {
+    // only a chat the task speaks in (or whose parent task does, for a subtask) may stop it — like closing it
+    const speaks = await this.dest.destForTask(taskId).catch(() => null);
+    if (!speaks || speaks.channelId !== channelId || speaks.chatId !== chatId) return void this.logger.warn(`Chat ${chatId} may not cancel task ${taskId}`);
     const task = await this.tasks.get(taskId).catch(() => null);
     if (!task) {
       await this.gateway.send(channelId, chatId, 'Task not found (it may have been deleted).');
@@ -1089,7 +1100,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const by = { displayName: `${row.kind}:${e.userName ?? e.userId}` };
 
     // `/pm text` or `@pm text` — straight to that agent (small typos in the name are forgiven).
-    const addr = await this.commands.resolveAddress(e.text);
+    const addr = await this.commands.resolveAddress(e.text, ctx);
     if (addr && 'reply' in addr) {
       await this.gateway.send(channelId, e.chatId, addr.reply);
       return;
@@ -1127,7 +1138,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       case 'select-agent': {
         // just the name: talk to this agent from now on (its own task stays active, another agent's does not)
         await this.channels.setChatState(channelId, e.chatId, { agent: target.agent, ...(activeTask?.agentName === target.agent ? {} : { activeTaskId: null }) });
-        await this.gateway.send(channelId, e.chatId, `💬 Now talking to «${target.agent}» — send your message.`);
+        await this.gateway.send(channelId, e.chatId, `💬 Now talking to «${target.agent}» — send your message. (New tasks from this chat go to it until you send /agent default.)`);
         return;
       }
       case 'answer': {
@@ -1219,7 +1230,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     // the run doesn't read the attachments dir before the file lands).
     const created = await this.tasks.create({
       prompt: caption,
-      agentName: state.agent ?? undefined,
+      agentName: (await this.commands.agentForNewTask({ channelId, chatId: e.chatId, userId: e.userId, kind: row.kind }, state.agent ?? null, undefined, bound?.defaultAgent ?? null)).name,
       provider: state.model ?? undefined,
       createdByChannel: `${row.kind}:${e.userId}`,
       project: bound?.slug,

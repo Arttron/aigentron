@@ -89,7 +89,7 @@ export class DiscussionService {
   }
 
   /** Begin a discussion in an existing chat (task) or in a new one. Returns at once; the turns play in the background. */
-  async start(input: { taskId?: string; topic?: string; agents?: unknown; rounds?: unknown; language?: unknown; summaryBy?: string | null; attachments?: string[]; createdById?: string; createdByChannel?: string }): Promise<{ taskId: string }> {
+  async start(input: { taskId?: string; topic?: string; agents?: unknown; rounds?: unknown; language?: unknown; summaryBy?: string | null; attachments?: string[]; createdById?: string; createdByChannel?: string; /** the project the discussion belongs to (a chat bound to a project) */ project?: string }): Promise<{ taskId: string }> {
     const topic = String(input.topic ?? '').trim();
     if (!topic) throw new BadRequestException('Say what the agents should discuss.');
     const cleaned = cleanParticipants(input.agents);
@@ -105,7 +105,7 @@ export class DiscussionService {
       if (this.active.has(taskId)) throw new ConflictException('A discussion is already running in this chat.');
       if (!isTerminalStatus(task.status)) throw new ConflictException('This chat is busy — wait until the agent has finished, then start the discussion.');
     } else {
-      const created = await this.tasks.create({ prompt: topic, title: `Discussion: ${topic.split('\n')[0]!.slice(0, 70)}`, agentName: agents[0], autostart: false, kind: 'discussion', ...(input.createdByChannel ? { createdByChannel: input.createdByChannel } : {}) } as never, input.createdById);
+      const created = await this.tasks.create({ prompt: topic, title: `Discussion: ${topic.split('\n')[0]!.slice(0, 70)}`, agentName: agents[0], autostart: false, kind: 'discussion', ...(input.project ? { project: input.project } : {}), ...(input.createdByChannel ? { createdByChannel: input.createdByChannel } : {}) } as never, input.createdById);
       taskId = created.id;
     }
     const a: Active = { taskId, topic, agents, rounds, summaryBy, language: cleanLanguage(input.language), turns: [], turn: 0, total: agents.length * rounds + (summaryBy ? 1 : 0), speaker: null, human: [], stop: false, conclude: false, attachments: input.attachments, seq: 1_000_000 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_CUSTOM_SOUNDS, customIdOf, isCustomName, validateSoundFile } from './custom-sounds';
-import { ALERT_SOUNDS, DEFAULT_ALERT, parseAlertSettings, soundScore } from './alert-sound';
+import { ALERT_SOUNDS, alertForMessage, isMessageKind, DEFAULT_ALERT, parseAlertSettings, soundScore } from './alert-sound';
 
 describe('alert sound settings', () => {
   it('a missing or broken stored value gives the defaults', () => {
@@ -9,7 +9,7 @@ describe('alert sound settings', () => {
     expect(parseAlertSettings({ sound: 'nope', volume: 'loud', enabled: 1 })).toEqual(DEFAULT_ALERT);
   });
   it('good values are kept, the volume is held between 0 and 1', () => {
-    expect(parseAlertSettings({ enabled: false, sound: 'bell', volume: 0.3, questions: false, onlyWhenAway: true })).toEqual({ enabled: false, sound: 'bell', volume: 0.3, questions: false, onlyWhenAway: true });
+    expect(parseAlertSettings({ enabled: false, sound: 'bell', volume: 0.3, questions: false, onlyWhenAway: true })).toMatchObject({ enabled: false, sound: 'bell', volume: 0.3, questions: false, onlyWhenAway: true });
     expect(parseAlertSettings({ volume: 7 }).volume).toBe(1);
     expect(parseAlertSettings({ volume: -2 }).volume).toBe(0);
   });
@@ -64,5 +64,25 @@ describe('which files may become a sound', () => {
     expect(customIdOf('uhoh')).toBeNull();
     expect(isCustomName('custom:abc123')).toBe(true);
     expect(isCustomName('custom:')).toBe(false);
+  });
+});
+
+describe('sounds for messages (not for steps)', () => {
+  it('only an agent\'s words and answers are messages', () => {
+    for (const k of ['assistant', 'result', 'discussion', 'subtask_report']) expect(isMessageKind(k), k).toBe(true);
+    for (const k of ['tool_use', 'tool_result', 'delegation', 'system', 'stderr', 'prompt']) expect(isMessageKind(k), k).toBe(false);
+  });
+  it('a step never plays, whatever the settings', async () => {
+    for (const k of ['tool_use', 'tool_result', 'delegation', 'system', 'stderr', 'prompt']) expect(await alertForMessage(k, { ...DEFAULT_ALERT, messages: true }, 1_000_000)).toBe(false);
+  });
+  it('off, or "only the final answer", stays quiet for the rest', async () => {
+    expect(await alertForMessage('result', { ...DEFAULT_ALERT, messages: false }, 2_000_000)).toBe(false);
+    expect(await alertForMessage('assistant', { ...DEFAULT_ALERT, messagesOnlyFinal: true }, 3_000_000)).toBe(false);
+  });
+  it('the stored settings carry the message options, with defaults for older ones', () => {
+    expect(parseAlertSettings({}).messages).toBe(true);
+    expect(parseAlertSettings({}).messageSound).toBe('ping');
+    expect(parseAlertSettings({ messages: false, messageSound: 'bell', messagesOnlyFinal: true, messagesOnlyWhenAway: true })).toMatchObject({ messages: false, messageSound: 'bell', messagesOnlyFinal: true, messagesOnlyWhenAway: true });
+    expect(parseAlertSettings({ messageSound: 'nope' }).messageSound).toBe('ping');
   });
 });

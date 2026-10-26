@@ -6,6 +6,8 @@ export interface AdminScope {
   name: string;
   /** the agents this project offers (its pinned ones, else the one that works in it) — nothing else about the fleet is shown */
   agents: string[];
+  /** may the admin start a task for this agent? (the project's pinned agents; with none pinned any agent but the admin) */
+  canStartFor: (agent: string) => boolean;
   /** does this task belong to the project? */
   owns: (taskId: string) => Promise<boolean>;
 }
@@ -58,6 +60,11 @@ export function scopeAdminTools(tools: AdminToolsWiring, scope: AdminScope): Adm
     usageReport: (input) => tools.usageReport({ ...input, project: scope.slug }),
     metricsReport: (input) => tools.metricsReport({ ...input, project: scope.slug }),
     proposeResource: (input) => tools.proposeResource({ ...input, project: scope.slug }),
+    // work started from here stays in this project (never a standalone task of the default project) and only for the project's own agents
+    proposeTask: (input) =>
+      scope.canStartFor(input.agentName)
+        ? tools.proposeTask({ ...input, standalone: false })
+        : Promise.resolve({ ok: false, message: `The agent "${input.agentName}" is not one of this project's agents${scope.agents.length ? ` (${scope.agents.join(', ')})` : ''} — ask for one of them.` }),
     taskDiagnose: async (id) => ((await scope.owns(id)) ? tools.taskDiagnose(id) : `No task ${id} in the project «${scope.name}».`),
     proposeTaskAction: async (input) => {
       const foreign: string[] = [];

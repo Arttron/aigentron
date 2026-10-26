@@ -1,10 +1,19 @@
-Aigentron v0.1.99
+Aigentron v0.1.100
 
-For people who are not programmers: a project that has its own channel no longer sends its messages into the main chat.
+For people who are not programmers: an agent can now be moved to another Aigentron together with its experience, chats are routed by project more reliably, and No-approvals mode asks about less.
 
-Fixed
-- A project that named a channel but no chat got that channel together with the chat id from the global escalation setting, so a blocked, stalled or failed task of the project spoke into the wrong conversation (the main chat). Now the project's channel stands for all of its allowed chats when no chat id is given, and the global chat is used only when the project names no channel at all.
-- Notices for the operators that belong to no project (low disk space and the like) are no longer sent into chats a project owns.
-- Tasks already started in a chat keep that chat (their results, replies and approvals stay there); binding a channel afterwards does not move them. Tasks started from the dashboard are announced through the project's channel.
+Added
+- Agents → Export / Import: one file with the agent, its custom skills and the learned skills (experience) you tick. Import shows a plan first and replaces nothing without your tick; the built-in admin and shipped skills are never overwritten.
+- A sound for a new message of an agent (its words and its answer, never its steps), with its own sound and "only final answer" / "only when away" options.
+- The project has its own default agent; the New project form asks for it, and the task form shows it.
+
+Changed
+- A request of a task that has no chat thread goes to the dashboard first; if nobody reacts within 10 s, to the project's chats (else the free ones). One rule for approvals, questions and blocked / stalled / failed notices.
+- A task started from a chat says who got it; the agent is chosen in the order message > chat > project default > channel default > main lead (the channel default was ignored before).
+- In No-approvals mode merging the agent's own agent/task-* branches in its worktree and starting tasks with propose_task no longer ask.
+- Number fields no longer show the browser's spin arrows.
+
+Fixed (review of the channels system)
+- propose_task stays in its project and its agents; the default project never owns a chat; an archived project keeps its chat; /discuss runs in the project; a bound chat sees only the project's agents; threads of other projects are not delivered into a bound chat; strangers cannot download files; Cancel needs the task's chat; the reload re-reads the cursor; and smaller fixes.
 
 Update note: no database changes.

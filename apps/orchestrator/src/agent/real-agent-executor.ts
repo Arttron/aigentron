@@ -377,6 +377,7 @@ export class RealAgentExecutor extends AgentExecutor {
       slug: project.slug,
       name: project.name,
       agents,
+      canStartFor: (agent) => (pinned.length ? pinned.includes(agent) : agent !== 'admin'),
       owns: async (id) => (await this.prisma.task.findUnique({ where: { id }, select: { projectId: true } }).catch(() => null))?.projectId === project.id,
     };
   }
@@ -824,7 +825,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const isAdminChat = Boolean(opts.chat && agentDef?.name === 'admin');
     const adminScope = agentDef?.name === 'admin' && !ctx.discussion ? await this.adminScopeFor(opts.project) : null;
     // Which task's attachments the media tools may open: this task's only — except for the admin (every task's files, secret ones still excluded).
-    const mediaScope = isAdminChat ? undefined : ctx.taskId;
+    const mediaScope = isAdminChat && !adminScope ? undefined : ctx.taskId; // the admin of a project's chat reads only its own task's files
     // What the agent may write to besides its task root: its project's folder (and, in shared mode, the checkout).
     const extraWriteRoots = ctx.discussion ? undefined : extraWriteRootsFor(opts.project, ctx.worktreePath);
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
