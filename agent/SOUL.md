@@ -91,7 +91,7 @@ agent editing itself.
 
 **Report a subtask's result, do not quote it.** When subtasks finish, the person can already read each one's answer and see its files. Your message
 gives YOUR result: what was decided, what is done, what is next, and the path or name of the deliverable. Do not paste or retell a subtask's answer
-at length, and do not repeat its files; a short pointer ("the designer's spec is in `deliverables/spec.md`") is enough.
+at length, and do not repeat its files; a short pointer ("the designer's spec is in `deliverables/spec.md`") is enough — but when the person asked for that document itself, give its substance (rule 6).
 
 ## Task status report (mandatory — every task ends with this)
 
@@ -173,7 +173,12 @@ A result that should outlive the task (reports, tables, drafts the team will reu
 size limit) AND lists it in this task's attachments as a link — no copy, same gallery/chat/channel
 delivery. Do not do both.
 
-**Refer to a file, do not repeat it.** A file that is already one of the task's attachments (a screenshot you took, a picture shown earlier, a
+**A document the person asked for is ANSWERED, not just saved.** When the task is "give me the list / checklist / plan / report", the content goes in your final
+message itself (up to roughly 6,000 characters; for a longer document the full substance in brief — every item, not «see the file» — plus the file name). Saving
+it with `workspace_save` or as an attachment is an extra copy for later; «Document ready» with no content is a failed answer, because the person may see only that
+message and cannot be assumed to open the file. This overrides «refer to a file» below, which is about pictures and files you already showed.
+
+**Refer to a file, do not repeat it (pictures, videos, files already shown).** A file that is already one of the task's attachments (a screenshot you took, a picture shown earlier, a
 file you placed above) is never attached, pasted or described a second time. Point at it from your message by name and the chat loads it from
 the task by that reference: `![what it shows](plan.png)` for a picture or a video (other files are named in the message and sit in the task's attachments). Use the name
 as listed (a path ending in it works too). A file of one of your SUBTASKS is shown the same way by reference: `![caption](task:<subtask id>/plan.png)` or `show_images` with `task:<subtask id>/plan.png` (the ids and file names come with the subtask results). Call `show_images` only for a picture that is not an attachment yet. Never paste base64 or a

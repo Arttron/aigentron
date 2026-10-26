@@ -3,6 +3,8 @@ import { prepareFile } from '@/lib/capture';
 import { api, type AttachmentMeta } from '@/lib/api';
 import { Card, Row, UploadButton, Muted, ErrorText } from '@/components/ui';
 import { MediaViewer } from './MediaViewer';
+import { DocViewer } from './DocViewer';
+import { docKind } from '@/lib/doc-kinds';
 import styles from './Attachments.module.css';
 
 /**
@@ -12,6 +14,7 @@ import styles from './Attachments.module.css';
  */
 export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; reloadSignal?: string; onAsk?: (prompt: string, attachments: string[]) => Promise<void> }) {
   const [viewing, setViewing] = useState<string | null>(null);
+  const [doc, setDoc] = useState<string | null>(null);
   const [items, setItems] = useState<AttachmentMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -73,6 +76,11 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
               className={styles.tile}
               title={a.originalName ?? a.name}
               onClick={(e) => {
+                if (docKind(a.name)) {
+                  e.preventDefault();
+                  setDoc(a.name);
+                  return;
+                }
                 if (!onAsk || !(a.mime.startsWith('video/') || a.mime.startsWith('image/'))) return;
                 e.preventDefault();
                 setViewing(a.name);
@@ -90,6 +98,7 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
           );
         })}
       </div>
+      {doc && <DocViewer taskId={taskId} name={doc} onClose={() => setDoc(null)} />}
       {viewing && <MediaViewer taskId={taskId} name={viewing} onClose={() => setViewing(null)} onAsk={onAsk} />}
     </Card>
   );

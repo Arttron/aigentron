@@ -2,6 +2,8 @@ import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'reac
 import type { TaskStatus } from '@lds/shared';
 import { isVideo } from '@/lib/capture';
 import { MediaViewer } from './MediaViewer';
+import { DocViewer } from './DocViewer';
+import { docKind } from '@/lib/doc-kinds';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
@@ -120,6 +122,7 @@ export function Transcript({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState<{ name: string; names?: string[] } | null>(null);
+  const [doc, setDoc] = useState<string | null>(null);
   const [translated, setTranslated] = useState<Record<string, string>>({});
   const translate = (id: string, text: string) => {
     setTranslated((m) => ({ ...m, [id]: '…' }));
@@ -238,13 +241,20 @@ export function Transcript({
             rel="noreferrer"
             title={name}
             onClick={(e) => {
+              if (docKind(name)) {
+                e.preventDefault();
+                setDoc(name);
+                return;
+              }
               // photos and videos open in the viewer (mark a spot and ask); other files open as before
               if (!onAsk || !(isVideo(name) || /\.(jpe?g|png|webp|gif)$/i.test(name))) return;
               e.preventDefault();
               setViewing({ name });
             }}
           >
-            {isVideo(name) ? (
+            {docKind(name) ? (
+              <span className={styles.docChip}>📄 {name.replace(/^task:[\w-]+\//, '')}</span>
+            ) : isVideo(name) ? (
               <video src={api.attachmentUrl(taskId, name)} className={styles.thumb} preload="metadata" muted />
             ) : (
               <img src={api.attachmentUrl(taskId, name)} alt={name} className={styles.thumb} />
@@ -416,6 +426,7 @@ export function Transcript({
           ↓ latest
         </button>
       )}
+      {doc && <DocViewer taskId={taskId} name={doc} onClose={() => setDoc(null)} />}
       {viewing && <MediaViewer taskId={taskId} name={viewing.name} names={viewing.names} onClose={() => setViewing(null)} onAsk={onAsk} />}
     </div>
   );

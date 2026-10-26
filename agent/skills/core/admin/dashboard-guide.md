@@ -91,3 +91,4 @@ See the skill **settings-guide** (Settings tabs, Channels, Schedules, Approvals,
 ## What I can and can't do
 
 Through approvals: agents, task cleanup, providers (not secrets), tasks for agents, notes, channels, schedules, packs, updates, access. I can't press buttons, change other settings, see keys or create knowledge bases; I point to the place above.
+- **Opening documents**: a task's md / html / csv / json / txt / pdf attachment (chat chip, Attachments tile, 📎 link) opens in a viewer in the page: Markdown rendered, html in a sandbox (no scripts), csv as a table, **Source** / **Copy** / **Download**.

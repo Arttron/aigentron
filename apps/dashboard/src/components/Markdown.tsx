@@ -1,5 +1,7 @@
 import { createContext, memo, useContext, useMemo, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
+import { docKind } from '@/lib/doc-kinds';
+import { DocViewer } from './DocViewer';
 import { parseInline, parseMarkdown, type Inline } from '@/lib/markdown-parse';
 import styles from './Markdown.module.css';
 
@@ -34,11 +36,23 @@ function InlineMedia({ name, alt, from }: { name: string; alt: string; from?: st
 function FileLink({ name, label, from }: { name: string; label: string; from?: string }) {
   const own = useContext(MediaTaskContext);
   const taskId = from ?? own;
+  const [open, setOpen] = useState(false);
   if (!taskId) return <code className={styles.inlineCode}>{name}</code>;
+  const preview = docKind(name) !== null;
   return (
-    <a href={api.attachmentUrl(taskId, name)} target="_blank" rel="noopener noreferrer" className={styles.fileLink} title={name}>
-      📎 {label}
-    </a>
+    <>
+      <a
+        href={api.attachmentUrl(taskId, name)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={styles.fileLink}
+        title={name}
+        onClick={preview ? (e) => { e.preventDefault(); setOpen(true); } : undefined}
+      >
+        📎 {label}
+      </a>
+      {open && <DocViewer taskId={taskId} name={name} onClose={() => setOpen(false)} />}
+    </>
   );
 }
 

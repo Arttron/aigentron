@@ -43,6 +43,7 @@ import { describeNow } from './clock';
 import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
 import { isImageName, isVideoName } from '../media/media-core';
+import { isPdf, isTextLike } from '../files/file-types';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
 import { ProvidersService } from '../providers/providers.service';
@@ -862,8 +863,9 @@ export class RealAgentExecutor extends AgentExecutor {
                   async (dest) => {
                     // the result shows up in THIS task's attachments (gallery, chat, channels) as a link to the workspace file — no copy
                     const name = await this.attachments.link(ctx.taskId, dest);
-                    if (isImageName(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
-                    return `It is listed in the task's attachments as "${name}" (the person sees it there — no need to copy it).`;
+                    // a picture or a document (md, html, csv, json, txt, pdf) is posted into the conversation: the picture shows, the document opens in the viewer
+                    if (isImageName(name) || isTextLike(name) || isPdf(name)) onEvent({ kind: 'assistant', text: '', attachments: [name] });
+                    return `It is listed in the task's attachments as "${name}" (the person sees it there and in the conversation — no need to copy it; still put its content in your final message).`;
                   },
                   this.attachments.dir(ctx.taskId), // only THIS task's attachments are a source (X-NEW-2)
                 ),

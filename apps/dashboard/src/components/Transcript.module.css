@@ -554,3 +554,16 @@
     opacity: 0.8;
   }
 }
+
+.docChip {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-xs);
+  font-size: 13px;
+}
