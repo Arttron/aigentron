@@ -63,11 +63,11 @@ export class WorktreeService {
   }
 
   /** Create a fresh branch + worktree for a task of a project. Idempotent-ish: reuses path. */
-  async createForTask(project: CheckoutTarget, taskId: string): Promise<Worktree> {
+  async createForTask(project: CheckoutTarget, taskId: string, title?: string | null): Promise<Worktree> {
     // Provision the project's checkout (clone/fetch or git init) before branching off it.
     const row = await this.provision(project);
     const repo = project.repoPath;
-    const branch = taskBranchFor(taskId);
+    const branch = taskBranchFor(taskId, title);
     const worktreePath = worktreePathFor(this.config.worktreesRoot, project.slug, taskId);
     await mkdir(dirname(worktreePath), { recursive: true });
 

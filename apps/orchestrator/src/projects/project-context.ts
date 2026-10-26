@@ -133,8 +133,38 @@ export function worktreePathFor(worktreesRoot: string, slug: string, taskId: str
   return join(worktreesRoot, slug, taskId);
 }
 
-/** The branch a task works on in worktree mode. */
-export const taskBranchFor = (taskId: string): string => `agent/task-${taskId}`;
+const TRANSLIT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya', і: 'i', ї: 'yi', є: 'ye', ґ: 'g',
+};
+
+const STOP_WORDS = new Set(['the', 'a', 'an', 'to', 'of', 'for', 'and', 'in', 'on', 'with', 'please', 'и', 'в', 'на', 'по', 'для', 'с', 'к', 'из', 'от', 'а', 'у', 'о', 'про', 'пожалуйста']);
+
+/**
+ * A title as a short git-ref-safe slug: filler words dropped, Cyrillic transliterated, at most 4 words and 28 characters (cut at a word edge);
+ * '' when nothing usable is left.
+ */
+export function slugifyTitle(title: string): string {
+  const words = title.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const meaningful = words.filter((w) => !STOP_WORDS.has(w));
+  const slugs = (meaningful.length ? meaningful : words)
+    .map((w) => [...w].map((c) => TRANSLIT[c] ?? c).join('').normalize('NFKD').replace(/[^a-z0-9]/g, ''))
+    .filter(Boolean);
+  const out: string[] = [];
+  for (const w of slugs.slice(0, 4)) {
+    if ([...out, w].join('-').length > 28) break;
+    out.push(w);
+  }
+  return out.length ? out.join('-') : (slugs[0] ?? '').slice(0, 28);
+}
+
+/**
+ * The branch a task works on in worktree mode: `agent/<title-slug>-<last 6 of the id>` (readable, unique), or the old `agent/task-<id>` when the title
+ * gives no slug. Tasks that already have a branch keep it.
+ */
+export const taskBranchFor = (taskId: string, title?: string | null): string => {
+  const slug = slugifyTitle(title ?? '');
+  return slug ? `agent/${slug}-${taskId.slice(-6)}` : `agent/task-${taskId}`;
+};
 
 /**
  * The agent's cwd inside a checkout: the configured subdirectory when it exists there, else the checkout root (a stale

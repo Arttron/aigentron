@@ -295,3 +295,6 @@ Only approvals and questions made a sound. The conversation now plays one (defau
 
 ## `propose_task` asked for approval in No-approvals mode (fixed)
 Starting a task for an agent is the agent's own work like `create_task`; in No-approvals mode it goes ahead without a card (a project's admin is scoped to that project's agents). Asking mode is unchanged.
+
+## Task branches were named by the task id only (changed)
+`agent/task-cmvow6fbs006ks5p85b6yvhs1` told nobody what the branch was for. New tasks get `agent/<short-title>-<last 6 of the id>` (filler words dropped, Cyrillic transliterated, at most 4 words / 28 characters, e.g. `agent/fix-login-button-6yvhs1`); with an unusable title the old form is kept. Existing branches keep their names. Maintenance (report / cleanup) finds both forms — a readable branch through the task's stored branch; one that no task owns is never listed or deleted. The "own task branch merge is routine" rule accepts both.

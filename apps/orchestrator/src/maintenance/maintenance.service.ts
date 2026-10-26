@@ -57,7 +57,7 @@ export interface CleanupRequest {
   dryRun?: boolean;
   runs?: boolean;
   worktrees?: boolean;
-  /** Also delete the `agent/task-*` branches of removed worktrees (their unpushed commits are LOST). */
+  /** Also delete the `agent/*` task branches of removed worktrees (their unpushed commits are LOST). */
   deleteBranches?: boolean;
   olderThanDays?: number;
 }
@@ -337,12 +337,23 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
     return rows;
   }
 
-  /** `agent/task-*` branches of every project's checkout. */
-  private async agentBranches(): Promise<{ repo: string; branch: string }[]> {
-    const out: { repo: string; branch: string }[] = [];
+  /**
+   * The agents' task branches of every project's checkout — the old `agent/task-<id>` and the readable `agent/<title>-<id6>` ones — each with the id of
+   * the task it belongs to. A readable branch is matched through the task's stored branch; one no task owns is not listed (never counted, never deleted).
+   */
+  private async agentBranches(): Promise<{ repo: string; branch: string; taskId: string }[]> {
+    const found: { repo: string; branch: string }[] = [];
     for (const repo of await this.repos()) {
-      const list = await this.git(repo, ['branch', '--list', 'agent/task-*', '--format=%(refname:short)']).catch(() => '');
-      for (const b of list.split('\n').map((s) => s.trim()).filter((b) => AGENT_BRANCH.test(b))) out.push({ repo, branch: b });
+      const list = await this.git(repo, ['branch', '--list', 'agent/*', '--format=%(refname:short)']).catch(() => '');
+      for (const b of list.split('\n').map((s) => s.trim()).filter(Boolean)) found.push({ repo, branch: b });
+    }
+    const named = found.filter((b) => !AGENT_BRANCH.test(b.branch)).map((b) => b.branch);
+    const rows = named.length ? await this.prisma.task.findMany({ where: { branch: { in: named } }, select: { id: true, branch: true } }) : [];
+    const byBranch = new Map(rows.map((r) => [r.branch as string, r.id]));
+    const out: { repo: string; branch: string; taskId: string }[] = [];
+    for (const b of found) {
+      const taskId = AGENT_BRANCH.exec(b.branch)?.[1] ?? byBranch.get(b.branch);
+      if (taskId) out.push({ ...b, taskId });
     }
     return out;
   }
@@ -418,8 +429,8 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
     const stale = this.retentionDays > 0 ? await this.staleRuns(this.retentionDays) : [];
     const wts = await this.worktreeState(this.worktreeRetentionDays);
     const branches = await this.agentBranches();
-    const st = await this.statuses(branches.map((b) => AGENT_BRANCH.exec(b.branch)![1]!));
-    const staleBranches = branches.filter((b) => !ACTIVE.includes(st.get(AGENT_BRANCH.exec(b.branch)![1]!) ?? ''));
+    const st = await this.statuses(branches.map((b) => b.taskId));
+    const staleBranches = branches.filter((b) => !ACTIVE.includes(st.get(b.taskId) ?? ''));
     return {
       retentionDays: this.retentionDays,
       worktreeRetentionDays: this.worktreeRetentionDays,
@@ -464,11 +475,11 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
       if (!dryRun && stale.length) for (const repo of new Set(stale.map((w) => w.repo).filter(Boolean))) await this.git(repo, ['worktree', 'prune']).catch(() => undefined);
       if (req.deleteBranches) {
         const branches = await this.agentBranches();
-        const st = await this.statuses(branches.map((b) => AGENT_BRANCH.exec(b.branch)![1]!));
+        const st = await this.statuses(branches.map((b) => b.taskId));
         const current = new Map<string, string>();
         for (const repo of new Set(branches.map((b) => b.repo))) current.set(repo, await this.git(repo, ['rev-parse', '--abbrev-ref', 'HEAD']).then((s) => s.trim()).catch(() => ''));
         for (const b of branches) {
-          const id = AGENT_BRANCH.exec(b.branch)![1]!;
+          const id = b.taskId;
           if (ACTIVE.includes(st.get(id) ?? '') || b.branch === current.get(b.repo)) continue;
           result.branchesDeleted += 1;
           if (!dryRun) await this.git(b.repo, ['branch', '-D', b.branch]).catch((e) => this.logger.warn(`could not delete branch ${b.branch}: ${(e as Error).message}`));

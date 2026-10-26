@@ -38,6 +38,7 @@ describe('merging the agent\'s own task branches', () => {
   const W = '/opt/aigentron/data/worktrees/p/t1';
   it('is routine inside a task worktree', () => {
     expect(analyzeShell('git merge --no-edit agent/task-abc1 agent/task-abc2', W).merge).toBe(false);
+    expect(analyzeShell('git merge agent/fix-login-button-s5p85b', W).merge).toBe(false);
     expect(analyzeShell(`cd ${W}; git merge agent/task-abc1 2>&1 | tail -2`, null).merge).toBe(false);
   });
   it('is still asked about elsewhere, with other refs, or into main', () => {

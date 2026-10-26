@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildProjectContext, docsWorkDirOf, extraWriteRootsFor, parseVerifyCommands, resolveWorkDir, taskBranchFor, worktreePathFor, type ProjectContextRow } from './project-context';
+import { buildProjectContext, docsWorkDirOf, extraWriteRootsFor, parseVerifyCommands, resolveWorkDir, slugifyTitle, taskBranchFor, worktreePathFor, type ProjectContextRow } from './project-context';
 import { DEFAULT_PROJECT_ID } from './project-core';
 
 const paths = { workspaceRepoPath: '/data/repo', workspaceDir: '/data/workspace', projectsDir: '/data/projects', workspaceShared: true };
@@ -100,6 +100,8 @@ describe('paths and roots', () => {
   it('worktrees nest per project; the branch names the task', () => {
     expect(worktreePathFor('/data/worktrees', 'shop', 't1')).toBe('/data/worktrees/shop/t1');
     expect(taskBranchFor('t1')).toBe('agent/task-t1');
+    expect(taskBranchFor('cmvow6fbs006ks5p85b6yvhs1', 'Fix the login button!')).toBe('agent/fix-login-button-6yvhs1');
+    expect(taskBranchFor('t1', '???')).toBe('agent/task-t1');
   });
 
   it('extra write roots: the project folder, plus the checkout in shared mode; never the task root itself', () => {
@@ -137,5 +139,16 @@ describe('resolveWorkDir', () => {
     expect(await resolveWorkDir(dir, 'missing', (m) => warnings.push(m))).toBe(dir);
     expect(await resolveWorkDir(dir, 'file.txt', (m) => warnings.push(m))).toBe(dir);
     expect(warnings).toHaveLength(2);
+  });
+});
+
+describe('slugifyTitle', () => {
+  it('readable ascii slugs, Cyrillic transliterated, long titles cut at a word', () => {
+    expect(slugifyTitle('Fix the login button!')).toBe('fix-login-button');
+    expect(slugifyTitle('Починить кнопку входа')).toBe('pochinit-knopku-vhoda');
+    expect(slugifyTitle('  ---  ')).toBe('');
+    expect(slugifyTitle('Refactor the whole authentication module and the session storage layer')).toBe('refactor-whole');
+    expect(slugifyTitle('Supercalifragilisticexpialidocious_thing')).toBe('supercalifragilisticexpialid');
+    expect(slugifyTitle('Add OAuth login via Google')).toBe('add-oauth-login-via');
   });
 });

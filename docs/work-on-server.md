@@ -21,7 +21,7 @@ Set per project: **Projects → the project → settings → Isolation** (empty 
 - **`shared`** — every task of the project runs **in the checkout itself**, one at a time, on whatever branch is checked out there; when a run finishes, the orchestrator
   pushes **the current branch** to the project's `origin` (no pull request). Simple, but **not safe to share with a person**: if you are on your own branch in that folder, the
   agent's commits land on your branch and are pushed.
-- **`worktree`** — each task gets its own branch `agent/task-<id>` and its own folder under `<data>/worktrees/…`, made from `origin/<branch>`; the result is a pull request (with a
+- **`worktree`** — each task gets its own branch `agent/<short-title>-<id6>` (older tasks: `agent/task-<id>`) and its own folder under `<data>/worktrees/…`, made from `origin/<branch>`; the result is a pull request (with a
   token) or a branch to merge. The checkout itself is **not touched** apart from `git fetch` and the bookkeeping `git worktree add` leaves in `.git`.
 
 **Rule: if you work in a directory the project uses, set that project to `worktree`.** If you cannot, work in your own clone (way 1) — the safest.

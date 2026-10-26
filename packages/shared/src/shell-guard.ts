@@ -286,9 +286,9 @@ function resolve(p: string, base: string | null): string {
   return `/${segs.join('/')}`;
 }
 
-/** `git merge agent/task-…` (only such refs) while the shell is inside a task worktree. */
+/** `git merge agent/…` (only the agents' own task branches) while the shell is inside a task worktree. */
 function ownTaskMerge(operands: Tok[], dir: string | null): boolean {
-  return !!dir && /[\\/]worktrees[\\/]/.test(dir) && operands.length > 0 && operands.every((t) => !t.dynamic && /^agent\/task-[\w-]+$/.test(t.text));
+  return !!dir && /[\\/]worktrees[\\/]/.test(dir) && operands.length > 0 && operands.every((t) => !t.dynamic && /^agent\/[a-z0-9][a-z0-9-]*$/.test(t.text));
 }
 
 /** A ref the way a person writes it (`origin/main`, `HEAD:main`, `+refs/heads/main`, `refs/remotes/origin/master`) → is it main or master? */

@@ -385,7 +385,7 @@ export class TaskWorkerService implements OnModuleInit {
   }
 
   /** The folder (and branch) a task of the project works in. */
-  private async checkoutFor(project: ProjectContext, task: { worktreePath: string | null; branch: string | null; id: string }, shared: boolean): Promise<{ worktreePath: string; branch: string }> {
+  private async checkoutFor(project: ProjectContext, task: { worktreePath: string | null; branch: string | null; id: string; title?: string | null }, shared: boolean): Promise<{ worktreePath: string; branch: string }> {
     if (project.kind !== 'code') {
       const dir = docsWorkDirOf(project);
       await mkdir(dir, { recursive: true });
@@ -393,7 +393,7 @@ export class TaskWorkerService implements OnModuleInit {
     }
     if (shared) return this.worktrees.useSharedRepo(project);
     if (task.worktreePath && task.branch) return { worktreePath: task.worktreePath, branch: task.branch };
-    return this.worktrees.createForTask(project, task.id);
+    return this.worktrees.createForTask(project, task.id, task.title);
   }
 
   /** One chat turn: run the agent in the agent-config dir and settle as done (or failed on a run error). */

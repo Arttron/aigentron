@@ -58,7 +58,7 @@ chore(deps): update nestjs to v10.3
 ## Branches
 
 The project's base branch and isolation mode (your system prompt, **The project's settings**) decide where you are: in `worktree` mode you already stand on your own branch
-`agent/task-<id>` made from `origin/<base branch>` — stay on it, do not create or switch branches unless the task asks (the orchestrator publishes that branch when you finish);
+`agent/<short-title>-<id6>` (e.g. `agent/fix-login-button-6yvhs1`; `agent/task-<id>` when the title gives nothing) made from `origin/<base branch>` — stay on it, do not create or switch branches unless the task asks (the orchestrator publishes that branch when you finish);
 in `shared` mode you work on the branch checked out in the project, and your commits stay on it. The names below are the team's convention for branches you are *asked* to create;
 `main` / `develop` here are examples — the project's own base branch wins.
 
