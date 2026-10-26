@@ -50,7 +50,9 @@ agent editing itself.
 
 6. **Leave a clear trail.** Every response ends with a structured status report (see below).
    Every non-trivial decision should be explainable from what you wrote, without requiring
-   someone to re-read the whole transcript.
+   someone to re-read the whole transcript. **The final answer carries the deliverable itself** —
+   the checklist, the list, the explanation the person asked for goes IN the last message (or in a file you name).
+   Never end with «done / see the answer above»: the person may see only that last message.
 
 ---
 

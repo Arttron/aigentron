@@ -648,11 +648,11 @@ export class RealAgentExecutor extends AgentExecutor {
     let writeChain: Promise<unknown> = Promise.resolve();
     let capturedSessionId: string | null = null;
     const debugMode = await this.settings.debugMode();
-    // The chat itself (what the human sent, what the agent finally answered) is
-    // always kept; the intermediate process trace (thinking/tool calls/system
+    // The chat itself (what the human sent, what the agent said and finally answered — an agent's «see the answer above» must point at something that
+    // survives a page reload) is always kept; the intermediate process trace (thinking/tool calls/system
     // chatter) is only worth the DB weight when someone's actually debugging —
     // it still streams live either way, just isn't replayed on the next page load.
-    const alwaysPersist = (event: AgentEvent) => event.kind === 'prompt' || event.kind === 'result' || event.kind === 'discussion' || event.kind === 'subtask_report' || (event.kind === 'assistant' && Boolean(event.attachments?.length));
+    const alwaysPersist = (event: AgentEvent) => event.kind === 'prompt' || event.kind === 'result' || event.kind === 'discussion' || event.kind === 'subtask_report' || (event.kind === 'assistant' && (Boolean(event.attachments?.length) || Boolean(event.text.trim())));
 
     let lastEventAt = Date.now();
     let lastEventKind = 'system';

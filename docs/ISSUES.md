@@ -298,3 +298,6 @@ Starting a task for an agent is the agent's own work like `create_task`; in No-a
 
 ## Task branches were named by the task id only (changed)
 `agent/task-cmvow6fbs006ks5p85b6yvhs1` told nobody what the branch was for. New tasks get `agent/<short-title>-<last 6 of the id>` (filler words dropped, Cyrillic transliterated, at most 4 words / 28 characters, e.g. `agent/fix-login-button-6yvhs1`); with an unusable title the old form is kept. Existing branches keep their names. Maintenance (report / cleanup) finds both forms — a readable branch through the task's stored branch; one that no task owns is never listed or deleted. The "own task branch merge is routine" rule accepts both.
+
+## «The checklist is ready in the answer above» — and there was no answer (fixed)
+An agent wrote its deliverable as a message in the middle of the run and ended with a short «ready, see above». The run's text messages (`assistant` events) were streamed live but, outside debug mode, NOT stored — only the final result was. After a reload (or in a chat / the task page opened later) the person saw only «ready, see above». Now an agent's text messages are stored like the final answer (tool calls, thinking and system lines still only in debug mode), and SOUL.md says the final message must carry the deliverable itself, never «see above». Existing tasks lost those messages for good.

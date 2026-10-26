@@ -1,10 +1,9 @@
-Aigentron v0.1.101
+Aigentron v0.1.102
 
-For people who are not programmers: the branches that agents create now have readable names.
+For people who are not programmers: an agent's answer no longer disappears after a page reload.
 
-Changed
-- A task's branch is named after its title instead of its id: `agent/fix-login-button-6yvhs1` (a few meaningful words, Cyrillic transliterated, at most 28 characters, plus the last 6 characters of the task id so names never clash). A task whose title gives nothing usable keeps the old `agent/task-<id>` form; branches that already exist are not renamed.
-- Cleanup of old branches (Settings → maintenance, the admin's cleanup) recognises both forms; a branch that belongs to no task is never listed or deleted.
-- In No-approvals mode merging the agent's own task branches in its worktree stays free for both forms of names.
+Fixed
+- An agent often wrote its answer (a checklist, a list, an explanation) as a message in the middle of its work and then finished with a short "ready, see above". Those messages were shown live but were not stored, so after a reload, in a chat or when the task was opened later only "see above" remained. Now the agent's text messages are stored like its final answer (tool calls and thinking are still kept only in debug mode). Messages of tasks that have already run cannot be recovered.
+- The agents' charter now says the final message must contain the deliverable itself and never refer to "the answer above".
 
 Update note: no database changes.
