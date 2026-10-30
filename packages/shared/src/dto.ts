@@ -17,6 +17,8 @@ export interface HookCheckInput {
   /** Worktree root, so the orchestrator classifies writes consistently. */
   workspaceRoot?: string;
   extraWriteRoots?: string[];
+  /** `$LDS_ATTACHMENTS_DIR` / `$TMPDIR` of the agent's shell (the classifier reads them as those paths). */
+  knownVars?: Record<string, string>;
 }
 
 /** Synchronous response telling the hook whether to allow without blocking. */

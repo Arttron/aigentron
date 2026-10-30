@@ -25,3 +25,16 @@ describe('buildItems', () => {
   });
   it('is empty for no lines', () => expect(buildItems([])).toEqual([]));
 });
+
+describe('the answer repeated in front of a short closing line', () => {
+  const long = 'The letter: '.padEnd(500, 'x');
+  const line = (id: string, kind: string, text: string) => ({ id, kind, text }) as never;
+  it('shows the text once', () => {
+    const items = buildItems([line('1', 'prompt', 'q'), line('2', 'assistant', long), line('3', 'result', `${long}\n\nAnswered above.`)]);
+    expect(items.map((i) => i.type)).toEqual(['user', 'agent']);
+  });
+  it('keeps both when the final one is a different text', () => {
+    const items = buildItems([line('1', 'prompt', 'q'), line('2', 'assistant', long), line('3', 'result', 'Done.')]);
+    expect(items).toHaveLength(3);
+  });
+});

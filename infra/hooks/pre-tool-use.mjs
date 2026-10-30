@@ -109,6 +109,9 @@ async function main() {
     input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
   const workspaceRoot = process.env.LDS_WORKSPACE_ROOT || input.cwd || undefined;
   const extraWriteRoots = (process.env.LDS_EXTRA_WRITE_ROOTS || '').split(':').filter(Boolean);
+  // folders the shell's `$LDS_ATTACHMENTS_DIR` / `$TMPDIR` stand for (the classifier reads them as those paths)
+  const knownVars = {};
+  for (const k of ['LDS_ATTACHMENTS_DIR', 'TMPDIR']) if (process.env[k]) knownVars[k] = process.env[k];
 
   const denial = policyDenial(toolName);
   if (denial) return decide('deny', denial);
@@ -123,7 +126,7 @@ async function main() {
   if (classify) {
     let verdict = null;
     try {
-      verdict = classify(toolName, toolInput, { workspaceRoot, extraWriteRoots });
+      verdict = classify(toolName, toolInput, { workspaceRoot, extraWriteRoots, knownVars });
     } catch {
       verdict = null; // fall through to the orchestrator on classifier error
     }
@@ -153,7 +156,7 @@ async function main() {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-lds-hook-secret': hookSecret },
-        body: JSON.stringify({ taskId, agentSessionId, toolName, toolInput, workspaceRoot, extraWriteRoots }),
+        body: JSON.stringify({ taskId, agentSessionId, toolName, toolInput, workspaceRoot, extraWriteRoots, knownVars }),
       },
       10_000,
     );

@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
 import { Muted } from '@/components/ui';
 import { Markdown, MediaTaskContext } from './Markdown';
+import { RevealMarkdown } from './Reveal';
 import { UserText } from './UserText';
 import { SpeakButton } from './SpeakButton';
 import { CopyButton } from './CopyButton';
@@ -187,6 +188,12 @@ export function Transcript({
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [lines, status, show, look]);
 
+  // a message that is being revealed grows: keep following the bottom unless the person scrolled up
+  const follow = () => {
+    const el = ref.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  };
+
   const toBottom = () => {
     const el = ref.current;
     if (!el) return;
@@ -345,7 +352,7 @@ export function Transcript({
                     </Collapsible>
                   ) : (
                     <MediaTaskContext.Provider value={taskId}>
-                      <Markdown text={it.line.text} />
+                      <RevealMarkdown id={it.line.id} text={it.line.text} live={rising.current.has(it.line.id)} onGrow={follow} />
                     </MediaTaskContext.Provider>
                   )}
                   {it.line.speaker && it.line.speaker !== 'system' && (

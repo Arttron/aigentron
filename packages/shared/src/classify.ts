@@ -207,6 +207,26 @@ export interface ClassifyOptions {
    * `external` page (a person approved the visit) they stay gated. Unset (callers that do not track it): always gated.
    */
   browserPage?: BrowserPage;
+  /**
+   * Values of environment variables the agent's shell has (`LDS_ATTACHMENTS_DIR`, `TMPDIR`): `$NAME` / `${NAME}` in a shell command is read as that path, so
+   * `cp x.png $LDS_ATTACHMENTS_DIR/` is judged by where it really writes instead of counting as «a path that cannot be known».
+   */
+  knownVars?: Readonly<Record<string, string>>;
+}
+
+/** Variables whose value may be substituted (the orchestrator sets them; nothing the agent controls). */
+export const KNOWN_VAR_NAMES = ['LDS_ATTACHMENTS_DIR', 'TMPDIR'] as const;
+
+/** `$NAME` / `${NAME}` → its value, for the known variables whose value is a plain absolute path (no spaces, quotes or shell characters). */
+export function expandKnownVars(command: string, vars?: Readonly<Record<string, string>>): string {
+  if (!vars) return command;
+  let out = command;
+  for (const name of KNOWN_VAR_NAMES) {
+    const value = vars[name]?.replace(/\/+$/, '');
+    if (!value || !/^\/[\w./@+-]+$/.test(value)) continue;
+    out = out.replace(new RegExp(`\\$\\{${name}\\}|\\$${name}(?![A-Za-z0-9_])`, 'g'), value);
+  }
+  return out;
 }
 
 export type BrowserPage = 'blank' | 'local' | 'external';
@@ -855,13 +875,15 @@ export function classifyToolCall(
   if (SHELL_TOOLS.has(name)) {
     const command = extractCommand(toolInput);
     const summary = command ? `$ ${command}` : `${toolName} (no command)`;
-    const safeRm = isSafeRmInRoots(command, opts);
+    // the path judgements below read `$LDS_ATTACHMENTS_DIR` / `$TMPDIR` as the folders they are; the text rules further down see the command as typed
+    const analysed = expandKnownVars(command, opts.knownVars);
+    const safeRm = isSafeRmInRoots(analysed, opts);
     // a command that writes, moves or deletes a credentials / protected file — wherever it is named from (a relative `.github/…`, `cd x && …`, `sh -c '…'`)
-    const touched = shellProtectedTarget(command, opts);
+    const touched = shellProtectedTarget(analysed, opts);
     if (touched) {
       return { dangerous: true, summary, reason: touched.secret ? 'write to a credentials file (sign-in password / tokens)' : 'write to a protected file (SOUL.md/.github/.git/agent definitions)', hard: true };
     }
-    const guarded = shellGuard(command, opts);
+    const guarded = shellGuard(analysed, opts);
     for (const { re, reason, hard } of DANGEROUS_SHELL_PATTERNS) {
       if (safeRm && RM_REASONS.has(reason)) continue;
       if (re.test(command)) {

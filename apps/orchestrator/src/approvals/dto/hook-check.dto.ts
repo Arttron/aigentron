@@ -24,4 +24,9 @@ export class HookCheckDto implements HookCheckInput {
   @IsOptional()
   @IsString({ each: true })
   extraWriteRoots?: string[];
+
+  /** `$LDS_ATTACHMENTS_DIR` / `$TMPDIR` of the agent's shell (only those two are read). */
+  @IsOptional()
+  @IsObject()
+  knownVars?: Record<string, string>;
 }

@@ -32,5 +32,27 @@ export function buildItems(lines: LogLine[]): Item[] {
     } else if (l.kind === 'tool_result') items.push({ type: 'tool', use: null, result: l });
     else items.push({ type: 'note', line: l });
   }
-  return items;
+  return dropRepeatedAnswer(items);
+}
+
+/**
+ * The server puts the long message an agent wrote just before a short closing line («answered above») in front of that line, so the final
+ * answer stands on its own (Telegram, «messages only»). Here the earlier copy is dropped so the conversation does not show the text twice.
+ */
+function dropRepeatedAnswer(items: Item[]): Item[] {
+  const drop = new Set<number>();
+  items.forEach((it, i) => {
+    if (it.type !== 'agent' || !it.final) return;
+    const answer = it.line.text.trim();
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = items[j]!;
+      if (prev.type === 'user') break;
+      if (prev.type === 'agent' && !prev.final && prev.line.kind === 'assistant') {
+        const t = prev.line.text.trim();
+        if (t.length >= 400 && answer.startsWith(t)) drop.add(j);
+        break;
+      }
+    }
+  });
+  return drop.size ? items.filter((_, i) => !drop.has(i)) : items;
 }

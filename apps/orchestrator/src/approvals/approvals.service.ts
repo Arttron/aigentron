@@ -27,6 +27,7 @@ import { browserPageAfter, type BrowserPage,
   type ApprovalStatus,
   type HookCheckInput,
   type HookCheckResponse,
+  KNOWN_VAR_NAMES,
 } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
@@ -204,6 +205,7 @@ export class ApprovalsService {
     const verdict = classifyToolCall(input.toolName, input.toolInput, {
       workspaceRoot: input.workspaceRoot,
       extraWriteRoots: input.extraWriteRoots,
+      knownVars: pickKnownVars(input.knownVars),
       readOnlyMcp,
       browserPage,
     });
@@ -546,4 +548,12 @@ export class ApprovalsService {
     if (!row) throw new NotFoundException(`Approval ${id} not found`);
     return row;
   }
+}
+
+/** Only the two variables the classifier knows, and only text values. */
+function pickKnownVars(raw: Record<string, unknown> | undefined): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out: Record<string, string> = {};
+  for (const k of KNOWN_VAR_NAMES) if (typeof raw[k] === 'string') out[k] = raw[k] as string;
+  return out;
 }

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
@@ -43,6 +43,7 @@ import { describeNow } from './clock';
 import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
 import { isImageName, isVideoName } from '../media/media-core';
+import { LONG_ANSWER, finalWithAnswer, isQuietTool } from './final-answer';
 import { isPdf, isTextLike } from '../files/file-types';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
@@ -658,8 +659,14 @@ export class RealAgentExecutor extends AgentExecutor {
     let lastEventAt = Date.now();
     let lastEventKind = 'system';
     let lastAssistantText = '';
+    let lastLongAnswer = '';
     const onEvent = (raw: AgentEvent): void => {
       let event = raw;
+      // The answer an agent wrote as a message must stand in the final one (see finalWithAnswer); the dashboard drops its earlier copy.
+      if (event.kind === 'assistant' && event.text.trim().length >= LONG_ANSWER) lastLongAnswer = event.text.trim();
+      // work done after the message (any tool but the reporting ones) makes it a stage of the run, not the answer
+      if (event.kind === 'tool_use' && !isQuietTool(event.toolName)) lastLongAnswer = '';
+      if (event.kind === 'result' && !event.isError && !ctx.discussion) event = { ...event, text: finalWithAnswer(lastLongAnswer, event.text) };
       // A discussion turn: its final answer becomes a message BY that participant (and is handed back to the discussion).
       if (ctx.discussion && event.kind === 'assistant' && event.text.trim()) lastAssistantText = event.text;
       if (ctx.discussion && event.kind === 'result') {
@@ -828,7 +835,8 @@ export class RealAgentExecutor extends AgentExecutor {
     // Which task's attachments the media tools may open: this task's only — except for the admin (every task's files, secret ones still excluded).
     const mediaScope = isAdminChat && !adminScope ? undefined : ctx.taskId; // the admin of a project's chat reads only its own task's files
     // What the agent may write to besides its task root: its project's folder (and, in shared mode, the checkout).
-    const extraWriteRoots = ctx.discussion ? undefined : extraWriteRootsFor(opts.project, ctx.worktreePath);
+    // plus the task's own attachments folder ($LDS_ATTACHMENTS_DIR) — where SOUL.md tells it to put the files it hands over
+    const extraWriteRoots = ctx.discussion ? undefined : [...extraWriteRootsFor(opts.project, ctx.worktreePath), resolve(this.attachments.dir(ctx.taskId))];
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
     const toolHandlers: InternalToolHandlers = {
       onReportStatus,

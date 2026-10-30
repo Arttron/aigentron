@@ -1,12 +1,12 @@
-Aigentron v0.1.103
+Aigentron v0.1.104
 
-For people who are not programmers: documents that agents write can now be opened and read right in the service, and an agent's answer is no longer just "the document is ready".
+For people who are not programmers: the agent's answer no longer gets lost behind "answered above", new messages appear smoothly, and a scheduled agent that writes charts stops asking for approvals.
 
-Added
-- A viewer for documents of a task: Markdown is rendered, html is shown safely (no scripts), csv as a table, json formatted, text and pdf as they are. It opens over the page from the chat, from the task's Attachments and from file links in messages; buttons Source, Copy and Download.
-- A document an agent saves for you (workspace_save) is posted into the conversation as a chip that opens the viewer, the way pictures were.
+Changed
+- A new message of an agent appears word by word (about 30 words a second, never longer than 3 seconds); a click shows the rest. It is skipped for short messages, for history, for a hidden tab and when the system asks to reduce motion.
 
 Fixed
-- Agents sometimes ended with "the document is ready" and the list lived only in a file. The agents' charter now says a document you asked for is answered in the final message itself (long ones: every item in brief plus the file name); "refer to the file, do not repeat it" stays only for pictures, videos and files already shown.
+- When an agent wrote its answer and then ended with a short "answered above", chat channels and the "messages only" view showed only that last line. The answer is now put in front of such a closing line (the dashboard shows it once).
+- In No-approvals mode an agent that saved files into its own attachments folder ($LDS_ATTACHMENTS_DIR) or cleaned up there (rm -rf) still got approval cards, because the guard could not tell where "$LDS_ATTACHMENTS_DIR/…" points. The task's attachments folder is now a folder the agent may write to, and $LDS_ATTACHMENTS_DIR and $TMPDIR are read as the paths they are. /tmp was already free. Unknown variables, paths that climb out of the folder and anything on main or a merge still ask.
 
 Update note: no database changes.

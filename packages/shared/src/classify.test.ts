@@ -383,3 +383,21 @@ describe('review of the approvals system (Fable): regressions', () => {
     expect(classifyToolCall('mcp__github__actions_list', {}).dangerous).toBe(false);
   });
 });
+
+describe('$LDS_ATTACHMENTS_DIR and $TMPDIR are read as the folders they are', () => {
+  const att = '/data/attachments/t1';
+  const opts = { workspaceRoot: '/data/worktrees/p/t1', extraWriteRoots: [att], knownVars: { LDS_ATTACHMENTS_DIR: att, TMPDIR: '/tmp/run-1' } };
+  const guard = (cmd: string, o = opts) => classifyToolCall('Bash', { command: cmd }, o).guard;
+  it('writes and removals there are routine', () => {
+    expect(guard('python3 -c "print(1)" > $LDS_ATTACHMENTS_DIR/chart.png')).toBeUndefined();
+    expect(guard('cp /tmp/x.png ${LDS_ATTACHMENTS_DIR}/x.png')).toBeUndefined();
+    expect(guard('rm -rf $LDS_ATTACHMENTS_DIR/old')).toBeUndefined();
+    expect(guard('mkdir -p $TMPDIR/build && cp a.txt $TMPDIR/build/')).toBeUndefined();
+  });
+  it('still asked about when the variable is unknown, points elsewhere, or the path goes out of it', () => {
+    expect(guard('cp x $HOME/x')).toBe('outside');
+    expect(guard('cp x $LDS_ATTACHMENTS_DIR/x', { ...opts, knownVars: {} })).toBe('outside');
+    expect(guard('cp x $LDS_ATTACHMENTS_DIR/x', { ...opts, knownVars: { LDS_ATTACHMENTS_DIR: '/etc/cron.d' } })).toBe('outside');
+    expect(guard('rm -rf $LDS_ATTACHMENTS_DIR/../../..')).toBe('outside');
+  });
+});
