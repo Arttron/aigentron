@@ -18,7 +18,10 @@ import { DiskSettings } from '@/components/settings/DiskSettings';
 import { TitleSettings } from '@/components/settings/TitleSettings';
 import { ApprovalSettings } from '@/components/settings/ApprovalSettings';
 import { AlertSoundSettings } from '@/components/settings/AlertSoundSettings';
+import { TranslateSettings } from '@/components/settings/TranslateSettings';
 import { RunLimitSettings } from '@/components/settings/RunLimitSettings';
+import { AskModelSettings } from '@/components/settings/AskModelSettings';
+import { CompressionSettings } from '@/components/settings/CompressionSettings';
 import { VisionSettings } from '@/components/settings/VisionSettings';
 import { VoiceSettings } from '@/components/settings/VoiceSettings';
 
@@ -55,6 +58,7 @@ export function SettingsPage() {
           <UpdateSettings />
           <GeneralSettingsForm sections={['display']} />
           <AlertSoundSettings />
+          <TranslateSettings />
           <TitleSettings />
           <DiskSettings />
         </>
@@ -63,6 +67,8 @@ export function SettingsPage() {
         <>
           <ApprovalSettings />
           <RunLimitSettings />
+          <AskModelSettings />
+          <CompressionSettings />
           <GeneralSettingsForm sections={['repo', 'verify', 'queue', 'approvals', 'instructions', 'escalations']} />
         </>
       )}

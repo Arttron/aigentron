@@ -3,7 +3,7 @@ import { API_BASE } from './config';
 
 export interface VoiceSettings {
   stt: { provider: string; model: string; language: string } | null;
-  tts: { provider: string; model: string; voice: string; maxChars: number } | null;
+  tts: { provider: string; model: string; voice: string; maxChars: number; language?: string } | null;
   sttReady: boolean;
   ttsReady: boolean;
 }
@@ -50,6 +50,11 @@ export const voiceApi = {
     if (!r.ok) throw await failure(r);
     voiceChanged();
     return r.json() as Promise<VoiceSettings>;
+  },
+  async voicelabVoices(provider: string): Promise<{ id: string; name: string; language?: string }[]> {
+    const r = await fetch(`${API_BASE}/voice/voicelab/voices?provider=${encodeURIComponent(provider)}`, { cache: 'no-store' });
+    if (!r.ok) throw await failure(r);
+    return r.json();
   },
   async test(): Promise<{ tts: { ok: boolean; error?: string; bytes?: number } | null; stt: { ok: boolean; error?: string; heard?: string } | null }> {
     const r = await fetch(`${API_BASE}/voice/test`, { method: 'POST' });

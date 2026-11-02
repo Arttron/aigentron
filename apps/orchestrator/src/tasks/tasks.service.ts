@@ -221,7 +221,7 @@ export class TasksService {
         prompt: dto.prompt,
         title,
         titleState: titleStateFor({ given: Boolean(given), byAgent: opts.byAgent }),
-        kind: (dto as { kind?: string }).kind === 'discussion' ? 'discussion' : 'task',
+        kind: (dto as { kind?: string }).kind === 'discussion' ? 'discussion' : dto.kind === 'ask' ? 'ask' : 'task',
         status: 'queued',
         agentName: agent?.name ?? null,
         createdById: createdById ?? null,
@@ -243,7 +243,7 @@ export class TasksService {
     // Defer queuing when the client will upload attachments first (avoids the
     // run reading the attachments dir before the files land); it then /start-s.
     if (dto.autostart !== false) {
-      await this.enqueueRun({ taskId: task.id, attachments: dto.attachments }, task.agentName);
+      await this.enqueueRun({ taskId: task.id, attachments: dto.attachments }, task.agentName, { ask: task.kind === 'ask' });
       this.nameSoon(task, dto.attachments);
     }
     return task;
@@ -497,9 +497,11 @@ export class TasksService {
   }
 
   /** Queue a run; a turn of a chat-mode agent (the admin) goes to the reserved lane, outside the cap the task runs share. */
-  private async enqueueRun(data: TaskJobData, agentName: string | null | undefined, opts?: { delayMs?: number }): Promise<void> {
+  private async enqueueRun(data: TaskJobData, agentName: string | null | undefined, opts?: { delayMs?: number; ask?: boolean }): Promise<void> {
     const agent = agentName ? await this.agents.get(agentName).catch(() => null) : null;
-    await this.queue.enqueue(agent?.mode === 'chat' ? { ...data, lane: 'chat' } : data, opts);
+    // a question, like a chat turn, goes to the reserved lane: it never waits behind long work
+    const ask = opts?.ask ?? (await this.getLite(data.taskId).catch(() => null))?.kind === 'ask';
+    await this.queue.enqueue(agent?.mode === 'chat' || ask ? { ...data, lane: 'chat' } : data, opts);
   }
 
   /** Queue a task that was created with autostart=false (after its uploads). */

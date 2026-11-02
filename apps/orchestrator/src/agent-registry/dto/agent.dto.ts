@@ -17,6 +17,12 @@ export class AgentBodyDto {
   @MaxLength(300)
   fallbackProviders?: string;
 
+  /** Comma-separated `provider/model` escalation steps, cheapest first. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(600)
+  escalation?: string;
+
   /** Steps one run may take (5–500); blank = the installation default (AGENT_MAX_TURNS, 40). */
   @IsOptional()
   @IsInt()

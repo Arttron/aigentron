@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
-import type { Provider } from '@lds/shared';
+import { compareModelCost, describeModel, type ModelInfo, type Provider } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { probeClaudeToken } from '../provider-login/claude-probe';
@@ -408,12 +408,12 @@ export class ProvidersService implements OnModuleInit {
   /** Models the provider's endpoint advertises (for the agent's model picker). */
   async listModels(name: string): Promise<ProviderModelsResult> {
     const p = toProvider(await this.getRow(name));
-    if (p.kind === 'codex') return { ok: true, models: await this.codex.models() };
+    if (p.kind === 'codex') return this.withInfo({ ok: true, models: await this.codex.models() }, { subscription: true });
     if (p.authMode === 'oauth-token') {
       // Same reasoning as test(): don't guess at the OAuth token's request shape — offer the known Claude models (any name can still be typed).
-      return { ok: true, models: [...CLAUDE_SUBSCRIPTION_MODELS] };
+      return this.withInfo({ ok: true, models: [...CLAUDE_SUBSCRIPTION_MODELS] }, { subscription: true });
     }
-    return this.fetchModels({ kind: kindOf(p), baseUrl: p.baseUrl, authMode: p.authMode === 'api-key' ? 'api-key' : 'auth-token', secret: p.secret });
+    return this.withInfo(await this.fetchModels({ kind: kindOf(p), baseUrl: p.baseUrl, authMode: p.authMode === 'api-key' ? 'api-key' : 'auth-token', secret: p.secret }), { local: kindOf(p) === 'ollama' });
   }
 
   /** Same as listModels but for unsaved params — lets the form preview models. */
@@ -423,14 +423,28 @@ export class ProvidersService implements OnModuleInit {
     authMode?: 'api-key' | 'auth-token' | 'oauth-token' | 'codex-login';
     secret?: string | null;
   }): Promise<ProviderModelsResult> {
-    if (input.kind === 'codex') return { ok: true, models: await this.codex.models() };
-    if (input.authMode === 'oauth-token') return { ok: true, models: [...CLAUDE_SUBSCRIPTION_MODELS] };
-    return this.fetchModels({
-      kind: kindOf(input),
-      baseUrl: input.baseUrl || null,
-      authMode: input.authMode === 'api-key' ? 'api-key' : 'auth-token',
-      secret: input.secret || null,
-    });
+    if (input.kind === 'codex') return this.withInfo({ ok: true, models: await this.codex.models() }, { subscription: true });
+    if (input.authMode === 'oauth-token') return this.withInfo({ ok: true, models: [...CLAUDE_SUBSCRIPTION_MODELS] }, { subscription: true });
+    return this.withInfo(
+      await this.fetchModels({
+        kind: kindOf(input),
+        baseUrl: input.baseUrl || null,
+        authMode: input.authMode === 'api-key' ? 'api-key' : 'auth-token',
+        secret: input.secret || null,
+      }),
+      { local: kindOf(input) === 'ollama' },
+    );
+  }
+
+  /**
+   * The model list with what is known about each model's cost, cheapest first (an agent's escalation ladder is chosen from it): a price from the
+   * gateway's price map, `local` for a model on this machine, a tier guessed from the name otherwise. A subscription has no price per token — only the tier.
+   */
+  private async withInfo(r: ProviderModelsResult, opts: { local?: boolean; subscription?: boolean }): Promise<ProviderModelsResult> {
+    if (!r.ok || !r.models.length) return r;
+    const prices = opts.local || opts.subscription ? undefined : await this.litellm.priceMap().catch(() => ({}));
+    const info = r.models.map((id) => describeModel(id, { prices, local: opts.local })).sort(compareModelCost);
+    return { ...r, info };
   }
 
   private async fetchModels(p: {
@@ -622,6 +636,8 @@ export interface ProviderTestResult {
 export interface ProviderModelsResult {
   ok: boolean;
   models: string[];
+  /** The same models with their cost tier and, when known, price — cheapest first. */
+  info?: ModelInfo[];
   error?: string;
 }
 

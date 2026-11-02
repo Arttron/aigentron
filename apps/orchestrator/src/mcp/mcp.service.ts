@@ -98,7 +98,7 @@ export class McpService {
     // Filtered here (not `createMany({skipDuplicates:true})`) since that
     // option isn't supported on SQLite.
     const existing = await this.prisma.mcpServer.findMany({
-      where: { name: { in: [...DEFAULT_MCP_SERVERS.map((s) => s.name), 'research'] } },
+      where: { name: { in: [...DEFAULT_MCP_SERVERS.map((s) => s.name), 'research', 'browser-ext'] } },
       select: { name: true },
     });
     const existingNames = new Set(existing.map((s) => s.name));
@@ -112,7 +112,13 @@ export class McpService {
         readOnlyTools: ['*'],
       },
     };
-    const missing = [...DEFAULT_MCP_SERVERS, researchSeed].filter((s) => !existingNames.has(s.name));
+    // The built-in browser-control server (the person's own browser through their extension): its tools are read-only for the approval classifier —
+    // the grants (one card per site and task) are asked inside the server, because only it knows the site.
+    const browserSeed = {
+      name: 'browser-ext',
+      config: { type: 'http', url: `${this.appConfig.approvalsApiUrl.replace(/\/$/, '')}/api/browser-mcp`, readOnlyTools: ['*'] },
+    };
+    const missing = [...DEFAULT_MCP_SERVERS, researchSeed, browserSeed].filter((s) => !existingNames.has(s.name));
     if (!missing.length) return;
     await this.prisma.mcpServer.createMany({ data: missing as Prisma.McpServerCreateManyInput[] });
     this.logger.log(`Seeded ${missing.length} default MCP server(s)`);

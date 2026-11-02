@@ -7,6 +7,8 @@ import { AppHeader, BackLink, Button, Card, SectionTitle, Muted, ErrorText } fro
 import { cn } from '@/lib/cn';
 import { UsageChart } from './UsageChart';
 import { DailyChart } from './DailyChart';
+import { CompressionStats } from './CompressionStats';
+import { EscalationStats } from './EscalationStats';
 import styles from './StatsPage.module.css';
 
 type RangeKey = 'today' | '7d' | '30d' | 'all';
@@ -157,6 +159,7 @@ export function StatsPage() {
         {data && !hasUsage && !loading && <Muted className={styles.empty}>Nothing here yet for this range{project ? ' and project' : ''} — try a wider window like 30 days or All time.</Muted>}
 
         {hasUsage && view === 'provider' && <UsageChart providers={data.providers} hidden={hidden} />}
+        {hasUsage && view === 'project' && <UsageChart providers={(data.projects ?? []).map((p) => ({ provider: p.name, ...p.totals }))} hidden={hidden} />}
         {hasUsage && view === 'day' && <DailyChart days={(data.days ?? []).slice(-120)} hidden={hidden} />}
 
         {hasUsage && cols.length === 0 && <Muted className={styles.empty}>Every column is switched off — tick some above.</Muted>}
@@ -210,6 +213,9 @@ export function StatsPage() {
             </table>
           </div>
         )}
+
+        {data && ((data.escalation?.runs ?? 0) > 0 || (data.ask?.sessions ?? 0) > 0) && <EscalationStats report={data} />}
+        {data?.compression && data.compression.runs > 0 && <CompressionStats report={data} />}
 
         <Muted className={styles.note}>
           A few notes: <strong>Requests</strong> counts each agentic turn the fleet took. <strong>Est. cost</strong> is a best-effort estimate — right on the money for Anthropic, rough or zero for models routed

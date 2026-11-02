@@ -4,6 +4,7 @@ import { isVideo } from '@/lib/capture';
 import { MediaViewer } from './MediaViewer';
 import { DocViewer } from './DocViewer';
 import { docKind } from '@/lib/doc-kinds';
+import { translateTarget } from '@/lib/translate-lang';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { useLook, useShow } from '@/lib/transcript-look';
@@ -128,7 +129,7 @@ export function Transcript({
   const translate = (id: string, text: string) => {
     setTranslated((m) => ({ ...m, [id]: '…' }));
     void api
-      .translate(text, navigator.language || 'English')
+      .translate(text, translateTarget())
       .then((r) => setTranslated((m) => ({ ...m, [id]: r.ok && r.text ? r.text : `⚠ ${r.error ?? 'could not translate'}` })))
       .catch((e) => setTranslated((m) => ({ ...m, [id]: `⚠ ${(e as Error).message}` })));
   };
@@ -358,7 +359,7 @@ export function Transcript({
                   {it.line.speaker && it.line.speaker !== 'system' && (
                     <div>
                       {translated[it.line.id] === undefined ? (
-                        <button type="button" className={styles.translateBtn} onClick={() => translate(it.line.id, it.line.text)} title="Translate into your language (a few tokens)">
+                        <button type="button" className={styles.translateBtn} onClick={() => translate(it.line.id, it.line.text)} title="Translate into the language chosen in Settings → General → Translation (a few tokens)">
                           🌐 translate
                         </button>
                       ) : (

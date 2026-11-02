@@ -28,6 +28,8 @@ import { browserPageAfter, type BrowserPage,
   type HookCheckInput,
   type HookCheckResponse,
   KNOWN_VAR_NAMES,
+  approvalNeedsDashboard,
+  BROWSER_SUBMIT_TOOL,
 } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
@@ -62,6 +64,7 @@ export function serializeApproval(row: ApprovalRow): ApprovalRequest {
     resolvedById: row.resolvedById,
     createdAt: row.createdAt.toISOString(),
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+    needsDashboard: approvalNeedsDashboard({ toolName: row.toolName, reason: row.reason, toolInput: row.toolInput }),
   };
 }
 
@@ -358,7 +361,8 @@ export class ApprovalsService {
 
     // On approve, optionally remember this call so it isn't asked again
     // (meaningless for a continuation prompt — skip it there).
-    if (decision === 'approve' && !isContinuation) {
+    // a form submitted in the person's browser is decided every time: never a standing exception
+    if (decision === 'approve' && !isContinuation && current.toolName !== BROWSER_SUBMIT_TOOL) {
       if (options?.taskException) await this.addException('task', current.taskId, current);
       if (options?.globalException) await this.addException('global', null, current);
     }
@@ -454,11 +458,13 @@ export class ApprovalsService {
   }
 
   /** List approvals, optionally filtered by status (newest first). */
-  async list(status?: ApprovalStatus) {
-    return this.prisma.approvalRequest.findMany({
+  async list(status?: ApprovalStatus): Promise<ApprovalRequest[]> {
+    const rows = await this.prisma.approvalRequest.findMany({
       where: status ? { status } : {},
       orderBy: { createdAt: 'desc' },
     });
+    // serialised like the live events (with `needsDashboard`): a client that reconnects must not offer Approve on a dashboard-only request
+    return rows.map(serializeApproval);
   }
 
   async get(id: string): Promise<ApprovalRequest> {

@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { DEFAULT_PROJECT_ID, normalizeSubdir } from '../projects/project-core';
 import { machineConcurrency } from '../queue/capacity-gate';
+import { normalizeCompression, type CompressionConfig } from '@lds/shared';
 
 const SINGLETON_ID = 'singleton';
 
@@ -16,6 +17,8 @@ export interface SettingsPatch {
   verifyMaxAttempts?: number;
   concurrency?: number;
   debugMode?: boolean;
+  compression?: string | null;
+  askModel?: string | null;
   agentInstructions?: string;
   repoUrl?: string | null;
   repoBranch?: string;
@@ -160,6 +163,16 @@ export class SettingsService {
     return (await this.load()).debugMode;
   }
 
+  /** The model that answers questions, `provider/model`, or null (the agent's own). */
+  async askModel(): Promise<string | null> {
+    return (await this.load()).askModel?.trim() || null;
+  }
+
+  /** The text compression / filtering settings (defaults when none are stored or the stored JSON is unreadable). */
+  async compression(): Promise<CompressionConfig> {
+    return parseCompression((await this.load()).compression);
+  }
+
   /** Instructions appended to the agent's system prompt (the "skill"). */
   async agentInstructions(): Promise<string> {
     return (await this.load()).agentInstructions;
@@ -201,4 +214,14 @@ function cleanEnv(value?: string): string | null {
   const v = value?.trim();
   if (!v || v.includes('xxx') || v.includes('<') || v.includes('your-')) return null;
   return v;
+}
+
+/** The stored JSON → a complete config. */
+export function parseCompression(stored: string | null | undefined): CompressionConfig {
+  if (!stored) return normalizeCompression(null);
+  try {
+    return normalizeCompression(JSON.parse(stored));
+  } catch {
+    return normalizeCompression(null);
+  }
 }

@@ -86,6 +86,8 @@ importers:
         specifier: ^6.0.7
         version: 6.4.3(@types/node@22.20.0)(jiti@2.7.0)(terser@5.48.0)
 
+  apps/extension: {}
+
   apps/orchestrator:
     dependencies:
       '@lds/agent-runner':

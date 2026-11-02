@@ -5,7 +5,8 @@ import { LoginLimiter } from '../auth/auth-core';
 import { RolesGuard } from '../identity/roles.guard';
 import { Roles } from '../identity/roles.decorator';
 import { IsString, MinLength } from 'class-validator';
-import { SettingsService, type SettingsPatch } from './settings.service';
+import { SettingsService, parseCompression, type SettingsPatch } from './settings.service';
+import { normalizeCompression, parseEscalationStep, validRulePattern } from '@lds/shared';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppConfigService } from '../config/app-config.service';
 import { machineConcurrency } from '../queue/capacity-gate';
@@ -28,6 +29,8 @@ function serialize(s: SettingsRow) {
     verifyMaxAttempts: s.verifyMaxAttempts,
     concurrency: s.concurrency,
     debugMode: s.debugMode,
+    compression: parseCompression(s.compression),
+    askModel: s.askModel ?? '',
     agentInstructions: s.agentInstructions,
     defaultProvider: s.defaultProvider,
     defaultAgent: s.defaultAgent,
@@ -52,6 +55,19 @@ function toPatch(dto: UpdateSettingsDto): SettingsPatch {
   if (dto.verifyMaxAttempts !== undefined) patch.verifyMaxAttempts = dto.verifyMaxAttempts;
   if (dto.concurrency !== undefined) patch.concurrency = dto.concurrency;
   if (dto.debugMode !== undefined) patch.debugMode = dto.debugMode;
+  if (dto.askModel !== undefined) {
+    const v = dto.askModel.trim();
+    if (v && !parseEscalationStep(v)) throw new HttpException('The question model must be written provider/model', HttpStatus.BAD_REQUEST);
+    patch.askModel = v || null;
+  }
+  if (dto.compression !== undefined) {
+    const c = normalizeCompression(dto.compression);
+    for (const r of c.rules) {
+      const bad = validRulePattern(r.pattern, r.flags);
+      if (bad) throw new HttpException(`Rule "${r.name}": ${bad}`, HttpStatus.BAD_REQUEST);
+    }
+    patch.compression = JSON.stringify(c);
+  }
   if (dto.agentInstructions !== undefined) patch.agentInstructions = dto.agentInstructions;
   if (dto.defaultProvider !== undefined) patch.defaultProvider = dto.defaultProvider || null;
   if (dto.defaultAgent !== undefined) patch.defaultAgent = dto.defaultAgent || null;

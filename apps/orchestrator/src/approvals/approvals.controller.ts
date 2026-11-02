@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import type { ApprovalStatus, HookCheckResponse } from '@lds/shared';
 import { ApprovalsService } from './approvals.service';
 import { HookCheckDto } from './dto/hook-check.dto';
@@ -98,11 +98,14 @@ export class ApprovalsController {
   @Post(':id/decision')
   @UseGuards(RolesGuard)
   @Roles('reviewer', 'operator', 'admin')
-  decide(
+  async decide(
     @Param('id') id: string,
     @Body() dto: ApprovalDecisionDto,
     @CurrentUser() user: UserRow,
+    @Req() req: { extensionDeviceId?: string },
   ) {
+    // a browser extension may decide the ordinary requests; the ones that need a careful look (merge, main, outside the folder, credentials, platform changes) only the dashboard
+    if (req.extensionDeviceId && (await this.approvals.get(id)).needsDashboard) throw new ForbiddenException('This request has to be decided in the dashboard.');
     return this.approvals.decide(
       id,
       dto.decision,

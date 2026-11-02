@@ -100,3 +100,15 @@ export function untagSessionId(stored: string | undefined, codex: boolean): stri
   if (codex) return isCodexId ? stored.slice('codex:'.length) : undefined;
   return isCodexId ? undefined : stored;
 }
+
+/**
+ * Did a run end in a way a STRONGER model might fix? The agent reported `failed`, or it ended without any report because it ran out of time /
+ * steps / ended in an error that is not the provider's. Not `blocked` (it needs a person's answer, not more brainpower), not `done`, not a
+ * cancel, and not the memory guard (a bigger model would run into it again).
+ */
+export function worthEscalating(o: { reported: 'done' | 'failed' | 'blocked' | null; errored: boolean; timedOut: boolean; maxTurns?: boolean; memoryStopped?: boolean; errorText?: string }): boolean {
+  if (o.memoryStopped) return false;
+  if (o.reported === 'failed') return true;
+  if (o.reported !== null) return false;
+  return o.timedOut || Boolean(o.maxTurns) || (o.errored && Boolean(o.errorText));
+}

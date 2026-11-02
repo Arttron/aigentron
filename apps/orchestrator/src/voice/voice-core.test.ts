@@ -83,3 +83,11 @@ describe('CallGate', () => {
     expect(g.enter('u1', 1500)).toBeTruthy(); // the window moved on
   });
 });
+
+describe('VoiceLab settings', () => {
+  it('keeps the language of the text to read aloud', () => {
+    const r = parseVoiceConfig({ tts: { provider: 'voicelab', model: 'voicelab', voice: 'voice_1', language: 'UZ' } });
+    expect(r.config?.tts).toMatchObject({ provider: 'voicelab', voice: 'voice_1', language: 'uz' });
+    expect(parseVoiceConfig({ tts: { provider: 'p', model: 'm' } }).config?.tts).not.toHaveProperty('language');
+  });
+});

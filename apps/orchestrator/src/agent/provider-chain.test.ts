@@ -46,3 +46,40 @@ describe('resolveProviderChain on a follow-up (X-FO-1)', () => {
     expect(names(chain)).toEqual(['a:a-default']);
   });
 });
+
+describe('resolveProviderChain with an escalation ladder', () => {
+  const agent = { provider: 'a', model: 'a-cheap', escalation: ['a/a-strong', 'b/b-top'], fallbackProviders: ['b'] };
+  it('primary, then the ladder steps (each with its own model), then the fallbacks', async () => {
+    const chain = await resolveProviderChain({ agent, defaultProvider: 'x' }, lookup);
+    expect(names(chain)).toEqual(['a:a-cheap', 'a:a-strong', 'b:b-top']); // the fallback b is already a step: not repeated
+    expect(chain.map((c) => Boolean(c.rung))).toEqual([false, true, true]);
+  });
+  it('a fallback provider that is not a step comes last and is not a rung', async () => {
+    const chain = await resolveProviderChain({ agent: { provider: 'a', escalation: ['a/a-strong'], fallbackProviders: ['b'] }, defaultProvider: 'x' }, lookup);
+    expect(names(chain)).toEqual(['a:a-default', 'a:a-strong', 'b:b-default']);
+    expect(chain.map((c) => Boolean(c.rung))).toEqual([false, true, false]);
+  });
+  it('skips a step whose provider is missing, malformed steps and a step equal to the primary', async () => {
+    const warnings: string[] = [];
+    const chain = await resolveProviderChain({ agent: { provider: 'a', model: 'm1', escalation: ['ghost/x', 'garbage', 'a/m1', 'a/m2'] }, defaultProvider: 'x' }, lookup, (m) => warnings.push(m));
+    expect(names(chain)).toEqual(['a:m1', 'a:m2']);
+    expect(warnings).toEqual(['Provider "ghost" not found — skipping in chain']);
+  });
+  it('a follow-up (noFailover) has the primary alone', async () => {
+    expect(names(await resolveProviderChain({ agent, defaultProvider: 'x', noFailover: true }, lookup))).toEqual(['a:a-cheap']);
+  });
+  it('a cooling primary is not moved behind the ladder', async () => {
+    const chain = await resolveProviderChain({ agent, defaultProvider: 'x', cooling: (n) => n === 'a' }, lookup);
+    expect(names(chain)).toEqual(['a:a-cheap', 'a:a-strong', 'b:b-top']);
+  });
+});
+
+describe('resolveProviderChain with a forced primary model (questions)', () => {
+  it('the forced model wins over the pin on the primary and leaves the fallbacks alone', async () => {
+    const chain = await resolveProviderChain({ agent: { provider: 'a', model: 'a-pinned', fallbackProviders: ['a'] }, defaultProvider: 'x', override: 'b', primaryModel: 'b-cheap' }, lookup);
+    expect(names(chain)).toEqual(['b:b-cheap', 'a:a-default']);
+  });
+  it('without a forced model nothing changes', async () => {
+    expect(names(await resolveProviderChain({ agent: { provider: 'a', model: 'a-pinned' }, defaultProvider: 'x', primaryModel: null }, lookup))).toEqual(['a:a-pinned']);
+  });
+});

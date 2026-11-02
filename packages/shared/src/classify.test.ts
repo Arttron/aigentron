@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { browserPageAfter, ACCESS_STATUS_TOOL, CREATE_TASK_TOOL, EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, classifyToolCall, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
+import { browserPageAfter, approvalNeedsItsOwnAnswer, BROWSER_GRANT_TOOL, BROWSER_SUBMIT_TOOL, ACCESS_STATUS_TOOL, CREATE_TASK_TOOL, EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, classifyToolCall, approvalNeedsDashboard, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
 
 const bash = (command: string) => classifyToolCall('Bash', { command });
 
@@ -399,5 +399,75 @@ describe('$LDS_ATTACHMENTS_DIR and $TMPDIR are read as the folders they are', ()
     expect(guard('cp x $LDS_ATTACHMENTS_DIR/x', { ...opts, knownVars: {} })).toBe('outside');
     expect(guard('cp x $LDS_ATTACHMENTS_DIR/x', { ...opts, knownVars: { LDS_ATTACHMENTS_DIR: '/etc/cron.d' } })).toBe('outside');
     expect(guard('rm -rf $LDS_ATTACHMENTS_DIR/../../..')).toBe('outside');
+  });
+});
+
+describe('dashboard-only: the cases a reason match alone missed', () => {
+  const stored = (toolName: string, toolInput: Record<string, unknown>) => {
+    const v = classifyToolCall(toolName, toolInput, { workspaceRoot: '/work/t1' });
+    return { toolName, reason: v.reason, toolInput };
+  };
+  it('publishing to main / master, and an MCP write on main', () => {
+    expect(approvalNeedsDashboard(stored(PUSH_BRANCH_TOOL, { branch: 'feat', to: 'main', reason: 'ship' }))).toBe(true);
+    expect(approvalNeedsDashboard(stored(PUSH_BRANCH_TOOL, { branch: 'main' }))).toBe(true);
+    expect(approvalNeedsDashboard(stored('mcp__github__push_files', { branch: 'main', owner: 'o', repo: 'r' }))).toBe(true);
+    expect(approvalNeedsDashboard(stored('mcp__github__create_or_update_file', { branch: 'master', path: 'a' }))).toBe(true);
+    // an ordinary branch is fine
+    expect(approvalNeedsDashboard(stored(PUSH_BRANCH_TOOL, { branch: 'feat', to: 'feat' }))).toBe(false);
+  });
+  it('blind approval is refused only for browser grants and submissions', () => {
+    expect(approvalNeedsItsOwnAnswer({ toolName: BROWSER_SUBMIT_TOOL })).toBe(true);
+    expect(approvalNeedsItsOwnAnswer({ toolName: BROWSER_GRANT_TOOL })).toBe(true);
+    expect(approvalNeedsItsOwnAnswer({ toolName: 'Bash' })).toBe(false);
+  });
+});
+
+describe('requests only the dashboard may decide (not a browser-extension button)', () => {
+  const needs = (toolName: string, reason: string) => approvalNeedsDashboard({ toolName, reason });
+  it('platform changes and secrets', () => {
+    expect(needs('mcp__lds_internal__propose_agent', 'x')).toBe(true);
+    expect(needs('mcp__lds_internal__propose_settings', 'x')).toBe(true);
+    expect(needs('mcp__lds_internal__request_secret', 'x')).toBe(true);
+    // the agent's own work is an ordinary request
+    expect(needs('mcp__lds_internal__push_branch', 'agent proposing to push')).toBe(false);
+    expect(needs('mcp__lds_internal__create_task', 'agent proposing to START a new task')).toBe(false);
+  });
+  it('every guard and hard reason the classifier produces', () => {
+    for (const cmd of ['git merge feature', 'git push origin main', 'cp x ~/y', 'cat .env', 'printenv', 'rm -rf /etc/x']) {
+      const v = classifyToolCall('Bash', { command: cmd }, { workspaceRoot: '/work/t1' });
+      if (v.dangerous && (v.hard || v.guard)) expect(needs('Bash', v.reason), `${cmd}: ${v.reason}`).toBe(true);
+    }
+    expect(needs('Write', 'write outside the task worktree (/work/t1)')).toBe(true);
+    expect(needs('Bash', 'write to a credentials file (sign-in password / tokens)')).toBe(true);
+    expect(needs('Bash', 'write to a protected file (SOUL.md/.github/.git)')).toBe(true);
+  });
+  it('ordinary requests can be decided from the page', () => {
+    expect(needs('Bash', 'recursive force remove (rm -rf)')).toBe(false);
+    expect(needs('mcp__playwright__browser_navigate', 'browser navigation to an external page')).toBe(false);
+    expect(needs('mcp__github__create_issue', 'MCP tool call (external server)')).toBe(false);
+  });
+});
+
+describe('the browser-control grant card', () => {
+  it('is always a card (even with no approvals), decidable from the extension, never a guard', () => {
+    const v = classifyToolCall(BROWSER_GRANT_TOOL, { host: 'example.com', level: 'read', why: 'look up a price' });
+    expect(v).toMatchObject({ dangerous: true });
+    expect(v.reason).toContain('example.com');
+    expect(v.reason).toContain('look up a price');
+    expect(v.hard).toBeFalsy();
+    expect(v.guard).toBeUndefined();
+    expect(approvalNeedsDashboard({ toolName: BROWSER_GRANT_TOOL, reason: v.reason })).toBe(false);
+  });
+});
+
+describe('the browser-control submit card', () => {
+  it('names the button, the site and what the form holds; asked always, decidable from the extension', () => {
+    const v = classifyToolCall(BROWSER_SUBMIT_TOOL, { host: 'shop.example.com', label: 'Place order', action: 'https://shop.example.com/checkout', fields: [{ label: 'Email', value: 'a@b.co' }, { label: 'Password', value: '••••' }] });
+    expect(v.dangerous).toBe(true);
+    expect(v.reason).toContain('Place order');
+    expect(v.reason).toContain('shop.example.com');
+    expect(v.reason).toContain('Email: a@b.co');
+    expect(v.hard).toBeFalsy();
+    expect(approvalNeedsDashboard({ toolName: BROWSER_SUBMIT_TOOL, reason: v.reason })).toBe(false);
   });
 });

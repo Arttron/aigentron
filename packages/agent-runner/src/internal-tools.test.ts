@@ -52,6 +52,8 @@ describe('internal tool registry', () => {
     );
     const specNames = new Set(buildInternalToolSpecs(full).map((s) => INTERNAL_TOOL_PREFIX + s.name));
     expect([...specNames].filter((n) => !consts.has(n))).toEqual([]);
-    expect([...consts].filter((n) => !specNames.has(n))).toEqual([]);
+    // raised by the orchestrator itself, not an agent tool: the browser-control server asks the person for a site through the approvals system
+    const VIRTUAL = new Set<string>([shared.BROWSER_GRANT_TOOL, shared.BROWSER_SUBMIT_TOOL]);
+    expect([...consts].filter((n) => !specNames.has(n) && !VIRTUAL.has(n))).toEqual([]);
   });
 });

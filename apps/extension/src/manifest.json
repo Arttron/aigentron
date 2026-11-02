@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Aigentron",
+  "version": "0.0.1",
+  "description": "Your Aigentron agents from any tab: send pages, answer their approvals where you are, and let them work in your browser.",
+  "minimum_chrome_version": "116",
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": { "default_title": "Aigentron", "default_popup": "popup.html" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "permissions": ["storage", "alarms", "activeTab", "scripting", "contextMenus", "notifications", "idle", "offscreen", "sidePanel", "tabGroups"],
+  "side_panel": { "default_path": "panel.html" },
+  "optional_host_permissions": ["<all_urls>"],
+  "commands": { "send-page": { "suggested_key": { "default": "Alt+Shift+A" }, "description": "Send this page to Aigentron" }, "open-panel": { "suggested_key": { "default": "Alt+Shift+P" }, "description": "Open the Aigentron panel" } },
+  "host_permissions": ["http://localhost/*"],
+  "content_scripts": [{ "matches": ["http://localhost/*"], "js": ["content.js"], "run_at": "document_idle" }]
+}

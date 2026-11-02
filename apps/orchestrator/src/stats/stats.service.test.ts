@@ -17,7 +17,7 @@ const row = (taskId: string, provider: string, at: string, over: Partial<Record<
 function service(rows: ReturnType<typeof row>[]) {
   const prisma = {
     agentSession: { findMany: async () => rows },
-    task: { findMany: async () => [{ id: 't1', projectId: 'p-shop' }, { id: 't2', projectId: 'p-blog' }, { id: 't3', projectId: 'p-shop' }] },
+    task: { findMany: async () => [{ id: 't1', projectId: 'p-shop', kind: 'task' }, { id: 't2', projectId: 'p-blog', kind: 'task' }, { id: 't3', projectId: 'p-shop', kind: 'ask' }] },
     project: { findMany: async () => [{ id: 'p-shop', slug: 'shop', name: 'Shop' }, { id: 'p-blog', slug: 'blog', name: 'Blog' }] },
   };
   return new StatsService(prisma as never);
@@ -27,6 +27,29 @@ const data = [
   row('t3', 'ollama', '2026-10-20T23:30:00Z', { costUsd: 0, numTurns: 5 }),
   row('t2', 'claude', '2026-10-22T09:00:00Z', { inputTokens: 1000 }),
 ];
+
+describe('escalations and questions', () => {
+  it('counts escalated runs by reason and path, and the cost of questions', async () => {
+    const esc = (taskId: string, reason: string, from: string, over: object = {}) => row(taskId, 'claude', '2026-10-20T10:00:00Z', { model: 'opus', escalationReason: reason as never, escalatedFrom: from as never, ...over });
+    const r = await service([esc('t1', 'verification failed', 'claude/haiku'), esc('t1', 'ran out of time', 'claude/haiku'), esc('t2', 'verification failed', 'claude/haiku'), row('t3', 'claude', '2026-10-20T11:00:00Z', { inputTokens: 500, outputTokens: 20, costUsd: 0.25 })]).usageByProvider({});
+    expect(r.escalation).toMatchObject({ runs: 3, tasks: 2, byReason: { 'verification failed': 2, 'ran out of time': 1 } });
+    expect(r.escalation!.paths).toEqual([{ from: 'claude/haiku', to: 'claude/opus', count: 3 }]);
+    expect(r.ask).toEqual({ tasks: 1, sessions: 1, inputTokens: 500, outputTokens: 20, estCostUsd: 0.25 });
+    const limited = await service([esc('t1', 'x', 'a/b'), esc('t2', 'y', 'a/b')]).usageByProvider({ project: 'blog' });
+    expect(limited.escalation).toMatchObject({ runs: 1, tasks: 1 });
+  });
+});
+
+describe('what the text filters saved', () => {
+  it('sums characters and the per-rule split, per project too; runs without savings do not count', async () => {
+    const withComp = (taskId: string, before: number, after: number, saved: object) => row(taskId, 'claude', '2026-10-20T10:00:00Z', { compressionBefore: before, compressionAfter: after, compressionSaved: JSON.stringify(saved) as never });
+    const r = await service([withComp('t1', 1000, 600, { whitespace: 100, logs: 300 }), withComp('t2', 500, 400, { whitespace: 100 }), row('t3', 'claude', '2026-10-20T11:00:00Z')]).usageByProvider({});
+    expect(r.compression).toEqual({ runs: 2, before: 1500, after: 1000, byRule: { whitespace: 200, logs: 300 } });
+    expect(r.projects!.find((p) => p.slug === 'shop')!.compression).toMatchObject({ runs: 1, before: 1000, after: 600 });
+    const limited = await service([withComp('t1', 1000, 600, { whitespace: 400 }), withComp('t2', 500, 400, { whitespace: 100 })]).usageByProvider({ project: 'blog' });
+    expect(limited.compression).toMatchObject({ runs: 1, before: 500 });
+  });
+});
 
 describe('usage report', () => {
   it('by provider, by project and by day from the same sessions', async () => {

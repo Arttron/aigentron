@@ -3,6 +3,8 @@ import type {
   AgentSession,
   ApprovalRequest,
   ChannelKind,
+  CompressionConfig,
+  ModelInfo,
   PendingFollowUp,
   Project,
   ProjectIsolation,
@@ -70,7 +72,7 @@ export interface TaskPage {
 /** Query params for the paginated/searchable task list. */
 export type TaskStatusFilter = 'queued' | 'running' | 'needs_approval' | 'review' | 'done' | 'blocked' | 'failed' | 'stalled' | 'cancelled' | 'active' | 'attention';
 
-export type TaskTypeFilter = 'task' | 'subtask' | 'chat' | 'scheduled' | 'channel' | 'discussion';
+export type TaskTypeFilter = 'task' | 'subtask' | 'chat' | 'scheduled' | 'channel' | 'discussion' | 'ask';
 
 export interface ListTasksParams {
   q?: string;
@@ -215,6 +217,8 @@ export interface ProviderTestResult {
 export interface ProviderModelsResult {
   ok: boolean;
   models: string[];
+  /** The models with their cost tier and (when known) price, cheapest first. */
+  info?: ModelInfo[];
   error?: string;
 }
 
@@ -247,6 +251,8 @@ export interface AgentInfo {
   provider?: string;
   /** Provider names to fail over to (in order) if the primary run errors. */
   fallbackProviders?: string[];
+  /** Escalation ladder: `provider/model` steps, cheapest first. */
+  escalation?: string[];
   model?: string;
   skills?: string[];
   allowedTools?: string[];
@@ -266,6 +272,7 @@ export type AgentBody = {
   description?: string;
   provider?: string;
   fallbackProviders?: string;
+  escalation?: string;
   model?: string;
   skills?: string;
   allowedTools?: string;
@@ -391,7 +398,8 @@ export interface ChannelInfo {
 export interface ChannelFieldMeta {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'list' | 'agent';
+  type: 'text' | 'password' | 'list' | 'agent' | 'select';
+  options?: { value: string; label: string }[];
   secret?: boolean;
   required?: boolean;
   placeholder?: string;
@@ -463,6 +471,10 @@ export interface Settings {
   /** what the queue really uses now (0 = automatic is resolved for this machine) */
   concurrencyEffective?: number;
   debugMode: boolean;
+  /** Text compression / filtering (Settings → Work → Compression). */
+  compression?: CompressionConfig;
+  /** The model that answers questions, `provider/model` ('' = each agent's own). */
+  askModel?: string;
   agentInstructions: string;
   defaultProvider: string | null;
   defaultAgent: string | null;
@@ -484,6 +496,8 @@ export type SettingsUpdate = Partial<{
   verifyMaxAttempts: number;
   concurrency: number;
   debugMode: boolean;
+  compression: CompressionConfig;
+  askModel: string;
   agentInstructions: string;
   defaultProvider: string;
   defaultAgent: string;
@@ -511,6 +525,8 @@ export interface KbInfo {
   embedModel: string | null;
   embedDim: number | null;
   agentWrite: boolean;
+  /** Kept by the platform (the administrator's reference): read-only. */
+  system?: boolean;
   docs: number;
   chunks: number;
   embedded: number;
@@ -617,7 +633,7 @@ export interface AddonInfo {
   title: string;
   description: string;
   requires: { ramMb: number; diskMb: number };
-  ports: { view: number | null; cdp: number | null; mcp: number | null };
+  ports: { view: number | null; cdp: number | null; mcp: number | null; api: number | null };
   backends: ('bare' | 'docker')[];
   status: AddonStatus;
   state: {
@@ -627,7 +643,7 @@ export interface AddonInfo {
     installedAt: string | null;
     browser: string | null;
     arch: string | null;
-    endpoints: { view: string | null; cdp: string | null; mcp: string | null };
+    endpoints: { view: string | null; cdp: string | null; mcp: string | null; api: string | null };
     profiles: string[];
     notes: string[];
   } | null;
@@ -694,7 +710,7 @@ export const api = {
   markTaskDone: (id: string, cancelOpenSubtasks = false) => request<unknown>('POST', `/tasks/${e(id)}/done`, { body: { cancelOpenSubtasks } }),
   startTask: (id: string, attachments?: string[]) => request<Task>('POST', `/tasks/${e(id)}/start`, { body: { attachments } }),
 
-  createTask: (body: { prompt: string; title?: string; agentName?: string; attachments?: string[]; autostart?: boolean; parentId?: string; references?: string[]; project?: string }) =>
+  createTask: (body: { prompt: string; title?: string; agentName?: string; attachments?: string[]; autostart?: boolean; parentId?: string; references?: string[]; project?: string; kind?: 'task' | 'ask' }) =>
     request<Task>('POST', '/tasks', { body }),
   providerLogin: (name: string) => request<LoginStatus>('GET', `/providers/${e(name)}/login`),
   providerLoginStart: (name: string) => request<LoginView>('POST', `/providers/${e(name)}/login/start`),
@@ -888,6 +904,10 @@ export const api = {
   getSettings: () => request<Settings>('GET', '/settings'),
   updateSettings: (body: SettingsUpdate) => request<Settings>('PUT', '/settings', { body }),
 
+  extensionInfo: () => request<{ available: boolean; signInOn: boolean; version: string; extensionVersion?: string; extensionId: string; origins: string[]; devices: { id: string; label: string; user: string; createdAt: string; lastSeenAt: string; /** the extension's own version as it last reported it (null: an older build that does not report) */ version: string | null; outdated: boolean }[]; agentsBrowser?: boolean }>('GET', '/extension/info'),
+  extensionSetAgentsBrowser: (on: boolean) => request<{ agentsBrowser: boolean }>('PUT', '/extension/settings', { body: { agentsBrowser: on } }),
+  extensionRemoveDevice: (id: string) => request<{ ok: boolean }>('DELETE', `/extension/devices/${e(id)}`),
+  extensionPair: () => request<{ code: string; expiresInSec: number }>('POST', '/extension/pair'),
   listAddons: () => request<AddonInfo[]>('GET', '/addons'),
   getAddon: (name: string) => request<AddonInfo>('GET', `/addons/${e(name)}`),
   /** The browser add-on's noVNC page, proxied behind the sign-in; `path` tells noVNC where its WebSocket is (host-relative, same proxy). */

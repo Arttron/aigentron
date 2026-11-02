@@ -2,6 +2,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
@@ -45,6 +46,11 @@ export class CreateTaskDto {
   @IsOptional()
   @IsBoolean()
   autostart?: boolean;
+
+  /** `ask` = a question: answered in a light run (no worktree, verification or status report), on the cheap model chosen in Settings. */
+  @IsOptional()
+  @IsIn(['task', 'ask'])
+  kind?: 'task' | 'ask';
 
   /** Parent task id when creating a subtask (decomposition). */
   @IsOptional()

@@ -34,6 +34,8 @@ export const SERVER_EVENT = {
   /** The task's pending-follow-up queue changed (enqueued/removed/drained) —
    *  from this client, another tab, or a channel. */
   followUpQueue: 'task:followup-queue',
+  /** A command for the person's browser extension (browser control): `{id, tool, args}`. */
+  extCommand: 'ext:command',
 } as const;
 
 /** Client -> server event names. */
@@ -43,6 +45,12 @@ export const CLIENT_EVENT = {
   /** The dashboard window gained/lost focus (drives approval escalation). */
   focus: 'client:focus',
   blur: 'client:blur',
+  /** The extension's answer to a command: `{id, ok, data? | error?}`. */
+  extResult: 'ext:result',
+  /** The person pressed Stop in the extension: the agent must stop using the browser. */
+  extStop: 'ext:stop',
+  /** The person allowed agents to use the browser again after a Stop. */
+  extAllow: 'ext:allow',
 } as const;
 
 /** A single line/chunk of an agent's streamed output. */

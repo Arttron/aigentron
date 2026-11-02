@@ -207,6 +207,9 @@ export function KnowledgePage() {
         <Card>
           <Row spaceBetween>
             <SectionTitle>{open.name}</SectionTitle>
+            {open.system ? (
+              <Muted>Built in — the administrator&apos;s reference, rebuilt from the shipped guides at every start. Read-only.</Muted>
+            ) : (
             <Row>
               <Button onClick={() => edit(open)}>Settings</Button>
               <Button
@@ -219,7 +222,9 @@ export function KnowledgePage() {
                 Delete
               </Button>
             </Row>
+            )}
           </Row>
+          {!open.system && (
           <div
             className={drag ? styles.dropOn : styles.drop}
             onDragOver={(e) => {
@@ -258,6 +263,7 @@ export function KnowledgePage() {
             </Row>
             <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.md,.markdown,.txt,.html,.htm,.csv,.tsv,.json,.log,.rst,.yaml,.yml" onChange={(e) => e.target.files && void upload(e.target.files)} />
           </div>
+          )}
 
           <form
             style={{ marginBottom: 16 }}
@@ -314,6 +320,7 @@ export function KnowledgePage() {
                   <span className={`${styles.status} ${status === 'processing' ? styles.statusProcessing : status === 'error' ? styles.statusError : styles.statusReady}`} aria-live={status === 'processing' ? 'polite' : undefined}>
                     {STATUS_LABEL[status]}
                   </span>
+                  {!open.system && (
                   <Button
                     variant="red"
                     size="sm"
@@ -326,6 +333,7 @@ export function KnowledgePage() {
                   >
                     ✕
                   </Button>
+                  )}
                 </li>
               );
             })}

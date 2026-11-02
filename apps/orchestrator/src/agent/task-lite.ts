@@ -19,6 +19,7 @@ export const TASK_LITE_SELECT = {
   title: true,
   prompt: true,
   providerOverride: true,
+  kind: true,
 } as const;
 
 export type TaskLite = {
@@ -33,6 +34,8 @@ export type TaskLite = {
   title: string;
   prompt: string;
   providerOverride: string | null;
+  /** `task` | `discussion` | `ask` (a question: the light lifecycle of a chat). */
+  kind?: string;
 };
 
 export async function getTaskLite(prisma: PrismaService, id: string): Promise<TaskLite | null> {

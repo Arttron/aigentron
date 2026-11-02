@@ -97,20 +97,22 @@ export function ApprovalDock() {
   // The first touch of the page wakes the audio, so the alert sound can play by itself later.
   useEffect(() => installAlertUnlock(), []);
 
-  // Report window focus to the server (drives channel escalation of unattended
-  // approvals), sending the initial state on (re)connect.
+  // Report to the server whether the dashboard is in front of someone (drives the «dashboard first» delay of approvals and questions before they go to a
+  // chat), sending the initial state on (re)connect. «In front» = the tab is VISIBLE, not that the window has the keyboard focus: a person who clicked into
+  // a terminal on the same screen still sees the page, and must get the 10 seconds to answer there before Telegram is bothered.
   useEffect(() => {
     const socket = getSocket();
-    const sendFocus = () => socket.emit(CLIENT_EVENT.focus);
-    const sendBlur = () => socket.emit(CLIENT_EVENT.blur);
-    const syncNow = () => (document.hasFocus() ? sendFocus() : sendBlur());
-    window.addEventListener('focus', sendFocus);
-    window.addEventListener('blur', sendBlur);
+    const syncNow = () => socket.emit(document.visibilityState === 'visible' ? CLIENT_EVENT.focus : CLIENT_EVENT.blur);
+    document.addEventListener('visibilitychange', syncNow);
+    window.addEventListener('pageshow', syncNow);
+    const hide = () => socket.emit(CLIENT_EVENT.blur);
+    window.addEventListener('pagehide', hide);
     socket.on('connect', syncNow);
     syncNow();
     return () => {
-      window.removeEventListener('focus', sendFocus);
-      window.removeEventListener('blur', sendBlur);
+      document.removeEventListener('visibilitychange', syncNow);
+      window.removeEventListener('pageshow', syncNow);
+      window.removeEventListener('pagehide', hide);
       socket.off('connect', syncNow);
     };
   }, []);

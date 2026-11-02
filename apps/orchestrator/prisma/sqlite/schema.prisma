@@ -37,6 +37,12 @@ model AppSettings {
   // when true the dashboard shows verbose 'assistant' transcript lines
   debugMode Boolean @default(false)
 
+  // Text compression / filtering settings (JSON of CompressionConfig in @lds/shared); null = the defaults.
+  compression String?
+
+  // The model that answers questions (tasks of kind `ask`), as `provider/model`; null = the agent's own.
+  askModel String?
+
   // instructions appended to every agent's system prompt (the "skill")
   agentInstructions String @default("Before changing anything, inspect the project in your working directory: list the files and read the README and key config files to understand its structure and conventions. Then implement the task with minimal, focused changes that match the existing style.")
 
@@ -360,6 +366,8 @@ model KnowledgeBase {
   embedDim      Int?
   // agents may add notes themselves (kb_add)
   agentWrite  Boolean  @default(false)
+  // a base the platform itself keeps (the administrator's reference): read-only for people and agents, refreshed from the shipped files at start
+  system      Boolean  @default(false)
   // the project the base belongs to; null = global (visible to every project). A deleted project's bases become global.
   projectId   String?
   project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
@@ -512,6 +520,13 @@ model AgentSession {
   numTurns            Int?
   costUsd             Float?
   apiMs               Int?
+  // What our own text filters saved on this run (characters before / after, and a JSON map rule → characters saved).
+  compressionBefore   Int?
+  compressionAfter    Int?
+  compressionSaved    String?
+  // Set when this run is an ESCALATION: why the earlier attempt was not enough, and the provider/model it ran on.
+  escalationReason    String?
+  escalatedFrom       String?
 
   events    AgentEvent[]
   approvals ApprovalRequest[]

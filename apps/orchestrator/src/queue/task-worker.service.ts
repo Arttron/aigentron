@@ -1,4 +1,6 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { isTerminalStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
@@ -158,7 +160,7 @@ export class TaskWorkerService implements OnModuleInit {
       return;
     }
     const agentDef = pre.agentName ? await this.agents.get(pre.agentName).catch(() => null) : null;
-    const chat = agentDef?.mode === 'chat';
+    const chat = agentDef?.mode === 'chat' || pre.kind === 'ask'; // a question has the light lifecycle of a chat turn
     const project = chat ? null : await this.projects.contextFor(pre);
     // A busy small machine: hold the start (the task stays `queued`) until the load / memory are back inside the limits. The admin's chat lane never waits.
     if (!chat) {
@@ -396,11 +398,29 @@ export class TaskWorkerService implements OnModuleInit {
     return this.worktrees.createForTask(project, task.id, task.title);
   }
 
+  /**
+   * Where a chat turn runs: the agent-configuration folder for a chat agent (the admin); for a QUESTION to a working agent, the task's project folder
+   * (the run only reads there — see the executor), or an empty scratch folder when the project has none. Never the configuration folder: it holds
+   * the agents' logins.
+   */
+  private async chatDir(taskId: string): Promise<string> {
+    const lite = await this.tasks.getLite(taskId).catch(() => null);
+    if (lite?.kind !== 'ask') return this.config.agentDir;
+    const agentDef = lite.agentName ? await this.agents.get(lite.agentName).catch(() => null) : null;
+    if (agentDef?.mode === 'chat') return this.config.agentDir; // a chat agent keeps its own place (and its own tool limits)
+    const project = await this.projects.contextFor(lite).catch(() => null);
+    const dir = project ? (project.kind === 'code' ? project.repoPath : docsWorkDirOf(project)) : null;
+    if (dir && (await stat(dir).then((s) => s.isDirectory()).catch(() => false))) return dir;
+    const scratch = join(tmpdir(), 'aigentron-ask');
+    await mkdir(scratch, { recursive: true });
+    return scratch;
+  }
+
   /** One chat turn: run the agent in the agent-config dir and settle as done (or failed on a run error). */
   private async processChat(taskId: string, followUpPrompt?: string, attachments?: string[]): Promise<void> {
     const outcome = await this.executor.run({
       taskId,
-      worktreePath: this.config.agentDir,
+      worktreePath: await this.chatDir(taskId),
       branch: '',
       followUpPrompt,
       attachments,
@@ -440,6 +460,8 @@ export class TaskWorkerService implements OnModuleInit {
         worktreePath: ctx.worktreePath,
         branch: ctx.branch,
         followUpPrompt: `Your change did not pass verification. Fix the problems below, then stop.\n\n${result.output}`,
+        // the first fix is tried on the same model; if that still fails, the next attempts go up the agent's escalation ladder (if it has one)
+        ...(attempt >= 2 ? { escalateTo: attempt - 1 } : {}),
         // a fix run needs no extra "report your status" turn (the gate re-verifies anyway)
         skipReportingResume: true,
       });

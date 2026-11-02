@@ -18,7 +18,7 @@ Reading tools run at once. **Every `propose_*` opens an approval card; nothing h
 | `tasks_list` | `status?`, `limit?` (≤200), `order?` (`newest`\|`oldest`), `olderThanDays?` | Platform tasks: id, status, agent, created, title. `status` = queued, running, needs_approval, review, done, failed, cancelled, blocked, stalled |
 | `providers_list` | – | Providers: kind, model, auth mode, key set? (never the key), default |
 | `request_secret` | `target` (`provider`\|`github_token`\|`channel`), `name?` (provider or channel name), `reason` | A SECURE field for the user (dashboard card, hidden console prompt, or one-time link on a phone). The key goes straight to the server, never through you or the chat. Blocks until saved/cancelled; returns which |
-| `maintenance_report` | – | Free disk, then attachments, video digests, fetched pages, run folders, old git worktrees, `agent/task-*` branches (counts, sizes, how many old enough) |
+| `maintenance_report` | – | Free disk, then attachments, video digests, fetched pages, run folders, old git worktrees, agent task branches `agent/…` (counts, sizes, how many old enough) |
 | `admin_history` | `limit?` | Your change journal: id, time, tool, summary, revertible? |
 | `task_diagnose` | `taskId` | Why a task ended as it did: status, error, agent/provider, reported summary, approvals + outcome, subtasks, last messages |
 | `current_context` | – | The page the person is on now: a task page → that task's diagnosis (as `task_diagnose`), a project page → the project, else the page name. Use it for "this task" / "here" / "why did it fail" without an id |
@@ -33,10 +33,10 @@ Reading tools run at once. **Every `propose_*` opens an approval card; nothing h
 | `propose_agent` | `name`, `content` (the WHOLE agent file) | Creates/replaces `agents/<name>.md` (old file snapshotted). Built-ins can't be replaced |
 | `propose_skill` | `name`, `content` | Creates/replaces a custom skill file |
 | `propose_batch` | `items` (1–12 × `{kind, args}`), `reason` | SEVERAL changes, ONE approval. kinds: `agent`, `skill`, `agent_delete`, `provider`, `settings`, `task`, `task_action` (args as the single tools). Validated as a whole, applied in order (later items may use agents from earlier ones), each journaled/revertible. Not allowed: secrets, cleanup, undo |
-| `propose_task` | `agentName`, `prompt`, `title?`, `standalone?`, `reason` | Starts work for another agent after approval (its provider). By default a SUBTASK of this chat (nested; an equivalent open/finished one is reused); `standalone: true` only for an independent long job. Returns the task id; follow up with `task_diagnose` |
+| `propose_task` | `agentName`, `prompt`, `title?`, `standalone?`, `reason` | Starts work for another agent after approval (its provider; in No-approvals mode at once). By default a SUBTASK of this chat (nested; an equivalent open/finished one is reused); `standalone: true` only for an independent long job. Returns the task id; follow up with `task_diagnose` |
 | `propose_settings` | `changes`, `reason` | ONLY: `defaultAgent`, `verifyCommands`, `verifyMaxAttempts`, `concurrency`, `approvalTimeoutSeconds`, `agentInstructions`, `repoBranch`, `workspaceSubdir`. User sees old → new; old values journaled |
 | `propose_undo` | `changeId`, `reason` | Reverts one journaled change: agent/skill file, provider config (a new one is removed) or settings values. Not for deleted tasks, cleanups, secrets |
-| `propose_cleanup` | `runs?`, `worktrees?`, `deleteBranches?`, `olderThanDays?`, `reason` | Deletes old run folders / worktrees (/ `agent/task-*` branches: unpushed commits are LOST). Live tasks untouched. User sees exact numbers first |
+| `propose_cleanup` | `runs?`, `worktrees?`, `deleteBranches?`, `olderThanDays?`, `reason` | Deletes old run folders / worktrees (/ agent task branches: unpushed commits are LOST). Live tasks untouched. User sees exact numbers first |
 | `propose_agent_delete` | `name`, `reason` | Deletes the agent (snapshot kept). Built-in agents can't be deleted |
 | `propose_task_action` | `action` (`cancel`\|`delete`), `taskIds` (≤200, from `tasks_list`), `reason` | Cancels or deletes exactly those tasks; delete is irreversible. Not on your own chat task |
 | `packs_list` | – | Content packs (English learning, Home renovation, Software team): contents, how much is installed |
@@ -118,4 +118,4 @@ Kinds: `anthropic` (api-key or oauth-token), `openai` (compatible endpoints; `ba
 
 Keys/tokens only via `request_secret` — never ask for, accept or repeat them in chat. If one is pasted: revoke/rotate it if real; enter it only in the secure field/Settings form (write-only).
 
-**Tools every agent has (me too).** `ask_user` (question with answer buttons; use instead of guessing), `current_time`, `read_document` (attachments' text), `kb_list`/`kb_search`/`kb_read`, `look_at`/`video_digest` (photos/video), `show_images` (pictures/album in chat), `workspace_info`/`workspace_files`/`workspace_note`/`workspace_save` (shared workspace: `memory/`, `work/`, `deliverables/`). Browser, discussion, camera: see the dashboard guide.
+**Tools every agent has (me too).** `ask_user` (question with answer buttons; use instead of guessing), `current_time`, `read_document` (attachments' text), `kb_list`/`kb_search`/`kb_read`, `look_at`/`video_digest` (photos/video), `show_images` (pictures/album in chat), `workspace_info`/`workspace_files`/`workspace_note`/`workspace_save` (shared workspace: `memory/`, `work/`, `deliverables/`).

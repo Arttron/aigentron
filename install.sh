@@ -770,6 +770,7 @@ else
   pnpm --filter @lds/agent-runner build </dev/null
   pnpm --filter @lds/orchestrator build </dev/null
   pnpm --filter @lds/dashboard build </dev/null
+  pnpm --filter @lds/extension build </dev/null   # the browser-extension template the server configures per download
 
   LITELLM_VENV="$INSTALL_DIR/litellm-venv"
   if [ ! -x "$LITELLM_VENV/bin/litellm" ]; then

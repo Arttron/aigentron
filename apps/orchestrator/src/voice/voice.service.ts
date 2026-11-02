@@ -3,6 +3,7 @@ import { SecretJsonFile } from '../security/secret-json-file';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { ProvidersService } from '../providers/providers.service';
+import { convertAudio, isVoicelabBase, vlSynthesize, vlTranscribe, vlVoices, type VlVoice } from './voicelab';
 import { EMPTY_VOICE, MAX_AUDIO_BYTES, audioFileName, parseVoiceConfig, speechText, type VoiceConfig } from './voice-core';
 
 const TIMEOUT_MS = 60_000;
@@ -103,6 +104,14 @@ export class VoiceService {
     const { base, headers } = await this.providers.audioEndpoint(stt.provider).catch((e) => {
       throw new BadRequestException((e as Error).message);
     });
+    if (isVoicelabBase(base)) {
+      try {
+        const r = await vlTranscribe({ base, headers }, { data, mime: mime || 'audio/ogg', fileName: audioFileName(mime), language: stt.language });
+        return { text: r.text, segments: r.segments };
+      } catch (e) {
+        throw new BadRequestException(`Speech recognition failed: ${(e as Error).message}`);
+      }
+    }
     const send = async (verbose: boolean) => {
       const form = new FormData();
       form.append('file', new Blob([new Uint8Array(data)], { type: mime || 'audio/ogg' }), audioFileName(mime));
@@ -151,6 +160,19 @@ export class VoiceService {
     const { base, headers } = await this.providers.audioEndpoint(tts.provider).catch((e) => {
       throw new BadRequestException((e as Error).message);
     });
+    if (isVoicelabBase(base)) {
+      if (!tts.voice || tts.voice === 'alloy') throw new BadRequestException('VoiceLab: choose a voice in Settings → Voice (Load voices).');
+      let wav: Buffer;
+      try {
+        wav = await vlSynthesize({ base, headers }, { text, language: tts.language || 'en', voiceId: tts.voice });
+      } catch (e) {
+        throw new BadRequestException(`Speech synthesis failed: ${(e as Error).message}`);
+      }
+      // VoiceLab returns WAV: Telegram wants Opus, a browser is happy with MP3; without ffmpeg the WAV itself is sent (browsers play it, Telegram gets a file)
+      const out = await convertAudio(wav, format);
+      if (out) return { audio: out, mime: format === 'opus' ? 'audio/ogg' : 'audio/mpeg', truncated };
+      return { audio: wav, mime: 'audio/wav', truncated };
+    }
     const request = (fmt: string) =>
       fetch(`${base}/audio/speech`, {
         method: 'POST',
@@ -169,6 +191,19 @@ export class VoiceService {
     }
     if (!res.ok) throw new BadRequestException(`Speech synthesis failed: ${apiError(res.status, await res.text())}`);
     return { audio: Buffer.from(await res.arrayBuffer()), mime: sent === 'opus' ? 'audio/ogg' : 'audio/mpeg', truncated };
+  }
+
+  /** The voices of a VoiceLab provider (for the picker in Settings → Voice). */
+  async voicelabVoices(provider: string): Promise<VlVoice[]> {
+    const { base, headers } = await this.providers.audioEndpoint(provider).catch((e) => {
+      throw new BadRequestException((e as Error).message);
+    });
+    if (!isVoicelabBase(base)) throw new BadRequestException(`Provider "${provider}" is not a VoiceLab one (its Base URL should be https://api.voicelab.uz/v1).`);
+    try {
+      return await vlVoices({ base, headers });
+    } catch (e) {
+      throw new BadRequestException(`Could not load the voices: ${(e as Error).message}`);
+    }
   }
 
   /** Round trip for the settings page: say a phrase, then recognise it. Each half reports separately. */

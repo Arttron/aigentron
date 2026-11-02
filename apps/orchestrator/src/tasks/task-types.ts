@@ -1,5 +1,5 @@
 /** Task types for the list filter: mutually exclusive, decided by kind > parent > origin > agent. */
-export const TASK_TYPES = ['task', 'subtask', 'chat', 'scheduled', 'channel', 'discussion'] as const;
+export const TASK_TYPES = ['task', 'subtask', 'chat', 'scheduled', 'channel', 'discussion', 'ask'] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
 export const isTaskType = (v: unknown): v is TaskType => typeof v === 'string' && (TASK_TYPES as readonly string[]).includes(v);
@@ -7,6 +7,7 @@ export const isTaskType = (v: unknown): v is TaskType => typeof v === 'string' &
 /**
  * Prisma `where` for one type. `chatAgents` = names of conversational agents (mode: chat, e.g. the admin).
  *  - discussion: a round-table between agents
+ *  - ask:        a question (a light run: no worktree, no gate, no status contract)
  *  - subtask:    produced by a lead's decomposition (has a parent)
  *  - scheduled:  started by a schedule
  *  - channel:    started from a chat channel (Telegram …)
@@ -18,6 +19,8 @@ export function typeWhere(type: TaskType, chatAgents: readonly string[]): Record
   switch (type) {
     case 'discussion':
       return { kind: 'discussion' };
+    case 'ask':
+      return { kind: 'ask' };
     case 'subtask':
       return { kind: 'task', parentId: { not: null } };
     case 'scheduled':

@@ -2,7 +2,7 @@ import { parsePinnedAgents } from '../projects/project-core';
 import { VoiceService } from '../voice/voice.service';
 import { ModuleRef } from '@nestjs/core';
 import { Injectable } from '@nestjs/common';
-import { isTerminalStatus } from '@lds/shared';
+import { approvalNeedsItsOwnAnswer, isTerminalStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -143,6 +143,8 @@ export class ChannelCommandService {
         return HELP;
       case '/clear':
         return this.clear(ctx);
+      case '/ask':
+        return this.newTask(ctx, arg, undefined, 'ask').then((r) => r.text);
       case '/new_task':
       case '/new':
         return this.newTask(ctx, arg).then((r) => r.text);
@@ -221,10 +223,10 @@ export class ChannelCommandService {
 
   /** `taskId` is null when nothing was actually created (e.g. the empty-text
    *  prompt below) — callers that want to react/track the run key off that. */
-  async newTask(ctx: CommandCtx, text: string, agentOverride?: string): Promise<{ text: string; taskId: string | null }> {
+  async newTask(ctx: CommandCtx, text: string, agentOverride?: string, kind?: 'ask'): Promise<{ text: string; taskId: string | null }> {
     if (!text) {
       await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: null });
-      return { text: '📝 Send the task description as your next message.', taskId: null };
+      return { text: kind === 'ask' ? '❓ Send /ask followed by your question.' : '📝 Send the task description as your next message.', taskId: null };
     }
     const state = await this.channels.chatState(ctx.channelId, ctx.chatId);
     const bound = await this.boundProject(ctx);
@@ -235,12 +237,13 @@ export class ChannelCommandService {
       agentName: agent.name,
       provider: state.model ?? undefined,
       createdByChannel: `${ctx.kind}:${ctx.userId}`,
+      ...(kind ? { kind } : {}),
     });
     await this.channels.linkThread(ctx.channelId, task.id, ctx.chatId);
     await this.channels.setChatState(ctx.channelId, ctx.chatId, { activeTaskId: task.id });
     const who = task.agentName ?? agent.name ?? 'the default lead';
     const why = agent.source === 'chat' ? ` — this chat's agent (/agent default goes back to the project's)` : '';
-    return { text: `✅ New task «${task.title}» (${shortId(task.id)}) → ${who}${why}. Updates will appear here.`, taskId: task.id };
+    return { text: `${kind === 'ask' ? '❓ Question' : '✅ New task'} «${task.title}» (${shortId(task.id)}) → ${who}${why}. Updates will appear here.`, taskId: task.id };
   }
 
   /**
@@ -418,9 +421,11 @@ export class ChannelCommandService {
     const pending = await this.prisma.approvalRequest.findFirst({
       where: { taskId: id, status: 'pending' },
       orderBy: { createdAt: 'desc' },
-      select: { id: true },
+      select: { id: true, toolName: true },
     });
     if (!pending) return 'No pending approval for the active task.';
+    // «approve the latest» is decided blind: not for a site grant or a form submission in the person's browser — they have to look at that card
+    if (decision === 'approve' && approvalNeedsItsOwnAnswer(pending)) return 'This one is about your browser (a site or a form) — press the button on its own message, or decide it in the dashboard.';
     await this.approvals.decide(pending.id, decision, { displayName: `${ctx.kind}:${ctx.userId}` });
     return decision === 'approve' ? '✅ Approved.' : '⛔ Denied.';
   }

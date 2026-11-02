@@ -1,0 +1,27 @@
+:root { color-scheme: light dark; --bg: #f6f7f9; --card: #fff; --fg: #1b1f24; --muted: #6b7280; --line: #e5e7eb; --accent: #4e78ff; --bad: #d33; --ok: #1a8f4c; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14171a; --card: #1b1f24; --fg: #e6e8eb; --muted: #9aa3ad; --line: #2f353d; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 14px; }
+header { display: flex; align-items: center; gap: 10px; }
+header h1 { font-size: 18px; margin: 0; }
+header img { width: 26px; height: 26px; }
+.muted { color: var(--muted); }
+.spacer { flex: 1; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.row label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 160px; }
+.checks label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); min-width: 0; }
+select, textarea, input[type="text"] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; }
+label > textarea { margin-top: 2px; }
+textarea { resize: vertical; }
+button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .5; cursor: default; }
+.canvasWrap { overflow: auto; max-height: 70vh; }
+canvas { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; }
+.bad { color: var(--bad); }
+.ok { color: var(--ok); }
+#source .title { font-weight: 600; }
+#source a { color: var(--accent); word-break: break-all; }
+pre.excerpt { margin: 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; color: var(--muted); }

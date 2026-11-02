@@ -46,6 +46,9 @@ case "$DATABASE_URL" in
     ;;
 esac
 
+# the browser-extension template the server configures per download (not a dependency of the orchestrator, so turbo would not build it)
+pnpm --filter @lds/extension build || echo "[entrypoint] WARNING: the extension template did not build — Settings → Extension will say it is missing"
+
 echo "[entrypoint] starting orchestrator in watch mode…"
 # turbo runs ^build first (compiles @lds/shared + @lds/agent-runner),
 # then the orchestrator's persistent `nest start --watch`.

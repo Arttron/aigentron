@@ -18,5 +18,9 @@ else
   echo "$LOCKFILE_HASH" > "$LOCKFILE_STAMP"
 fi
 
+# Vite pre-bundles the workspace package @lds/shared and keeps it in this cache; when shared gains an export the old bundle lacks it
+# ("x is not a function" in the browser). The cache is rebuilt in a second, so it is dropped on every start.
+rm -rf apps/dashboard/node_modules/.vite
+
 echo "[dashboard] starting vite dev (watch)…"
 exec pnpm exec turbo run dev --filter=@lds/dashboard

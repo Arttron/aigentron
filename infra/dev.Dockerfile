@@ -47,6 +47,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
 COPY apps/orchestrator/package.json apps/orchestrator/package.json
 COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY apps/extension/package.json apps/extension/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/agent-runner/package.json packages/agent-runner/package.json
 

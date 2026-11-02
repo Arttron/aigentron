@@ -41,6 +41,31 @@ this one is a throw-away headless browser — `--isolated`, no profile is kept b
 - **Memory**: a page open in Chromium takes 0.5–1.5 GB. On a 4 GB machine add a swap file first (`docs/small-servers.md`) and run one browser task at a time.
 - `aigentron addon status|logs|disable [--purge] playwright` work as for the browser.
 
+## The voice add-on (speech on this server)
+
+`sudo aigentron addon enable voice [--no-stt] [--stt-model tiny|base|small|medium]` installs a small **OpenAI-compatible speech server** on loopback
+(`http://127.0.0.1:8880/v1`) so voice (docs/voice.md) costs nothing and nothing leaves the machine:
+
+- **Speech synthesis — Piper** (the pinned release binary with its own espeak-ng, no Python needed): the voices `ru_RU-irina-medium` and `en_US-amy-medium`.
+  The voice name `auto` (or any name that is not an installed voice, e.g. the OpenAI `alloy`) picks the Russian or the English voice by the **script of the text**, so one
+  setting reads both languages. Output mp3 / opus / flac through ffmpeg (WAV without it). Kokoro was not used: it has no Russian.
+- **Speech recognition — faster-whisper** (CPU, int8) in a venv; model `small` by default (~460 MB download, ~1 GB RAM while it works; `--stt-model base|tiny` are lighter,
+  `--no-stt` installs synthesis only). Returns `json` or `verbose_json` (segment and word times, so "look here" in a video still works).
+- **Install**: Debian 11+ / Ubuntu 22.04+ (apt), Amazon Linux 2023 / Fedora (dnf; without ffmpeg the audio stays WAV), x86_64 or aarch64, ~3 GB free disk. Downloads are
+  **sha256-pinned** (Piper tarballs, voices); a mismatch stops the install. The unit `aigentron-voice.service` runs as its own user, `ProtectSystem=strict`, loopback only,
+  `MemoryMax` from `addon.json`, `HF_HUB_OFFLINE=1` (the model is fetched at install, never at run time). The installer finishes with a real speech test.
+- **Use it**: Settings → Voice shows **Use it for recognition and speech** once the add-on is running (it creates the provider `local-voice` — kind OpenAI, Base URL
+  `http://127.0.0.1:8880/v1`, no key — and selects it for both halves), or add that provider by hand.
+- Code: `infra/addons/voice/` (`server.py` — Python standard library + faster-whisper; tests `python3 -m unittest infra/addons/voice/test_server.py`).
+- Bare-metal only (like Playwright). On a Docker install point a provider at any OpenAI-compatible speech container instead (docs/voice.md).
+
+## The extension (built with the project, configured per server)
+
+The **browser extension** (Chrome / Edge / Brave) is listed under **Add-ons → Extension** in the dashboard, but unlike the others nothing is installed on the server: the extension is **built with
+the project** (`pnpm --filter @lds/extension build` → `apps/extension/dist`, part of `install.sh`, `minimal.Dockerfile` and the dev entrypoint) and the server only writes its **configuration** — this
+server's addresses, name and key — into a copy of it when you press *Download* (`GET /api/extension/download`). You unzip it, *Load unpacked* in `chrome://extensions`, and press **Connect** in the
+dashboard (a handshake with the signed-in page; needs a sign-in password). Plan and details: `docs/plan-browser-extension.md`. The tabs of the page: Browser, Playwright, Voice, Extension.
+
 ## Layout and contract
 
 ```

@@ -1,0 +1,12 @@
+{
+  "name": "@lds/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Aigentron browser extension (Chromium, Manifest V3): sources in src/, the built template in dist/ — the server only writes its configuration into a copy of it.",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "node build.mjs --check",
+    "icons": "node make-icons.mjs"
+  }
+}

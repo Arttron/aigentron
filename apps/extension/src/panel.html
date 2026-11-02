@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="panel.css" />
+    <title>Aigentron</title>
+  </head>
+  <body>
+    <header>
+      <img src="icons/32.png" alt="" /><strong>Aigentron</strong><span id="server" class="muted"></span>
+      <span class="spacer"></span><span id="conn" class="muted"></span>
+    </header>
+    <nav id="tabs" role="tablist">
+      <button data-tab="tasks" class="on">Tasks</button>
+      <button data-tab="chat">New chat</button>
+      <button data-tab="bug">Report a bug</button>
+    </nav>
+    <main id="main"></main>
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>

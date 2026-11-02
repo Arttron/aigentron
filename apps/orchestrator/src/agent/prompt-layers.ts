@@ -27,6 +27,8 @@ export interface PromptLayerInput {
   projectMap: string;
   /** Workspace memory digest ('' when empty or not a working agent). */
   memory: string;
+  /** Passages of the administrator's guides matching this message ('' for every other agent). */
+  reference?: string;
 }
 
 export interface PromptLayers {
@@ -44,7 +46,7 @@ export function projectMapBlock(projectMap: string): string {
 
 export function assemblePromptLayers(input: PromptLayerInput): PromptLayers {
   const systemAppend = `${input.orientation}\n\n${input.instructions}${input.roster}`;
-  const runContext = [projectMapBlock(input.projectMap), input.memory.trim()].filter(Boolean).join('\n\n');
+  const runContext = [projectMapBlock(input.projectMap), input.memory.trim(), (input.reference ?? '').trim()].filter(Boolean).join('\n\n');
   return { systemAppend, runContext };
 }
 

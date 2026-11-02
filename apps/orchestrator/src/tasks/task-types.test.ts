@@ -3,7 +3,7 @@ import { TASK_TYPES, isTaskType, typeWhere } from './task-types';
 
 describe('task types', () => {
   it('knows the six types', () => {
-    expect([...TASK_TYPES]).toEqual(['task', 'subtask', 'chat', 'scheduled', 'channel', 'discussion']);
+    expect([...TASK_TYPES]).toEqual(['task', 'subtask', 'chat', 'scheduled', 'channel', 'discussion', 'ask']);
     expect(isTaskType('chat')).toBe(true);
     expect(isTaskType('nope')).toBe(false);
     expect(isTaskType(undefined)).toBe(false);

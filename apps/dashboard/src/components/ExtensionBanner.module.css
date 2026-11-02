@@ -1,0 +1,28 @@
+.banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 14px;
+  margin: 0 0 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev-2);
+  box-shadow: var(--raised-xs);
+  font-size: 13px;
+}
+.close {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.close:hover {
+  opacity: 1;
+}
+.error {
+  color: var(--red, #d33);
+}

@@ -48,7 +48,7 @@ _aigentron() {
   elif [ "${COMP_WORDS[1]}" = completion ]; then
     COMPREPLY=( $(compgen -W "bash zsh" -- "$cur") )
   elif [ "${COMP_WORDS[1]}" = addon ]; then
-    if [ "$COMP_CWORD" -eq 2 ]; then COMPREPLY=( $(compgen -W "list enable disable status logs" -- "$cur") ); else COMPREPLY=( $(compgen -W "browser playwright --dry-run --purge --no-cdp --browser" -- "$cur") ); fi
+    if [ "$COMP_CWORD" -eq 2 ]; then COMPREPLY=( $(compgen -W "list enable disable status logs" -- "$cur") ); else COMPREPLY=( $(compgen -W "browser playwright voice --dry-run --purge --no-cdp --browser --no-stt --stt-model" -- "$cur") ); fi
   fi
 }
 complete -F _aigentron aigentron
@@ -83,7 +83,7 @@ _aigentron() {
     'import:put an export on this (new) server'
     'backup-timer:daily automatic backup on|off'
     'reset-password:remove the dashboard password'
-    'addon:add-ons (a real browser, a Playwright browser for agents): list, enable, disable, status, logs'
+    'addon:add-ons (a real browser, a Playwright browser for agents, local voice): list, enable, disable, status, logs'
     'rollback:go back to the previous release'
     'logout:end this terminal\'s signed-in session'
     'version:the installed version'
@@ -95,7 +95,7 @@ _aigentron() {
   elif [[ ${words[2]} == completion ]]; then
     _values 'shell' bash zsh
   elif [[ ${words[2]} == addon ]]; then
-    if (( CURRENT == 3 )); then _values 'addon command' list enable disable status logs; else _values 'add-on' browser playwright; fi
+    if (( CURRENT == 3 )); then _values 'addon command' list enable disable status logs; else _values 'add-on' browser playwright voice; fi
   fi
 }
 _aigentron "$@"
@@ -245,7 +245,7 @@ do_export() {
   say "${B}To finish the move${N} (docs/moving-servers.md):"
   say "  1. new server: install Aigentron (same or newer version), then  ${B}sudo aigentron import <archive>${N}"
   say "  2. ${B}stop this server${N} (sudo aigentron stop) once the new one works - two servers must not share one Telegram bot or the same repository pushes"
-  say "  3. on the new server: re-enable add-ons (sudo aigentron addon enable browser|playwright), check domains / Cloudflare Access in Settings, and run  aigentron doctor"
+  say "  3. on the new server: re-enable add-ons (sudo aigentron addon enable browser|playwright|voice), check domains / Cloudflare Access in Settings, and run  aigentron doctor"
 }
 
 do_restore() {
@@ -285,7 +285,7 @@ do_import() {
   say ""
   say "${B}After the import${N} (docs/moving-servers.md):"
   say "  - open the dashboard and check Tasks / Projects; a project with a remote repository fetches by itself, the code was carried too if the archive was made by 'aigentron export'"
-  say "  - add-ons are NOT carried over: sudo aigentron addon enable browser|playwright (the browser add-on's profile with your sign-ins stays on the old server)"
+  say "  - add-ons are NOT carried over: sudo aigentron addon enable browser|playwright|voice (the browser add-on's profile with your sign-ins stays on the old server)"
   say "  - the old server must be stopped (Telegram bot, repository pushes): sudo aigentron stop there"
   say "  - the .env of the old server is saved as <data>/backups/env-from-backup.txt - copy over PUBLIC_URL, domains and API keys you need; sudo aigentron harden if agents ran isolated there"
   say "  - aigentron doctor"
@@ -401,7 +401,7 @@ addon_backend_of() { b=$(addon_state "$1" | addon_state_field backend); echo "${
 addon_usage() {
   cat <<USAGE
 usage: aigentron addon list                              the add-ons this release ships, and which are enabled
-       aigentron addon enable <name> [--dry-run] [--backend bare|docker] [--browser chrome|chromium|playwright] [--no-cdp]
+       aigentron addon enable <name> [--dry-run] [--backend bare|docker] [--browser chrome|chromium|playwright] [--no-cdp] [--no-stt] [--stt-model tiny|base|small|medium]
        aigentron addon disable <name> [--purge]          --purge also removes the profile/data (bare: + the user and /opt/aigentron/<name>)
        aigentron addon status <name>                     state.json + are the endpoints answering
        aigentron addon logs <name>                       follow the add-on's log
@@ -425,10 +425,13 @@ addon_list() {
 addon_enable() {
   name="${1:-}"; shift || true
   dir=$(addon_dir "$name") || exit 1
-  dry=0; browser=""; cdp=on; extra=""; backend="$MODE"
+  dry=0; browser=""; cdp=on; extra=""; backend="$MODE"; stt=on; stt_model=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --dry-run) dry=1 ;;
+      --no-stt) stt=off ;;
+      --stt-model) stt_model="${2:-}"; shift ;;
+      --stt-model=*) stt_model="${1#--stt-model=}" ;;
       --browser) browser="${2:-}"; shift ;;
       --browser=*) browser="${1#--browser=}" ;;
       --backend) backend="${2:-}"; shift ;;
@@ -449,7 +452,7 @@ addon_enable() {
     [ "$dry" = 1 ] && extra="--dry-run"
     say "${B}Enabling add-on $name${N} on this server (bare-metal)…"
     # shellcheck disable=SC2086
-    BROWSER="$browser" AGENT_CDP="$cdp" DATA_DIR="$DATA_DIR" bash "$dir/bare.sh" install $extra || die "the add-on install failed (see above)"
+    BROWSER="$browser" AGENT_CDP="$cdp" VOICE_STT="$stt" ${stt_model:+WHISPER_MODEL="$stt_model"} DATA_DIR="$DATA_DIR" bash "$dir/bare.sh" install $extra || die "the add-on install failed (see above)"
     [ "$dry" = 1 ] || say "${G}✔${N} $name enabled — aigentron addon status $name"
     return 0
   fi

@@ -112,7 +112,7 @@ export function isThisMachine(addr: string | undefined, ownAddresses: readonly s
 export function isPublicRoute(path: string): boolean {
   // /api/secret-links/<token>: the one-time token is the credential (see SecretLinksService).
   if (path.startsWith('/api/secret-links/')) return true;
-  return path === '/api/health' || path === '/api/auth/status' || path === '/api/auth/login' || path === '/api/auth/setup' || path === '/api/auth/logout';
+  return path === '/api/health' || path === '/api/auth/status' || path === '/api/auth/login' || path === '/api/auth/setup' || path === '/api/auth/logout' || path === '/api/extension/token';
 }
 
 /**
@@ -121,7 +121,7 @@ export function isPublicRoute(path: string): boolean {
  * they are not reachable through a public tunnel.
  */
 export function isMachineRoute(path: string): boolean {
-  return /^\/api\/approvals\/check$/.test(path) || /^\/api\/approvals\/[^/]+\/wait$/.test(path) || path.startsWith('/api/internal-mcp') || path.startsWith('/api/research-mcp');
+  return /^\/api\/approvals\/check$/.test(path) || /^\/api\/approvals\/[^/]+\/wait$/.test(path) || path.startsWith('/api/internal-mcp') || path.startsWith('/api/research-mcp') || path.startsWith('/api/browser-mcp');
 }
 
 /** Failed sign-ins per key (client address): 5 misses → locked, doubling up to 15 minutes. Old failures are forgotten after an hour. */

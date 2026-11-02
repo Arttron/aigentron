@@ -11,7 +11,7 @@ import {
   UnsubscribeRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { isTerminalStatus, type TaskStatus } from '@lds/shared';
+import { approvalNeedsItsOwnAnswer, isTerminalStatus, type TaskStatus } from '@lds/shared';
 import { TasksService } from '../tasks/tasks.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
@@ -622,7 +622,10 @@ export class McpHostService implements OnModuleDestroy {
     decision: 'approve' | 'deny',
   ): Promise<Record<string, unknown>> {
     const task = await this.tasks.get(taskId); // 404s if missing
-    const pending = task.approvals.filter((a) => a.status === 'pending');
+    const all = task.approvals.filter((a) => a.status === 'pending');
+    // approving everything at once is blind: a site grant or a form submission in the person's browser is decided on its own card
+    const pending = decision === 'approve' ? all.filter((a) => !approvalNeedsItsOwnAnswer(a)) : all;
+    const skipped = all.length - pending.length;
     for (const a of pending) {
       await this.approvals.decide(a.id, decision, { displayName: 'mcp client' });
     }
@@ -631,7 +634,7 @@ export class McpHostService implements OnModuleDestroy {
     const message =
       pending.length === 0
         ? 'No pending approval on this task — nothing to decide.'
-        : `${decision === 'approve' ? 'Approved' : 'Denied'} ${pending.length} pending gate(s).`;
+        : `${decision === 'approve' ? 'Approved' : 'Denied'} ${pending.length} pending gate(s).${skipped ? ` ${skipped} browser request(s) (a site or a form) need their own answer in the dashboard.` : ''}`;
     return { decided: pending.length, decision, message, ...(await this.taskView(taskId)) };
   }
 

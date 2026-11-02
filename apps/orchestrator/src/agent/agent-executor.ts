@@ -13,6 +13,11 @@ export interface TaskRunContext {
   /** Follow-up prompt that continues an existing agent session, if any. */
   followUpPrompt?: string;
   /**
+   * Start this run on the Nth step (1-based) of the agent's escalation ladder, in a fresh session: the gate found the work of a cheaper model
+   * wanting and a stronger one is to fix it. Ignored when the agent has no ladder (the run then goes on as a plain follow-up).
+   */
+  escalateTo?: number;
+  /**
    * Do not resume the session once more to force a report_task_status when the
    * run ends without one (E-07): for a verify-fix or schedule-check run the
    * caller decides the outcome itself (it re-verifies), so the extra full pass

@@ -13,6 +13,8 @@ import { AgentEventBus, type BusEvent } from '../bus/agent-event-bus';
 import { PresenceService } from '../presence/presence.service';
 import { resolveCorsOrigin } from '../config/cors';
 import { AuthService } from '../auth/auth.service';
+import { ExtensionDevicesService } from '../auth/extension-devices.service';
+import { BrowserBridgeService } from '../browser-control/browser-bridge.service';
 import { CloudflareAccessService } from '../access/cloudflare-access.service';
 import { AccessService } from '../access/access.service';
 
@@ -37,6 +39,8 @@ export class EventsGateway
     private readonly auth: AuthService,
     private readonly access: AccessService,
     private readonly cloudflare: CloudflareAccessService,
+    private readonly devices: ExtensionDevicesService,
+    private readonly bridge: BrowserBridgeService,
   ) {}
 
   onModuleInit(): void {
@@ -64,23 +68,30 @@ export class EventsGateway
       client.disconnect(true);
       return;
     }
-    if (!this.auth.isAuthenticated(client.handshake.headers)) {
+    // a browser extension identifies itself with its device token in the connect packet (a socket has no headers to set from an extension)
+    const deviceToken = (client.handshake.auth as { token?: unknown } | undefined)?.token;
+    const device = typeof deviceToken === 'string' ? this.devices.verify(deviceToken, (client.handshake.auth as { version?: unknown } | undefined)?.version) : null;
+    const extension = device !== null;
+    if (!extension && !this.auth.isAuthenticated(client.handshake.headers)) {
       client.data.rejected = true;
       client.disconnect(true);
       return;
     }
     void client.join(ROOM.global);
+    if (device) this.bridge.attach(client, device.id, device.userId); // commands for the browser (browser control) go to this socket
     this.presence.connect();
   }
 
   handleDisconnect(client: Socket): void {
     if (client.data.rejected) return; // never counted as present
     this.presence.disconnect();
+    this.bridge.detach(client.id);
     if (this.focused.delete(client.id)) this.presence.blur();
   }
 
   @SubscribeMessage(CLIENT_EVENT.focus)
   onFocus(@ConnectedSocket() client: Socket): void {
+    this.bridge.setFront(client.id, true);
     if (!this.focused.has(client.id)) {
       this.focused.add(client.id);
       this.presence.focus();
@@ -89,7 +100,26 @@ export class EventsGateway
 
   @SubscribeMessage(CLIENT_EVENT.blur)
   onBlur(@ConnectedSocket() client: Socket): void {
+    this.bridge.setFront(client.id, false);
     if (this.focused.delete(client.id)) this.presence.blur();
+  }
+
+  /** The browser extension's answer to a browser-control command. */
+  @SubscribeMessage(CLIENT_EVENT.extResult)
+  onExtResult(@ConnectedSocket() client: Socket, @MessageBody() body: unknown): void {
+    if (body && typeof body === 'object') this.bridge.onResult(client.id, body as never);
+  }
+
+  /** The person allowed agents to use the browser again. */
+  @SubscribeMessage(CLIENT_EVENT.extAllow)
+  onExtAllow(@ConnectedSocket() client: Socket): void {
+    this.bridge.onAllow(client.id);
+  }
+
+  /** The person pressed Stop in the extension. */
+  @SubscribeMessage(CLIENT_EVENT.extStop)
+  onExtStop(@ConnectedSocket() client: Socket): void {
+    this.bridge.onStop(client.id);
   }
 
   @SubscribeMessage(CLIENT_EVENT.subscribeTask)

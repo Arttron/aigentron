@@ -11,6 +11,7 @@ export interface CommandDef {
 }
 
 export const COMMAND_MENU: CommandDef[] = [
+  { command: 'ask', description: 'Ask a question (a light, cheap answer)', usage: '/ask <question>' },
   { command: 'new_task', description: 'Start a new task', usage: '/new_task <text>' },
   { command: 'tasks', description: 'List recent tasks' },
   { command: 'task', description: 'Switch to a task', usage: '/task <id>' },

@@ -21,7 +21,7 @@ import {
 import { ROLES_KEY } from '../identity/roles.decorator';
 import { AddonsController } from './addons.controller';
 
-const descriptor = { name: 'browser', title: 'Browser', description: 'A browser.', requires: { ramMb: 1536, diskMb: 1500 }, ports: { view: 6080, cdp: 9222, mcp: null }, backends: ['bare', 'docker'] };
+const descriptor = { name: 'browser', title: 'Browser', description: 'A browser.', requires: { ramMb: 1536, diskMb: 1500 }, ports: { view: 6080, cdp: 9222, mcp: null, api: null }, backends: ['bare', 'docker'] };
 const state = {
   name: 'browser',
   enabled: true,
@@ -30,7 +30,7 @@ const state = {
   installedAt: '2026-10-19T10:00:00Z',
   browser: 'chromium 131',
   arch: 'x86_64',
-  endpoints: { view: 'http://127.0.0.1:6080', cdp: 'http://127.0.0.1:9222', mcp: null },
+  endpoints: { view: 'http://127.0.0.1:6080', cdp: 'http://127.0.0.1:9222', mcp: null, api: null },
   profiles: ['agent'],
   notes: ['hello'],
 };
@@ -103,7 +103,7 @@ describe('parseState', () => {
     const r = parseState({ name: 'browser', enabled: false, backend: 'docker', notes: Array(40).fill('n'), profiles: [1, 'agent'] }, 'browser');
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.value.endpoints).toEqual({ view: null, cdp: null, mcp: null });
+      expect(r.value.endpoints).toEqual({ view: null, cdp: null, mcp: null, api: null });
       expect(r.value.notes).toHaveLength(20);
       expect(r.value.profiles).toEqual(['agent']);
       expect(r.value.version).toBe('');
@@ -217,5 +217,17 @@ describe('the Playwright add-on', () => {
     expect(playwrightSseUrl({ ...pw, endpoints: { mcp: 'http://example.com:8931' } })).toBeNull();
     expect(playwrightSseUrl({ ...pw, name: 'browser' })).toBeNull();
     expect(playwrightSseUrl('junk')).toBeNull();
+  });
+});
+
+describe('an add-on with an API port (the local voice server)', () => {
+  const voice = { name: 'voice', enabled: true, backend: 'bare', version: '1', endpoints: { api: 'http://127.0.0.1:8880/v1' } };
+  it('reads its descriptor and its endpoint', () => {
+    expect(parseDescriptor({ name: 'voice', title: 'V', requires: { ramMb: 1, diskMb: 1 }, ports: { api: 8880 }, backends: ['bare'] }).ok).toBe(true);
+    const r = parseState(voice, 'voice');
+    expect(r.ok && r.value.endpoints.api).toBe('http://127.0.0.1:8880/v1');
+  });
+  it('refuses a public address', () => {
+    expect(parseState({ ...voice, endpoints: { api: 'http://example.com:8880/v1' } }, 'voice').ok).toBe(false);
   });
 });

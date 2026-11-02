@@ -1,0 +1,14 @@
+{
+  "name": "voice",
+  "title": "Local voice (speech on this server)",
+  "description": "Speech recognition (Whisper) and speech synthesis (Piper: Russian and English voices) running on this machine behind an OpenAI-compatible address, so voice costs nothing and nothing leaves the server.",
+  "version": "1",
+  "requires": {
+    "ramMb": 2048,
+    "diskMb": 2500
+  },
+  "ports": {
+    "api": 8880
+  },
+  "backends": ["bare"]
+}

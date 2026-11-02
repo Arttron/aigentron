@@ -105,6 +105,39 @@ export class LitellmService {
     private readonly managed: LitellmManagedService,
   ) {}
 
+  private prices: { at: number; map: Record<string, { input: number; output: number }> } | null = null;
+
+  /**
+   * LiteLLM's own price map (USD per token for thousands of models), from its public endpoint; kept for six hours. Empty when the gateway is
+   * off or does not serve it — callers then rank models by name.
+   */
+  async priceMap(): Promise<Record<string, { input: number; output: number }>> {
+    if (!this.config.litellmBaseUrl) return {};
+    if (this.prices && Date.now() - this.prices.at < 6 * 3_600_000) return this.prices.map;
+    // several lists asked for at once (a ladder of three steps) share one download
+    return (this.pricesInFlight ??= this.loadPrices().finally(() => (this.pricesInFlight = null)));
+  }
+
+  private pricesInFlight: Promise<Record<string, { input: number; output: number }>> | null = null;
+
+  private async loadPrices(): Promise<Record<string, { input: number; output: number }>> {
+    const map: Record<string, { input: number; output: number }> = {};
+    try {
+      const res = await fetch(`${this.config.litellmBaseUrl}/public/litellm_model_cost_map`, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const raw = (await res.json()) as Record<string, { input_cost_per_token?: number; output_cost_per_token?: number }>;
+        for (const [k, v] of Object.entries(raw)) {
+          if (v && typeof v === 'object' && typeof v.input_cost_per_token === 'number' && v.input_cost_per_token > 0) map[k] = { input: v.input_cost_per_token, output: Number(v.output_cost_per_token) || 0 };
+        }
+      }
+    } catch (e) {
+      this.logger.debug(`price map unavailable: ${(e as Error).message}`);
+    }
+    // an empty answer is remembered for a minute only, so a gateway that is still starting is asked again soon
+    this.prices = { at: Object.keys(map).length ? Date.now() : Date.now() - 6 * 3_600_000 + 60_000, map };
+    return map;
+  }
+
   get enabled(): boolean {
     return Boolean(this.config.litellmMasterKey && this.config.litellmBaseUrl);
   }

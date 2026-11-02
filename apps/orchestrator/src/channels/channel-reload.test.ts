@@ -113,3 +113,20 @@ describe('reload hands the replacement the cursor the old adapter left (a re-rea
     expect(built[1]!.row.config.lastUpdateId).toBe(777);
   });
 });
+
+import { ChannelsService } from './channels.service';
+import { getKind } from './channel-kinds';
+describe('a channel\'s default mode', () => {
+  const fields = getKind('telegram')!.fields;
+  it('keeps only a listed choice and defaults to a task', () => {
+    expect(normalizeConfig(fields, { botToken: 't', defaultMode: 'ask' }).defaultMode).toBe('ask');
+    expect(normalizeConfig(fields, { botToken: 't', defaultMode: 'task' }).defaultMode).toBe('task');
+    expect(normalizeConfig(fields, { botToken: 't', defaultMode: 'weird' }).defaultMode).toBeUndefined();
+    // an edit that does not send it keeps the stored one
+    expect(normalizeConfig(fields, { botToken: 't' }, { defaultMode: 'ask' }).defaultMode).toBe('ask');
+    const svc = Object.create(ChannelsService.prototype) as ChannelsService;
+    expect(svc.defaultMode({ config: { defaultMode: 'ask' } } as never)).toBe('ask');
+    expect(svc.defaultMode({ config: {} } as never)).toBe('task');
+    expect(svc.defaultMode({ config: { defaultMode: 'nope' } } as never)).toBe('task');
+  });
+});

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, HttpException, HttpStatus, Controller, Get, HttpCode, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Query, Body, HttpException, HttpStatus, Controller, Get, HttpCode, Post, Put, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { VoiceService } from './voice.service';
 import { CallGate, MAX_AUDIO_BYTES } from './voice-core';
@@ -45,6 +45,14 @@ export class VoiceController {
   async set(@Body() body: unknown) {
     const c = await this.voice.save(body);
     return { ...c, sttReady: c.stt !== null, ttsReady: c.tts !== null };
+  }
+
+  /** Voices of a VoiceLab provider (`?provider=name`). */
+  @Get('voicelab/voices')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  voicelabVoices(@Query('provider') provider?: string) {
+    return this.voice.voicelabVoices(String(provider ?? ''));
   }
 
   @Post('test')

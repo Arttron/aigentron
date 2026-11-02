@@ -70,3 +70,21 @@ describe('session id tagging', () => {
     expect(untagSessionId(undefined, true)).toBeUndefined();
   });
 });
+
+import { worthEscalating } from './run-outcome';
+describe('worthEscalating', () => {
+  const o = (over: object) => ({ reported: null as 'done' | 'failed' | 'blocked' | null, errored: false, timedOut: false, ...over });
+  it('a failed report, a timeout, used-up steps or an own error: a stronger model may fix it', () => {
+    expect(worthEscalating(o({ reported: 'failed' }))).toBe(true);
+    expect(worthEscalating(o({ timedOut: true, errored: true }))).toBe(true);
+    expect(worthEscalating(o({ maxTurns: true }))).toBe(true);
+    expect(worthEscalating(o({ errored: true, errorText: 'tool call loop' }))).toBe(true);
+  });
+  it('done, blocked (needs a person), a cancel (error without text) and the memory guard: no', () => {
+    expect(worthEscalating(o({ reported: 'done' }))).toBe(false);
+    expect(worthEscalating(o({ reported: 'blocked' }))).toBe(false);
+    expect(worthEscalating(o({ errored: true }))).toBe(false);
+    expect(worthEscalating(o({ reported: 'failed', memoryStopped: true }))).toBe(false);
+    expect(worthEscalating(o({}))).toBe(false);
+  });
+});

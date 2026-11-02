@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type ProviderInfo } from '@/lib/api';
+import { api, type AddonInfo, type ProviderInfo } from '@/lib/api';
 import { loadVoice, voiceApi, type VoiceSettings as VoiceCfg } from '@/lib/voice';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
 import { ModelSelect, SelectWithOther } from '@/components/ModelSelect';
@@ -20,6 +20,7 @@ interface Draft {
   ttsProvider: string;
   ttsModel: string;
   ttsVoice: string;
+  ttsLang: string;
   ttsMax: number;
 }
 
@@ -32,6 +33,7 @@ const fromCfg = (c: VoiceCfg | null): Draft => ({
   ttsProvider: c?.tts?.provider ?? '',
   ttsModel: c?.tts?.model ?? 'gpt-4o-mini-tts',
   ttsVoice: c?.tts?.voice ?? 'alloy',
+  ttsLang: c?.tts?.language ?? '',
   ttsMax: c?.tts?.maxChars ?? 1500,
 });
 
@@ -43,6 +45,10 @@ export function VoiceSettings() {
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState<string | null>(null);
   const [saved, setSaved] = useState<VoiceCfg | null>(null);
+  const [local, setLocal] = useState<AddonInfo | null>(null);
+  useEffect(() => {
+    void api.getAddon('voice').then(setLocal).catch(() => setLocal(null));
+  }, []);
 
   const load = useCallback(async () => {
     const [ps, cfg] = await Promise.all([api.listProviders().catch(() => []), loadVoice(true)]);
@@ -65,6 +71,18 @@ export function VoiceSettings() {
       return p.baseUrl ?? '';
     }
   };
+  // VoiceLab (voicelab.uz) is not OpenAI-compatible: the provider of kind OpenAI whose Base URL is on voicelab.uz selects it (no model, a voice id, a language)
+  const isVoicelab = (name: string) => /(^|\.)voicelab\.uz$/i.test(where(name).split(':')[0] ?? '');
+  const [voices, setVoices] = useState<{ id: string; name: string; language?: string }[]>([]);
+  const [voicesError, setVoicesError] = useState<string | null>(null);
+  const loadVoices = async () => {
+    setVoicesError(null);
+    try {
+      setVoices(await voiceApi.voicelabVoices(d.ttsProvider));
+    } catch (e) {
+      setVoicesError((e as Error).message);
+    }
+  };
   const set = (patch: Partial<Draft>) => setD((x) => ({ ...x, ...patch }));
 
   const save = async () => {
@@ -73,11 +91,34 @@ export function VoiceSettings() {
     setTest(null);
     try {
       await voiceApi.save({
-        stt: d.sttOn ? { provider: d.sttProvider, model: d.sttModel, language: d.sttLang } : null,
-        tts: d.ttsOn ? { provider: d.ttsProvider, model: d.ttsModel, voice: d.ttsVoice, maxChars: d.ttsMax } : null,
+        stt: d.sttOn ? { provider: d.sttProvider, model: isVoicelab(d.sttProvider) ? 'voicelab' : d.sttModel, language: d.sttLang } : null,
+        tts: d.ttsOn ? { provider: d.ttsProvider, model: isVoicelab(d.ttsProvider) ? 'voicelab' : d.ttsModel, voice: d.ttsVoice, maxChars: d.ttsMax, language: d.ttsLang } : null,
       });
       setMsg({ ok: true, text: 'Saved.' });
       setSaved(await loadVoice(true));
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // The local voice add-on (sudo aigentron addon enable voice): one click makes a provider for it and points both halves at it.
+  const useLocal = async () => {
+    const base = local?.state?.endpoints.api;
+    if (!base) return;
+    setBusy(true);
+    setMsg(null);
+    setTest(null);
+    try {
+      const name = 'local-voice';
+      if (!providers.some((p) => p.name === name)) await api.createProvider({ name, kind: 'openai', baseUrl: base });
+      await voiceApi.save({
+        stt: { provider: name, model: 'whisper-1', language: '' },
+        tts: { provider: name, model: 'piper', voice: 'auto', maxChars: d.ttsMax },
+      });
+      await load();
+      setMsg({ ok: true, text: 'The local voice add-on is set up: Russian and English are read by the voice that fits the text.' });
     } catch (e) {
       setMsg({ ok: false, text: (e as Error).message });
     } finally {
@@ -119,9 +160,24 @@ export function VoiceSettings() {
         Speak instead of typing: Telegram voice messages and the 🎤 button in the dashboard are turned into text; answers can be read aloud (in Telegram only when
         you switch <code>/voice on</code> in that chat, in the dashboard with the 🔊 switch or in voice-only mode). By default answers stay text.
       </Muted>
-      {usable.length === 0 && (
+      {local?.status === 'enabled-healthy' && (
+        <Row wrap>
+          <Muted>
+            🖥 The <strong>local voice</strong> add-on is running on this server (Russian + English, nothing leaves the machine).
+          </Muted>
+          <Button size="sm" variant="primary" disabled={busy} onClick={() => void useLocal()}>
+            Use it for recognition and speech
+          </Button>
+        </Row>
+      )}
+      {local?.status === 'not-installed' && usable.length === 0 && (
+        <Muted>
+          No paid service needed: run <code>sudo aigentron addon enable voice</code> on the server to get free local speech recognition and Russian / English voices.
+        </Muted>
+      )}
+      {usable.length === 0 && local?.status !== 'enabled-healthy' && (
         <ErrorText>
-          No suitable provider yet. Add one of kind <strong>OpenAI</strong> (Settings → Providers) — OpenAI itself, Groq, or a local Whisper/TTS server by its Base URL — and put its API key in.
+          No suitable provider yet. Add one of kind <strong>OpenAI</strong> (Settings → Providers) — OpenAI itself, Groq, a local Whisper/TTS server by its Base URL, or <strong>VoiceLab</strong> (Base URL <code>https://api.voicelab.uz/v1</code>) — and put its API key in.
         </ErrorText>
       )}
 
@@ -132,9 +188,9 @@ export function VoiceSettings() {
         {d.sttOn && (
           <>
             <Field label="Provider">{providerSelect(d.sttProvider, (v) => set({ sttProvider: v }))}</Field>
-            <Field label="Model">
+            {!isVoicelab(d.sttProvider) && <Field label="Model">
               <ModelSelect provider={d.sttProvider} value={d.sttModel} onChange={(m) => set({ sttModel: m })} suggestions={STT_MODELS} match={/whisper|transcri|speech|stt|asr/i} />
-            </Field>
+            </Field>}
             <Field label="Language of your speech">
               <select value={d.sttLang} onChange={(e) => set({ sttLang: e.target.value })}>
                 {LANGS.map(([v, l]) => (
@@ -156,12 +212,53 @@ export function VoiceSettings() {
         {d.ttsOn && (
           <>
             <Field label="Provider">{providerSelect(d.ttsProvider, (v) => set({ ttsProvider: v }))}</Field>
-            <Field label="Model">
-              <ModelSelect provider={d.ttsProvider} value={d.ttsModel} onChange={(m) => set({ ttsModel: m })} suggestions={TTS_MODELS} match={/tts|speech|voice|kokoro|piper|bark/i} />
-            </Field>
-            <Field label="Voice">
-              <SelectWithOther value={d.ttsVoice} options={VOICES} onChange={(m) => set({ ttsVoice: m })} />
-            </Field>
+            {isVoicelab(d.ttsProvider) ? (
+              <>
+                <Field label="Language of the text to read aloud (VoiceLab needs it)">
+                  <select value={d.ttsLang} onChange={(e) => set({ ttsLang: e.target.value })}>
+                    <option value="">— choose —</option>
+                    {LANGS.filter(([v]) => v).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Voice (VoiceLab voice id)">
+                  <Row wrap>
+                    {voices.length > 0 ? (
+                      <select value={d.ttsVoice} onChange={(e) => set({ ttsVoice: e.target.value })}>
+                        <option value="">— choose a voice —</option>
+                        {voices
+                          .filter((v) => !d.ttsLang || !v.language || v.language.toLowerCase().startsWith(d.ttsLang))
+                          .map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.name}
+                              {v.language ? ` (${v.language})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    ) : (
+                      <input value={d.ttsVoice === 'alloy' ? '' : d.ttsVoice} placeholder="voice_…" onChange={(e) => set({ ttsVoice: e.target.value })} />
+                    )}
+                    <Button size="sm" onClick={() => void loadVoices()} disabled={!d.ttsProvider}>
+                      Load voices
+                    </Button>
+                  </Row>
+                  {voicesError && <ErrorText>{voicesError}</ErrorText>}
+                </Field>
+                <Muted>VoiceLab charges one credit per character read aloud — keep the longest text below modest.</Muted>
+              </>
+            ) : (
+              <>
+                <Field label="Model">
+                  <ModelSelect provider={d.ttsProvider} value={d.ttsModel} onChange={(m) => set({ ttsModel: m })} suggestions={TTS_MODELS} match={/tts|speech|voice|kokoro|piper|bark/i} />
+                </Field>
+                <Field label="Voice">
+                  <SelectWithOther value={d.ttsVoice} options={VOICES} onChange={(m) => set({ ttsVoice: m })} />
+                </Field>
+              </>
+            )}
             <Field label="Longest text to read aloud (characters; longer answers are cut at a sentence — the full text is always shown)">
               <input type="number" min={200} max={4000} step={100} value={d.ttsMax} onChange={(e) => set({ ttsMax: Number(e.target.value) || 1500 })} />
             </Field>

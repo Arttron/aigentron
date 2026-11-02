@@ -1,5 +1,7 @@
 import { ExportAgentModal, ImportAgentModal } from '@/components/AgentBundle';
 import { PacksCard } from '@/components/PacksCard';
+import { EscalationEditor, modelCostLabel } from '@/components/agents/EscalationEditor';
+import { parseEscalationStep, type ModelInfo } from '@lds/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { api, type AgentInfo, type McpServerInfo, type ProviderInfo } from '@/lib/api';
 import {
@@ -24,6 +26,8 @@ type Form = {
   description: string;
   provider: string;
   fallbackProviders: string[];
+  /** `provider/model` steps, cheaper first */
+  escalation: string[];
   model: string;
   skills: string[];
   allowedTools: string;
@@ -39,6 +43,7 @@ const emptyForm: Form = {
   description: '',
   provider: '',
   fallbackProviders: [],
+  escalation: [],
   model: '',
   skills: [],
   allowedTools: '',
@@ -71,6 +76,7 @@ export function AgentsPage() {
   const [error, setError] = useState<string | null>(null);
   // Models advertised by the currently-selected provider (for the model picker).
   const [models, setModels] = useState<string[]>([]);
+  const [modelInfo, setModelInfo] = useState<Map<string, ModelInfo>>(new Map());
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
 
@@ -121,6 +127,7 @@ export function AgentsPage() {
   useEffect(() => {
     if (!selectedProvider) {
       setModels([]);
+      setModelInfo(new Map());
       setModelsError(null);
       return;
     }
@@ -131,7 +138,9 @@ export function AgentsPage() {
       .listProviderModels(selectedProvider)
       .then((r) => {
         if (!active) return;
-        setModels(r.models);
+        // cheapest first when the server knows the costs
+        setModels(r.info?.length ? r.info.map((m) => m.id) : r.models);
+        setModelInfo(new Map((r.info ?? []).map((m) => [m.id, m])));
         if (!r.ok) setModelsError(r.error ?? 'failed to load models');
       })
       .catch((e) => active && setModelsError((e as Error).message))
@@ -151,6 +160,7 @@ export function AgentsPage() {
         description: a.description ?? '',
         provider: a.provider ?? '',
         fallbackProviders: a.fallbackProviders ?? [],
+        escalation: a.escalation ?? [],
         model: a.model ?? '',
         maxTurns: a.maxTurns ? String(a.maxTurns) : '',
         skills: a.skills ?? [],
@@ -185,6 +195,7 @@ export function AgentsPage() {
               name: f.name.trim() ? f.name : agents.some((a) => a.name === t.name) ? '' : t.name,
               description: t.description ?? '',
               fallbackProviders: t.fallbackProviders ?? [],
+              escalation: t.escalation ?? [],
               model: t.model ?? '',
               skills: t.skills ?? [],
               allowedTools: (t.allowedTools ?? []).join(', '),
@@ -213,6 +224,10 @@ export function AgentsPage() {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form) return;
+    if (form.escalation.some((e) => !parseEscalationStep(e))) {
+      setError('Finish or remove the incomplete escalation step (choose a model for it).');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -220,6 +235,7 @@ export function AgentsPage() {
         description: form.description,
         provider: form.provider || undefined,
         fallbackProviders: form.fallbackProviders.join(', '),
+        escalation: form.escalation.filter((e) => parseEscalationStep(e)).join(', '),
         model: form.model || undefined,
         skills: form.skills.join(', '),
         allowedTools: form.allowedTools,
@@ -389,6 +405,7 @@ export function AgentsPage() {
                 {modelOptions.map((m) => (
                   <option key={m} value={m}>
                     {m}
+                    {modelInfo.get(m) ? ` — ${modelCostLabel(modelInfo.get(m))}` : ''}
                   </option>
                 ))}
               </select>
@@ -412,7 +429,10 @@ export function AgentsPage() {
               />
               <Muted className={styles.modelHint}>When a run uses them all without finishing, you are asked whether to continue. Give a lead that plans big work more (e.g. 80).</Muted>
             </Field>
-            <Field label="Fallback providers (tried in order if the primary run errors)">
+            <Field label="Escalation: stronger models for work the agent could not finish (cheaper → stronger)">
+              <EscalationEditor steps={form.escalation} providers={providers.map((p) => p.name)} onChange={(v) => setForm((f) => (f ? { ...f, escalation: v } : f))} />
+            </Field>
+            <Field label="Fallback providers (tried in order if the primary run errors; with an escalation ladder, only when no step is available)">
               <CheckboxGroup
                 options={providers.map((p) => p.name).filter((n) => n !== form.provider)}
                 selected={form.fallbackProviders}

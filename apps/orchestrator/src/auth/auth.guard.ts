@@ -1,9 +1,12 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { AuthService } from './auth.service';
 import { SessionsService } from './sessions.service';
+import { ExtensionDevicesService } from './extension-devices.service';
+import { looksLikeDeviceToken } from './extension-devices';
 import { ownAddresses } from '../access/own-addresses';
-import { isDirectLocalRequest, isMachineRoute, isPublicRoute } from './auth-core';
+import { extensionRouteAllowed } from '../extension/extension-pairing';
+import { isDirectLocalRequest, isMachineRoute, isPublicRoute, tokenFromRequest } from './auth-core';
 
 /**
  * Global gate. When a sign-in password is set, every /api route needs a valid session — except liveness + the sign-in
@@ -16,19 +19,34 @@ export class AuthGuard implements CanActivate {
     private readonly auth: AuthService,
     private readonly config: AppConfigService,
     private readonly sessions: SessionsService,
+    private readonly devices: ExtensionDevicesService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
     if (context.getType() !== 'http') return true;
-    if (!this.auth.isConfigured()) return true;
     const req = context.switchToHttp().getRequest<{
       path: string;
+      method: string;
       headers: Record<string, string | string[] | undefined>;
       socket?: { remoteAddress?: string };
       authUserId?: string;
+      extensionDeviceId?: string;
     }>();
     const path = req.path.replace(/\/+$/, '') || '/';
     if (isPublicRoute(path)) return true;
+    // A browser extension has its own credential (a device token), checked whether or not the server has a sign-in password. It reaches only its own
+    // few routes, whatever its user's role would allow, and acts as the user that paired it.
+    const bearer = tokenFromRequest(req.headers);
+    if (looksLikeDeviceToken(bearer)) {
+      const reported = req.headers['x-extension-version'];
+      const device = this.devices.verify(bearer, Array.isArray(reported) ? reported[0] : reported);
+      if (!device) throw new UnauthorizedException('The extension is not (or no longer) connected to this server.');
+      if (!extensionRouteAllowed(req.method, path)) throw new ForbiddenException('This token (a browser extension) cannot use this route.');
+      req.authUserId = device.userId;
+      req.extensionDeviceId = device.id;
+      return true;
+    }
+    if (!this.auth.isConfigured()) return true;
     const uid = this.auth.sessionUserId(req.headers);
     if (uid) {
       req.authUserId = uid; // RolesGuard acts as THIS user — the x-lds-user header is ignored once sign-in is on

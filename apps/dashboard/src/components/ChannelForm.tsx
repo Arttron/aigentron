@@ -101,6 +101,14 @@ export function ChannelForm({
                   </option>
                 ))}
               </select>
+            ) : f.type === 'select' ? (
+              <select value={values[f.key] ?? f.options?.[0]?.value ?? ''} onChange={(e) => set(f.key, e.target.value)}>
+                {(f.options ?? []).map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             ) : (
               <input
                 type={f.secret ? 'password' : 'text'}
@@ -166,7 +174,7 @@ function FindMyId({ kind, channelId, values, def, hasStoredSecret, onAdd }: { ki
     const config: Record<string, unknown> = {};
     for (const f of def.fields) {
       const raw = (values[f.key] ?? '').trim();
-      if (f.type !== 'list' && f.type !== 'agent' && raw) config[f.key] = raw;
+      if (f.type !== 'list' && f.type !== 'agent' && f.type !== 'select' && raw) config[f.key] = raw;
     }
     try {
       for (let i = 0; i < WAIT_ROUNDS && !cancelled.current; i++) {

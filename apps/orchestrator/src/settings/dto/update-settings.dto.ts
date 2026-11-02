@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 /** PUT /api/settings body. All fields optional; only present ones are changed. */
 export class UpdateSettingsDto {
@@ -28,6 +28,17 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsBoolean()
   debugMode?: boolean;
+
+  /** The model that answers questions: `provider/model` (blank = each agent's own). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  askModel?: string;
+
+  /** Text compression / filtering (CompressionConfig); normalised and checked by the controller. */
+  @IsOptional()
+  @IsObject()
+  compression?: Record<string, unknown>;
 
   @IsOptional()
   @IsString()

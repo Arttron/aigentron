@@ -34,7 +34,7 @@ export class PresenceService {
     return this.online > 0;
   }
 
-  /** True when at least one dashboard window is focused (actively watched). */
+  /** True when at least one dashboard tab is in front of someone (visible — the client reports `focus` while its tab is visible, `blur` when hidden). */
   anyoneFocused(): boolean {
     return this.focused > 0;
   }

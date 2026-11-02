@@ -19,6 +19,7 @@ const TYPES: { id: TaskTypeFilter; label: string; hint: string }[] = [
   { id: 'channel', label: 'From chats', hint: 'Started from Telegram or another channel' },
   { id: 'scheduled', label: 'Scheduled', hint: 'Started by a schedule' },
   { id: 'discussion', label: 'Discussions', hint: 'Agents discussing among themselves' },
+  { id: 'ask', label: 'Questions', hint: 'Short questions answered by a light run' },
   { id: 'subtask', label: 'Subtasks', hint: 'Parts a lead agent split off' },
 ];
 /** Status chips: the groups first (what is going on / what needs a person), then each status. */

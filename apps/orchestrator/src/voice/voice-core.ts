@@ -14,6 +14,8 @@ export interface TtsConfig {
   provider: string;
   model: string;
   voice: string;
+  /** Language of the text to read (VoiceLab needs it: "uz", "ru", "en"…); OpenAI-style engines detect it themselves. */
+  language?: string;
   /** Longer answers are cut at a sentence boundary; the full text is always sent as text too. */
   maxChars: number;
 }
@@ -40,14 +42,14 @@ export function parseVoiceConfig(input: unknown): { config: VoiceConfig; error?:
   if (i.stt && (str(i.stt.provider) || str(i.stt.model))) {
     const s = { provider: str(i.stt.provider), model: str(i.stt.model), language: str(i.stt.language, 8).toLowerCase() };
     if (!s.provider) return { error: 'Speech-to-text: choose a provider.' };
-    if (!s.model) return { error: 'Speech-to-text: give a model (e.g. gpt-4o-mini-transcribe or whisper-1).' };
+    if (!s.model) return { error: 'Speech-to-text: give a model (e.g. gpt-4o-mini-transcribe or whisper-1; for VoiceLab any word, e.g. voicelab).' };
     if (s.language && !/^[a-z]{2,3}(-[a-z]{2,4})?$/.test(s.language)) return { error: 'Speech-to-text: the language is a short code like "ru" or "en" (or empty for automatic).' };
     stt = s;
   }
   if (i.tts && (str(i.tts.provider) || str(i.tts.model))) {
     const raw = Number(i.tts.maxChars);
     const maxChars = Number.isFinite(raw) && raw > 0 ? Math.min(Math.round(raw), MAX_CHARS_LIMIT) : DEFAULT_MAX_CHARS;
-    const t = { provider: str(i.tts.provider), model: str(i.tts.model), voice: str(i.tts.voice, 60) || 'alloy', maxChars };
+    const t = { provider: str(i.tts.provider), model: str(i.tts.model), voice: str(i.tts.voice, 60) || 'alloy', maxChars, ...(str(i.tts.language, 8) ? { language: str(i.tts.language, 8).toLowerCase() } : {}) };
     if (!t.provider) return { error: 'Text-to-speech: choose a provider.' };
     if (!t.model) return { error: 'Text-to-speech: give a model (e.g. gpt-4o-mini-tts or tts-1).' };
     tts = t;

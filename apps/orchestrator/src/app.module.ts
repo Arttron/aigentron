@@ -46,6 +46,8 @@ import { ProjectsModule } from './projects/projects.module';
 import { GitAccessModule } from './projects/git/git-access.module';
 import { PacksModule } from './packs/packs.module';
 import { VoiceModule } from './voice/voice.module';
+import { ExtensionModule } from './extension/extension.module';
+import { BrowserControlModule } from './browser-control/browser-control.module';
 import { StatsModule } from './stats/stats.module';
 import { AddonsModule } from './addons/addons.module';
 import { HealthController } from './health/health.controller';
@@ -74,6 +76,8 @@ import { HealthController } from './health/health.controller';
     GitAccessModule,
     PacksModule,
     VoiceModule,
+    ExtensionModule,
+    BrowserControlModule,
     PreflightModule,
     PrismaModule,
     BusModule,

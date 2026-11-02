@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="compose.css" />
+    <title>Send to Aigentron</title>
+  </head>
+  <body>
+    <main>
+      <header><img src="icons/32.png" alt="" /><h1>Send to Aigentron</h1><span id="server" class="muted"></span></header>
+      <p id="notice" class="muted" hidden></p>
+      <section id="source" class="card"></section>
+
+      <section class="card">
+        <div class="row">
+          <label>Send as
+            <select id="mode"><option value="task">a task for an agent</option><option value="kb">a note in a knowledge base</option></select>
+          </label>
+          <label>Project <select id="project"></select></label>
+          <label id="agentWrap">Agent <select id="agent"></select></label>
+          <label id="kbWrap" hidden>Knowledge base <select id="kb"></select></label>
+        </div>
+        <label>What should be done? <span class="muted" id="promptHint">(optional)</span>
+          <textarea id="prompt" rows="4" placeholder="For example: summarise it, check the claims, turn it into a task list…"></textarea>
+        </label>
+        <div id="includes" class="row checks"></div>
+      </section>
+
+      <section id="shotCard" class="card" hidden>
+        <div class="row"><strong>Screenshot</strong><span class="muted">drag to mark what you mean</span>
+          <span class="spacer"></span><button id="undo" type="button">Undo mark</button><button id="clear" type="button">Clear marks</button></div>
+        <div class="canvasWrap"><canvas id="canvas"></canvas></div>
+      </section>
+
+      <section class="row">
+        <button id="send" class="primary" type="button" disabled>Send</button>
+        <span id="status" class="muted"></span>
+      </section>
+      <section id="done" class="card" hidden></section>
+    </main>
+    <script type="module" src="compose.js"></script>
+  </body>
+</html>

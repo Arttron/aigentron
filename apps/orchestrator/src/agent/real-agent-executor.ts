@@ -19,13 +19,14 @@ import {
   type SessionTotals,
   type SubagentDefinition,
 } from '@lds/agent-runner';
-import { EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, isListedMarkdown, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
+import { EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, isListedMarkdown, parseEscalationStep, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
 import { LitellmService, routeName, routeParams, stripSelfPrefix } from '../litellm/litellm.service';
 import { AppConfigService } from '../config/app-config.service';
 import { encodeAttachments } from '../prisma/agent-event-attachments';
 import { PrismaService } from '../prisma/prisma.service';
 import { AgentEventBus } from '../bus/agent-event-bus';
 import { SettingsService } from '../settings/settings.service';
+import { RunCompressor } from '../compression/run-compressor';
 import { AgentRegistryService, isBuiltinAgent, type AgentDef } from '../agent-registry/agent-registry.service';
 import { SkillsLearnedService } from '../agent-registry/skills-learned.service';
 import { AgentCatalogService } from '../agent-registry/agent-catalog.service';
@@ -35,15 +36,18 @@ import { codexImagesDir, listGeneratedImages } from './codex-images';
 import { inlineBlock, readInlineFiles } from './inline-attachments';
 import { readDocumentText } from '../knowledge/extract';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { BrowserMcpService } from '../browser-control/browser-mcp.service';
+import { mcpWithBrowser } from '../browser-control/browser-policy';
 import { ResearchMcpService } from '../research/research-mcp.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { AdminReferenceService } from '../knowledge/admin-reference.service';
 import { stripMark } from '../discussion/discussion-core';
 import { describeNow } from './clock';
 import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
 import { isImageName, isVideoName } from '../media/media-core';
-import { LONG_ANSWER, finalWithAnswer, isQuietTool } from './final-answer';
+import { AnswerTracker, resumeTurnEvent } from './final-answer';
 import { isPdf, isTextLike } from '../files/file-types';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
@@ -58,7 +62,7 @@ import { RunLimitsService } from '../settings/run-limits.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { assemblePromptLayers, withRunContext } from './prompt-layers';
 import { AgentExecutor, type AgentRunOutcome, type TaskRunContext } from './agent-executor';
-import { classifyProviderFailure, errorTextOf, isFailoverWorthy, reportText, shortReason, tagSessionId, untagSessionId } from './run-outcome';
+import { classifyProviderFailure, errorTextOf, isFailoverWorthy, reportText, shortReason, tagSessionId, untagSessionId, worthEscalating } from './run-outcome';
 import { ProviderCooldown } from './provider-cooldown';
 import { resolveProviderChain } from './provider-chain';
 import { accountRunUsage, addTotals, budgetTokens, emptyTotals, reportingResumeUsage, startOfLocalDay, totalsAfter } from './usage-accounting';
@@ -151,9 +155,11 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly resources: ResourcesService,
     private readonly workspace: WorkspaceService,
     private readonly researchMcp: ResearchMcpService,
+    private readonly browserMcp: BrowserMcpService,
     private readonly media: MediaService,
     private readonly questions: QuestionsService,
     private readonly knowledge: KnowledgeService,
+    private readonly adminReference: AdminReferenceService,
     private readonly agentUser: AgentUserService,
     private readonly projects: ProjectsService,
     private readonly github: GitHubService,
@@ -182,10 +188,13 @@ export class RealAgentExecutor extends AgentExecutor {
     // the server's own config says (a `${GITHUB_TOKEN}` placeholder becomes empty).
     const githubToken = (await this.credentials.apiTokenFor?.(project.git).catch(() => null)) ?? (await this.settings.githubToken());
     // A discussion participant only talks: none of the agent's own MCP servers (their tools could write somewhere).
-    const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(agentDef?.mcp ?? [], { GITHUB_TOKEN: githubToken });
+    const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(mcpWithBrowser(agentDef?.mcp ?? [], { available: this.browserMcp.available, isAdmin: agentDef?.name === 'admin', discussion: Boolean(ctx.discussion) }), { GITHUB_TOKEN: githubToken });
     // The built-in research server lives in this process and only serves runs that carry a bearer (S-04): give this run its own.
     const researchCfg = mcpServers['research'] as { url?: string; headers?: Record<string, string> } | undefined;
     if (researchCfg?.url) researchCfg.headers = { ...(researchCfg.headers ?? {}), Authorization: `Bearer ${this.researchMcp.register().token}` };
+    // The browser-control server names the task by the run's bearer (it must know whose approvals to ask).
+    const browserCfg = mcpServers['browser-ext'] as { url?: string; headers?: Record<string, string> } | undefined;
+    if (browserCfg?.url) browserCfg.headers = { ...(browserCfg.headers ?? {}), Authorization: `Bearer ${this.browserMcp.register(ctx.taskId).token}` };
     const attachmentPaths = await this.attachments.paths(ctx.taskId).catch(() => []);
     const attachmentOriginals = await this.attachments.originalNames(ctx.taskId).catch(() => ({}) as Record<string, string>);
     // Which attachments belong to THIS message (inline thumbnails): the ones
@@ -197,7 +206,7 @@ export class RealAgentExecutor extends AgentExecutor {
         : attachmentPaths.map((p) => basename(p));
     // Agent cwd: the worktree root, or the configured subdir within it. The
     // worktree root stays the write boundary (passed separately to the runner).
-    const chat = agentDef?.mode === 'chat' || Boolean(ctx.discussion);
+    const chat = agentDef?.mode === 'chat' || task.kind === 'ask' || Boolean(ctx.discussion);
     const docs = !chat && project.kind !== 'code';
     const workDir = chat || docs ? ctx.worktreePath : await resolveWorkDir(ctx.worktreePath, project.repoSubdir, (m) => this.logger.warn(`[${project.slug}] ${m}`));
     // Orient every agent (lead AND delegated sub-agents share this cwd): its cwd
@@ -206,7 +215,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // static for a task (paths, branch) — it lives in the system append.
     const workspaceOn = !chat; // chat agents and discussion participants get the tools, not the prompt block
     const orientation =
-      (chat ? buildChatOrientation(workDir) : docs ? buildDocsOrientation(workDir, project) : buildOrientation(workDir, ctx.worktreePath, task.branch, project.isolation === 'shared', project, !ctx.discussion && !!project.repoUrl)) +
+      (task.kind === 'ask' && !ctx.discussion ? buildAskOrientation(workDir) : chat ? buildChatOrientation(workDir) : docs ? buildDocsOrientation(workDir, project) : buildOrientation(workDir, ctx.worktreePath, task.branch, project.isolation === 'shared', project, !ctx.discussion && !!project.repoUrl)) +
       (workspaceOn ? `\n\n${workspace.orientation()}` : '');
     // What changes between runs (the project map, the workspace memory) goes into
     // the run's MESSAGE, never into the system append: a changed system block
@@ -215,13 +224,16 @@ export class RealAgentExecutor extends AgentExecutor {
     const memory = workspaceOn ? await workspace.digest().catch(() => '') : '';
     // The admin in the chat of a project (not the default one) is that project's assistant, not the platform's: its tools are narrowed (admin-scope.ts) and it is told so.
     const adminScope = agentDef?.name === 'admin' && !ctx.discussion ? await this.adminScopeFor(project) : null;
-    const instructions = `${await this.buildInstructions(agentDef, project)}${adminScope ? `\n\n${scopePrompt(adminScope)}` : ''}`;
+    const instructions = `${await this.buildInstructions(agentDef, project, chat)}${adminScope ? `\n\n${scopePrompt(adminScope)}` : ''}`;
     // Other registered agents become delegatable subagents (each on its own provider);
     // a chat agent talks to the user directly and delegates to no one. The map
     // depends on the LEAD's provider (an agent without a provider of its own runs
     // on the lead's; a subscription lead cannot share its connection), so it is
     // built per attempt: after a failover the `Task` tool must not point at the
     // failed provider's routes (X-FO-7).
+    // The administrator gets the passages of its guides that match THIS message, whole, in the message itself (a search and a read would be two more
+    // turns, each re-sending the whole prompt). Only while its reference base is ready — otherwise the guides are inlined.
+    const reference = agentDef?.name === 'admin' && !ctx.discussion && (await this.adminReference.index().catch(() => null)) ? await this.adminReference.relevant(ctx.followUpPrompt ?? task.prompt).catch(() => '') : '';
     const prepared = new Map<string, { agents: Record<string, SubagentDefinition>; systemAppend: string; runContext: string }>();
     const prepare = async (leadProvider: string) => {
       const hit = prepared.get(leadProvider);
@@ -230,7 +242,7 @@ export class RealAgentExecutor extends AgentExecutor {
       if (Object.keys(agents).length) {
         this.logger.log(`Task ${task.id} subagents on ${leadProvider}: [${Object.keys(agents).join(', ')}]`);
       }
-      const layers = assemblePromptLayers({ orientation, instructions, roster, projectMap, memory });
+      const layers = assemblePromptLayers({ orientation, instructions, roster, projectMap, memory, reference });
       const p = { agents, systemAppend: layers.systemAppend, runContext: layers.runContext };
       prepared.set(leadProvider, p);
       return p;
@@ -242,6 +254,8 @@ export class RealAgentExecutor extends AgentExecutor {
     // context) rather than starting fresh.
     let resumeSessionId: string | undefined;
     let resumedFrom: Date | undefined;
+    /** the provider and model whose session a follow-up resumes: the conversation lives with it, even when a stronger step of the ladder ran last */
+    let resumedWith: { provider: string; model: string } | null = null;
     const followUp = Boolean(ctx.followUpPrompt) && !ctx.discussion;
     if (followUp) {
       const last = await this.prisma.agentSession.findFirst({
@@ -251,10 +265,11 @@ export class RealAgentExecutor extends AgentExecutor {
           claudeSessionId: { not: null },
         },
         orderBy: { startedAt: 'desc' },
-        select: { claudeSessionId: true, startedAt: true },
+        select: { claudeSessionId: true, startedAt: true, provider: true, model: true },
       });
       resumeSessionId = last?.claudeSessionId ?? undefined;
       resumedFrom = last?.startedAt;
+      if (last?.provider && last.model && (await this.providers.get(last.provider).catch(() => null))) resumedWith = { provider: last.provider, model: last.model };
     }
 
     // Provider chain: the primary followed by declared fallbacks (existing, with
@@ -262,11 +277,26 @@ export class RealAgentExecutor extends AgentExecutor {
     // on a follow-up (X-FO-1): the conversation lives with its provider, so a
     // failure there ends the run with the provider's error instead of handing
     // another provider just the follow-up text.
-    const chain = await resolveProviderChain(
-      { agent: agentDef, defaultProvider, override: ctx.discussion ? null : task.providerOverride, noFailover: followUp, cooling: (n) => this.cooldown.isCooling(n) },
-      (name) => this.providers.get(name),
-      (m) => this.logger.warn(m),
-    );
+    // A question runs on the model chosen for questions (Settings → Work), unless the person pinned a model for this task (a channel's /model).
+    let askStep: { provider: string; model: string } | null = null;
+    if (task.kind === 'ask' && !ctx.discussion && !task.providerOverride) {
+      const step = parseEscalationStep((await this.settings.askModel()) ?? '');
+      if (step && (await this.providers.get(step.provider).catch(() => null))) askStep = step;
+      else if ((await this.settings.askModel()) && !step) this.logger.warn(`Task ${ctx.taskId}: the question model in Settings is not written provider/model — using the agent's own`);
+      else if (step) this.logger.warn(`Task ${ctx.taskId}: the provider "${step.provider}" of the question model no longer exists — using the agent's own model`);
+    }
+    const chainInput = { agent: agentDef, defaultProvider, override: ctx.discussion ? null : task.providerOverride || askStep?.provider || (followUp && !ctx.escalateTo ? resumedWith?.provider : null) || null, primaryModel: askStep?.model ?? (followUp && !ctx.escalateTo && !task.providerOverride ? resumedWith?.model : null) ?? null, cooling: (n: string) => this.cooldown.isCooling(n) };
+    let chain = await resolveProviderChain({ ...chainInput, noFailover: followUp }, (name) => this.providers.get(name), (m) => this.logger.warn(m));
+    // The gate found a cheaper model's work wanting: this run starts on a stronger step of the ladder (a fresh session — the files carry the work).
+    let startIndex = 0;
+    if (ctx.escalateTo && !ctx.discussion) {
+      const full = await resolveProviderChain({ ...chainInput, noFailover: false }, (name) => this.providers.get(name), (m) => this.logger.warn(m));
+      const rungs = full.map((c, k) => (c.rung ? k : -1)).filter((k) => k >= 0);
+      if (rungs.length) {
+        chain = full;
+        startIndex = rungs[Math.min(ctx.escalateTo, rungs.length) - 1]!;
+      }
+    }
     if (!chain.length) {
       throw new Error('No runnable provider: set a default model on the provider or pick one on the agent.');
     }
@@ -278,7 +308,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // related work. Empty when the task has no references. A resumed session
     // already has the earlier references in its context: only the ones added
     // since the last run are repeated (E-05).
-    const refContext = await this.buildReferencesContext(ctx.taskId, resumeSessionId ? resumedFrom : undefined);
+    const refContext = await this.buildReferencesContext(ctx.taskId, resumeSessionId && startIndex === 0 ? resumedFrom : undefined);
     // S-01: when AGENT_RUN_AS_UID is set, hand the agent user what it writes (its home, the checkout, the
     // workspace, this task's attachments) and run the runtime as that user. Off = unchanged. Throws (→ the
     // task fails with the reason) when it is on but broken — never a silent run as root.
@@ -300,6 +330,7 @@ export class RealAgentExecutor extends AgentExecutor {
       agentDef,
       mcpServers,
       chat,
+      ask: task.kind === 'ask' && !ctx.discussion,
       attachmentPaths,
       attachmentOriginals,
       messageAttachments,
@@ -311,11 +342,24 @@ export class RealAgentExecutor extends AgentExecutor {
     }
     let last: AgentRunOutcome = { reported: null, errored: true, timedOut: false };
     let note: string | undefined;
-    for (let i = 0; i < chain.length; i++) {
+    // What a stronger model is told that the session it starts does not hold (a fresh session knows nothing of the earlier attempt).
+    let handoff: string | undefined;
+    /** set for the attempt that follows an escalation (and cleared once it has started): recorded on its session for Stats */
+    let pendingEscalation: { reason: string; from: string } | undefined;
+    if (startIndex > 0) {
+      const { provider: sp, model: sm } = chain[startIndex]!;
+      note = `↑ verification failed on the earlier model — fixing on "${sp.name}/${sm}" (a step of the escalation ladder)`;
+      pendingEscalation = { reason: 'verification failed', from: resumedWith ? `${resumedWith.provider}/${resumedWith.model}` : `${chain[0]!.provider.name}/${chain[0]!.model}` };
+      handoff = `An earlier attempt on a cheaper model already made the changes now in the working tree. The original request of this task:\n${task.prompt.slice(0, 3000)}`;
+      this.logger.warn(`Task ${ctx.taskId}: ${note}`);
+    }
+    for (let i = startIndex; i < chain.length; i++) {
       const { provider, model } = chain[i]!;
       const isLast = i === chain.length - 1;
       const resume = i === 0 ? resumeSessionId : undefined;
       const { agents, systemAppend, runContext } = await prepare(provider.name);
+      const esc = pendingEscalation;
+      pendingEscalation = undefined;
       const run = (resumeId: string | undefined, refContext: string) =>
         this.attempt({
           ...common,
@@ -328,8 +372,10 @@ export class RealAgentExecutor extends AgentExecutor {
           resumeSessionId: resumeId,
           // A resumed session was already told about the task's files: list only the ones sent with THIS message (E-06).
           listedAttachments: resumeId && !chat ? attachmentPaths.filter((p) => messageAttachments.includes(basename(p))) : attachmentPaths,
-          firstAttempt: i === 0,
+          firstAttempt: i === startIndex,
           leadingNote: note,
+          handoff,
+          escalation: esc,
         });
       let r = await run(resume, refContext);
       // The stored session cannot be resumed any more (the CLI's session store was reset — a rebuilt container, another data dir, a cleaned
@@ -358,6 +404,18 @@ export class RealAgentExecutor extends AgentExecutor {
         const kind = classifyProviderFailure(r.outcome.errorText ?? r.reason);
         const ms = this.cooldown.mark(provider.name, kind);
         if (ms > 0) this.logger.warn(`Provider "${provider.name}" looks ${kind === 'quota' ? 'out of quota / plan' : kind === 'rate' ? 'rate limited' : 'unauthorised'} — runs prefer its fallbacks for ${Math.round(ms / 60_000)} min`);
+      }
+      // Quality escalation: the cheaper model did not finish the work (it reported `failed`, or ran out of time / steps) and the ladder has a
+      // stronger step — hand the task on, in a fresh session, with what the first attempt said. Not for a provider failure (that is failover).
+      const nextStep = chain[i + 1];
+      if (!r.failoverWorthy && nextStep?.rung && worthEscalating(r.outcome)) {
+        const why = r.outcome.reported === 'failed' ? 'reported it could not finish' : r.outcome.timedOut ? 'ran out of time' : r.outcome.maxTurns ? 'used all its steps' : 'ended in an error';
+        const said = (r.outcome.reportedSummary ?? r.outcome.finalText ?? r.outcome.errorText ?? '').trim().slice(0, 600);
+        pendingEscalation = { reason: why, from: `${provider.name}/${model}` };
+        note = `↑ escalating from "${provider.name}/${model}" (${why}) to "${nextStep.provider.name}/${nextStep.model}"`;
+        handoff = `An earlier attempt on a cheaper model (${why}) already worked on this task; the files are as it left them. Continue from there, do not start over.${said ? `\nWhat that attempt said: ${said}` : ''}`;
+        this.logger.warn(`Task ${ctx.taskId}: ${note}`);
+        continue;
       }
       // A clean finish (or a non-provider error) is final. Only a provider-level
       // failure with another provider left triggers failover.
@@ -582,6 +640,8 @@ export class RealAgentExecutor extends AgentExecutor {
     runContext: string;
     /** Conversational agent: no forced status-report resume. */
     chat?: boolean;
+    /** a question: the run may only read */
+    ask?: boolean;
     /** Run the runtime as the separate agent OS user (S-01); null = as this process. */
     isolation: AgentIsolation | null;
     /** Every file of the task (chat agents read some of them inline). */
@@ -595,11 +655,20 @@ export class RealAgentExecutor extends AgentExecutor {
     /** The first provider of the chain: the person's message is recorded once, not per failover attempt (E-34). */
     firstAttempt: boolean;
     leadingNote?: string;
+    /** Text for the MODEL only (not shown as the person's message): what a stronger model needs to know about the attempt before it. */
+    handoff?: string;
+    /** this run is an escalation: why, and from which provider/model (written on its session for Stats) */
+    escalation?: { reason: string; from: string };
   }): Promise<{ outcome: AgentRunOutcome; failoverWorthy: boolean; reason: string }> {
     const { ctx, agentDef, provider, model, workspace } = opts;
     // Prepend referenced-task context (if any) to the message the agent sees.
     const rawPrompt = ctx.followUpPrompt ?? opts.basePrompt;
-    const prompt = opts.refContext ? `${opts.refContext}\n${rawPrompt}` : rawPrompt;
+    // Our own text filters (Settings → Compression): what the person wrote and what bulky tools answer, counted per run for Stats.
+    const compressor = new RunCompressor(await this.settings.compression());
+    // Only the person's own text is filtered (never the orchestrator's reference context); the transcript keeps the original (`shownPrompt`).
+    const shownPrompt = opts.refContext ? `${opts.refContext}\n${rawPrompt}` : rawPrompt;
+    const body = opts.refContext ? `${opts.refContext}\n${compressor.message(rawPrompt)}` : compressor.message(rawPrompt);
+    const prompt = opts.handoff ? `${opts.handoff}\n\n---\n\n${body}` : body;
     const isCodex = provider.kind === 'codex';
     // Session ids are runtime-specific; only resume a session this runtime created.
     const resumeSessionId = untagSessionId(opts.resumeSessionId, isCodex);
@@ -611,7 +680,7 @@ export class RealAgentExecutor extends AgentExecutor {
     );
 
     const session = await this.prisma.agentSession.create({
-      data: { taskId: ctx.taskId, status: 'running', provider: provider.name, model },
+      data: { taskId: ctx.taskId, status: 'running', provider: provider.name, model, ...(opts.escalation ? { escalationReason: opts.escalation.reason, escalatedFrom: opts.escalation.from } : {}) },
     });
     this.publishAgentStatus(ctx.taskId, session.id, 'running');
 
@@ -659,14 +728,14 @@ export class RealAgentExecutor extends AgentExecutor {
     let lastEventAt = Date.now();
     let lastEventKind = 'system';
     let lastAssistantText = '';
-    let lastLongAnswer = '';
+    const answer = new AnswerTracker();
     const onEvent = (raw: AgentEvent): void => {
       let event = raw;
       // The answer an agent wrote as a message must stand in the final one (see finalWithAnswer); the dashboard drops its earlier copy.
-      if (event.kind === 'assistant' && event.text.trim().length >= LONG_ANSWER) lastLongAnswer = event.text.trim();
+      if (event.kind === 'assistant') answer.assistant(event.text);
       // work done after the message (any tool but the reporting ones) makes it a stage of the run, not the answer
-      if (event.kind === 'tool_use' && !isQuietTool(event.toolName)) lastLongAnswer = '';
-      if (event.kind === 'result' && !event.isError && !ctx.discussion) event = { ...event, text: finalWithAnswer(lastLongAnswer, event.text) };
+      if (event.kind === 'tool_use') answer.tool(event.toolName);
+      if (event.kind === 'result' && !event.isError && !ctx.discussion) event = { ...event, text: answer.result(event.text) };
       // A discussion turn: its final answer becomes a message BY that participant (and is handed back to the discussion).
       if (ctx.discussion && event.kind === 'assistant' && event.text.trim()) lastAssistantText = event.text;
       if (ctx.discussion && event.kind === 'result') {
@@ -742,7 +811,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // run: a failover attempt re-sends the same message to the next provider,
     // which is not a second message from the person.
     if (opts.firstAttempt) {
-      if (!ctx.discussion) await this.recordPrompt(ctx.taskId, rawPrompt, prompt, opts.messageAttachments, onEvent);
+      if (!ctx.discussion) await this.recordPrompt(ctx.taskId, rawPrompt, shownPrompt, opts.messageAttachments, onEvent);
       else if (ctx.discussion.opening) onEvent({ kind: 'prompt', text: ctx.discussion.opening.text, attachments: ctx.discussion.opening.attachments });
     }
 
@@ -881,7 +950,7 @@ export class RealAgentExecutor extends AgentExecutor {
       },
       // An agent with no file reader of its own (the admin, a read-restricted agent) reads attachments / workspace / library files through this.
       onReadDocument:
-        !ctx.discussion && (agentDef?.mode === 'chat' || (agentDef?.allowedTools?.length && !agentDef.allowedTools.includes('Read')))
+        !ctx.discussion && (opts.chat || (agentDef?.allowedTools?.length && !agentDef.allowedTools.includes('Read')))
           ? async ({ path, from }) => {
               const file = path.startsWith('/') ? await this.media.safePath(path, mediaRoots, ctx.taskId) : (await this.attachments.filePath(ctx.taskId, path)).path;
               // 10 MB limit, extracted text cached by (path, mtime, size) — X-NEW-4
@@ -894,6 +963,7 @@ export class RealAgentExecutor extends AgentExecutor {
             }
           : undefined,
       onCurrentTime: (input) => describeNow(new Date(), input.timezone),
+      onCompressResult: (tool, text) => compressor.tool(tool, text),
       onShowImages: async (input) => {
         const paths = [...new Set(input.paths)].slice(0, 10);
         if (!paths.length) throw new Error('show_images needs at least one image path.');
@@ -984,7 +1054,8 @@ export class RealAgentExecutor extends AgentExecutor {
           // A discussion participant only talks (and may look things up): no editing, no shell, no delegation.
           allowedTools: ctx.discussion ? ['Read', 'Grep', 'Glob'] : agentDef?.allowedTools,
           // Block SendMessage so the lead delegates via the Task tool.
-          disallowedTools: [...(agentDef?.disallowedTools ?? []), 'SendMessage', ...(ctx.discussion ? ['Bash', 'Write', 'Edit', 'NotebookEdit', 'Task', 'Agent', 'WebFetch', 'WebSearch'] : [])],
+          // a discussion or a question only reads: no shell, no writing, no delegating (a question may still search the web)
+          disallowedTools: [...(agentDef?.disallowedTools ?? []), 'SendMessage', ...(ctx.discussion ? ['Bash', 'Write', 'Edit', 'NotebookEdit', 'Task', 'Agent', 'WebFetch', 'WebSearch'] : opts.ask ? ['Bash', 'Write', 'Edit', 'NotebookEdit', 'Task', 'Agent'] : [])],
           mcpServers: opts.mcpServers,
           agents: opts.agents,
           settingsDir: join(this.config.agentDir, 'runs', ctx.taskId),
@@ -1061,7 +1132,7 @@ export class RealAgentExecutor extends AgentExecutor {
           isolation: opts.isolation,
           onReportStatus,
           onHeartbeat,
-          onEvent,
+          onEvent: (e) => onEvent(resumeTurnEvent(e) as AgentEvent),
         });
         // The resume continues the same session: its totals include the main run.
         usage = addUsage(usage, reportingResumeUsage({ sessionTotals: result.sessionTotals ?? totalsAfter(baseline, usage) }, resume));
@@ -1095,6 +1166,7 @@ export class RealAgentExecutor extends AgentExecutor {
           numTurns: usage.numTurns,
           costUsd: usage.costUsd,
           apiMs: usage.apiMs,
+          ...compressor.columns(),
           ...(fallbackSummary ? { reportedSummary: fallbackSummary } : {}),
         },
       });
@@ -1141,6 +1213,7 @@ export class RealAgentExecutor extends AgentExecutor {
             numTurns: spent.numTurns,
             costUsd: spent.costUsd,
             apiMs: spent.apiMs,
+            ...compressor.columns(),
           },
         })
         .catch(() => undefined);
@@ -1566,7 +1639,7 @@ export class RealAgentExecutor extends AgentExecutor {
    *   5. skill files from <agentDir>/skills (all, or the subset the agent declares)
    *   6. the resource index (the task's project library first, then the global one) and the knowledge bases it may search
    */
-  private async buildInstructions(agent: AgentDef | null, project: Pick<ProjectContext, 'id' | 'slug' | 'repoPath'>): Promise<string> {
+  private async buildInstructions(agent: AgentDef | null, project: Pick<ProjectContext, 'id' | 'slug' | 'repoPath'>, light = false): Promise<string> {
     const parts: string[] = [];
     const repoPath = project.repoPath;
 
@@ -1607,6 +1680,13 @@ export class RealAgentExecutor extends AgentExecutor {
         files = files.filter((f) => !f.split(/[\\/]/).includes('admin'));
       }
       files.sort();
+      // The administrator's guides live in a knowledge base it searches (a table of contents stays in the prompt); learned skills are still inlined.
+      // Not ready (first start, no files) → the guides are inlined as before.
+      const refIndex = agent?.name === 'admin' ? await this.adminReference.index().catch(() => null) : null;
+      if (refIndex) {
+        files = files.filter((f) => f.split(/[\\/]/).includes('learned'));
+        parts.push(refIndex);
+      }
 
       // Lazy mode hands the agent an index plus a path to `Read`; an agent that can't read files (e.g. the
       // tools-only admin) would never see the content, so its skills are always inlined.
@@ -1652,7 +1732,7 @@ export class RealAgentExecutor extends AgentExecutor {
       // no skills directory — base instructions only
     }
     // The resource libraries — the task's project library first, then the global one (an agent that cannot read files — the tools-only admin — gets the tool instead).
-    if (agent?.mode !== 'chat' && !(agent?.disallowedTools ?? []).some((t) => /^read$/i.test(t))) {
+    if (agent?.mode !== 'chat' && !light && !(agent?.disallowedTools ?? []).some((t) => /^read$/i.test(t))) {
       const block = await this.resources.promptIndex(agent?.name, project.slug);
       if (block) parts.push(block);
     }
@@ -1705,6 +1785,17 @@ function isOauthToken(provider: Pick<Provider, 'authMode'>): boolean {
 }
 
 /** Orientation for a chat agent: no repo, no worktree — just a conversation. */
+/** A question: read-only, in the project's folder when there is one. */
+function buildAskOrientation(workDir: string): string {
+  return [
+    '## Your context',
+    'You are answering a question. Answer briefly and to the point; your reply is the result of this turn.',
+    `- working directory: \`${workDir}\` — you may only READ here (Read, Grep, Glob, web search); you cannot run commands or change files`,
+    '- if the answer needs real work (a change, a build, a test), say so and suggest starting a task instead',
+    '- you do NOT need to call report_task_status',
+  ].join('\n');
+}
+
 function buildChatOrientation(workDir: string): string {
   return [
     '## Your context',

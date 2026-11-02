@@ -214,6 +214,8 @@ export interface ApprovalRequest {
   resolvedById: string | null;
   createdAt: string;
   resolvedAt: string | null;
+  /** Only the dashboard may decide this one (not a button in a browser extension): a merge, main / master, outside the working directory, credentials, platform changes. */
+  needsDashboard?: boolean;
 }
 
 /** A follow-up message held for a task that's still running — server-side
@@ -242,12 +244,44 @@ export interface ProviderUsage {
   estCostUsd: number;
 }
 
+/** What our own text filters saved (characters of text that did not go to a model), see compress.ts. */
+export interface CompressionUsage {
+  /** Runs that had something filtered out. */
+  runs: number;
+  before: number;
+  after: number;
+  /** Characters removed per rule (`whitespace`, `quotes`, `rule:<name>` for a custom one, …). */
+  byRule: Record<string, number>;
+}
+
+/** Escalations: runs that continued a task on a stronger model because the earlier attempt was not enough. */
+export interface EscalationUsage {
+  /** Runs that were an escalation (each is one session). */
+  runs: number;
+  /** Distinct tasks that were escalated at least once. */
+  tasks: number;
+  /** Why: `reported it could not finish`, `ran out of time`, `used all its steps`, `ended in an error`, `verification failed`. */
+  byReason: Record<string, number>;
+  /** From which provider/model to which, most frequent first. */
+  paths: { from: string; to: string; count: number }[];
+}
+
+/** Questions (tasks of kind `ask`): how many, and what they cost. */
+export interface AskUsage {
+  tasks: number;
+  sessions: number;
+  inputTokens: number;
+  outputTokens: number;
+  estCostUsd: number;
+}
+
 /** Usage of one project over the range: its totals and what each provider took. */
 export interface ProjectUsage {
   slug: string;
   name: string;
   totals: Omit<ProviderUsage, 'provider'>;
   providers: ProviderUsage[];
+  compression?: CompressionUsage;
 }
 
 /** One calendar day of usage (the viewer's day: `date` is YYYY-MM-DD). */
@@ -269,4 +303,10 @@ export interface UsageReport {
   projects?: ProjectUsage[];
   /** Usage per day (limited by `project` like the provider rows), oldest first, quiet days included as zeros. */
   days?: DayUsage[];
+  /** What the text filters saved (limited by `project` like the provider rows). */
+  compression?: CompressionUsage;
+  /** Escalations to a stronger model (limited by `project`). */
+  escalation?: EscalationUsage;
+  /** Questions answered by the light mode (limited by `project`). */
+  ask?: AskUsage;
 }

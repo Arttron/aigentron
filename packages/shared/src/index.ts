@@ -6,3 +6,5 @@ export * from './dto';
 export * from './schedule';
 export * from './frontmatter';
 export * from './mcp-config';
+export * from './compress';
+export * from './model-tier';

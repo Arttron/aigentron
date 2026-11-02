@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CREATE_TASK_TOOL, EXTEND_RUN_TOOL, INTERNAL_TOOL_PREFIX, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, PUSH_BRANCH_TOOL } from '@lds/shared';
+import { CREATE_TASK_TOOL, EXTEND_RUN_TOOL, INTERNAL_TOOL_PREFIX, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, PUSH_BRANCH_TOOL, BROWSER_GRANT_TOOL } from '@lds/shared';
 import { approvalWaived, parseApprovalMode, resolveApprovalMode } from './approval-mode';
 
 const risky = { dangerous: true };
@@ -20,6 +20,8 @@ describe('approval mode', () => {
     expect(approvalWaived('off', CREATE_TASK_TOOL, risky)).toBe(true);
     expect(approvalWaived('off', PROPOSE_TASK_TOOL, risky)).toBe(true);
     expect(approvalWaived('ask', PROPOSE_TASK_TOOL, risky)).toBe(false);
+    // using the person's own browser is asked about even without approvals
+    expect(approvalWaived('off', BROWSER_GRANT_TOOL, risky)).toBe(false);
     expect(approvalWaived('off', EXTEND_RUN_TOOL, risky)).toBe(true); // more run time is granted by itself: the person chose not to be asked
   });
   it('off mode still asks about a merge, an action on main / master and anything outside the working directory', () => {

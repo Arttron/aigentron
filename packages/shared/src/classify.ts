@@ -128,6 +128,10 @@ export const PROPOSE_PROVIDER_TOOL = `${INTERNAL_TOOL_PREFIX}propose_provider`;
 /** Narrow, approved changes to a few platform settings, and reverting earlier admin changes. */
 export const PROPOSE_SETTINGS_TOOL = `${INTERNAL_TOOL_PREFIX}propose_settings`;
 /** Start a task for another agent on the user's behalf (it uses the provider's budget — approval required). */
+/** The agent asks to use the person's own browser on a site (the browser-control MCP server raises it; one card per site and task, «always» becomes an exception). */
+export const BROWSER_GRANT_TOOL = `${INTERNAL_TOOL_PREFIX}browser_grant`;
+/** The agent is about to submit / commit something on a web page in the person's browser (send a form, pay, delete, sign in …): always its own card with the form's values; never a standing exception. */
+export const BROWSER_SUBMIT_TOOL = `${INTERNAL_TOOL_PREFIX}browser_submit`;
 export const PROPOSE_TASK_TOOL = `${INTERNAL_TOOL_PREFIX}propose_task`;
 /**
  * Several related admin changes behind ONE approval card (agents, skills, providers, settings, task starts, task actions,
@@ -303,6 +307,29 @@ function shellProtectedTarget(command: string, opts: ClassifyOptions): { path: s
   }
   return null;
 }
+
+/**
+ * Requests a person must decide in the DASHBOARD, never from a page or a button in a browser extension: everything the no-approvals mode still asks
+ * about (a merge, main / master, outside the working directory), credentials / protected files, and everything an admin proposal changes on the
+ * platform (`propose_*`) or a secret request. Judged from the stored tool name and reason, so it works on any saved approval.
+ */
+export function approvalNeedsDashboard(a: { toolName: string; reason: string; toolInput?: unknown }): boolean {
+  const tool = a.toolName.toLowerCase();
+  if (tool.startsWith(INTERNAL_TOOL_PREFIX.toLowerCase())) {
+    const bare = tool.slice(INTERNAL_TOOL_PREFIX.length);
+    if (bare.startsWith('propose_') || bare === 'request_secret') return true;
+  }
+  if (/a merge|main \/ master|on the (main|master) branch|as "(main|master)"|outside the working directory|outside the task worktree|credentials|protected file|reads secrets|git config that makes git run|sign-in password/i.test(a.reason)) return true;
+  // the stored reason is only text: judge the call again, so a guard that wrote its reason in other words (a push to main, an MCP write on main) still counts
+  if (a.toolInput && typeof a.toolInput === 'object') {
+    const v = classifyToolCall(a.toolName, a.toolInput as Record<string, unknown>, {});
+    if (v.hard || v.guard) return true;
+  }
+  return false;
+}
+
+/** Approvals that must never be decided blind («approve the latest», «approve everything of this task»): the browser grants and form submissions — the person has to look at THIS card. */
+export const approvalNeedsItsOwnAnswer = (a: { toolName: string }): boolean => a.toolName.toLowerCase() === BROWSER_GRANT_TOOL.toLowerCase() || a.toolName.toLowerCase() === BROWSER_SUBMIT_TOOL.toLowerCase();
 
 /** Shell command patterns that are destructive, irreversible, or outbound. */
 const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string; hard?: boolean }> = [
@@ -692,6 +719,26 @@ export function classifyToolCall(
       dangerous: true,
       summary: `extend_run_time +${n('extraMin')} min (after ${n('usedMin')} min) #${shortHash(`${n('usedMin')}:${n('extraMin')}`)}`,
       reason: `this run has used ${n('usedMin')} min of active time (the limit is ${n('limitMin')} min) and is still making progress — allow ${n('extraMin')} more minutes? Deny to stop it here (the task becomes stalled; the work done so far stays)`,
+    };
+  }
+  if (name === BROWSER_GRANT_TOOL.toLowerCase()) {
+    const host = typeof toolInput.host === 'string' ? toolInput.host : '?';
+    const level = typeof toolInput.level === 'string' ? toolInput.level : 'read';
+    return {
+      dangerous: true,
+      summary: `browser_grant ${level} ${host}`,
+      reason: `agent wants to use YOUR browser on ${host} (${level === 'read' ? 'open and read pages' : level}) — it works in its own browser window and only on this site${typeof toolInput.why === 'string' && toolInput.why ? `; why: ${toolInput.why.slice(0, 160)}` : ''}`,
+    };
+  }
+  if (name === BROWSER_SUBMIT_TOOL.toLowerCase()) {
+    const host = typeof toolInput.host === 'string' ? toolInput.host : '?';
+    const label = typeof toolInput.label === 'string' ? toolInput.label : 'a button';
+    const fields = Array.isArray(toolInput.fields) ? (toolInput.fields as { label?: unknown; value?: unknown }[]) : [];
+    const shown = fields.slice(0, 12).map((f) => `${String(f.label ?? '?').slice(0, 40)}: ${String(f.value ?? '').slice(0, 80)}`).join('; ');
+    return {
+      dangerous: true,
+      summary: `browser_submit ${host}: "${label.slice(0, 60)}"${shown ? ` — ${shown}` : ''}`,
+      reason: `agent is about to press "${label.slice(0, 80)}" on ${host}${typeof toolInput.action === 'string' && toolInput.action ? ` (sends to ${toolInput.action.slice(0, 120)})` : ''} — this sends or changes something on that site${fields.length ? '; the form holds: ' + shown : ''}`,
     };
   }
   if (name === PROPOSE_TASK_TOOL.toLowerCase()) {

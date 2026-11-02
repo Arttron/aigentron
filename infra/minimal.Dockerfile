@@ -22,6 +22,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json .npmrc ./
 COPY apps/orchestrator/package.json apps/orchestrator/package.json
 COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY apps/extension/package.json apps/extension/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/agent-runner/package.json packages/agent-runner/package.json
 # better-sqlite3 needs a C++ toolchain to compile its native binding (approved
@@ -39,6 +40,7 @@ COPY . .
 RUN pnpm --filter @lds/shared build && pnpm --filter @lds/agent-runner build
 RUN pnpm --filter @lds/orchestrator build
 RUN pnpm --filter @lds/dashboard build
+RUN pnpm --filter @lds/extension build
 
 # ---- runtime: node (both apps) + python (litellm child process) + uv (code-intel skill's Serena MCP) ----
 FROM node:22-bookworm-slim AS runtime
@@ -101,6 +103,8 @@ COPY --from=build /app/apps/dashboard/dist /app/apps/dashboard/dist
 
 # Agent operational files (skills, agent defs) — read at runtime, not compiled.
 COPY agent /app/agent
+# the BUILT browser-extension template (the server writes only its configuration into a copy of it when the zip is downloaded)
+COPY --from=build /app/apps/extension/dist /app/apps/extension/dist
 
 COPY infra/minimal-entrypoint.sh infra/db-snapshot.sh infra/minimal-healthcheck.sh infra/setup-wizard.mjs infra/agent-exec.sh infra/harden.sh /app/infra/
 # The PreToolUse approval hook (apps/orchestrator's AppConfigService resolves

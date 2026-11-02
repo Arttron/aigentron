@@ -22,6 +22,12 @@ interface Opts {
   /** the task row disappears (deleted) while the run is going */
   vanish?: boolean;
   runThrows?: Error;
+  /** the project's auto-fix attempts after a red gate */
+  verifyAttempts?: number;
+  /** the task's kind (`ask` = a question) */
+  kind?: string;
+  /** every argument object the executor was run with */
+  runArgs?: Record<string, unknown>[];
 }
 
 const project = (over: Partial<ProjectContext> = {}): ProjectContext => ({
@@ -57,6 +63,7 @@ function make(o: Opts = {}) {
     status: o.status ?? 'running',
     agentName: 'a',
     parentId: o.parentId ?? null,
+    kind: o.kind ?? 'task',
     projectId: 'proj_default',
     worktreePath: '/wt',
     branch: 'b',
@@ -73,7 +80,7 @@ function make(o: Opts = {}) {
     waiting: 0,
     lastConcurrency: 2,
     queue: { setConcurrency: () => undefined },
-    projects: { contextFor: async () => project() },
+    projects: { contextFor: async () => project({ verifyMaxAttempts: o.verifyAttempts ?? 0 }) },
     tasks: {
       startRunning: async (id: string) => {
         calls.push(`startRunning:${id}`);
@@ -104,7 +111,8 @@ function make(o: Opts = {}) {
     },
     agents: { get: async () => ({ mode: o.chat ? 'chat' : 'code' }) },
     executor: {
-      run: async () => {
+      run: async (args: Record<string, unknown>) => {
+        o.runArgs?.push(args);
         calls.push('executor.run');
         if (o.vanish) gone = true;
         if (o.runThrows) throw o.runThrows;
@@ -151,6 +159,28 @@ describe('TaskWorkerService.process — entry guard', () => {
 });
 
 /** The table: what a run produced → the status the task ends in (E-33 / E-29). */
+describe('TaskWorkerService.process — a question', () => {
+  it('runs the light chat lifecycle of a WORKING agent: no gate, not in the agent-configuration folder, ends in review', async () => {
+    const runArgs: Record<string, unknown>[] = [];
+    const { process, calls } = make({ kind: 'ask', outcome: { reported: 'done' }, verify: { ran: true, ok: false, output: 'red' }, verifyAttempts: 2, runArgs });
+    await process({ taskId: 'T' });
+    expect(runArgs).toHaveLength(1); // no auto-fix runs: there is no gate for a question
+    expect(runArgs[0]!.worktreePath).not.toBe('/agent'); // never the folder that holds the agents' logins
+    expect(calls).toContain('setStatus:review');
+  });
+});
+
+describe('TaskWorkerService.process — the gate and the escalation ladder', () => {
+  it('the first auto-fix stays on the agent\'s own model; the next ones go up the ladder (escalateTo 1, 2, …)', async () => {
+    const runArgs: Record<string, unknown>[] = [];
+    const { process, statusWrites } = make({ outcome: { reported: 'done' }, verify: { ran: true, ok: false, output: 'red' }, verifyAttempts: 3, runArgs });
+    await process({ taskId: 'T' });
+    expect(runArgs.length).toBe(4); // the work + three fixes
+    expect(runArgs.slice(1).map((a) => a.escalateTo)).toEqual([undefined, 1, 2]);
+    expect(statusWrites.at(-1)).toMatchObject({ status: 'failed' });
+  });
+});
+
 describe('TaskWorkerService.process — run outcome → status', () => {
   const cases: { name: string; o: Opts; status: string | null; error?: string | RegExp; extra?: string[] }[] = [
     { name: 'reported done, clean → review (person accepts)', o: { outcome: { reported: 'done' } }, status: 'review' },

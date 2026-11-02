@@ -17,3 +17,6 @@
 
 ## Moving an agent to another Aigentron
 **Agents → Export** on an agent downloads `<name>.agent.json`: the agent file + the custom skills it lists + any custom/learned skills the person ticks (learned skills are shared by all agents and may hold project/client details — warn). No keys or secrets. **Agents → Import** reads the file, shows a plan (new / same / different / blocked), and writes only new items; a differing local item is replaced only when "overwrite mine" is ticked (old copy snapshotted). The name can be changed; `admin` and shipped skill names are blocked; `createTasks` is not carried over. Check the provider/MCP/skills the agent uses exist on the target. The whole server: `aigentron export/import`.
+
+## Escalation ladder
+An agent may list `escalation: provider/model, provider/model` (cheaper → stronger; Agents page → Escalation, models listed cheapest first with tier and price where known). It starts on its own model; if the run reports `failed`, runs out of time or steps, the task continues in a fresh session on the next step (never for `blocked` — that needs a person — and not for follow-up messages). A red verification gate uses the ladder too: the first auto-fix stays on the agent's model, later attempts climb the steps. A step that is unavailable is skipped; `fallbackProviders` are tried only when no step is available.

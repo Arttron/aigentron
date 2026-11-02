@@ -223,6 +223,11 @@ export class ChannelsService {
     return typeof v === 'string' && v.trim() ? v.trim() : undefined;
   }
 
+  /** What a plain message (no command) starts when the chat has no active task: a full task (the default) or a light question. */
+  defaultMode(row: ChannelRow): 'task' | 'ask' {
+    return (row.config as ChannelConfig)?.defaultMode === 'ask' ? 'ask' : 'task';
+  }
+
   /** Whether the channel has the secrets it needs to connect. */
   isConfigured(row: ChannelRow): boolean {
     const def = getKind(row.kind);
@@ -366,6 +371,9 @@ export function normalizeConfig(
             ? (current[f.key] as string[])
             : [];
       if (list.length) out[f.key] = list;
+    } else if (f.type === 'select') {
+      const next = typeof raw === 'string' ? raw.trim() : (current[f.key] as string | undefined);
+      if (next && f.options?.some((o) => o.value === next)) out[f.key] = next;
     } else if (f.secret) {
       const next = typeof raw === 'string' && raw.trim() ? raw.trim() : (current[f.key] as string | undefined);
       if (next) out[f.key] = next;

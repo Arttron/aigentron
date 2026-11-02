@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Update the Aigentron extension</title>
+    <link rel="stylesheet" href="compose.css" />
+  </head>
+  <body>
+    <main>
+      <header><img src="icons/32.png" alt="" /><h1>Update the extension</h1></header>
+      <section class="card" id="state"><p class="muted">Checking…</p></section>
+      <section class="card" id="how" hidden>
+        <strong>Manual update</strong>
+        <ol>
+          <li>Download the new zip from the dashboard (Add-ons → Extension) and unzip it over the extension's folder.</li>
+          <li>Open <code>chrome://extensions</code> and press <strong>Reload</strong> on this extension.</li>
+        </ol>
+      </section>
+    </main>
+    <script type="module" src="update.js"></script>
+  </body>
+</html>

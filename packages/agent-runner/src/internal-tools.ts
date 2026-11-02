@@ -33,6 +33,7 @@ export type InternalToolHandlers = Pick<
   | 'onReadDocument'
   | 'onShowImages'
   | 'onCurrentTime'
+  | 'onCompressResult'
   | 'onAskUser'
   | 'onLookAt'
   | 'onVideoDigest'
@@ -92,7 +93,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'push_branch',
       description:
-        "Publish a LOCAL branch of this project's git repository to its remote (origin). This is the ONLY way to push: a `git push` from Bash cannot work (you have no credentials and no SSH key — do not try it, and do not ask for a token). `branch`: the local branch (it must exist and be committed: commit first); `to` (optional): the branch name on the remote (default: the same name; use it e.g. to publish `develop` as `main` in an empty repository); `reason`: ONE plain line on why (shown to the person on the approval card). A person approves every push; it never forces (a rejected non-fast-forward is reported, not overwritten). Returns what happened.",
+        "Publish a LOCAL committed branch to origin. The ONLY way to push: `git push` from Bash cannot work (no credentials — do not try or ask for a token). `branch`; `to?` (remote branch name, default the same); `reason` (ONE line for the approval card). A person approves every push; never forces (a rejected non-fast-forward is reported). Returns what happened.",
       shape: { branch: z.string(), to: z.string().optional(), reason: z.string().optional() },
       handler: (args) =>
         params.onPushBranch!({
@@ -107,7 +108,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'fetch_remote',
       description:
-        "Download the latest commits of this project's remote (origin) so `origin/<branch>` is current. This is the ONLY way to fetch or pull: `git fetch` / `git pull` from Bash cannot authenticate (you have no credentials and no SSH key — a `Host key verification failed` or `Permission denied` from your shell is expected: do not try to fix it, do not ask for a token). `branch` (optional): one branch (default: the project's branch; `all` fetches every branch). It changes none of your files or branches — afterwards bring the commits in yourself with plain git, e.g. `git merge origin/<branch>` or `git rebase origin/<branch>`. No approval needed. Returns what happened and the new head.",
+        "Download the latest commits of origin so `origin/<branch>` is current. The ONLY way to fetch or pull: `git fetch/pull` from Bash cannot authenticate (no credentials — do not try to fix it or ask for a token). `branch?` (default the project's; `all`). Changes none of your files — then merge/rebase `origin/<branch>` yourself. No approval needed.",
       shape: { branch: z.string().optional() },
       handler: (args) => params.onFetchRemote!({ branch: typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined }),
     });
@@ -117,7 +118,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'create_task',
       description:
-        "Start a NEW top-level task in a project — independent work for someone else, NOT a part of this task (for parts of this task use create_subtask: it stays in your project and is tracked under you). `project`: the project's slug (e.g. \"web\"; \"default\" for the default one); `prompt`: the full instruction, a complete brief in terse English; `title` (optional); `agent` (optional: the agent that should run it — otherwise the project's default agent); `reason`: ONE plain line on why this work is moved out (the person reads it first on the approval card); `related`: ids of the tasks it grows out of (they are linked, so their summaries fold into the new task's context). Write the brief so it stands on its own — the new task does not see this conversation. A person approves each one on a card, and if an equivalent task is already open in that project you get it back instead of a duplicate. Check what exists before you create: do not start the same work twice.",
+        "Start a NEW top-level task in a project — independent work for someone else (for parts of this task use create_subtask). `project` (slug; \"default\"), `prompt` (a complete brief in terse English — the new task does not see this conversation), `title?`, `agent?` (else the project's default), `reason` (ONE line, shown first on the approval card), `related` (task ids whose summaries fold in). A person approves each; an equivalent open task is returned instead of a duplicate — check what exists first.",
       shape: { project: z.string(), prompt: z.string(), title: z.string().optional(), agent: z.string().optional(), reason: z.string().optional(), related: z.array(z.string()).optional() },
       handler: (args) =>
         params.onCreateTask!({
@@ -135,7 +136,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'create_subtask',
       description:
-        'Decompose this task into an independent subtask. Use it to split work into scoped units — each subtask runs on its own (its own worktree and agent) and starts immediately. Give a clear `prompt` — a full instruction, not a title, in terse English (facts and the next action; no pleasantries, no retelling of what the receiver can read itself) — an optional short `title`, and optionally the specialist `agent` to run it (e.g. backend, frontend, coder). Returns the new subtask id. Prefer this over doing everything yourself when the work has distinct parts. Before creating one, call check_subtasks: reuse a finished or running subtask that already covers it, and do not split work that one subtask can do — do not multiply tasks.',
+        "Split this task into an independent subtask that starts at once in its own worktree. `prompt`: a full instruction in terse English (facts and the next action), `title?`, `agent?` (a specialist). Returns the subtask id. Call check_subtasks first: reuse an existing subtask and do not split what one subtask can do.",
       shape: { prompt: z.string(), title: z.string().optional(), agent: z.string().optional() },
       handler: async (args) => {
         const created = await params.onCreateSubtask!({
@@ -217,7 +218,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'kb_search',
         description:
-          "Search the project's knowledge bases (large reference material: regulations, manuals, textbooks, saved web pages). Returns the best passages with their document id, passage number and source. `query`: a few specific words (the question's key terms — not a whole sentence) IN THE LANGUAGE OF THE DOCUMENTS (a Russian manual is found with Russian words; keyword search does not translate); `kb` (optional): search one base only; `limit` (default 6). Prefer it over guessing, and cite the source of a passage you rely on. If the results look thin, try synonyms or another language.",
+          "Search the knowledge bases (regulations, manuals, saved pages). Returns the best passages with document id, passage number, source. `query`: a few key words IN THE LANGUAGE OF THE DOCUMENTS (no translation); `kb?` one base; `limit` (default 6). Prefer it over guessing; cite sources; try synonyms or another language if thin.",
         shape: { query: z.string(), kb: z.string().optional(), limit: z.number().optional() },
         handler: (args) => kb.search({ query: String(args.query ?? ''), kb: typeof args.kb === 'string' && args.kb ? args.kb : undefined, limit: typeof args.limit === 'number' ? args.limit : undefined }),
       },
@@ -291,7 +292,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'show_images',
       description:
-        "Show pictures to the user IN THE CHAT — one picture, or an album of up to 10 (generated images, charts, screenshots, photos, video frames you extracted). `paths`: full paths of image files (png, jpg, webp, gif) in the task's attachments, the resource library or the workspace — or `task:<subtask id>/<file name>` for a picture one of your subtasks produced (shown from where it is, never copied); `caption`: one short line (what they are). They appear inline in the dashboard conversation and are sent as a photo / album to chat channels like Telegram. Use it whenever the result IS a picture — don't just name the file. Several related images go in ONE call (an album), not one call each.",
+        "Show pictures IN THE CHAT (one or an album of up to 10): generated images, charts, screenshots, frames. `paths`: image files (png, jpg, webp, gif) in the task's attachments, library or workspace, or `task:<subtask id>/<file>`; `caption`: one short line. Use it whenever the result IS a picture; several related images go in ONE call.",
       shape: { paths: z.array(z.string()), caption: z.string().optional() },
       handler: (args) => params.onShowImages!({ paths: Array.isArray(args.paths) ? (args.paths as unknown[]).map(String) : [], caption: typeof args.caption === 'string' ? args.caption : undefined }),
     });
@@ -311,7 +312,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'ask_user',
       description:
-        "Ask the HUMAN a question and wait for the answer. Use it when you need a decision or a missing fact that you cannot find yourself — instead of guessing, and instead of ending your run with a question. `question`: short and specific. `options`: 2–6 short answer choices shown as buttons (in the dashboard and in the chat channels); leave it out for an open question. `multiple` (default false): the person may tick SEVERAL options (\"which of these topics do you want?\") — the answer lists the chosen ones. `allow_text` (default true): the person may also type their own answer. `image`: a full path of a photo / video frame to show with the question (e.g. a frame from video_digest — \"is THIS the crack?\"). Returns the answer; if nobody answers in time you get a note saying so — then choose the safest default yourself or report the task as blocked. Don't ask what you can decide or check yourself, and ask one thing at a time.",
+        "Ask the HUMAN a question and wait — for a decision or a fact you cannot find yourself (do not guess or end your run with a question). `question`: short and specific. `options`: 2–6 buttons (omit for an open question); `multiple` (several choices); `allow_text` (default true); `image`: a path to show with it. Returns the answer; if nobody answers in time, pick the safest default or report blocked. Ask one thing at a time; do not ask what you can check yourself.",
       shape: { question: z.string(), options: z.array(z.string()).optional(), allow_text: z.boolean().optional(), multiple: z.boolean().optional(), image: z.string().optional() },
       handler: (args) =>
         params.onAskUser!({
@@ -328,7 +329,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'look_at',
       description:
-        "Look at a PHOTO or a VIDEO and answer a question about it, using the project's vision model (works for any agent, even one whose own model cannot see images). `path`: the full path of the file (a resource from the library or a file in the workspace) OR just the file name of an attachment of this task, exactly as the prompt lists it (e.g. \"IMG_4870.jpg\"). `question`: what you want to know — be specific (e.g. \"read the measurements on the tape\", \"is there mould on the wall\", \"what is wrong with this pronunciation exercise page\"). For a video it looks at frames spread over the whole clip (at most 8 are shown at once, evenly picked); `every_seconds` sets the step between frames (default: automatic). To look at the moments when the speaker POINTS at things (\"look here\", \"вот тут\"), set `pointing: true` (built-in list, Russian and English) and/or `phrases: [\"…\"]` (your own words); `at_seconds: [12, 40]` takes frames at exact times (read them from the timed transcript of video_digest). For a video you usually want video_digest first (it also gives you what was said).",
+        "Answer a question about a PHOTO or VIDEO with the vision model (any agent). `path`: full path (library / workspace) or the attachment's file name as listed in the prompt. `question`: be specific. Video: frames spread over the clip (max 8); `every_seconds` sets the step; `pointing: true` and/or `phrases: [\"…\"]` pick the moments where the speaker points (\"look here\", \"вот тут\"); `at_seconds: [12, 40]` exact times. For video use video_digest first (it also gives the speech).",
       shape: { path: z.string(), question: z.string(), every_seconds: z.number().optional(), at_seconds: z.array(z.number()).optional(), phrases: z.array(z.string()).optional(), pointing: z.boolean().optional() },
       handler: (args) =>
         params.onLookAt!({ path: String(args.path), question: String(args.question ?? ''), ...framePlan(args) }),
@@ -339,7 +340,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'video_digest',
       description:
-        "Turn a VIDEO into something you can use: it returns frames spread over the clip (paths you can Read, or pass to look_at) and — when speech recognition is set up — a transcript of what was said. `path`: the full path of the video (library resource) or just the file name of a video attached to this task, as the prompt lists it. `every_seconds` (optional): take one frame every N seconds (min 1, up to 60 frames; default: about one per 10 s, 4–24 frames) — use a small step for fast action or a short clip, a large one for a long clip. The transcript is timestamped (`[0:12] …`). To get frames at the moments some words are said — the speaker says \"look here\" / \"смотри, вот тут\" — set `pointing: true` (built-in list, Russian and English) and/or `phrases: [\"…\"]`; each such frame is labelled with the words said. `at_seconds: [12, 40]` takes frames at exact times. A different frame plan re-takes the frames (the transcript is kept, so recognition is not paid for twice). The first call on a video takes a while (it is processed once and cached).",
+        "Turn a VIDEO into frames (paths to Read / pass to look_at) plus a timestamped transcript (`[0:12] …`) when speech recognition is set up. `path`: full path or the attachment's file name as listed. `every_seconds` (1–60 frames max; default ≈ one per 10 s); `pointing` / `phrases` pick frames at the moments those words are said; `at_seconds` exact times. A new frame plan re-takes frames, the transcript is kept. The first call is slow (cached afterwards).",
       shape: { path: z.string(), every_seconds: z.number().optional(), at_seconds: z.array(z.number()).optional(), phrases: z.array(z.string()).optional(), pointing: z.boolean().optional() },
       handler: (args) =>
         params.onVideoDigest!({ path: String(args.path), ...framePlan(args) }),
@@ -373,7 +374,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'propose_learned_skill',
       description:
-        "Propose writing a durable, fleet-wide observation to agent/skills/learned/<name>.md — something future agent runs (not just this one) should know, e.g. a project-specific quirk or gotcha you had to work around. This is NOT for task-specific notes (use report_task_status for those) and NOT for one-off facts — only for things worth a human approving as standing guidance. A human must approve the write before it lands (this call blocks until they decide); `content` should be complete markdown (this REPLACES the file, not appends). Keep it under 16KB — consolidate rather than let it grow unbounded.",
+        "Propose a durable, fleet-wide observation for agent/skills/learned/<name>.md — standing guidance future runs should know (a project quirk, a workaround), not task notes (report_task_status) or one-off facts. `content`: complete markdown (REPLACES the file), under 16KB. Needs approval (blocks until decided).",
       shape: {
         name: z.string().describe('lowercase-with-hyphens, no extension, e.g. "checkout-service-quirks"'),
         content: z.string(),
@@ -418,7 +419,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_agent',
         description:
-          'Propose creating or replacing an agent. `name`: lowercase letters/digits/-/_. `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, skills, allowedTools, disallowedTools, mcp, `maxTurns: 80` (steps one run may take, 5–500; default 40 — give a lead that plans big work more), and `createTasks: true` to let a lead agent start new tasks in projects with the create_task tool — each one still approved by a person) followed by the system prompt. A human reviews the full content and must approve before anything is written; this call blocks until they decide. You cannot overwrite built-in agents.',
+          "Create or replace an agent. `name` (lowercase letters/digits/-/_), `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, `escalation: provider/model, …` (stronger steps, cheaper first), skills, allowedTools, disallowedTools, mcp, `maxTurns` 5–500, `createTasks: true` for a lead that starts tasks) then the system prompt. Needs approval (blocks until decided). Built-in agents cannot be overwritten.",
         shape: { name: z.string(), content: z.string() },
         handler: async (args) =>
           (await admin.proposeAgent({ name: String(args.name), content: String(args.content) })).message,
@@ -484,7 +485,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_provider',
         description:
-          "Propose creating a provider or updating an existing one's configuration. Fields: `name`, `kind` (anthropic | openai | deepseek | ollama | codex), `model`, `authMode` (api-key | auth-token | oauth-token for non-codex; codex-login | api-key for codex), optional `baseUrl` (https://… endpoint; leave out for the family default), optional `makeDefault` (also set it as the default provider), `reason`. There is NO secret field: API keys/tokens must never be typed into this chat — after approval, tell the user to paste the key themselves in Settings → Providers → Edit. A human reviews the request and must approve before anything changes; this call blocks until they decide.",
+          "Create a provider or update one. `name`, `kind` (anthropic|openai|deepseek|ollama|codex), `model`, `authMode` (api-key|auth-token|oauth-token; codex: codex-login|api-key), `baseUrl?`, `makeDefault?`, `reason`. NO secret field: never type keys in the chat — after approval tell the user to paste the key in Settings → Providers → Edit. Needs approval.",
         shape: {
           name: z.string(),
           kind: z.enum(['anthropic', 'openai', 'deepseek', 'ollama', 'codex']),
@@ -517,7 +518,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_pack_install',
         description:
-          "Install a content pack by `name` (from packs_list): its agents, skills, starter notes in the resource library and prepared schedules (the schedules are created SWITCHED OFF — nothing runs until the user turns them on and picks a chat). Anything that already exists is left untouched, so it is safe to re-run. Ask the user's time zone and pass it as `timezone` (IANA, e.g. Europe/Kyiv) so the prepared schedules match. `project` (a project's slug, optional): the starter notes go into THAT project's library instead of the global one (agents and skills are always global). `reason` is required. A human reviews and must approve; this call blocks until they decide. Afterwards tell the user the \"next steps\" from the result (usually: fill in the profile note, choose a chat for the schedules).",
+          "Install a content pack `name` (from packs_list): agents, skills, starter notes, prepared schedules (created SWITCHED OFF). Existing items are left untouched (safe to re-run). Ask the user's time zone and pass `timezone` (IANA). `project?` (slug): notes go into that project's library (agents/skills are global). `reason` required. Needs approval; afterwards tell the user the \"next steps\" from the result.",
         shape: { name: z.string(), timezone: z.string().optional(), project: z.string().optional(), reason: z.string() },
         handler: async (args) =>
           (
@@ -532,7 +533,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_resource',
         description:
-          "Add, change or delete a TEXT NOTE in a resource library — shared knowledge agents read (use it for things like a learner profile, house measurements, a style guide, a glossary). `action`: create | update | delete. create: `title`, `text` (Markdown), optional `description` (one line — shown to agents so they know when to read it), `tags`, `agents` (names of agents it is meant for; leave out for all), `project` (a project's slug: the note goes into THAT project's library and only its tasks see it; leave out for the global library every project shares). update: `id` (from resources_search) + the fields to change; `text` replaces the whole note. delete: `id`. Files and images are uploaded by the user in the dashboard (Resources) — you cannot create those. A human reviews and must approve; this call blocks until they decide. Search first (resources_search) to avoid duplicates.",
+          "Add, change or delete a TEXT NOTE in a resource library (shared knowledge agents read: a profile, measurements, a glossary). `action`: create|update|delete. create: `title`, `text` (Markdown), `description?` (one line — when to read it), `tags?`, `agents?` (omit = all), `project?` (slug: only its tasks see it; omit = global). update: `id` (from resources_search) + changed fields (`text` replaces the whole note). delete: `id`. Files/images are uploaded by the user (Resources). Search first to avoid duplicates. Needs approval.",
         shape: {
           action: z.enum(['create', 'update', 'delete']),
           id: z.string().optional(),
@@ -572,7 +573,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_channel',
         description:
-          "Create, change or delete a chat channel. `action`: create | update | delete; `name` identifies it. create: `kind` \"telegram\" — the channel is created SWITCHED OFF and has no token yet; next call request_secret (target \"channel\", name = the channel name) so the user enters the BotFather token in a secure field (never in the chat) — it then switches on by itself. update: `enabled`, `defaultAgent` (an existing agent for tasks from this channel), `allowChatId` (let that chat control the platform — only for a chat id the user confirmed, usually one listed as waiting in channels_list), `removeChatId`. A chat that is allowed can create tasks and approve actions, so only allow the user's own chats. `reason` is required. A human reviews and must approve; this call blocks until they decide.",
+          "Create, change or delete a chat channel. `action`: create|update|delete; `name`. create: `kind` \"telegram\" — created SWITCHED OFF without a token; then call request_secret (target \"channel\", name) so the user enters the BotFather token securely. update: `enabled`, `defaultAgent`, `allowChatId` (only a chat id the user confirmed, usually waiting in channels_list — an allowed chat can create tasks and approve actions), `removeChatId`. `reason` required. Needs approval.",
         shape: {
           action: z.enum(['create', 'update', 'delete']),
           name: z.string(),
@@ -609,7 +610,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_schedule',
         description:
-          "Create, change or delete a recurring job. `action`: create | update | delete; `name` identifies it. For create/update: `cron` (5 fields: minute hour day-of-month month day-of-week, e.g. \"30 9 * * *\" = every day 09:30, \"0 18 * * 0\" = Sundays 18:00, \"0 8 * * 1-5\" = weekdays 08:00; not more often than every 5 minutes), `timezone` (IANA, e.g. Europe/Kyiv — ask the user, don't guess), `kind`: \"message\" (posts `text` to a chat — no model, free; use it for plain reminders) or \"task\" (starts a task with `text` as the prompt for `agentName` each time — uses model budget; its updates go to the chat; `taskMode`: \"same\" (default) = every run continues ONE task, so the agent remembers earlier runs, or \"new\" = every run starts a separate task), `channel` (channel NAME) + `chatId` (must already be an allowed chat of that channel — see channels_list), optional quiet hours `quietStart`/`quietEnd` (HH:MM, runs inside are skipped), optional `enabled`. `reason` is required. A human reviews and must approve; this call blocks until they decide. Schedules cannot be part of propose_batch — call this once per job.",
+          "Create, change or delete a recurring job (once per job; not allowed in propose_batch). `action`: create|update|delete; `name`. `cron` (5 fields, min 5 minutes apart, e.g. \"30 9 * * *\"), `timezone` (IANA — ask the user), `kind`: \"message\" (posts `text`, no model, free) or \"task\" (starts a task with `text` for `agentName`; `taskMode` \"same\" = one task that remembers, default, or \"new\"), `channel` (name) + `chatId` (an allowed chat, see channels_list), optional `quietStart`/`quietEnd` (HH:MM), `enabled`. `reason` required. Needs approval (blocks until decided).",
         shape: {
           action: z.enum(['create', 'update', 'delete']),
           name: z.string(),
@@ -658,7 +659,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_update',
         description:
-          "Update this server to a newer release. `version` (e.g. 0.1.48) or omit it for the latest; `force: true` only if the user accepts that running tasks are interrupted (otherwise it refuses while tasks run). The server RESTARTS for a minute or two — you and the dashboard are unreachable meanwhile, so say so first and do not start other work. `reason` is required. A human reviews and must approve; this call blocks until they decide, then returns as soon as the update has started. The previous version is kept for a rollback (`aigentron rollback` on the server).",
+          "Update this server to a newer release: `version` (omit = latest); `force: true` only if interrupting running tasks is accepted. The server RESTARTS for 1–2 minutes — say so first and start no other work. `reason` required. Needs approval; returns once the update has started (the previous version is kept for `aigentron rollback`).",
         shape: {
           version: z.string().optional(),
           force: z.boolean().optional(),
@@ -683,7 +684,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_allowed_domains',
         description:
-          "Change the list of domain names this server answers to. `action`: add | remove | set (replace the whole list) | clear (accept any name again); `domains` (for add/remove/set): names like dev.example.com or *.example.com. localhost, IP addresses and single-word LAN names always work, whatever the list. Once the list is non-empty, OTHER public domain names stop working — make sure the user's own address stays on it. `reason` is required. A human reviews and must approve; this call blocks until they decide. PUBLIC_URL / listen address live in the server's .env — you cannot change them; point the user to `aigentron access`.",
+          "Change the domain names this server answers to. `action`: add|remove|set|clear; `domains`: dev.example.com or *.example.com. localhost, IPs and single-word LAN names always work; once the list is non-empty OTHER public names stop working — keep the user's own address on it. `reason` required. Needs approval. PUBLIC_URL / listen address live in .env (point to `aigentron access`).",
         shape: {
           action: z.enum(['add', 'remove', 'set', 'clear']),
           domains: z.array(z.string()).optional(),
@@ -701,7 +702,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_cloudflare_access',
         description:
-          "Turn the server's own Cloudflare Access check on or off. `enabled`; `teamDomain` (yourteam.cloudflareaccess.com — Zero Trust → Settings → Team domain); `aud` (the Application Audience tag from the Access application's Overview page; optional if one is already saved — it is an identifier, not a secret, so it may be typed in chat). When on, a request under a real domain name must carry Cloudflare's signed token or it gets 403 (localhost, IPs and the local network are unaffected). The call first checks that Cloudflare answers for that team. `reason` is required. A human reviews and must approve; this call blocks until they decide.",
+          "Turn the server's Cloudflare Access check on/off. `enabled`; `teamDomain` (yourteam.cloudflareaccess.com); `aud` (the Application Audience tag, not a secret; optional if saved). When on, a request under a real domain without Cloudflare's signed token gets 403 (localhost, IPs, LAN unaffected). Checks that Cloudflare answers for the team first. `reason` required. Needs approval.",
         shape: {
           enabled: z.boolean(),
           teamDomain: z.string(),
@@ -721,7 +722,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_batch',
         description:
-          "Propose SEVERAL related changes behind ONE approval (the user approves once instead of N times). Use it whenever a request needs 2+ changes (e.g. create three agents + a provider, set up an agent and start its first task). `items` (1–12, applied IN ORDER; later items may refer to agents created by earlier ones): each is {kind, args} where kind/args are: agent {name, content}; skill {name, content}; agent_delete {name, reason}; provider {name, kind, model, authMode, baseUrl?, makeDefault?, reason}; settings {changes, reason}; task {agentName, prompt, title?, reason}; task_action {action, taskIds, reason}. Not allowed in a batch: secrets (use request_secret), cleanup, undo. The whole batch is validated first — if any item is invalid nothing is shown and you get the reasons; otherwise the user sees every item on one card. Items are journaled one by one (each can be reverted). If an item fails while applying, the batch stops there and the result says which items were applied.",
+          "Propose SEVERAL related changes behind ONE approval (use for 2+ changes). `items` (1–12, applied in order): {kind, args}: agent {name, content}; skill {name, content}; agent_delete {name, reason}; provider {name, kind, model, authMode, baseUrl?, makeDefault?, reason}; settings {changes, reason}; task {agentName, prompt, title?, reason}; task_action {action, taskIds, reason}. Not allowed: secrets, cleanup, undo, schedules. All items are validated first (invalid → nothing shown, you get the reasons); applied one by one, each journaled; a failure stops the batch and says what was applied.",
         shape: {
           items: z
             .array(
@@ -745,7 +746,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_task',
         description:
-          "Propose starting a task for another agent on the user's behalf: `agentName` (an existing agent other than yourself), `prompt` (the full instruction — a complete brief, not a title), optional `title`, `reason`. It runs immediately after approval and spends that agent's provider budget. By default it starts as a SUBTASK of this conversation (it appears nested under this chat, and you are told when it finishes) — do not multiply top-level tasks. Pass `standalone: true` only for an independent, long-running job the person will follow on its own, or when this conversation is not the right owner of it. You get the task id back; check progress/results later with task_diagnose. Use it when the user asks you to get something done by an agent (e.g. 'ask the researcher to find…').",
+          "Start a task for another agent on the user's behalf: `agentName` (existing, not you), `prompt` (a complete brief), `title?`, `reason`. Runs right after approval and spends that agent's budget. By default a SUBTASK of this conversation (you are told when it finishes); `standalone: true` only for an independent long job. Returns the task id; check later with task_diagnose.",
         shape: { agentName: z.string(), prompt: z.string(), title: z.string().optional(), standalone: z.boolean().optional(), reason: z.string() },
         handler: async (args) =>
           (
@@ -768,7 +769,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_settings',
         description:
-          "Propose changing a few platform settings. `changes` may contain ONLY: defaultAgent (an existing agent name), verifyCommands (shell commands run after each task, one per line; '' = off), verifyMaxAttempts (0–10), concurrency (1–16; ignored in shared workspace mode), approvalTimeoutSeconds (30–3600), agentInstructions (text appended to EVERY agent's prompt, ≤4000 chars), repoBranch, workspaceSubdir (relative folder inside the repo). Not available: repo URL, tokens/secrets, providers (use propose_provider), channels, users. The user sees old → new values and must approve; the old values are journaled so the change can be reverted. `reason` is required.",
+          "Change a few platform settings. `changes` may contain ONLY: defaultAgent, verifyCommands (one per line; '' = off), verifyMaxAttempts (0–10), concurrency (1–16), approvalTimeoutSeconds (30–3600), agentInstructions (≤4000 chars, appended to EVERY agent), repoBranch, workspaceSubdir. Not available: repo URL, secrets, providers (use propose_provider), channels, users. The user sees old → new; old values are journaled for revert. `reason` required.",
         shape: {
           changes: z.object({
             defaultAgent: z.string().optional(),
@@ -808,7 +809,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'metrics_report',
         description:
-          "Numbers to CHECK a complaint or a setting against, as tables (read-only). `topic`: 'approvals' (how many approval cards, by reason / tool / most repeated command, per run, who decided, how long they waited, which tasks ask most), 'tasks' (outcomes, why they failed / stalled / hit the step limit / ended without a result, durations), 'agents' (per agent: runs, steps, failure rate, tokens, cost estimate, approvals per run), 'config' (the settings that shape behaviour: step limit, concurrency, approval timeout and repeat limit, project modes, per-agent limits and providers), 'system' (the machine right now: load per CPU, free memory, runs in flight, the limits that hold new runs back — for \"the server is overloaded\"). `days` (default 7, max 365); `project` (slug) and `agent` (name) narrow approvals / tasks / agents. Use it before proposing a change (\"how often do cards come from rm?\") and again after, to show whether it helped. Cost figures for subscription providers are estimates at API list prices, not charges.",
+          "Read-only tables to CHECK a complaint or a setting against. `topic`: approvals | tasks | agents | config | system (machine load / memory / limits). `days` (default 7, max 365); `project` (slug) and `agent` narrow approvals/tasks/agents. Use before proposing a change and again after. Subscription costs are list-price estimates, not charges.",
         shape: { topic: z.enum(['approvals', 'tasks', 'agents', 'config', 'system']), days: z.number().optional(), project: z.string().optional(), agent: z.string().optional() },
         handler: (args) =>
           admin.metricsReport({
@@ -828,7 +829,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'request_secret',
         description:
-          "Ask the user to enter an API key / token in a SECURE field (a card in the dashboard, a hidden prompt in the console) — the value goes straight to the server and you never see it. `target`: 'provider' (the key/token of the provider `name`), 'github_token' (the GitHub token in Settings) or 'channel' (the bot token of the channel `name`). On a phone/Telegram the user gets a one-time secure link instead of a card. `reason`: one line shown to the user. Blocks until they save or cancel; returns whether it was saved. NEVER ask the user to type a key in the chat — use this.",
+          "Ask the user to enter an API key / token in a SECURE field (a dashboard card; a one-time link on a phone/Telegram) — you never see the value. `target`: 'provider' (key of provider `name`), 'github_token' or 'channel' (bot token of channel `name`). `reason`: one line. Blocks until saved or cancelled. NEVER ask for a key in the chat.",
         shape: { target: z.enum(['provider', 'github_token', 'channel']), name: z.string().optional(), reason: z.string() },
         handler: async (args) =>
           (
@@ -879,5 +880,10 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     );
   }
 
-  return specs;
+  const compress = params.onCompressResult;
+  if (!compress) return specs;
+  return specs.map((s) => (COMPRESSIBLE_RESULTS.has(s.name) ? { ...s, handler: async (args: Record<string, unknown>) => compress(s.name, await s.handler(args)) } : s));
 }
+
+/** The tools whose answers can be long free text (never the control tools: status, approvals, task creation). */
+const COMPRESSIBLE_RESULTS = new Set(['kb_search', 'kb_read', 'read_document', 'resources_search', 'workspace_files', 'look_at', 'video_digest', 'check_subtasks']);

@@ -11,17 +11,19 @@ import { McpController } from '../mcp/mcp.controller';
 import { ChannelsController } from '../channels/channels.controller';
 import { ProjectsController } from '../projects/projects.controller';
 import { ProjectRepoController } from '../projects/git/project-repo.controller';
+import { ExtensionController } from '../extension/extension.controller';
 
 // Nest RequestMethod: GET 0, POST 1, PUT 2, DELETE 3, PATCH 4
 const MUTATING = new Set([1, 2, 3, 4]);
 
 const CONTROLLERS = [
   SettingsController, AgentRegistryController, ProvidersController, TasksController,
-  AttachmentsController, UpdateController, McpController, ChannelsController, ProjectsController, ProjectRepoController,
+  AttachmentsController, UpdateController, McpController, ChannelsController, ProjectsController, ProjectRepoController, ExtensionController,
 ];
 
 /** Mutating handlers deliberately open to any signed-in user (reviewer may act on them). Keep this list short. */
-const OPEN: string[] = [];
+/** The browser extension's own handshake: `pair` / `revoke` are for any signed-in user (the issued token is capped by their role), `token` is open on purpose (a one-use code is its credential), `clip` checks the role itself (task: task_setter and up; knowledge note: operator and up). */
+const OPEN: string[] = ['ExtensionController.pair', 'ExtensionController.token', 'ExtensionController.revoke', 'ExtensionController.clip', 'ExtensionController.removeDevice'];
 
 describe('every mutating handler declares @Roles', () => {
   for (const C of CONTROLLERS) {

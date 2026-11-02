@@ -17,6 +17,8 @@ export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }
   const [prompt, setPrompt] = useState('');
   const { onPaste, notice: pasteNotice } = useSmartPaste(setPrompt);
   const [agentName, setAgentName] = useState('');
+  /** a question: a light, cheap run (no worktree, no checks, no status report) */
+  const [question, setQuestion] = useState(false);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [defaultProvider, setDefaultProvider] = useState('');
   const [defaultAgent, setDefaultAgent] = useState('');
@@ -90,6 +92,7 @@ export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }
         autostart: staged.length === 0,
         references: references.length ? references : undefined,
         project: projects.length > 1 ? project : undefined,
+        ...(question ? { kind: 'ask' as const } : {}),
       });
       createdId = task.id;
       phase = 'upload';
@@ -110,6 +113,7 @@ export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }
       createdId = null;
       setPrompt('');
       setAgentName('');
+      setQuestion(false);
       setStaged([]);
       setReferences([]);
       onCreated?.();
@@ -239,8 +243,11 @@ export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }
         {(showRefs || references.length > 0) && (
           <TaskReferencePicker value={references} onChange={setReferences} />
         )}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }} title="A short question gets a light, cheap answer: no working copy, no checks, no status report. Use a task for real work.">
+          <input type="checkbox" checked={question} onChange={(e) => setQuestion(e.target.checked)} style={{ width: 'auto', margin: 0 }} /> Just a question
+        </label>
         <Button variant="primary" type="submit" disabled={!canSubmit}>
-          {busy ? (progress ?? 'Creating…') : preparing ? 'Preparing files…' : 'Create task'}
+          {busy ? (progress ?? 'Creating…') : preparing ? 'Preparing files…' : question ? 'Ask' : 'Create task'}
         </Button>
         <Button type="button" onClick={() => setDiscussing(true)} title="Several agents discuss a topic in a new chat">
           💬 Discuss

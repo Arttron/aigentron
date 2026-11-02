@@ -1175,7 +1175,7 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     const channelId = row.id;
     const ctx = { channelId, chatId: e.chatId, userId: e.userId, kind: row.kind };
     const created = await this.commands
-      .newTask(ctx, text, agent)
+      .newTask(ctx, text, agent, this.channels.defaultMode(row) === 'ask' ? 'ask' : undefined)
       .catch((err) => ({ text: `⚠️ ${(err as Error).message}`, taskId: null }));
     if (e.messageId && created.taskId) {
       // A brand-new task — remember its ack message so the final outcome updates

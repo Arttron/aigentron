@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { parseEscalationStep } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
 
 /** A named agent definition loaded from <agentDir>/agents/<name>.md. */
@@ -11,6 +12,8 @@ export interface AgentDef {
   provider?: string;
   /** Provider names to fail over to (in order) if the primary run errors. */
   fallbackProviders?: string[];
+  /** Escalation ladder: `provider/model` steps, cheapest first. A run that a cheaper model could not finish continues on the next step; the fallback providers are tried only when no step is available. */
+  escalation?: string[];
   /** Model to use; falls back to the provider's default model when absent. */
   model?: string;
   /** Optional skill filenames to include; when absent, all skills are used. */
@@ -89,11 +92,12 @@ export class AgentRegistryService {
     return defs
       .filter((d): d is AgentDef => d !== null)
       .map(
-        ({ name, description, provider, fallbackProviders, model, skills, allowedTools, disallowedTools, mcp, mode, maxTurns }) => ({
+        ({ name, description, provider, fallbackProviders, escalation, model, skills, allowedTools, disallowedTools, mcp, mode, maxTurns }) => ({
           name,
           description,
           provider,
           fallbackProviders,
+          escalation,
           model,
           skills,
           allowedTools,
@@ -122,6 +126,7 @@ export class AgentRegistryService {
       description?: string;
       provider?: string;
       fallbackProviders?: string[];
+      escalation?: string[];
       model?: string;
       skills?: string[];
       allowedTools?: string[];
@@ -136,6 +141,8 @@ export class AgentRegistryService {
     if (!NAME_RE.test(name)) {
       throw new BadRequestException('Agent name must be alphanumeric/dash/underscore');
     }
+    const badStep = (def.escalation ?? []).find((e) => !parseEscalationStep(e));
+    if (badStep) throw new BadRequestException(`Escalation step "${badStep}" must be written provider/model`);
     if (isBuiltinAgent(name)) {
       // Built-ins keep their prompt/tools/skills; only routing (provider/model/fallbacks)
       // may be changed, so the dashboard and setup wizard can still point them at a model.
@@ -144,6 +151,7 @@ export class AgentRegistryService {
         ...existing,
         provider: def.provider,
         fallbackProviders: def.fallbackProviders,
+        escalation: def.escalation,
         model: def.model,
       };
     }
@@ -207,6 +215,7 @@ export function parseAgentMarkdown(raw: string, fallbackName: string): AgentDef 
     description: meta.description || '',
     provider: meta.provider || undefined,
     fallbackProviders: csv(meta.fallbackProviders),
+    escalation: csv(meta.escalation),
     model: meta.model || undefined,
     skills: csv(meta.skills),
     allowedTools: csv(meta.allowedTools),
@@ -256,6 +265,7 @@ function serializeAgent(def: {
   description?: string;
   provider?: string;
   fallbackProviders?: string[];
+  escalation?: string[];
   model?: string;
   skills?: string[];
   allowedTools?: string[];
@@ -273,6 +283,7 @@ function serializeAgent(def: {
     def.description ? `description: ${oneLine(def.description)}` : null,
     def.provider ? `provider: ${oneLine(def.provider)}` : null,
     csvLine('fallbackProviders', def.fallbackProviders),
+    csvLine('escalation', def.escalation),
     def.model ? `model: ${oneLine(def.model)}` : null,
     csvLine('skills', def.skills),
     csvLine('allowedTools', def.allowedTools),

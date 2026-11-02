@@ -14,7 +14,7 @@ export interface AddonDescriptor {
   description: string;
   requires: { ramMb: number; diskMb: number };
   /** the browser add-on has view + cdp, the Playwright one an MCP port; a port an add-on does not have is null */
-  ports: { view: number | null; cdp: number | null; mcp: number | null };
+  ports: { view: number | null; cdp: number | null; mcp: number | null; api: number | null };
   backends: AddonBackend[];
 }
 
@@ -27,7 +27,7 @@ export interface AddonState {
   installedAt: string | null;
   browser: string | null;
   arch: string | null;
-  endpoints: { view: string | null; cdp: string | null; mcp: string | null };
+  endpoints: { view: string | null; cdp: string | null; mcp: string | null; api: string | null };
   profiles: string[];
   notes: string[];
 }
@@ -54,7 +54,7 @@ export const BUILTIN_DESCRIPTORS: readonly AddonDescriptor[] = [
     description:
       'A real Chromium browser running on the server. You watch and operate it from the dashboard; agents drive the same browser. Sign in to sites once, and the agents can use them.',
     requires: { ramMb: 1536, diskMb: 1500 },
-    ports: { view: 6080, cdp: 9222, mcp: null },
+    ports: { view: 6080, cdp: 9222, mcp: null, api: null },
     backends: ['bare', 'docker'],
   },
   {
@@ -63,7 +63,16 @@ export const BUILTIN_DESCRIPTORS: readonly AddonDescriptor[] = [
     description:
       'A headless Chromium behind the Playwright MCP server, for the agents\' browser work (screenshots, checking a page, filling a form). Separate from the Browser add-on, so a personal browser stays personal.',
     requires: { ramMb: 1536, diskMb: 1500 },
-    ports: { view: null, cdp: null, mcp: 8931 },
+    ports: { view: null, cdp: null, mcp: 8931, api: null },
+    backends: ['bare'],
+  },
+  {
+    name: 'voice',
+    title: 'Local voice',
+    description:
+      'Speech recognition (Whisper) and speech synthesis (Piper: Russian and English voices) running on this server behind an OpenAI-compatible address — voice without a paid service, and nothing leaves the machine.',
+    requires: { ramMb: 2048, diskMb: 2500 },
+    ports: { view: null, cdp: null, mcp: null, api: 8880 },
     backends: ['bare'],
   },
 ];
@@ -88,8 +97,9 @@ export function parseDescriptor(raw: unknown): Parsed<AddonDescriptor> {
   const view = optPort(ports.view);
   const cdp = optPort(ports.cdp);
   const mcp = optPort(ports.mcp);
-  if (view === 'bad' || cdp === 'bad' || mcp === 'bad') return { ok: false, error: 'ports.view, ports.cdp and ports.mcp must be 1–65535' };
-  if (view === null && cdp === null && mcp === null) return { ok: false, error: 'the add-on needs at least one port (view, cdp or mcp)' };
+  const api = optPort(ports.api);
+  if (view === 'bad' || cdp === 'bad' || mcp === 'bad' || api === 'bad') return { ok: false, error: 'ports.view, ports.cdp, ports.mcp and ports.api must be 1–65535' };
+  if (view === null && cdp === null && mcp === null && api === null) return { ok: false, error: 'the add-on needs at least one port (view, cdp, mcp or api)' };
   const backends = Array.isArray(raw.backends) ? raw.backends.filter((b): b is AddonBackend => (ADDON_BACKENDS as readonly unknown[]).includes(b)) : [];
   if (backends.length === 0) return { ok: false, error: 'backends must list bare and/or docker' };
   return {
@@ -99,7 +109,7 @@ export function parseDescriptor(raw: unknown): Parsed<AddonDescriptor> {
       title,
       description,
       requires: { ramMb: int(req.ramMb, 0, 1_000_000) ?? 0, diskMb: int(req.diskMb, 0, 10_000_000) ?? 0 },
-      ports: { view, cdp, mcp },
+      ports: { view, cdp, mcp, api },
       backends: [...new Set(backends)],
     },
   };
@@ -154,6 +164,8 @@ export function parseState(raw: unknown, name: string): Parsed<AddonState> {
   if (cdp && !cdp.ok) return { ok: false, error: `endpoints.cdp: ${cdp.error}` };
   const mcp = ep.mcp === undefined || ep.mcp === null ? null : parseEndpoint(ep.mcp);
   if (mcp && !mcp.ok) return { ok: false, error: `endpoints.mcp: ${mcp.error}` };
+  const api = ep.api === undefined || ep.api === null ? null : parseEndpoint(ep.api);
+  if (api && !api.ok) return { ok: false, error: `endpoints.api: ${api.error}` };
   return {
     ok: true,
     value: {
@@ -164,7 +176,7 @@ export function parseState(raw: unknown, name: string): Parsed<AddonState> {
       installedAt: str(raw.installedAt, 60),
       browser: str(raw.browser, 120),
       arch: str(raw.arch, 40),
-      endpoints: { view: view ? (ep.view as string) : null, cdp: cdp ? (ep.cdp as string) : null, mcp: mcp ? (ep.mcp as string) : null },
+      endpoints: { view: view ? (ep.view as string) : null, cdp: cdp ? (ep.cdp as string) : null, mcp: mcp ? (ep.mcp as string) : null, api: api ? (ep.api as string) : null },
       profiles: strList(raw.profiles, 20, 60),
       notes: strList(raw.notes, 20, 400),
     },

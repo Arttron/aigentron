@@ -47,6 +47,8 @@ export class AppConfigService {
    *  `full` dev it's actually the SAME path as agentDir, which is fine — the sync
    *  logic just finds nothing to reconcile).  */
   readonly shippedAgentDir: string;
+  /** The BUILT browser-extension template (`apps/extension/dist`, produced by the project build); EXTENSION_DIR overrides. The server only writes its configuration into a copy of it. */
+  readonly extensionDir: string;
   readonly agentMaxTurns: number;
   /** A new run is held while the 1-minute load per CPU is above this (AGENT_MAX_LOAD, default 1.5; 0 = off). */
   readonly agentMaxLoadPerCpu: number;
@@ -204,6 +206,7 @@ export class AppConfigService {
     this.agentDir = process.env.AGENT_DIR ?? '/workspace/agent';
     this.secretsDir = process.env.SECRETS_DIR ?? join(this.agentDir, '..', 'secrets');
     this.shippedAgentDir = process.env.SHIPPED_AGENT_DIR ?? defaultShippedAgentDir();
+    this.extensionDir = process.env.EXTENSION_DIR ?? join(__dirname, '..', '..', '..', '..', 'apps', 'extension', 'dist');
     this.agentMaxTurns = parseInt(process.env.AGENT_MAX_TURNS ?? '40', 10);
     const loadLimit = Number(process.env.AGENT_MAX_LOAD ?? '1.5');
     this.agentMaxLoadPerCpu = Number.isFinite(loadLimit) && loadLimit >= 0 ? loadLimit : 1.5;

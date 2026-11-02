@@ -10,8 +10,10 @@ export interface ChannelFieldDef {
   /** Key inside Channel.config. */
   key: string;
   label: string;
-  /** text = string · password = masked secret · list = comma-separated → string[] · agent = pick a registered agent. */
-  type: 'text' | 'password' | 'list' | 'agent';
+  /** text = string · password = masked secret · list = comma-separated → string[] · agent = pick a registered agent · select = one of `options`. */
+  type: 'text' | 'password' | 'list' | 'agent' | 'select';
+  /** The choices of a `select` field. */
+  options?: { value: string; label: string }[];
   /** Masked on the wire and preserved on update when left blank. */
   secret?: boolean;
   required?: boolean;
@@ -52,6 +54,16 @@ export const CHANNEL_KINDS: ChannelKindDef[] = [
       { key: 'botToken', label: 'Bot token (from @BotFather)', type: 'password', secret: true, required: true, placeholder: '123456:ABC-DEF…' },
       { key: 'allowedChatIds', label: 'Allowed chat ids', type: 'list', placeholder: '12345678, -100987654321', help: 'Only these chats may create tasks / approve.' },
       { key: 'defaultAgent', label: 'Default agent', type: 'agent', help: 'Agent for tasks from this channel (blank = default lead).' },
+      {
+        key: 'defaultMode',
+        label: 'A plain message starts',
+        type: 'select',
+        options: [
+          { value: 'task', label: 'a task — the full work cycle (working copy, checks, status report)' },
+          { value: 'ask', label: 'a question — a light, cheap answer (model chosen in Settings → Work → Questions)' },
+        ],
+        help: 'What a message with no command becomes when the chat has no active task. /ask always asks a question, /new_task always starts a task, a file always starts a task.',
+      },
     ],
     build: (name, config) => new TelegramAdapter(name, config as unknown as TelegramConfig),
   },
