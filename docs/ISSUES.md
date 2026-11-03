@@ -461,3 +461,6 @@ After the page source (stage 2), a source that is almost empty (a page drawn by 
 
 ## Queued messages vanished from the chat after a page refresh (fixed)
 A message sent while the agent was running was shown in the conversation only from the page's local "sending…" list; after a refresh that list was empty and the message was visible only in the composer's "Queued" block (task page) or not at all (admin chat). Fix: the task page and the admin chat load the server-side queue (`/tasks/:id/pending-follow-ups`, live via `followUpQueue`) and show those messages in the conversation as queued; a local "sending…" message that is already in the queue is not shown twice.
+
+## Clicking an extension notification did nothing (fixed, cause partly inferred)
+The click handler opened the task only if the request was still in the extension's memory (a woken service worker, or a request already answered, left nothing to open) and failed silently otherwise. Now the click always opens the dashboard: the task if known, the main page if not, focusing an already open tab; errors are logged. If it still does nothing for a notification that is not an approval/question, the notification text is needed to find the cause.

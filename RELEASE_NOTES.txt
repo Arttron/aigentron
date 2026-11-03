@@ -1,13 +1,8 @@
-Aigentron v0.1.111
+Aigentron v0.1.112
 
-For people who are not programmers: agents read more pages in your browser, and your queued messages no longer disappear.
+For people who are not programmers: a click on the browser extension's notification now always takes you somewhere useful.
 
 Fixed
-- Messages you send while an agent is still working stay visible in the chat after you refresh the page (in task chats and in the admin chat), marked as queued.
-- When you allow agents to use your browser, Add-ons → Extension notices it at once instead of showing the old warning.
-
-Improved
-- Pages Chrome refuses to let extensions touch (the Chrome Web Store, chrome:// pages) are now read from their source: title, descriptions, structured data and visible text, with a note about what may be missing.
-- If the source is almost empty (a page drawn by scripts), the extension takes a screenshot as a last step: the vision model turns it into text, or the agent gets the image. The browser screenshot tool can also take a question about the picture.
+- Clicking a notification from the extension sometimes did nothing (when the request had already been answered, or the extension had just woken up). Now it always opens the dashboard: the task if it is known, the main page if not, and it switches to a tab that is already open instead of opening another.
 
 Update note: update the extension (its icon → "Update the extension"). No database changes.

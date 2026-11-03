@@ -316,12 +316,25 @@ export function startInbox() {
     if (S.approvals.has(id)) void inboxHandlers.decide({ id, decision: i === 0 ? 'approve' : 'deny' }).catch(() => undefined);
   });
   chrome.notifications.onClicked.addListener(async (nid) => {
-    await load();
-    const id = nid.replace(/^req:/, '');
-    const x = S.approvals.get(id) ?? S.questions.get(id);
-    const conn = await getConnection();
-    if (conn && x) await chrome.tabs.create({ url: `${conn.origin}/tasks/${x.taskId}` });
-    void chrome.notifications.clear(nid);
+    try {
+      await load();
+      const id = nid.replace(/^req:/, '');
+      const x = S.approvals.get(id) ?? S.questions.get(id);
+      const conn = await getConnection();
+      if (conn) {
+        // the request may already be answered (or the worker lost it): the dashboard is still the place to look
+        const url = x?.taskId ? `${conn.origin}/tasks/${x.taskId}` : `${conn.origin}/`;
+        const [open] = await chrome.tabs.query({ url: `${url}*` });
+        if (open?.id) {
+          await chrome.tabs.update(open.id, { active: true });
+          if (open.windowId) await chrome.windows.update(open.windowId, { focused: true });
+        } else await chrome.tabs.create({ url });
+      }
+    } catch (e) {
+      console.warn('notification click failed', e);
+    } finally {
+      void chrome.notifications.clear(nid);
+    }
   });
   chrome.alarms.create('inbox', { periodInMinutes: 1 });
   chrome.alarms.onAlarm.addListener((a) => {
