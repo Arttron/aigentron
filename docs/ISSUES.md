@@ -417,3 +417,12 @@ Platform-kept base `admin-reference` (seeded and synchronised from the shipped g
 
 ## gitleaks: a fake token in the extension e2e test (fixed)
 The redaction check of the extension's bug report used a made-up `token=…` value (a 22-character letters-and-digits string) that the secret scanner took for a key. The fake credentials are now assembled from pieces in the test; the old findings in history (the same test, and key-building code / fixtures of the git module) are listed in `.gitleaksignore`. `gitleaks detect` over the history reports no leaks; a scan of the working tree also sees the git-ignored local files `.env` and `.claude/settings.local.json` (not in the repository).
+
+## Approval for a heredoc that only writes a document (fixed)
+The text rules of the approval classifier (rm -rf, git push, curl -X, --force, .env, printenv …) were applied to the whole command, including the body of `cat > doc.md <<'EOF'`. A document that merely MENTIONED such words needed an approval (or a hard block for a credentials word). The body of a heredoc that only writes text (`cat` / `tee`, QUOTED delimiter, no pipe or chain on the line) is now content, not commands; unquoted delimiters, pipes into a shell, `bash` / `python` consumers and everything after the document are still read. The line that writes the file is still judged (protected targets).
+
+## Compression rules: crowded fields (fixed)
+Each custom rule is now a bordered block with aligned fields and room around the buttons.
+
+## Escalation steps: «the last step is not removed» (not reproduced)
+Checked in a real browser (add, remove first / last / only step, save): removal and saving worked in every case. Waiting for the exact steps from the report.

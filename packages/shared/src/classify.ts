@@ -1,4 +1,4 @@
-import { analyzeShell, isMainRef, type ShellFacts } from './shell-guard';
+import { analyzeShell, isMainRef, stripDataHeredocs, type ShellFacts } from './shell-guard';
 
 // `URL` exists in every runtime this runs in (the server, the hook, the browser); the package is compiled without the DOM / node typings.
 declare const URL: new (url: string, base?: string) => { protocol: string; hostname: string };
@@ -931,9 +931,11 @@ export function classifyToolCall(
       return { dangerous: true, summary, reason: touched.secret ? 'write to a credentials file (sign-in password / tokens)' : 'write to a protected file (SOUL.md/.github/.git/agent definitions)', hard: true };
     }
     const guarded = shellGuard(analysed, opts);
+    // the text rules do not read the body of a heredoc that only writes a document (`cat > doc.md <<'EOF'`): its words are content, not commands
+    const scanned = stripDataHeredocs(command);
     for (const { re, reason, hard } of DANGEROUS_SHELL_PATTERNS) {
       if (safeRm && RM_REASONS.has(reason)) continue;
-      if (re.test(command)) {
+      if (re.test(scanned)) {
         if (hard) return { dangerous: true, summary, reason, hard: true };
         return { dangerous: true, summary, reason: guarded ? `${guarded.reason}: ${reason}` : reason, ...(guarded ? { guard: guarded.guard } : {}) };
       }

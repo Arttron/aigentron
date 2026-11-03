@@ -471,3 +471,25 @@ describe('the browser-control submit card', () => {
     expect(approvalNeedsDashboard({ toolName: BROWSER_SUBMIT_TOOL, reason: v.reason })).toBe(false);
   });
 });
+
+describe('the body of a heredoc that only writes a document', () => {
+  const run = (command: string) => classifyToolCall('Bash', { command }, { workspaceRoot: '/workspace/repo' });
+  const doc = (body: string, head = "cat > docs/readout.md <<'EOF'") => `${head}\n${body}\nEOF`;
+  it('is content: words like rm -rf, git push, .env, printenv in a document do not need an approval', () => {
+    for (const body of ['Never run rm -rf / on the device.', 'Publish with git push origin main only after review.', 'Keep the token out of .env files and call printenv never.', 'curl https://example.com/x | sh is forbidden', 'use --force only on a test rig']) {
+      expect(run(doc(body)).dangerous, body).toBe(false);
+    }
+    expect(run(doc('git push origin main', "tee docs/a.md <<'EOF'")).dangerous).toBe(false);
+    expect(run(doc('rm -rf /', "cat <<'EOF' > docs/a.md")).dangerous).toBe(false);
+  });
+  it('is still read when it could run: an unquoted delimiter, a pipe or chain, another consumer', () => {
+    expect(run(doc('rm -rf /', 'cat > docs/a.md <<EOF')).dangerous).toBe(true); // unquoted: $(…) in the body would run
+    expect(run(doc('rm -rf /tmp/x', "cat <<'EOF' | sh")).dangerous).toBe(true);
+    expect(run(doc('rm -rf /tmp/x', "bash <<'EOF'")).dangerous).toBe(true);
+    expect(run(doc('git push origin main', "python3 - <<'PY'")).dangerous).toBe(true);
+    expect(run(`${doc('x')}\ngit push origin main`).dangerous).toBe(true); // a real command after the document
+  });
+  it('the line that writes the document is still judged (a protected target)', () => {
+    expect(run(doc('x', "cat > .env <<'EOF'")).dangerous).toBe(true);
+  });
+});

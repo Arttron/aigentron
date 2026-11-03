@@ -1,25 +1,9 @@
-Aigentron v0.1.107
+Aigentron v0.1.108
 
-This version carries everything announced for 0.1.105 and 0.1.106 (those tags were cut before last small fixes to the test files and the notes, so use this one).
-
-For people who are not programmers: a browser extension that lets you send any page to an agent and approve things right where you are (and lets agents work in your browser, with your permission), free local voice, a cheap "just a question" mode, agents that move up to a stronger model only when they need to, and text filters that save tokens and the limits of your subscription plans.
-
-Added
-- Browser extension (Chrome, Edge, Brave). Add-ons → Extension: download the zip made for your server, load it, press Connect. Send the page, a selection, a link or a screenshot (you can draw on it) to an agent as a task or a note for a knowledge base; approval and question cards appear on the page you are on; a side panel with your tasks and a chat; "Report a bug" (console errors, failed requests, the element you point at); dictation with the microphone. It updates itself in place, and the Extension tab shows the version on the server, in this browser and in every connected browser, with a banner when one is older.
-- Agents in your browser (needs the extension). They search, read, click and fill forms in their own separate window; you allow each site once per task, EVERY form submission asks you (with the values shown), passwords and card fields are never filled, banks, mail and the dashboard are never available, and "Stop agents" cuts them off at once.
-- Free local voice (Add-ons → Voice): speech recognition and speech in Russian and English on your own server. VoiceLab can also be used as a voice provider.
-- "Just a question": a checkbox in the new-task form, /ask in a chat, and a channel setting "A plain message starts" (a task or a question). A question is a light, cheap run: no working copy, no checks, no status report, read-only, in its own lane. Choose its model in Settings → Work → Questions.
-- Escalation for agents: an agent can list stronger models (provider/model, cheaper to stronger). When the cheaper one cannot finish, runs out of time or steps, or its work does not pass the checks, the task goes on the next step. Fallback providers are used only when no step is available. Model lists are sorted by cost, with price per million tokens where known (from LiteLLM's price map; local models are free).
-- Text compression and filtering (Settings → Work → Compression): cheap rules, no model calls, that shorten what is sent to an agent (extra blank lines, repeated lines, quoted mail replies and signatures, base64 blobs, long logs) with your own rules and a "Try it" box. Stats shows what was saved, by filter and by project; Stats also shows escalations and questions, and "By project" has a chart.
-- A setting for the language of the 🌐 translate button.
-
-Changed
-- The administrator's guides live in a built-in read-only knowledge base; the matching passages are attached to each message, so the administrator's run is lighter (about 23.7k instead of 33k input tokens for a documentation question). Tool descriptions are shorter (about 2.2k fewer tokens for the administrator, 1k for other agents).
-- Approvals for the browser (a site, a form submission) are never approved blindly from Telegram or MCP; they always need the person's own answer.
+For people who are not programmers: an agent that writes a document no longer gets stopped for approval just because the text of the document mentions a risky word, and the settings for text filters are tidier.
 
 Fixed
-- A test file and a notes file held a made-up token that a secret scanner mistook for a real key; they no longer do (no product change).
-- After "run ended without report_task_status — resuming once" the same answer was shown twice.
-- Several holes found in review of the new features: the server itself could be opened by an agent under another spelling of its address (localhost., 127.0.0.1, [::1]), look-alike domain names, grants that covered other ports, links and forms that leave a site were checked only after loading, an in-place update could delete other files in the chosen folder, and a question run could write in the agents' configuration folder.
+- When an agent saved a document with a command like `cat > file <<'EOF' … EOF`, words inside the document (for example "rm -rf", "git push", ".env" or "printenv" in an instruction or a checklist) were read as commands and asked for approval, sometimes with a hard block. The text of such a document is now treated as content. Anything that could really run stays checked: a delimiter without quotes, a pipe into a shell, another program reading the text, any command after the document, and the file the document is written to (credentials and protected files still ask).
+- Settings → Work → Compression: each custom filter rule is a clear block with fields lined up and room around its buttons.
 
-Update note: new database columns are added automatically when the server starts (no manual step). To use the extension, install it once from Add-ons → Extension.
+Update note: no database changes.

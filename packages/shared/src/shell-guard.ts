@@ -27,6 +27,31 @@ interface Tok {
 
 const MAIN = /^(main|master)$/i;
 
+/**
+ * The command without the bodies of heredocs that only WRITE text into a file: `cat > doc.md <<'EOF' … EOF` or `tee doc.md <<'EOF' …`. The words in such a body
+ * («never run rm -rf», «git push», a path of `.env`) are the content of a document, not commands, so the text rules must not read them.
+ * Deliberately narrow: the delimiter must be QUOTED (an unquoted one expands `$(…)` and backticks in its body — that runs code), the command must start with
+ * `cat` / `tee`, and neither the line before nor after the marker may pipe or chain into anything (`cat <<'EOF' | sh` runs its body). Everything else is left as typed.
+ */
+export function stripDataHeredocs(command: string): string {
+  const out: string[] = [];
+  let skip: { word: string; trim: boolean } | null = null;
+  for (const line of command.split('\n')) {
+    if (skip) {
+      if ((skip.trim ? line.trim() : line) === skip.word) skip = null;
+      continue;
+    }
+    out.push(line);
+    const m = /<<(-?)\s*(?:'([^']+)'|"([^"]+)")/.exec(line);
+    if (!m) continue;
+    const before = line.slice(0, m.index);
+    const after = line.slice(m.index + m[0].length);
+    const chained = /[|;&`]|\$\(/;
+    if (/^\s*(cat|tee)\b/.test(before) && !chained.test(before) && !chained.test(after)) skip = { word: (m[2] ?? m[3])!, trim: m[1] === '-' };
+  }
+  return out.join('\n');
+}
+
 /** Split on `;` `&&` `||` `|` `&` and newlines outside quotes; drop heredoc bodies; join `\`-newline continuations. */
 export function splitCommands(src: string): string[] {
   const text = src.replace(/\\\r?\n/g, ' ');

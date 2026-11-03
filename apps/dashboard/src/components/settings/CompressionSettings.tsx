@@ -95,22 +95,22 @@ export function CompressionSettings() {
       </div>
       <Muted>Regular expressions applied last, for example a ticket footer or a banner that is always the same. Replace with nothing to remove.</Muted>
       {cfg.rules.map((r, i) => (
-        <Row key={i} wrap>
-          <input placeholder="name" value={r.name} onChange={(e) => setRule(i, { name: e.target.value })} style={{ maxWidth: 140 }} />
-          <input placeholder="pattern, e.g. ^Confidential.*$" value={r.pattern} onChange={(e) => setRule(i, { pattern: e.target.value })} style={{ minWidth: 220 }} />
-          <input placeholder="replace with" value={r.replace} onChange={(e) => setRule(i, { replace: e.target.value })} style={{ maxWidth: 160 }} />
-          <input placeholder="flags (i m s)" value={r.flags ?? ''} onChange={(e) => setRule(i, { flags: e.target.value.replace(/[^gimsu]/g, '') })} style={{ maxWidth: 90 }} />
+        <div key={i} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: 12, marginBottom: 12, border: '1px solid rgba(128,128,128,.28)', borderRadius: 10 }}>
+          <input placeholder="name" value={r.name} onChange={(e) => setRule(i, { name: e.target.value })} style={{ flex: '0 1 150px', width: 'auto', minWidth: 110 }} />
+          <input placeholder="pattern, e.g. ^Confidential.*$" value={r.pattern} onChange={(e) => setRule(i, { pattern: e.target.value })} style={{ flex: '2 1 240px', width: 'auto', minWidth: 160 }} />
+          <input placeholder="replace with" value={r.replace} onChange={(e) => setRule(i, { replace: e.target.value })} style={{ flex: '1 1 160px', width: 'auto', minWidth: 120 }} />
+          <input placeholder="flags (i m s)" value={r.flags ?? ''} onChange={(e) => setRule(i, { flags: e.target.value.replace(/[^gimsu]/g, '') })} style={{ flex: '0 0 110px', width: 'auto' }} />
           <Button size="sm" onClick={() => set('rules', cfg.rules.filter((_, j) => j !== i))}>
             Remove
           </Button>
-          {badRule[i] && <ErrorText>{badRule[i]}</ErrorText>}
-        </Row>
+          {badRule[i] && <div style={{ flexBasis: '100%' }}><ErrorText>{badRule[i]}</ErrorText></div>}
+        </div>
       ))}
-      <Row wrap>
+      <div style={{ marginTop: 14 }}>
         <Button size="sm" onClick={() => set('rules', [...cfg.rules, { name: `rule ${cfg.rules.length + 1}`, pattern: '', replace: '' }])}>
           + Add a rule
         </Button>
-      </Row>
+      </div>
 
       <div style={{ marginTop: 20 }}>
         <SectionTitle>Try it</SectionTitle>
