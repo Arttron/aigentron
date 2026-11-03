@@ -44,7 +44,7 @@ async function render() {
   if (ib.allPages) bell.append(el('p', { className: 'muted', textContent: 'Approval cards appear on the page you are on.' }));
   else {
     bell.append(
-      el('p', { className: 'muted', textContent: 'Now approvals arrive as notifications. To see a card right on the page you are on, let the extension show it on any site. The browser words this as access to all your sites: the extension uses it only to draw the card (it does not read pages), and agents never get it — they work only in their own window, site by site, with your yes.' }),
+      el('p', { className: 'muted', textContent: 'Now approvals arrive as notifications. To see a card right on the page you are on, let the extension show it on any site. The browser words this as access to all your sites: for the cards the extension only draws them (it does not read pages). The same permission is what lets agents work in their own window — and only on the sites you approve for each task.' }),
       el('button', { textContent: 'Show cards on any page', onclick: async () => { await chrome.permissions.request({ origins: ['<all_urls>'] }); await render(); } }),
     );
   }
@@ -59,6 +59,11 @@ async function render() {
     main.append(
       el('div', { className: 'bell' },
         el('strong', { textContent: 'Agents in your browser' }),
+        ...(ag.access ? [] : [
+          el('p', { className: 'bad', textContent: 'Agents cannot open or read sites yet: Chrome has not given the extension access to websites.' }),
+          el('button', { className: 'primary', textContent: 'Allow agents to use my browser', onclick: async () => { await chrome.permissions.request({ origins: ['<all_urls>'] }); await render(); } }),
+          el('p', { className: 'muted', textContent: 'Chrome words it as «read and change all your data on all websites». Agents still work only in their own window, only on sites you approve for each task, ask you before every form is sent, never fill passwords or cards, and never touch banks, mail or this dashboard. «Stop agents» cuts them off at once.' }),
+        ]),
         el('p', { className: 'muted', textContent: `${ag.windowOpen ? `Their window is open (${ag.tabs} tab${ag.tabs === 1 ? '' : 's'}).` : 'An agent can open its own window when a task needs the web (you are asked per site).'}${ag.shared ? ` ${ag.shared} of your tabs shared.` : ''}` }),
         el('div', { className: 'row' }, shareBtn, el('button', { textContent: ag.stopped ? 'Allow agents again' : 'Stop agents', onclick: async () => { await send({ type: ag.stopped ? 'agent-allow' : 'agent-stop' }); await render(); } })),
       ),

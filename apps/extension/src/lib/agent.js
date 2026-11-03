@@ -27,6 +27,20 @@ async function own(args) {
 
 const hostOf = (url) => webUrl(url)?.host ?? '';
 
+/** Why the browser would not show an address: the extension has no access to the site. Told to the agent, which tells the person. */
+export const NO_ACCESS_MESSAGE =
+  'The browser has not given the Aigentron extension access to websites yet, so it cannot open or read this site. Ask the person to click the extension icon and press "Allow agents to use my browser" (Chrome asks once; agents still touch only the sites they approve for each task). Do not retry until they say it is done.';
+
+/** Can the extension read / drive pages of this address? (`<all_urls>` granted, or the site itself.) */
+export async function hasSiteAccess(url) {
+  try {
+    const u = new URL(url);
+    return await chrome.permissions.contains({ origins: [`${u.protocol}//${u.hostname}/*`] });
+  } catch {
+    return false;
+  }
+}
+
 /** The tab the command names, if the agent may use it at all (its own, or one the person shared). */
 async function usableTab(args) {
   const s = await load();
@@ -40,7 +54,11 @@ async function usableTab(args) {
 /** May the page in this tab be read for this command? Never-allowed → an error; a site the task was not granted → `needsGrant`. */
 async function gate(tab, args, level = 'read') {
   const w = webUrl(tab.url);
-  if (!w) throw new Error('This tab is not showing a web page.');
+  if (!w) {
+    // Chrome hides a tab's address (and title) from an extension that has no access to its site — that is not «no web page»
+    if (!(await chrome.permissions.contains({ origins: ['<all_urls>'] }))) throw new Error(NO_ACCESS_MESSAGE);
+    throw new Error('This tab is not showing a web page.');
+  }
   const bad = deniedReason(w.url, await own(args));
   if (bad) throw new Error(`Not allowed: ${bad}.`);
   const allow = args.allow ?? { read: args.allowHosts ?? [], interact: [] };
@@ -149,6 +167,8 @@ const COMMANDS = {
     if (!w) throw new Error('That is not a web address.');
     const bad = deniedReason(w.url, await own(args));
     if (bad) throw new Error(`Not allowed: ${bad}.`);
+    // before the person is asked to approve a site: no point approving one the browser will not let the extension open
+    if (!(await hasSiteAccess(w.url.href))) throw new Error(NO_ACCESS_MESSAGE);
     if (!((args.allow?.read ?? args.allowHosts) ?? []).includes(w.key)) return { ok: false, needsGrant: w.key, needsUrl: w.url.toString(), error: 'not granted' };
     const tab = await ensureWindowTab(w.url.toString());
     const done = await waitLoaded(tab.id);
@@ -161,6 +181,7 @@ const COMMANDS = {
     if (!w) throw new Error('That is not a web address.');
     const bad = deniedReason(w.url, await own(args));
     if (bad) throw new Error(`Not allowed: ${bad}.`);
+    if (!(await hasSiteAccess(w.url.href))) throw new Error(NO_ACCESS_MESSAGE);
     if (!((args.allow?.read ?? args.allowHosts) ?? []).includes(w.key)) return { ok: false, needsGrant: w.key, needsUrl: w.url.toString(), error: 'not granted' };
     await chrome.tabs.update(tab.id, { url: w.url.toString() });
     const done = await waitLoaded(tab.id);
@@ -254,7 +275,7 @@ export async function toggleShare(tabId) {
 
 export async function agentStatus(activeTabId) {
   const s = await load();
-  return { windowOpen: Boolean(s.windowId), tabs: s.tabs.length, shared: s.shared.length, thisShared: s.shared.includes(activeTabId), stopped: await isStopped() };
+  return { access: await chrome.permissions.contains({ origins: ['<all_urls>'] }), windowOpen: Boolean(s.windowId), tabs: s.tabs.length, shared: s.shared.length, thisShared: s.shared.includes(activeTabId), stopped: await isStopped() };
 }
 
 export function watchTabs() {

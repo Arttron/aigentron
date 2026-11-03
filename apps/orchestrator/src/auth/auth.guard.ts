@@ -39,7 +39,8 @@ export class AuthGuard implements CanActivate {
     const bearer = tokenFromRequest(req.headers);
     if (looksLikeDeviceToken(bearer)) {
       const reported = req.headers['x-extension-version'];
-      const device = this.devices.verify(bearer, Array.isArray(reported) ? reported[0] : reported);
+      const access = req.headers['x-extension-access'];
+      const device = this.devices.verify(bearer, Array.isArray(reported) ? reported[0] : reported, Array.isArray(access) ? access[0] : access);
       if (!device) throw new UnauthorizedException('The extension is not (or no longer) connected to this server.');
       if (!extensionRouteAllowed(req.method, path)) throw new ForbiddenException('This token (a browser extension) cannot use this route.');
       req.authUserId = device.userId;

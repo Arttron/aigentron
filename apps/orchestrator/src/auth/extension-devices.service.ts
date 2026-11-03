@@ -48,16 +48,18 @@ export class ExtensionDevicesService {
   }
 
   /** The device behind a request's token (and a note of the activity, written at most every ten minutes). */
-  verify(token: string | undefined, reportedVersion?: unknown): DeviceRecord | null {
+  verify(token: string | undefined, reportedVersion?: unknown, reportedAccess?: unknown): DeviceRecord | null {
     const d = verifyDevice(this.list(), token);
     if (!d) return null;
     const now = Date.now();
     // the version the extension says it is (a changed one is written at once: the dashboard shows who needs an update)
     const version = typeof reportedVersion === 'string' && /^\d{1,6}(\.\d{1,6}){0,3}$/.test(reportedVersion) ? reportedVersion : undefined;
-    if (version && version !== d.version) {
+    const allSites = reportedAccess === '1' || reportedAccess === true ? true : reportedAccess === '0' || reportedAccess === false ? false : undefined;
+    if ((version && version !== d.version) || (allSites !== undefined && allSites !== d.allSites)) {
       this.touched.set(d.id, now);
-      this.save(this.list().map((x) => (x.id === d.id ? { ...x, version, lastSeenAt: new Date(now).toISOString() } : x)));
-      return { ...d, version };
+      const patch = { ...(version ? { version } : {}), ...(allSites !== undefined ? { allSites } : {}) };
+      this.save(this.list().map((x) => (x.id === d.id ? { ...x, ...patch, lastSeenAt: new Date(now).toISOString() } : x)));
+      return { ...d, ...patch };
     }
     if (now - (this.touched.get(d.id) ?? 0) >= TOUCH_EVERY_MS) {
       this.touched.set(d.id, now);

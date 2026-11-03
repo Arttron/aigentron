@@ -89,6 +89,11 @@ export function ExtensionSettings() {
             )}
           </Row>
           {ext.error && <ErrorText>{ext.error}</ErrorText>}
+          {info.devices.some((d) => d.allSites === false) && (
+            <ErrorText>
+              Agents cannot use {info.devices.filter((d) => d.allSites === false).map((d) => d.label).join(', ')} yet: Chrome has not given the extension access to websites. Click the extension icon → <strong>Allow agents to use my browser</strong>.
+            </ErrorText>
+          )}
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
             <input
               type="checkbox"
@@ -109,6 +114,7 @@ export function ExtensionSettings() {
                 {info.devices.map((d) => (
                   <li key={d.id}>
                     {d.label} · {d.user} · {d.version ? `v${d.version}` : 'version unknown'}{' '}
+                    {d.allSites === false && <Badge tone="review">agents have no access to sites</Badge>}{' '}
                     {d.outdated ? <Badge tone="review">update available</Badge> : d.version ? <Badge tone="done">up to date</Badge> : null} · last seen {new Date(d.lastSeenAt).toLocaleString()}{' '}
                     <Button size="sm" onClick={() => void api.extensionRemoveDevice(d.id).then(load).catch((e: Error) => setError(e.message))}>
                       Disconnect

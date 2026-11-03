@@ -25,9 +25,10 @@ async function message(res) {
 export async function apiFetch(path, init = {}) {
   const conn = await getConnection();
   if (!conn) throw new ApiError(0, 'Not connected');
+  const sites = (await chrome.permissions.contains({ origins: ['<all_urls>'] }).catch(() => false)) ? '1' : '0'; // the server tells the person when agents have no access
   const res = await fetch(`${conn.origin}${path}`, {
     ...init,
-    headers: { ...(init.body && !(init.body instanceof FormData) && !(init.body instanceof Blob) ? { 'content-type': 'application/json' } : {}), ...init.headers, authorization: `Bearer ${conn.token}`, 'x-extension-version': chrome.runtime.getManifest().version },
+    headers: { ...(init.body && !(init.body instanceof FormData) && !(init.body instanceof Blob) ? { 'content-type': 'application/json' } : {}), ...init.headers, authorization: `Bearer ${conn.token}`, 'x-extension-version': chrome.runtime.getManifest().version, 'x-extension-access': sites },
   }).catch((e) => {
     throw new ApiError(0, `Could not reach the server: ${e.message}`);
   });

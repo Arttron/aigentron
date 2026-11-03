@@ -44,7 +44,7 @@ export class ExtensionController {
     const devices = this.devices
       .list()
       .filter((d) => manager || d.userId === viewer?.id)
-      .map((d) => ({ id: d.id, label: d.label, user: names.get(d.userId) ?? '(removed user)', createdAt: d.createdAt, lastSeenAt: d.lastSeenAt, version: d.version ?? null, outdated: isOutdated(d.version, this.ext.extensionVersion) }));
+      .map((d) => ({ id: d.id, label: d.label, user: names.get(d.userId) ?? '(removed user)', createdAt: d.createdAt, lastSeenAt: d.lastSeenAt, version: d.version ?? null, allSites: d.allSites ?? null, outdated: isOutdated(d.version, this.ext.extensionVersion) }));
     return {
       available: await this.ext.templateAvailable(),
       /** the server has a sign-in: the extension then acts as the person who presses Connect; without one it acts as the default operator */

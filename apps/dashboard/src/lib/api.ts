@@ -915,7 +915,7 @@ export const api = {
   getSettings: () => request<Settings>('GET', '/settings'),
   updateSettings: (body: SettingsUpdate) => request<Settings>('PUT', '/settings', { body }),
 
-  extensionInfo: () => request<{ available: boolean; signInOn: boolean; version: string; extensionVersion?: string; extensionId: string; origins: string[]; devices: { id: string; label: string; user: string; createdAt: string; lastSeenAt: string; /** the extension's own version as it last reported it (null: an older build that does not report) */ version: string | null; outdated: boolean }[]; agentsBrowser?: boolean }>('GET', '/extension/info'),
+  extensionInfo: () => request<{ available: boolean; signInOn: boolean; version: string; extensionVersion?: string; extensionId: string; origins: string[]; devices: { id: string; label: string; user: string; createdAt: string; lastSeenAt: string; /** the extension's own version as it last reported it (null: an older build that does not report) */ version: string | null; /** Chrome has given the extension access to websites (false: agents cannot use this browser yet) */ allSites: boolean | null; outdated: boolean }[]; agentsBrowser?: boolean }>('GET', '/extension/info'),
   extensionSetAgentsBrowser: (on: boolean) => request<{ agentsBrowser: boolean }>('PUT', '/extension/settings', { body: { agentsBrowser: on } }),
   extensionRemoveDevice: (id: string) => request<{ ok: boolean }>('DELETE', `/extension/devices/${e(id)}`),
   extensionPair: () => request<{ code: string; expiresInSec: number }>('POST', '/extension/pair'),

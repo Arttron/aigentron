@@ -487,6 +487,7 @@ describe.skipIf(!BIN)('the generated extension in a real Chromium', () => {
     expect((await command('open', { url: 'http://127.0.0.1:1/article', allowHosts: ['127.0.0.1:1'], ownOrigins: own })).error).toContain('Aigentron server');
     expect((await command('open', { url: 'http://localhost.:1/article', allowHosts: ['localhost:1'], ownOrigins: own })).error).toContain('Aigentron server'); // another spelling of the same machine
     expect((await command('open', { url: 'javascript:alert(1)', allowHosts: [], ownOrigins: own })).error).toContain('not a web address');
+    // (the test browser has the access: an unapproved site asks for a grant; the no-access message is covered in lib/agent-access.test.ts)
     expect(await command('open', { url: 'https://example.com', allowHosts: [], ownOrigins: own })).toMatchObject({ ok: false, needsGrant: 'example.com' });
 
     // granted: a new tab in the agent's window, with a text outline of the page

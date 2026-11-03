@@ -16,6 +16,8 @@ export interface DeviceRecord {
   lastSeenAt: string;
   /** the extension's own version, as it last reported it (an `x-extension-version` header / the socket's connect packet) */
   version?: string;
+  /** whether Chrome has given the extension access to websites (agents cannot use the browser without it); as last reported */
+  allSites?: boolean;
 }
 
 export const TOKEN_RE = /^ext_([0-9a-f]{16})_([A-Za-z0-9_-]{43})$/;
