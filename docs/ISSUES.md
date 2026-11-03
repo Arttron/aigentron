@@ -426,3 +426,22 @@ Each custom rule is now a bordered block with aligned fields and room around the
 
 ## Escalation steps: «the last step is not removed» (not reproduced)
 Checked in a real browser (add, remove first / last / only step, save): removal and saving worked in every case. Waiting for the exact steps from the report.
+
+## Schedules: main menu + scripts (added)
+Schedules moved from a Settings tab to the main menu (⏰, right after Tasks; `/schedules`). New kind **script**: a shell script run with `sh -c` in the schedule's project folder (scratch folder if none), a minimal environment (the verification gate's list, plus `LDS_SCHEDULE`), a time limit (default 10 min, max 6 h, the whole process group is killed), the tail of the output kept on the schedule (`lastOutput`) and posted to a chat after every run or only on failure (`notifyOn`); never two runs of one schedule at once. Only an operator / admin can create or change one through the dashboard / API: the admin assistant's `propose_schedule` and packs are refused (validate has no `allowScript`). Scripts run with the orchestrator's rights — as the verification commands do — so who may create them is the safeguard.
+
+## Script schedules: files to the chat and a data folder (added)
+A script gets `LDS_OUTPUT_DIR` (empty at each start; its files are posted to the schedule's chat — photos / documents — and deleted) and `LDS_DATA_DIR` (kept between runs). Example `docs/examples/fx-chart.py` (EUR/UAH PrivatBank chart, tested with real rates); guide `docs/schedule-scripts.md`. Reason: a small model could not reliably draw and send a chart (background run, "I will report later", stalled run) — a fixed script can.
+
+## Weak models overwrote shared notes, and a scheduled report was invented (safeguards, steps 1-3)
+Incident (a user's server): a scheduled agent on the cheapest model replaced a history note with one line (388 → 57 bytes), overwrote the team's `memory/` files, and sent a report copied from the example numbers in its own prompt.
+Cause found in the code: the project's shared folder (memory, library, brief) is a write root, so a Write / Edit / shell redirect / patch into it was judged benign by the hook and allowed locally, without the orchestrator ever seeing it.
+- **Step 1.** Writes into `memory/`, the project's note library and the brief by hand are refused by the hook on the spot (no card; the text names the tool to use: `workspace_note`, `workspace_save`, files of its own in `work/`) — for every model (`ClassifyOptions.protectedPaths`, `LDS_PROTECTED_PATHS`, `verdict.refuse`; also on the orchestrator's `check`). Covers Write/Edit, shell redirects / tee / sed -i / mv / rm, Codex `apply_patch`. Reads stay free; `work/` and `deliverables/` are unchanged.
+- **Step 2.** Library notes: the old text is kept as a version before any replacement (last five), new `propose_resource` action `append` (only new lines), a replacement that would drop most of a note is refused before a card unless `replace: true`; the answer says how many lines the note has now.
+- **Step 3.** A scheduled run that used no tool gets a ⚠ line under its report; the scheduled-run hint forbids background work / "report later" and copying numbers from examples; the schedule form warns about numbers in a task prompt.
+Not covered: files overwritten before this change cannot be restored. Steps 4-5 (model tier per run, stats by model) follow.
+
+## Weak-model safeguards, steps 4-5 (added)
+- **Model strength per attempt** (`tierFor`: the agent's `tier:` override, else the gateway price map / local size / name; unknown = `mid`). A `cheap` run gets a static «work carefully» note in its system block (numbers only from tools of this run, work before report, no background processes, shared notes only by adding) and `create_task` / `propose_task` are no longer waved through in the no-approvals mode (`LDS_MODEL_TIER` → hook → `approvalWaived`). Agents form: *Model strength*.
+- **Stats → How runs ended, by model** (done / failed / blocked / no report per model, escalations in, average steps).
+- Not built, on purpose: cards for overwrites (refused instead — a card at 03:00 is a delayed denial), forced read-back and a stricter report_task_status (a weak model fakes them), per-tier tool sets, automatic weakening from statistics. Known limit: the tier of a run is the lead's; a cheap subagent under a strong lead is not tightened.

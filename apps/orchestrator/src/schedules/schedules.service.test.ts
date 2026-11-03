@@ -9,6 +9,7 @@ function fakeEnv(rows: Row[]) {
   const prisma = {
     task: { update: vi.fn(async ({ where, data }: { where: { id: string }; data: Row }) => ({ id: where.id, ...data })) },
     schedule: {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) => rows.find((r) => r.id === where.id) ?? null),
       findMany: vi.fn(async ({ where }: { where: { enabled: boolean; nextRunAt: { lte: Date } } }) =>
         rows.filter((r) => r.enabled === where.enabled && r.nextRunAt && (r.nextRunAt as Date) <= where.nextRunAt.lte),
       ),
@@ -25,7 +26,11 @@ function fakeEnv(rows: Row[]) {
     },
   };
   const sent: { channelId: string; chatId: string; text: string }[] = [];
-  const manager = { sendText: vi.fn(async (channelId: string, chatId: string, text: string) => (sent.push({ channelId, chatId, text }), true)) };
+  const files: { channelId: string; chatId: string; names: string[]; mimes: string[]; caption?: string }[] = [];
+  const manager = {
+    sendText: vi.fn(async (channelId: string, chatId: string, text: string) => (sent.push({ channelId, chatId, text }), true)),
+    sendFiles: vi.fn(async (channelId: string, chatId: string, fs: { filename: string; mime: string }[], caption?: string) => (files.push({ channelId, chatId, names: fs.map((f) => f.filename), mimes: fs.map((f) => f.mime), caption }), true)),
+  };
   const tasks = {
     create: vi.fn(async () => ({ id: 't1', title: '⏰ x' })),
     get: vi.fn(async (id: string) => ({ id, createdAt: new Date() })),
@@ -33,7 +38,7 @@ function fakeEnv(rows: Row[]) {
   };
   const channels = { linkThread: vi.fn(async () => undefined), setChatState: vi.fn(async () => undefined), chatState: vi.fn(async () => ({ activeTaskId: null as string | null })) };
   const svc = new SchedulesService(prisma as never, tasks as never, channels as never, manager as never, {} as never);
-  return { svc, prisma, manager, tasks, channels, sent, rows };
+  return { svc, prisma, manager, tasks, channels, sent, files, rows };
 }
 
 const base = (over: Partial<Row> = {}): Row => ({
@@ -244,5 +249,93 @@ describe('approvals for the tasks a schedule starts', () => {
     const { svc } = fakeEnv([]);
     const ok = { name: 'Chart', cron: '30 9 * * *', kind: 'message', text: 'x', channelId: undefined };
     expect(await svc.validate({ ...ok, approvalMode: 'bogus' } as never)).toMatch(/approvalMode must be/);
+  });
+});
+
+describe('script schedules', () => {
+  const script = (over: Partial<Row> = {}) => base({ kind: 'script', name: 'nightly', text: 'echo hello from the script', timeoutSec: null, notifyOn: 'always', lastOutput: null, ...over });
+
+  it('runs the script, keeps its output, posts the result to the chat and records ok', async () => {
+    const { svc, rows, sent } = fakeEnv([script()]);
+    expect(await svc.tick(new Date('2026-10-08T09:30:20Z'))).toBe(1);
+    expect(rows[0]).toMatchObject({ lastStatus: 'ok', lastError: null });
+    expect(String(rows[0]!.lastOutput)).toContain('hello from the script');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toMatch(/^⏰ nightly: ✅ done in \d+ s\nhello from the script/);
+  });
+
+  it('a failing script is an error with its exit code, and the chat hears about it', async () => {
+    const { svc, rows, sent } = fakeEnv([script({ text: 'echo broken 1>&2; exit 4' })]);
+    await svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(rows[0]).toMatchObject({ lastStatus: 'error', lastError: 'exit code 4' });
+    expect(sent[0]!.text).toContain('❌ exit code 4');
+    expect(sent[0]!.text).toContain('broken');
+  });
+
+  it('notifyOn "failure": a good run stays quiet, a bad one speaks', async () => {
+    const quiet = fakeEnv([script({ notifyOn: 'failure' })]);
+    await quiet.svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(quiet.sent).toHaveLength(0);
+    expect(quiet.rows[0]).toMatchObject({ lastStatus: 'ok' });
+    const loud = fakeEnv([script({ notifyOn: 'failure', text: 'exit 1' })]);
+    await loud.svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(loud.sent).toHaveLength(1);
+  });
+
+  it('stops a script at its time limit', async () => {
+    const { svc, rows } = fakeEnv([script({ text: 'sleep 20', timeoutSec: 1 })]);
+    await svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(rows[0]).toMatchObject({ lastStatus: 'error', lastError: 'stopped after 1 s (time limit)' });
+  });
+
+  it('is skipped while the previous run is still working', async () => {
+    const { svc, rows } = fakeEnv([script({ text: 'sleep 2' })]);
+    const first = svc.runNow('s1');
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await svc.runNow('s1')).toMatchObject({ status: 'skipped', error: 'the previous run is still working' });
+    await first;
+    expect(rows[0]).toMatchObject({ lastStatus: 'ok' }); // the run that was working finishes last and records its own result
+  });
+
+  it('only an operator (allowScript) may create or change one: not an agent, not a pack', async () => {
+    const { svc } = fakeEnv([]);
+    const input = { name: 'job', cron: '0 * * * *', kind: 'script', text: 'echo hi', channelId: 'c1', chatId: '42' };
+    expect(await svc.validate(input)).toMatch(/only be created or changed in the dashboard/);
+    expect(await svc.validate({ ...input, channelId: null, chatId: null }, undefined, { allowScript: true })).toBeNull();
+    expect(await svc.validate({ ...input, channelId: null, chatId: null, timeoutSec: 0 }, undefined, { allowScript: true })).toMatch(/time limit/);
+    expect(await svc.validate({ ...input, channelId: null, chatId: null, notifyOn: 'sometimes' }, undefined, { allowScript: true })).toMatch(/notifyOn/);
+    // an existing script row cannot be toggled by an agent either
+    expect(await svc.validate({ enabled: false }, script() as never)).toMatch(/only be created or changed in the dashboard/);
+  });
+});
+
+describe('script schedules — files and data', () => {
+  const script = (over: Partial<Row> = {}) => base({ kind: 'script', name: 'chart', id: `sc-${Math.random().toString(36).slice(2, 8)}`, text: 'echo drawn', timeoutSec: null, notifyOn: 'always', lastOutput: null, ...over });
+
+  it('files the script leaves in $LDS_OUTPUT_DIR are posted to the chat (pictures as photos) and then deleted', async () => {
+    const { svc, files, sent, rows } = fakeEnv([script({ text: 'echo "$LDS_OUTPUT_DIR" > /tmp/lds-out-path.txt; printf PNGDATA > "$LDS_OUTPUT_DIR/chart.png"; printf a,b > "$LDS_OUTPUT_DIR/data.csv"; echo EUR 48.1' })]);
+    await svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({ channelId: 'c1', chatId: '42', names: ['chart.png', 'data.csv'], mimes: ['image/png', 'text/csv'] });
+    expect(files[0]!.caption).toMatch(/^⏰ chart\nEUR 48\.1/);
+    expect(sent).toHaveLength(0); // the result went as the caption, not as a second message
+    expect(rows[0]).toMatchObject({ lastStatus: 'ok' });
+    const { existsSync, readFileSync } = await import('node:fs');
+    expect(existsSync(readFileSync('/tmp/lds-out-path.txt', 'utf8').trim())).toBe(false); // nothing stays on disk
+  });
+
+  it('a script with no chat sends no files; the output folder is still cleaned', async () => {
+    const { svc, files, rows } = fakeEnv([script({ channelId: null, chatId: null, text: 'printf x > "$LDS_OUTPUT_DIR/a.png"' })]);
+    await svc.tick(new Date('2026-10-08T09:30:20Z'));
+    expect(files).toHaveLength(0);
+    expect(rows[0]).toMatchObject({ lastStatus: 'ok' });
+  });
+
+  it('$LDS_DATA_DIR keeps its files between runs (a history)', async () => {
+    const row = script({ text: 'echo x >> "$LDS_DATA_DIR/history.txt"; wc -l < "$LDS_DATA_DIR/history.txt"', channelId: null, chatId: null });
+    const { svc, rows } = fakeEnv([row]);
+    await svc.runNow(row.id);
+    await svc.runNow(row.id);
+    expect(String(rows[0]!.lastOutput).trim()).toBe('2');
   });
 });

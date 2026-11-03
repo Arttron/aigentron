@@ -14,6 +14,10 @@ export interface HookWiring {
   agentSessionId: string;
   /** Absolute path to the compiled @lds/shared entry, so the hook can reuse the classifier. */
   sharedDistPath: string;
+  /** Shared project knowledge that is written only through its tools (memory, the note library, the brief): the hook refuses hand-written changes. */
+  protectedPaths?: string[];
+  /** How strong the run's model is: a small model is asked about more. */
+  modelTier?: 'cheap' | 'mid' | 'top';
 }
 
 /** Options specific to the Codex runtime (provider kind `codex`). */
@@ -268,7 +272,8 @@ export interface AdminToolsWiring {
   proposePackInstall: (input: { name: string; timezone?: string; project?: string; reason: string }) => Promise<{ ok: boolean; message: string }>;
   /** Text notes in a resource library (global, or a project's with `project`): create/update/delete — human-approved. (Reading/searching: the general resources_search tool.) */
   proposeResource: (input: {
-    action: 'create' | 'update' | 'delete';
+    action: 'create' | 'update' | 'append' | 'delete';
+    replace?: boolean;
     id?: string;
     title?: string;
     description?: string;

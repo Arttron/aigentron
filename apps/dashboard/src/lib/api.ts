@@ -253,6 +253,8 @@ export interface AgentInfo {
   fallbackProviders?: string[];
   /** Escalation ladder: `provider/model` steps, cheapest first. */
   escalation?: string[];
+  /** Model strength override (blank = guessed from the price / name). */
+  tier?: 'cheap' | 'mid' | 'top';
   model?: string;
   skills?: string[];
   allowedTools?: string[];
@@ -273,6 +275,7 @@ export type AgentBody = {
   provider?: string;
   fallbackProviders?: string;
   escalation?: string;
+  tier?: 'cheap' | 'mid' | 'top' | '';
   model?: string;
   skills?: string;
   allowedTools?: string;
@@ -361,8 +364,16 @@ export interface ScheduleInfo {
   timezone: string;
   /** Human description, e.g. "every day at 09:30 (Europe/Kyiv)". */
   when: string;
-  kind: 'message' | 'task';
+  kind: 'message' | 'task' | 'script';
   text: string;
+  /** script kind: the tail of what the last run printed */
+  lastOutput?: string | null;
+  /** script kind: seconds the script may run (null = 10 minutes) */
+  timeoutSec?: number | null;
+  /** script kind: post to the chat `always` or only on `failure` */
+  notifyOn?: 'always' | 'failure';
+  /** the project it runs in; null = the default project */
+  project?: { slug: string; name: string } | null;
   agentName: string | null;
   /** task kind: `same` = every run continues one task, `new` = every run starts a new task */
   taskMode: 'same' | 'new';
@@ -379,7 +390,7 @@ export interface ScheduleInfo {
   lastError: string | null;
 }
 
-export type ScheduleInput = Partial<Pick<ScheduleInfo, 'name' | 'enabled' | 'cron' | 'timezone' | 'kind' | 'text' | 'agentName' | 'taskMode' | 'channelId' | 'chatId' | 'quietStart' | 'quietEnd'>> & { approvalMode?: 'ask' | 'off' | 'inherit' };
+export type ScheduleInput = Partial<Pick<ScheduleInfo, 'name' | 'enabled' | 'cron' | 'timezone' | 'kind' | 'text' | 'agentName' | 'taskMode' | 'channelId' | 'chatId' | 'quietStart' | 'quietEnd' | 'timeoutSec' | 'notifyOn'>> & { approvalMode?: 'ask' | 'off' | 'inherit'; /** a project's slug (null = the default project) */ project?: string | null };
 
 export interface ChannelInfo {
   id: string;

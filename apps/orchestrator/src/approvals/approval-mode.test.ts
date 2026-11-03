@@ -59,3 +59,15 @@ describe('approval mode levels', () => {
     expect(resolveApprovalMode({ task: 'maybe', project: '', global: 7 })).toEqual({ mode: 'ask', source: 'default' });
   });
 });
+
+describe('a small model asks more, even with approvals off', () => {
+  const risky = { dangerous: true, hard: false, guard: undefined } as const;
+  it('starting a task is not waved through for a cheap model, but everything else is the same as for any model', () => {
+    expect(approvalWaived('off', CREATE_TASK_TOOL, risky, 'cheap')).toBe(false);
+    expect(approvalWaived('off', CREATE_TASK_TOOL, risky, 'mid')).toBe(true);
+    expect(approvalWaived('off', CREATE_TASK_TOOL, risky, 'top')).toBe(true);
+    expect(approvalWaived('off', CREATE_TASK_TOOL, risky)).toBe(true);
+    expect(approvalWaived('off', 'Bash', risky, 'cheap')).toBe(true); // a shell command is the agent's own work
+    expect(approvalWaived('off', PUSH_BRANCH_TOOL, risky, 'cheap')).toBe(true);
+  });
+});

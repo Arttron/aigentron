@@ -59,3 +59,13 @@ describe('resumeTurnEvent', () => {
     expect(resumeTurnEvent(a)).toBe(a);
   });
 });
+
+import { noToolsNote } from './final-answer';
+describe('noToolsNote', () => {
+  it('warns for a scheduled run that used no tool, and only then', () => {
+    expect(noToolsNote(0, true, false)).toMatch(/not based on fresh data/);
+    expect(noToolsNote(1, true, false)).toBe('');
+    expect(noToolsNote(0, false, false)).toBe(''); // a person asked: text only is fine
+    expect(noToolsNote(0, true, true)).toBe(''); // a chat turn
+  });
+});

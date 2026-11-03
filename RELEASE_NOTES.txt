@@ -1,9 +1,21 @@
-Aigentron v0.1.108
+Aigentron v0.1.109
 
-For people who are not programmers: an agent that writes a document no longer gets stopped for approval just because the text of the document mentions a risky word, and the settings for text filters are tidier.
+For people who are not programmers: scheduled jobs can now run a script instead of an agent (free, and it cannot get lost), a small model can no longer overwrite the team's notes, and Schedules has its own place in the main menu.
+
+Added
+- Schedules is a page in the main menu, right after Tasks.
+- Scheduled scripts: a new kind of schedule, "Run a script on the server". It runs with a minimal environment (none of the server's keys) in the project's folder, with a time limit. Files the script leaves in $LDS_OUTPUT_DIR (a chart, a report) are sent to the chat and deleted; $LDS_DATA_DIR keeps files between runs (a history). Its output is kept on the schedule and can be posted after every run or only on failure. Only an operator creates or changes one. An example for a EUR/UAH chart is in docs/examples/fx-chart.py, how-to in docs/schedule-scripts.md. Agents and the admin assistant are told to prefer a script when the steps are always the same.
+- Safeguards for weak models: the project's memory, note library and brief can no longer be written by hand (Write, Edit, shell redirect, patch) by any model; the agent is told which tool to use instead. Library notes keep the last five versions, can be appended to (`append`), and a replacement that would drop most of a note is refused unless it is on purpose. A scheduled run that used no tool at all gets a warning under its report.
+- Model strength: the platform guesses it (price, size, name) and an agent can set it (Agents → Model strength). A small model gets a short "work carefully" note and is asked before it starts tasks even when approvals are off. Stats shows how runs ended per model.
+- "Just a question": a light, cheap run for questions (a checkbox in the new-task form, /ask, a channel setting for what a plain message starts), with its own model in Settings → Work → Questions.
+- Escalation: an agent can list stronger models; work the cheaper one could not finish (or whose checks stay red) continues on the next one. Model lists are sorted by cost.
+- Text compression and filtering (Settings → Work → Compression) and the administrator's guides as a built-in knowledge base: fewer tokens per run. Stats shows what was saved, escalations and questions.
+- Browser extension versions in Add-ons → Extension, with an update banner.
+
+Changed
+- Shorter descriptions of the longest tools, a lighter administrator run.
 
 Fixed
-- When an agent saved a document with a command like `cat > file <<'EOF' … EOF`, words inside the document (for example "rm -rf", "git push", ".env" or "printenv" in an instruction or a checklist) were read as commands and asked for approval, sometimes with a hard block. The text of such a document is now treated as content. Anything that could really run stays checked: a delimiter without quotes, a pipe into a shell, another program reading the text, any command after the document, and the file the document is written to (credentials and protected files still ask).
-- Settings → Work → Compression: each custom filter rule is a clear block with fields lined up and room around its buttons.
+- A scheduled agent could overwrite shared notes and the team's memory files with one line; the same answer could appear twice after "resuming once"; an approval was asked for a document that only mentioned risky words (rm -rf, git push …); and a few holes found in review (see docs/ISSUES.md).
 
-Update note: no database changes.
+Update note: new database columns are added automatically when the server starts. After the update, an agent that kept its history in a note of the project's library must keep it in a file in its work/ folder (or with workspace_note); it is told so when it tries.

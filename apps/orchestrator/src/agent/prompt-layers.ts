@@ -29,6 +29,8 @@ export interface PromptLayerInput {
   memory: string;
   /** Passages of the administrator's guides matching this message ('' for every other agent). */
   reference?: string;
+  /** The «work carefully» note of a small model ('' for the others). Static for a session, so it belongs in the system block. */
+  smallModelNote?: string;
 }
 
 export interface PromptLayers {
@@ -45,7 +47,7 @@ export function projectMapBlock(projectMap: string): string {
 }
 
 export function assemblePromptLayers(input: PromptLayerInput): PromptLayers {
-  const systemAppend = `${input.orientation}\n\n${input.instructions}${input.roster}`;
+  const systemAppend = `${input.orientation}\n\n${input.instructions}${input.roster}${input.smallModelNote ? `\n\n${input.smallModelNote}` : ''}`;
   const runContext = [projectMapBlock(input.projectMap), input.memory.trim(), (input.reference ?? '').trim()].filter(Boolean).join('\n\n');
   return { systemAppend, runContext };
 }

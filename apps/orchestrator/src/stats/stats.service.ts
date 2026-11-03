@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { AskUsage, CompressionUsage, DayUsage, EscalationUsage, ProjectUsage, ProviderUsage, UsageReport } from '@lds/shared';
+import type { AskUsage, CompressionUsage, DayUsage, EscalationUsage, ModelOutcome, ProjectUsage, ProviderUsage, UsageReport } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Zeroed totals — the reduce seed and the empty-result response. */
@@ -32,7 +32,7 @@ export class StatsService {
 
     const sessions = await this.prisma.agentSession.findMany({
       where,
-      select: { startedAt: true, taskId: true, provider: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheCreationTokens: true, numTurns: true, costUsd: true, compressionBefore: true, compressionAfter: true, compressionSaved: true, model: true, escalationReason: true, escalatedFrom: true },
+      select: { startedAt: true, taskId: true, provider: true, status: true, reportedStatus: true, inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheCreationTokens: true, numTurns: true, costUsd: true, compressionBefore: true, compressionAfter: true, compressionSaved: true, model: true, escalationReason: true, escalatedFrom: true },
     });
     const taskIds = [...new Set(sessions.map((g) => g.taskId))];
     const projectOf = new Map<string, string>();
@@ -84,6 +84,7 @@ export class StatsService {
     const escalation: EscalationUsage = { runs: 0, tasks: 0, byReason: {}, paths: [] };
     const escalatedTasks = new Set<string>();
     const pathCount = new Map<string, number>();
+    const modelRows = new Map<string, ModelOutcome & { turns: number }>();
     const ask: AskUsage = { tasks: 0, sessions: 0, inputTokens: 0, outputTokens: 0, estCostUsd: 0 };
     const askSeen = new Set<string>();
     const compByProject = new Map<string, CompressionUsage>();
@@ -100,6 +101,19 @@ export class StatsService {
       addComp(compByProject.get(pid) ?? (compByProject.set(pid, emptyComp()), compByProject.get(pid)!), g);
       if (wanted === null || pid === wanted) {
         addComp(compression, g);
+        const mk = `${g.provider}\u0000${g.model}`;
+        const m = modelRows.get(mk) ?? (modelRows.set(mk, { provider: g.provider, model: g.model, runs: 0, done: 0, failed: 0, blocked: 0, none: 0, escalatedTo: 0, avgTurns: 0, inputTokens: 0, outputTokens: 0, estCostUsd: 0, turns: 0, answered: 0 }), modelRows.get(mk)!);
+        m.runs += 1;
+        if (g.reportedStatus === 'done') m.done += 1;
+        else if (g.reportedStatus === 'failed') m.failed += 1;
+        else if (g.reportedStatus === 'blocked') m.blocked += 1;
+        else if (g.status === 'errored') m.none += 1;
+        else m.answered += 1;
+        if (g.escalationReason) m.escalatedTo += 1;
+        m.turns += g.numTurns ?? 0;
+        m.inputTokens += g.inputTokens ?? 0;
+        m.outputTokens += g.outputTokens ?? 0;
+        m.estCostUsd += g.costUsd ?? 0;
         if (g.escalationReason) {
           escalation.runs += 1;
           escalatedTasks.add(g.taskId);
@@ -140,6 +154,7 @@ export class StatsService {
       compression,
       escalation,
       ask,
+      models: [...modelRows.values()].map(({ turns, ...m }) => ({ ...m, avgTurns: m.runs ? Math.round((turns / m.runs) * 10) / 10 : 0 })).sort((a, b) => b.runs - a.runs || a.model.localeCompare(b.model)),
       days: fillDays(byDay, range.from ? dayOf(range.from) : null, dayOf(range.to ?? new Date())),
     };
   }

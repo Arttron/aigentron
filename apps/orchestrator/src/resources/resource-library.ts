@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import { basename, dirname, extname, join } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -223,6 +223,37 @@ export class ResourceLibrary {
     });
   }
 
+  /** The old text of a note is kept before it is replaced (`<library>/versions/`, the newest five) — an overwrite by mistake can be undone. */
+  private async keepVersion(cur: ResourceEntry): Promise<void> {
+    const dir = join(this.root, 'versions'); // beside `files/`, not in it (the files folder lists what the library holds)
+    await mkdir(dir, { recursive: true });
+    const stamp = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomBytes(2).toString('hex')}`;
+    await copyFile(this.pathOf(cur), join(dir, `${cur.file}.${stamp}`));
+    const mine = (await readdir(dir)).filter((n) => n.startsWith(`${cur.file}.`)).sort().reverse();
+    for (const n of mine.slice(5)) await rm(join(dir, n), { force: true }).catch(() => undefined);
+  }
+
+  /** Add `text` at the end of a text note (a new line first when the note does not end with one). Nothing already in the note is touched. */
+  async append(id: string, text: string): Promise<{ entry: ResourceEntry; lines: number; bytes: number; was: number }> {
+    return this.locked(async () => {
+      const items = await this.read();
+      const i = items.findIndex((x) => x.id === id);
+      if (i < 0) throw new NotFoundException(`Resource not found: ${id}`);
+      const cur = items[i]!;
+      if (cur.kind !== 'text') throw new BadRequestException('only text notes can be appended to.');
+      if (!text.trim()) throw new BadRequestException('the text is empty.');
+      const old = await readFile(this.pathOf(cur), 'utf8').catch(() => '');
+      const next = `${old}${old && !old.endsWith('\n') ? '\n' : ''}${text}${text.endsWith('\n') ? '' : '\n'}`;
+      if (Buffer.byteLength(next) > MAX_TEXT_BYTES) throw new PayloadTooLargeException('the note would be too long (max 1 MB).');
+      await this.keepVersion(cur).catch(() => undefined);
+      await writeFile(this.pathOf(cur), next);
+      const bytes = Buffer.byteLength(next);
+      items[i] = { ...cur, size: bytes, updatedAt: new Date().toISOString() };
+      await this.write(items);
+      return { entry: items[i]!, lines: next.split('\n').filter((l) => l.length).length, bytes, was: Buffer.byteLength(old) };
+    });
+  }
+
   async update(id: string, patch: ResourceMeta & { text?: string }): Promise<ResourceEntry> {
     return this.locked(async () => {
       const items = await this.read();
@@ -235,6 +266,7 @@ export class ResourceLibrary {
         if (cur.kind !== 'text') throw new BadRequestException('only text resources can be edited here.');
         if (Buffer.byteLength(patch.text) > MAX_TEXT_BYTES) throw new PayloadTooLargeException('the text is too long (max 1 MB).');
         if (!patch.text.trim()) throw new BadRequestException('the text is empty.');
+        await this.keepVersion(cur).catch(() => undefined); // best effort: a failed copy must not stop the edit
         await writeFile(this.pathOf(cur), patch.text);
         size = Buffer.byteLength(patch.text);
       }
@@ -283,4 +315,12 @@ export class ResourceLibrary {
       return entry;
     });
   }
+}
+
+/**
+ * Would this replacement throw most of a note away (a small model rewriting a history note with one line)? A note of at least 256 bytes that would lose
+ * more than half and more than 200 bytes. A person's own edit in the dashboard is not judged by this.
+ */
+export function shrinksTooMuch(oldBytes: number, newBytes: number): boolean {
+  return oldBytes >= 256 && newBytes < oldBytes * 0.5 && oldBytes - newBytes > 200;
 }

@@ -1,5 +1,5 @@
 import { parseLevel } from '../approvals/approval-mode';
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { isTerminalStatus } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -8,6 +8,12 @@ import { ChannelManagerService } from '../channels/channel-manager.service';
 import { AgentRegistryService } from '../agent-registry/agent-registry.service';
 import { ProjectsService } from '../projects/projects.service';
 import { knownProjectLabel } from '../projects/project-labels';
+import { docsWorkDirOf } from '../projects/project-context';
+import { runScript, DEFAULT_SCRIPT_TIMEOUT_SEC, MAX_SCRIPT_TIMEOUT_SEC } from './script-runner';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { AppConfigService } from '../config/app-config.service';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describeSchedule, inQuietHours, isHM, isValidScheduleName, nextRun, validateCron } from './schedule-core';
 
 type ScheduleRow = NonNullable<Awaited<ReturnType<PrismaService['schedule']['findUnique']>>>;
@@ -28,6 +34,10 @@ export interface ScheduleInput {
   quietEnd?: string | null;
   /** approvals for the tasks this schedule starts: 'ask' | 'off', null / 'inherit' = follow the project / global setting */
   approvalMode?: string | null;
+  /** script kind: seconds the script may run (default 600, max 6 h) */
+  timeoutSec?: number | null;
+  /** script kind: post to the chat `always` (default) or only when the script `failure`s */
+  notifyOn?: string;
   /** slug of the project the scheduled task is created in (null / omitted = the default project) */
   project?: string | null;
 }
@@ -40,6 +50,12 @@ const GRACE_MS = 2 * 3600_000;
 /** A chat whose active task was touched this recently is "in a conversation": a scheduled task does not take it over. */
 const ACTIVE_CHAT_MS = 30 * 60_000;
 
+/** The mime type of a file a script wrote, from its extension (pictures are sent as photos). */
+function mimeOf(name: string): string {
+  const ext = name.toLowerCase().split('.').pop() ?? '';
+  return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf', csv: 'text/csv', txt: 'text/plain', json: 'application/json', md: 'text/markdown' } as Record<string, string>)[ext] ?? 'application/octet-stream';
+}
+
 /** Wire shape: the row plus a human description of when it runs. */
 export function serializeSchedule(r: ScheduleRow) {
   return {
@@ -51,6 +67,9 @@ export function serializeSchedule(r: ScheduleRow) {
     when: describeSchedule(r.cron, r.timezone),
     kind: r.kind,
     text: r.text,
+    lastOutput: r.lastOutput,
+    timeoutSec: r.timeoutSec,
+    notifyOn: r.notifyOn,
     agentName: r.agentName,
     taskMode: r.taskMode,
     taskId: r.taskId,
@@ -69,8 +88,8 @@ export function serializeSchedule(r: ScheduleRow) {
 }
 
 /**
- * Recurring jobs. Two kinds: `message` posts text to a chat (no model, free) and `task` starts a task for an agent
- * (its updates flow to the chat). The next run time lives in the database, so a restart loses nothing; a run missed
+ * Recurring jobs. Three kinds: `message` posts text to a chat (no model, free), `task` starts a task for an agent (its updates flow to the chat) and
+ * `script` runs a shell script on the server (no model, free; only an operator / admin may create one, never an agent). The next run time lives in the database, so a restart loses nothing; a run missed
  * while the server was off is skipped instead of fired hours late.
  */
 @Injectable()
@@ -78,6 +97,8 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SchedulesService.name);
   private timer?: NodeJS.Timeout;
   private ticking = false;
+  /** Scripts that are running right now (a schedule never runs two at once). */
+  private readonly scripts = new Set<string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -86,6 +107,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     private readonly manager: ChannelManagerService,
     private readonly agents: AgentRegistryService,
     private readonly projects: ProjectsService,
+    @Optional() private readonly config?: AppConfigService,
   ) {}
 
   onModuleInit(): void {
@@ -108,15 +130,20 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Why this input is unusable (null = fine). `current` fills in fields an update leaves out. */
-  async validate(input: ScheduleInput, current?: ScheduleRow): Promise<string | null> {
+  async validate(input: ScheduleInput, current?: ScheduleRow, opts: { allowScript?: boolean } = {}): Promise<string | null> {
     const v = { ...(current ?? {}), ...Object.fromEntries(Object.entries(input).filter(([, x]) => x !== undefined)) } as ScheduleInput;
     if (!v.name || !isValidScheduleName(v.name)) return 'give a short name (letters, digits, spaces and . _ - – — : ( ) ; max 60 characters).';
     if (!v.cron) return 'give a schedule (cron, e.g. "30 9 * * *" = every day at 09:30).';
     const bad = validateCron(v.cron, v.timezone || 'UTC');
     if (bad) return bad;
-    if (v.kind !== 'message' && v.kind !== 'task') return 'kind must be "message" (post text to a chat) or "task" (start a task for an agent).';
-    if (!v.text?.trim()) return v.kind === 'message' ? 'give the message text.' : 'give the task prompt.';
-    if (v.text.length > 4000) return 'text is too long (max 4000 characters).';
+    if (v.kind !== 'message' && v.kind !== 'task' && v.kind !== 'script') return 'kind must be "message" (post text to a chat), "task" (start a task for an agent) or "script" (run a shell script).';
+    if (v.kind === 'script' && !opts.allowScript) return 'a script schedule can only be created or changed in the dashboard (Schedules) by an operator — not by an agent or a pack.';
+    if (!v.text?.trim()) return v.kind === 'message' ? 'give the message text.' : v.kind === 'script' ? 'give the script.' : 'give the task prompt.';
+    if (v.text.length > (v.kind === 'script' ? 20000 : 4000)) return `text is too long (max ${v.kind === 'script' ? 20000 : 4000} characters).`;
+    if (v.kind === 'script') {
+      if (v.timeoutSec != null && (!Number.isInteger(Number(v.timeoutSec)) || Number(v.timeoutSec) < 1 || Number(v.timeoutSec) > MAX_SCRIPT_TIMEOUT_SEC)) return `the time limit is a whole number of seconds from 1 to ${MAX_SCRIPT_TIMEOUT_SEC}.`;
+      if (v.notifyOn !== undefined && v.notifyOn !== 'always' && v.notifyOn !== 'failure') return 'notifyOn must be "always" or "failure".';
+    }
     if ((v.quietStart && !isHM(v.quietStart)) || (v.quietEnd && !isHM(v.quietEnd))) return 'quiet hours are HH:MM, e.g. 22:00 and 08:00.';
     if (Boolean(v.quietStart) !== Boolean(v.quietEnd)) return 'give both quiet hours or neither.';
     if (v.approvalMode != null && v.approvalMode !== 'inherit' && parseLevel(v.approvalMode) === null) return 'approvalMode must be "ask", "off" or "inherit".';
@@ -147,8 +174,8 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     return p.isDefault ? null : p.id;
   }
 
-  async create(input: ScheduleInput, by?: string): Promise<ScheduleRow> {
-    const bad = await this.validate(input);
+  async create(input: ScheduleInput, by?: string, opts: { allowScript?: boolean } = {}): Promise<ScheduleRow> {
+    const bad = await this.validate(input, undefined, opts);
     if (bad) throw new BadRequestException(bad);
     const tz = input.timezone || 'UTC';
     const cron = input.cron!.trim().replace(/\s+/g, ' ');
@@ -169,6 +196,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         quietStart: input.quietStart ?? null,
         quietEnd: input.quietEnd ?? null,
         approvalMode: parseLevel(input.approvalMode),
+        ...(input.kind === 'script' ? { timeoutSec: input.timeoutSec ? Math.round(Number(input.timeoutSec)) : null, notifyOn: input.notifyOn === 'failure' ? 'failure' : 'always' } : {}),
         projectId: await this.projectIdOf(input.project),
         nextRunAt: nextRun(cron, tz, new Date()),
         createdBy: by ?? null,
@@ -176,9 +204,9 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async update(id: string, input: ScheduleInput): Promise<ScheduleRow> {
+  async update(id: string, input: ScheduleInput, opts: { allowScript?: boolean } = {}): Promise<ScheduleRow> {
     const cur = await this.get(id);
-    const bad = await this.validate(input, cur);
+    const bad = await this.validate(input, cur, opts);
     if (bad) throw new BadRequestException(bad);
     const next = { ...cur, ...Object.fromEntries(Object.entries(input).filter(([, x]) => x !== undefined)) } as ScheduleRow;
     const cron = next.cron.trim().replace(/\s+/g, ' ');
@@ -204,6 +232,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         quietStart: next.quietStart || null,
         quietEnd: next.quietEnd || null,
         approvalMode: input.approvalMode === undefined ? cur.approvalMode : parseLevel(input.approvalMode),
+        ...(next.kind === 'script' ? { timeoutSec: next.timeoutSec ? Math.round(Number(next.timeoutSec)) : null, notifyOn: next.notifyOn === 'failure' ? 'failure' : 'always' } : {}),
         nextRunAt: next.enabled ? nextRun(cron, next.timezone || 'UTC', new Date()) : null,
       },
     });
@@ -275,6 +304,74 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.task.update({ where: { id: taskId }, data: { approvalMode: mode } }).catch((err) => this.logger.warn(`Schedule "${row.name}": could not set the approval level of task ${taskId}: ${(err as Error).message}`));
   }
 
+  /** Where a script runs: the schedule's project folder (the checkout, or the documents folder), else an empty scratch folder. */
+  private async scriptDir(row: ScheduleRow): Promise<string> {
+    try {
+      const ctx = await this.projects.contextFor(row.projectId ? { projectId: row.projectId } : undefined);
+      const dir = ctx.kind === 'code' ? ctx.repoPath : docsWorkDirOf(ctx);
+      if (dir && (await stat(dir).then((s) => s.isDirectory()).catch(() => false))) return dir;
+    } catch {
+      /* the project is gone: the scratch folder */
+    }
+    const scratch = join(tmpdir(), 'aigentron-scripts');
+    await mkdir(scratch, { recursive: true });
+    return scratch;
+  }
+
+  /**
+   * The files a script left in its output folder go to the schedule's chat: pictures as photos, the rest as documents (at most 10, up to 25 MB each), with the
+   * run's result as the caption (always for a failure; for a good run unless the schedule posts only failures). Returns how many files were sent.
+   */
+  private async postOutputFiles(row: ScheduleRow, outDir: string, r: { exitCode: number | null; timedOut: boolean; output: string; ms: number }): Promise<number> {
+    if (!row.channelId || !row.chatId) return 0;
+    const names = (await readdir(outDir).catch(() => [] as string[])).sort().slice(0, 10);
+    const files: { data: Buffer; filename: string; mime: string }[] = [];
+    for (const name of names) {
+      const path = join(outDir, name);
+      const st = await stat(path).catch(() => null);
+      if (!st?.isFile() || st.size === 0 || st.size > 25 * 1024 * 1024) continue;
+      files.push({ data: await readFile(path), filename: name, mime: mimeOf(name) });
+    }
+    if (!files.length) return 0;
+    const ok = r.exitCode === 0 && !r.timedOut;
+    const text = r.output.trim().slice(-700);
+    const caption = `⏰ ${row.name}${ok ? '' : ' ❌'}${text ? `\n${text}` : ''}`.slice(0, 1000);
+    return (await this.manager.sendFiles(row.channelId, row.chatId, files, caption)) ? files.length : 0;
+  }
+
+  /** One run of a script schedule: runs it, keeps what it printed, tells the chat (every run, or only a failure). */
+  private async executeScript(row: ScheduleRow, now: Date, record: (status: string, error?: string) => Promise<{ status: string; error?: string }>): Promise<{ status: string; error?: string }> {
+    if (this.scripts.has(row.id)) return record('skipped', 'the previous run is still working');
+    this.scripts.add(row.id);
+    try {
+      const timeoutSec = row.timeoutSec ?? DEFAULT_SCRIPT_TIMEOUT_SEC;
+      // two folders for the script: LDS_DATA_DIR keeps what it needs between runs (a history file), LDS_OUTPUT_DIR is empty at every start — what the
+      // script leaves there is posted to the chat afterwards and deleted (a chart: draw it, the server sends it, nothing stays on disk)
+      const dataDir = join(this.config ? join(this.config.secretsDir, '..', 'schedule-data') : join(tmpdir(), 'aigentron-schedule-data'), row.id);
+      await mkdir(dataDir, { recursive: true });
+      const outDir = await mkdtemp(join(tmpdir(), 'aigentron-out-'));
+      let r;
+      let sentFiles = 0;
+      try {
+        r = await runScript(row.text, { cwd: await this.scriptDir(row), timeoutSec, extraEnv: { LDS_SCHEDULE: row.name, LDS_DATA_DIR: dataDir, LDS_OUTPUT_DIR: outDir } });
+        sentFiles = await this.postOutputFiles(row, outDir, r);
+      } finally {
+        await rm(outDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+      const ok = r.exitCode === 0 && !r.timedOut;
+      const why = r.timedOut ? `stopped after ${timeoutSec} s (time limit)` : r.exitCode === null ? `could not run (${r.output.split('\n')[0]?.slice(0, 120) || 'unknown'})` : `exit code ${r.exitCode}`;
+      await this.prisma.schedule.update({ where: { id: row.id }, data: { lastOutput: r.output.slice(-4000) || null } }).catch(() => undefined);
+      if (row.channelId && row.chatId && sentFiles === 0 && (!ok || row.notifyOn !== 'failure')) {
+        const tail = r.output.trim().slice(-1500);
+        const head = ok ? `⏰ ${row.name}: ✅ done in ${Math.max(1, Math.round(r.ms / 1000))} s` : `⏰ ${row.name}: ❌ ${why}`;
+        await this.manager.sendText(row.channelId, row.chatId, tail ? `${head}\n${tail}` : head);
+      }
+      return record(ok ? 'ok' : 'error', ok ? undefined : why);
+    } finally {
+      this.scripts.delete(row.id);
+    }
+  }
+
   private async execute(row: ScheduleRow, now: Date, respectQuiet: boolean): Promise<{ status: string; error?: string }> {
     const record = async (status: string, error?: string) => {
       await this.prisma.schedule
@@ -284,6 +381,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     };
     if (respectQuiet && inQuietHours(now, row.timezone, row.quietStart, row.quietEnd)) return record('skipped', 'quiet hours');
     try {
+      if (row.kind === 'script') return await this.executeScript(row, now, record);
       if (row.kind === 'message') {
         const ok = await this.manager.sendText(row.channelId!, row.chatId!, `⏰ ${row.text}`);
         return ok ? record('ok') : record('error', 'could not deliver to the chat (is the channel enabled and the bot able to write there?)');

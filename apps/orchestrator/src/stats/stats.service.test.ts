@@ -83,3 +83,14 @@ describe('fillDays', () => {
     expect(fillDays(new Map([['2020-01-01', z]]), null, '2026-10-23').length).toBeLessThanOrEqual(366);
   });
 });
+
+describe('how runs ended per model', () => {
+  it('counts reports (done / failed / blocked / none), escalations into the model and the average steps', async () => {
+    const r = (taskId: string, model: string, over: object = {}) => row(taskId, 'p', '2026-10-20T10:00:00Z', { model, numTurns: 4, reportedStatus: 'done', status: 'completed', ...over } as never);
+    const res = await service([r('t1', 'mini'), r('t1', 'mini', { reportedStatus: 'failed', numTurns: 8 }), r('t2', 'mini', { reportedStatus: null, status: 'errored' }), r('t2', 'mini', { reportedStatus: null, status: 'completed' }), r('t1', 'big', { escalationReason: 'reported it could not finish', escalatedFrom: 'p/mini' })]).usageByProvider({});
+    const mini = res.models!.find((m) => m.model === 'mini')!;
+    expect(mini).toMatchObject({ runs: 4, done: 1, failed: 1, none: 1, answered: 1, blocked: 0, escalatedTo: 0, avgTurns: 5 });
+    expect(res.models!.find((m) => m.model === 'big')).toMatchObject({ runs: 1, done: 1, escalatedTo: 1 });
+    expect(res.models![0]!.model).toBe('mini'); // busiest first
+  });
+});

@@ -23,3 +23,11 @@ describe('maxTurns', () => {
     expect(parseAgentMarkdown('---\ndescription: x\n---\nbody', 'pm').maxTurns).toBeUndefined();
   });
 });
+
+describe('tier (model strength override)', () => {
+  it('reads cheap | mid | top, ignores anything else, and is absent by default', () => {
+    for (const t of ['cheap', 'mid', 'top']) expect(parseAgentMarkdown(`---\ndescription: x\ntier: ${t}\n---\nb`, 'a').tier).toBe(t);
+    expect(parseAgentMarkdown('---\ndescription: x\ntier: huge\n---\nb', 'a').tier).toBeUndefined();
+    expect(parseAgentMarkdown('---\ndescription: x\n---\nb', 'a').tier).toBeUndefined();
+  });
+});

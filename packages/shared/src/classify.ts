@@ -189,6 +189,12 @@ function agentPowers(content: string): string {
 
 export interface ClassifyOptions {
   /**
+   * Shared project knowledge that is written ONLY through its tools, never by hand (`memory/`, the project's note library, the brief): absolute folders or
+   * files. A Write / Edit / patch / shell write into one is refused outright (no card: the agent is told which tool to use) — a small model overwrote the
+   * team's notes with one line this way.
+   */
+  protectedPaths?: readonly string[];
+  /**
    * Absolute path of the worktree the agent is confined to. When provided,
    * file writes resolving outside it are flagged as dangerous.
    */
@@ -259,6 +265,8 @@ export interface DangerVerdict {
   reason: string;
   /** Never waved through, not even in the no-approvals mode (credentials, protected files). */
   hard?: boolean;
+  /** Set: the call is REFUSED without a card, and this text tells the agent what to do instead (shared project knowledge written by hand). */
+  refuse?: string;
   /**
    * The kind of action that is still asked about in the no-approvals mode (everything else dangerous goes ahead there): a `merge`, an action on the
    * `main-branch` (main / master), or something outside the working `outside` directory.
@@ -294,6 +302,25 @@ function shellGuard(command: string, opts: ClassifyOptions): { guard: Guard; rea
   if (facts.mainBranch) return { guard: 'main-branch', reason: GUARD_LABEL['main-branch'] };
   if (facts.merge) return { guard: 'merge', reason: GUARD_LABEL.merge };
   if (facts.mutated.some((m) => mutatesOutside(m, opts))) return { guard: 'outside', reason: GUARD_LABEL.outside };
+  return null;
+}
+
+/** Why a write to `abs` is refused (it lies in shared project knowledge), or null. The text says which tool to use instead. */
+export function sharedWriteRefusal(abs: string, opts: ClassifyOptions): string | null {
+  const hit = (opts.protectedPaths ?? []).find((p) => p && isInside(normalize(abs), normalize(p)));
+  if (!hit) return null;
+  return `Refused: ${abs} is shared project knowledge and is not edited by hand. Record decisions, facts, questions and status with the workspace_note tool (it appends), save results with workspace_save, keep your own data files (a history, a cache) in the work/ folder, and leave the brief and the note library to the person (ask them to change it). Nothing was written.`;
+}
+
+/** The first shell write that lands in shared project knowledge (relative paths are read against the directory they run in). */
+function shellSharedTarget(command: string, opts: ClassifyOptions): string | null {
+  if (!opts.protectedPaths?.length) return null;
+  for (const m of analyzeShell(command, opts.workspaceRoot ?? null).mutated) {
+    if (m.dynamic) continue;
+    const abs = normalize(m.path.startsWith('/') ? m.path : `${(m.cwd ?? opts.workspaceRoot ?? '').replace(/\/$/, '')}/${m.path}`);
+    const why = sharedWriteRefusal(abs, opts);
+    if (why) return why;
+  }
   return null;
 }
 
@@ -926,6 +953,8 @@ export function classifyToolCall(
     const analysed = expandKnownVars(command, opts.knownVars);
     const safeRm = isSafeRmInRoots(analysed, opts);
     // a command that writes, moves or deletes a credentials / protected file — wherever it is named from (a relative `.github/…`, `cd x && …`, `sh -c '…'`)
+    const shared = shellSharedTarget(analysed, opts);
+    if (shared) return { dangerous: true, summary, reason: 'write to shared project knowledge', refuse: shared };
     const touched = shellProtectedTarget(analysed, opts);
     if (touched) {
       return { dangerous: true, summary, reason: touched.secret ? 'write to a credentials file (sign-in password / tokens)' : 'write to a protected file (SOUL.md/.github/.git/agent definitions)', hard: true };
@@ -961,6 +990,8 @@ export function classifyToolCall(
       if (isProtectedPath(where)) {
         return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)', hard: true };
       }
+      const sharedWhy = sharedWriteRefusal(where, opts);
+      if (sharedWhy) return { dangerous: true, summary, reason: 'write to shared project knowledge', refuse: sharedWhy };
       if (opts.workspaceRoot) {
         const absolute = filePath.startsWith('/') ? filePath : `${opts.workspaceRoot.replace(/\/$/, '')}/${filePath}`;
         if (!insideWriteRoots(absolute, opts)) {
@@ -982,6 +1013,8 @@ export function classifyToolCall(
     if (filePath && isProtectedPath(absolutePath(filePath, opts))) {
       return { dangerous: true, summary, reason: 'write to a protected file (SOUL.md/.github/.git)', hard: true };
     }
+    const sharedWhy = filePath ? sharedWriteRefusal(absolutePath(filePath, opts), opts) : null;
+    if (sharedWhy) return { dangerous: true, summary, reason: 'write to shared project knowledge', refuse: sharedWhy };
     // Writes outside the confined worktree are dangerous.
     if (opts.workspaceRoot && filePath) {
       const absolute = filePath.startsWith('/')

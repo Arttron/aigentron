@@ -208,10 +208,15 @@ export class ApprovalsService {
     const verdict = classifyToolCall(input.toolName, input.toolInput, {
       workspaceRoot: input.workspaceRoot,
       extraWriteRoots: input.extraWriteRoots,
+      protectedPaths: input.protectedPaths,
       knownVars: pickKnownVars(input.knownVars),
       readOnlyMcp,
       browserPage,
     });
+    if (verdict.refuse) {
+      this.logger.warn(`Refused ${input.toolName} (task ${input.taskId}): ${verdict.summary.slice(0, 120)}`);
+      return { allow: false, reason: verdict.refuse };
+    }
     if (!verdict.dangerous) {
       return { allow: true };
     }
@@ -228,7 +233,7 @@ export class ApprovalsService {
     }
 
     // The no-approvals mode: the agent's own risky actions go ahead (credentials and platform proposals never do).
-    if (approvalWaived('off', input.toolName, verdict) && (await this.modeFor(input.taskId).catch(() => ({ effective: this.mode() }))).effective === 'off') {
+    if (approvalWaived('off', input.toolName, verdict, input.modelTier === 'cheap' ? 'cheap' : undefined) && (await this.modeFor(input.taskId).catch(() => ({ effective: this.mode() }))).effective === 'off') {
       this.logger.log(`Approvals are off: allowed ${input.toolName} — ${verdict.summary.slice(0, 120)}`);
       return { allow: true };
     }

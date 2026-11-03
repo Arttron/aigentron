@@ -18,14 +18,14 @@ export class SchedulesController {
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
   async create(@Body() body: ScheduleInput, @CurrentUser() user: UserRow) {
-    return serializeSchedule(await this.schedules.create(body, user?.displayName));
+    return serializeSchedule(await this.schedules.create(body, user?.displayName, { allowScript: true }));
   }
 
   @Put(':id')
   @UseGuards(RolesGuard)
   @Roles('operator', 'admin')
   async update(@Param('id') id: string, @Body() body: ScheduleInput) {
-    return serializeSchedule(await this.schedules.update(id, body));
+    return serializeSchedule(await this.schedules.update(id, body, { allowScript: true }));
   }
 
   @Delete(':id')

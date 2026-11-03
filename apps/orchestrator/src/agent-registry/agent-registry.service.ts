@@ -14,6 +14,8 @@ export interface AgentDef {
   fallbackProviders?: string[];
   /** Escalation ladder: `provider/model` steps, cheapest first. A run that a cheaper model could not finish continues on the next step; the fallback providers are tried only when no step is available. */
   escalation?: string[];
+  /** How strong the model is, when the platform's guess (price / name) is wrong: a `cheap` one gets more care (see docs). Absent = guessed. */
+  tier?: 'cheap' | 'mid' | 'top';
   /** Model to use; falls back to the provider's default model when absent. */
   model?: string;
   /** Optional skill filenames to include; when absent, all skills are used. */
@@ -92,12 +94,13 @@ export class AgentRegistryService {
     return defs
       .filter((d): d is AgentDef => d !== null)
       .map(
-        ({ name, description, provider, fallbackProviders, escalation, model, skills, allowedTools, disallowedTools, mcp, mode, maxTurns }) => ({
+        ({ name, description, provider, fallbackProviders, escalation, tier, model, skills, allowedTools, disallowedTools, mcp, mode, maxTurns }) => ({
           name,
           description,
           provider,
           fallbackProviders,
           escalation,
+          tier,
           model,
           skills,
           allowedTools,
@@ -127,6 +130,7 @@ export class AgentRegistryService {
       provider?: string;
       fallbackProviders?: string[];
       escalation?: string[];
+      tier?: 'cheap' | 'mid' | 'top';
       model?: string;
       skills?: string[];
       allowedTools?: string[];
@@ -152,6 +156,7 @@ export class AgentRegistryService {
         provider: def.provider,
         fallbackProviders: def.fallbackProviders,
         escalation: def.escalation,
+        tier: def.tier,
         model: def.model,
       };
     }
@@ -216,6 +221,7 @@ export function parseAgentMarkdown(raw: string, fallbackName: string): AgentDef 
     provider: meta.provider || undefined,
     fallbackProviders: csv(meta.fallbackProviders),
     escalation: csv(meta.escalation),
+    tier: meta.tier === 'cheap' || meta.tier === 'mid' || meta.tier === 'top' ? meta.tier : undefined,
     model: meta.model || undefined,
     skills: csv(meta.skills),
     allowedTools: csv(meta.allowedTools),
@@ -266,6 +272,7 @@ function serializeAgent(def: {
   provider?: string;
   fallbackProviders?: string[];
   escalation?: string[];
+  tier?: 'cheap' | 'mid' | 'top';
   model?: string;
   skills?: string[];
   allowedTools?: string[];
@@ -284,6 +291,7 @@ function serializeAgent(def: {
     def.provider ? `provider: ${oneLine(def.provider)}` : null,
     csvLine('fallbackProviders', def.fallbackProviders),
     csvLine('escalation', def.escalation),
+    def.tier ? `tier: ${def.tier}` : null,
     def.model ? `model: ${oneLine(def.model)}` : null,
     csvLine('skills', def.skills),
     csvLine('allowedTools', def.allowedTools),

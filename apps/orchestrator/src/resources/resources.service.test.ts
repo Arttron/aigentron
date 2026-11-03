@@ -231,3 +231,40 @@ describe('a project is deleted', () => {
     expect(await svc.releaseProject({ slug: 'beta', isDefault: false }, 'keep')).toEqual({ moved: 0, deleted: 0 });
   });
 });
+
+describe('text notes: append, versions, and the shrink check', () => {
+  const note = async (text: string) => svc.createNote({ title: 'History', text, source: 'note' } as never);
+
+  it('append adds only the new lines at the end, keeps the old text as a version, and says what the note holds now', async () => {
+    const n = await note('2026-10-25 | 51.28\n2026-10-26 | 51.30\n');
+    const r = await svc.append(n.id, '2026-10-27 | 51.40');
+    expect(await svc.text(n.id)).toBe('2026-10-25 | 51.28\n2026-10-26 | 51.30\n2026-10-27 | 51.40\n');
+    expect(r).toMatchObject({ lines: 3, was: 38 });
+    const versions = await readdir(join(base, 'agent', 'resources', 'versions'));
+    expect(versions).toHaveLength(1);
+    expect(await readFile(join(base, 'agent', 'resources', 'versions', versions[0]!), 'utf8')).toBe('2026-10-25 | 51.28\n2026-10-26 | 51.30\n');
+  });
+
+  it('append puts a line break first when the note did not end with one; an empty text is refused', async () => {
+    const n = await note('a');
+    await svc.append(n.id, 'b');
+    expect(await svc.text(n.id)).toBe('a\nb\n');
+    await expect(svc.append(n.id, '  ')).rejects.toThrow(/empty/);
+  });
+
+  it('replacing the text keeps the old one as a version too; only the newest five are kept', async () => {
+    const n = await note('v0');
+    for (let i = 1; i <= 7; i++) await svc.update(n.id, { text: `v${i}` });
+    const versions = await readdir(join(base, 'agent', 'resources', 'versions'));
+    expect(versions).toHaveLength(5);
+  });
+
+  it('shrinksTooMuch: a big note cut to a line is caught, small notes and small cuts are not', async () => {
+    const { shrinksTooMuch } = await import('./resource-library');
+    expect(shrinksTooMuch(388, 57)).toBe(true);
+    expect(shrinksTooMuch(5000, 2000)).toBe(true);
+    expect(shrinksTooMuch(200, 10)).toBe(false); // too small to matter
+    expect(shrinksTooMuch(1000, 700)).toBe(false); // lost less than half
+    expect(shrinksTooMuch(300, 120)).toBe(false); // lost less than 200 bytes
+  });
+});

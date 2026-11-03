@@ -880,6 +880,39 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     for (const c of free) await this.gateway.send(c.channelId, c.chatId, text);
   }
 
+  /**
+   * Post files to a chat: pictures as photos (an album when there are 2–10), everything else as documents; the caption goes on the first. Used by script
+   * schedules (the files a script wrote). False when nothing could be delivered.
+   */
+  async sendFiles(channelId: string, chatId: string, files: { data: Buffer; filename: string; mime: string }[], caption?: string): Promise<boolean> {
+    const adapter = this.gateway.adapterFor(channelId);
+    if (!adapter || !files.length) return false;
+    const pics = files.filter((f) => f.mime.startsWith('image/'));
+    const docs = files.filter((f) => !f.mime.startsWith('image/'));
+    try {
+      let first = true;
+      const cap = () => {
+        const c = first ? caption : undefined;
+        first = false;
+        return c;
+      };
+      if (pics.length && (adapter.sendImage || adapter.sendImages)) {
+        await this.gateway.withActivity(channelId, chatId, 'upload_photo', async () => {
+          for (let i = 0; i < pics.length; i += 10) {
+            const batch = pics.slice(i, i + 10);
+            if (batch.length >= 2 && adapter.sendImages) await adapter.sendImages(chatId, batch, cap());
+            else for (const p of batch) await adapter.sendImage?.(chatId, p, cap());
+          }
+        });
+      } else docs.push(...pics);
+      for (const d of docs) if (adapter.sendDocument) await adapter.sendDocument(chatId, d, cap());
+      return true;
+    } catch (err) {
+      this.logger.warn(`sendFiles failed: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   /** Post plain text to a chat of a channel (scheduled reminders, pairing replies). False when it could not be delivered (channel off, transport error). */
   async sendText(channelId: string, chatId: string, text: string): Promise<boolean> {
     return this.gateway.sendText(channelId, chatId, text);

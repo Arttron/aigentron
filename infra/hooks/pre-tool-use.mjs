@@ -109,6 +109,8 @@ async function main() {
     input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
   const workspaceRoot = process.env.LDS_WORKSPACE_ROOT || input.cwd || undefined;
   const extraWriteRoots = (process.env.LDS_EXTRA_WRITE_ROOTS || '').split(':').filter(Boolean);
+  const protectedPaths = (process.env.LDS_PROTECTED_PATHS || '').split(':').filter(Boolean);
+  const modelTier = process.env.LDS_MODEL_TIER || undefined;
   // folders the shell's `$LDS_ATTACHMENTS_DIR` / `$TMPDIR` stand for (the classifier reads them as those paths)
   const knownVars = {};
   for (const k of ['LDS_ATTACHMENTS_DIR', 'TMPDIR']) if (process.env[k]) knownVars[k] = process.env[k];
@@ -126,13 +128,15 @@ async function main() {
   if (classify) {
     let verdict = null;
     try {
-      verdict = classify(toolName, toolInput, { workspaceRoot, extraWriteRoots, knownVars });
+      verdict = classify(toolName, toolInput, { workspaceRoot, extraWriteRoots, knownVars, protectedPaths });
     } catch {
       verdict = null; // fall through to the orchestrator on classifier error
     }
     // A browser navigation (or going back, or a tab change) always goes to the orchestrator, even when it is benign: it keeps track of where each
     // task's browser is, and that decides whether clicks and typing on the page need a card.
     const tracksBrowser = /^mcp__playwright(-proxy)?__browser_(navigate|navigate_back|tabs)$/i.test(toolName);
+    // shared project knowledge is never written by hand: refused on the spot (no card — the text tells the agent which tool to use)
+    if (verdict && verdict.refuse) return decide('deny', verdict.refuse);
     if (verdict && !verdict.dangerous && !tracksBrowser) {
       return decide('allow', 'auto-allowed (benign)');
     }
@@ -156,7 +160,7 @@ async function main() {
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-lds-hook-secret': hookSecret },
-        body: JSON.stringify({ taskId, agentSessionId, toolName, toolInput, workspaceRoot, extraWriteRoots, knownVars }),
+        body: JSON.stringify({ taskId, agentSessionId, toolName, toolInput, workspaceRoot, extraWriteRoots, knownVars, protectedPaths, modelTier }),
       },
       10_000,
     );

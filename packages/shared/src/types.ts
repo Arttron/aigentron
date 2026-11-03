@@ -266,6 +266,25 @@ export interface EscalationUsage {
   paths: { from: string; to: string; count: number }[];
 }
 
+/** How runs ended on one model: shows which models carry which work, and which need an escalation or a stronger one. */
+export interface ModelOutcome {
+  provider: string;
+  model: string;
+  runs: number;
+  /** What the agent reported: `done` / `failed` / `blocked`; `none` = ended in an error without a report (timed out, ran out of steps, crashed); `answered` = finished cleanly without a report (a chat turn, a question). */
+  done: number;
+  failed: number;
+  blocked: number;
+  none: number;
+  answered: number;
+  /** Runs that continued work an earlier, weaker attempt did not finish (this model was the escalation). */
+  escalatedTo: number;
+  avgTurns: number;
+  inputTokens: number;
+  outputTokens: number;
+  estCostUsd: number;
+}
+
 /** Questions (tasks of kind `ask`): how many, and what they cost. */
 export interface AskUsage {
   tasks: number;
@@ -309,4 +328,6 @@ export interface UsageReport {
   escalation?: EscalationUsage;
   /** Questions answered by the light mode (limited by `project`). */
   ask?: AskUsage;
+  /** How runs ended, per model (limited by `project`), busiest first. */
+  models?: ModelOutcome[];
 }

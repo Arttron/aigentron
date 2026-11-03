@@ -14,7 +14,7 @@ Shipped with the release in `agent/packs/<name>/`.
 - **ask the admin** ("set me up for learning English") — it shows one approval card listing the contents.
 
 Installing **never overwrites** anything that already exists (agents, skills, library notes, schedules are matched by name/title), so you can press it again
-to fill gaps and your own edits stay. **Schedules are created switched OFF** and without a chat: open Settings → Schedules, pick the chat and turn them on.
+to fill gaps and your own edits stay. **Schedules are created switched OFF** and without a chat: open Schedules (main menu), pick the chat and turn them on.
 They start tasks, so they use model budget. Prepared: English — a daily lesson (19:00) and a weekly review (Sun 18:00); renovation — a weekly check-in (Mon 10:00); development — a weekly repository health check (Mon 09:00, read-only reviewer).
 
 ## After installing (the pack tells you too)

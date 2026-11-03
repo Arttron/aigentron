@@ -20,6 +20,7 @@ export const TASK_LITE_SELECT = {
   prompt: true,
   providerOverride: true,
   kind: true,
+  createdByChannel: true,
 } as const;
 
 export type TaskLite = {
@@ -36,6 +37,8 @@ export type TaskLite = {
   providerOverride: string | null;
   /** `task` | `discussion` | `ask` (a question: the light lifecycle of a chat). */
   kind?: string;
+  /** Where the task came from: `schedule:<name>`, `telegram:<id>`, … (null = started in the dashboard / API). */
+  createdByChannel?: string | null;
 };
 
 export async function getTaskLite(prisma: PrismaService, id: string): Promise<TaskLite | null> {

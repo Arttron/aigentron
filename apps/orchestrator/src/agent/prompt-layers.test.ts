@@ -37,3 +37,14 @@ describe('prompt layers (E-04: the system append must be cacheable across runs)'
     expect(m.endsWith('\n\n---\n\nFix the bug')).toBe(true);
   });
 });
+
+describe('the note of a small model', () => {
+  it('goes into the system block (static for a session), never into the run message', () => {
+    const base = { orientation: 'O', instructions: 'I', roster: '', projectMap: '', memory: '' };
+    const small = assemblePromptLayers({ ...base, smallModelNote: '## Work carefully\n- one step' });
+    expect(small.systemAppend).toContain('## Work carefully');
+    expect(small.runContext).not.toContain('Work carefully');
+    expect(assemblePromptLayers(base).systemAppend).not.toContain('Work carefully');
+    expect(assemblePromptLayers({ ...base, smallModelNote: '## Work carefully\n- one step' }).systemAppend).toBe(small.systemAppend); // the same text every time
+  });
+});

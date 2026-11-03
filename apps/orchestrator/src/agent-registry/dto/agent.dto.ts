@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 export class AgentBodyDto {
   @IsOptional()
@@ -16,6 +16,11 @@ export class AgentBodyDto {
   @IsString()
   @MaxLength(300)
   fallbackProviders?: string;
+
+  /** Model strength override: `cheap` | `mid` | `top` (blank = guessed from the model's price / name). */
+  @IsOptional()
+  @IsIn(['cheap', 'mid', 'top'])
+  tier?: 'cheap' | 'mid' | 'top';
 
   /** Comma-separated `provider/model` escalation steps, cheapest first. */
   @IsOptional()

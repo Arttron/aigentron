@@ -493,3 +493,36 @@ describe('the body of a heredoc that only writes a document', () => {
     expect(run(doc('x', "cat > .env <<'EOF'")).dangerous).toBe(true);
   });
 });
+
+describe('shared project knowledge is never written by hand (protectedPaths)', () => {
+  const opts = { workspaceRoot: '/work/task1', extraWriteRoots: ['/ws/proj'], protectedPaths: ['/ws/proj/memory', '/ws/proj/library', '/ws/proj/WORKSPACE.md'] };
+  const run = (tool: string, input: Record<string, unknown>) => classifyToolCall(tool, input, opts);
+  it('Write / Edit into memory, the library or the brief is refused with a text that names the right tool', () => {
+    for (const file of ['/ws/proj/memory/status.md', '/ws/proj/memory/questions.md', '/ws/proj/library/fx-eur-uah-history.md', '/ws/proj/WORKSPACE.md']) {
+      const v = run('Write', { file_path: file, content: 'x' });
+      expect(v.refuse, file).toMatch(/workspace_note/);
+      expect(v.dangerous).toBe(true);
+    }
+    expect(run('Edit', { file_path: '/ws/proj/memory/decisions.md', old_string: 'a', new_string: 'b' }).refuse).toBeTruthy();
+  });
+  it('the rest of the shared folder and the task worktree stay free', () => {
+    expect(run('Write', { file_path: '/ws/proj/work/draft.md', content: 'x' }).dangerous).toBe(false);
+    expect(run('Write', { file_path: '/ws/proj/deliverables/report.md', content: 'x' }).dangerous).toBe(false);
+    expect(run('Write', { file_path: '/work/task1/src/a.ts', content: 'x' }).dangerous).toBe(false);
+    expect(run('Read', { file_path: '/ws/proj/memory/status.md' }).dangerous).toBe(false); // reading is free
+  });
+  it('a shell write into it is refused too: a redirect, tee, sed -i, mv, rm, a relative path after cd', () => {
+    for (const cmd of ['echo x > /ws/proj/memory/status.md', 'echo x >> /ws/proj/memory/q.md', 'printf a | tee /ws/proj/library/n.md', 'sed -i s/a/b/ /ws/proj/memory/status.md', 'mv /tmp/x /ws/proj/library/n.md', 'rm /ws/proj/memory/status.md', 'cd /ws/proj/memory && echo x > status.md', "cat > /ws/proj/WORKSPACE.md <<'EOF'\nhi\nEOF"]) {
+      expect(run('Bash', { command: cmd }).refuse, cmd).toBeTruthy();
+    }
+    expect(run('Bash', { command: 'cat /ws/proj/memory/status.md' }).dangerous).toBe(false);
+    expect(run('Bash', { command: 'echo x > /ws/proj/work/a.txt' }).dangerous).toBe(false);
+  });
+  it('a Codex patch into it is refused', () => {
+    const patch = '*** Begin Patch\n*** Update File: /ws/proj/memory/status.md\n@@\n-a\n+b\n*** End Patch';
+    expect(run('apply_patch', { input: patch }).refuse).toBeTruthy();
+  });
+  it('nothing is protected when no paths are given (callers that do not know them)', () => {
+    expect(classifyToolCall('Write', { file_path: '/ws/proj/memory/status.md', content: 'x' }, { workspaceRoot: '/work/task1', extraWriteRoots: ['/ws/proj'] }).dangerous).toBe(false);
+  });
+});

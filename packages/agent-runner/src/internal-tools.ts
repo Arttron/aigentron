@@ -419,7 +419,7 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_agent',
         description:
-          "Create or replace an agent. `name` (lowercase letters/digits/-/_), `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, `escalation: provider/model, …` (stronger steps, cheaper first), skills, allowedTools, disallowedTools, mcp, `maxTurns` 5–500, `createTasks: true` for a lead that starts tasks) then the system prompt. Needs approval (blocks until decided). Built-in agents cannot be overwritten.",
+          "Create or replace an agent. `name` (lowercase letters/digits/-/_), `content`: the COMPLETE agent file — frontmatter (description required; optional provider, model, `escalation: provider/model, …` (stronger steps, cheaper first), `tier: cheap|mid|top` (model strength override), skills, allowedTools, disallowedTools, mcp, `maxTurns` 5–500, `createTasks: true` for a lead that starts tasks) then the system prompt. Needs approval (blocks until decided). Built-in agents cannot be overwritten.",
         shape: { name: z.string(), content: z.string() },
         handler: async (args) =>
           (await admin.proposeAgent({ name: String(args.name), content: String(args.content) })).message,
@@ -533,9 +533,10 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
       {
         name: 'propose_resource',
         description:
-          "Add, change or delete a TEXT NOTE in a resource library (shared knowledge agents read: a profile, measurements, a glossary). `action`: create|update|delete. create: `title`, `text` (Markdown), `description?` (one line — when to read it), `tags?`, `agents?` (omit = all), `project?` (slug: only its tasks see it; omit = global). update: `id` (from resources_search) + changed fields (`text` replaces the whole note). delete: `id`. Files/images are uploaded by the user (Resources). Search first to avoid duplicates. Needs approval.",
+          "Add, change or delete a TEXT NOTE in a resource library (shared knowledge agents read: a profile, measurements, a glossary). `action`: create|update|append|delete. create: `title`, `text` (Markdown), `description?` (one line — when to read it), `tags?`, `agents?` (omit = all), `project?` (slug: only its tasks see it; omit = global). append: `id` + `text` = only the NEW lines, added at the end (history, logs — nothing already in the note is touched). update: `id` + changed fields (`text` REPLACES the whole note and is refused when it would drop most of it, unless `replace: true`). delete: `id`. Files/images are uploaded by the user (Resources). Search first to avoid duplicates. Needs approval.",
         shape: {
-          action: z.enum(['create', 'update', 'delete']),
+          action: z.enum(['create', 'update', 'append', 'delete']),
+          replace: z.boolean().optional(),
           id: z.string().optional(),
           title: z.string().optional(),
           description: z.string().optional(),
@@ -550,7 +551,8 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
           const str = (k: string) => (typeof args[k] === 'string' ? (args[k] as string) : undefined);
           return (
             await admin.proposeResource({
-              action: args.action as 'create' | 'update' | 'delete',
+              action: args.action as 'create' | 'update' | 'append' | 'delete',
+              replace: args.replace === true ? true : undefined,
               id: str('id')?.trim() || undefined,
               title: str('title'),
               description: str('description'),

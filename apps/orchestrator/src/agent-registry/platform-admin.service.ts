@@ -47,6 +47,7 @@ import { ResourcesService } from '../resources/resources.service';
 import { cleanTags, validateMeta } from '../resources/resources-core';
 import type { PacksService } from '../packs/packs.service';
 import { describeSchedule } from '../schedules/schedule-core';
+import { shrinksTooMuch } from '../resources/resource-library';
 import { UpdateService } from '../update/update.service';
 import { AccessService } from '../access/access.service';
 import { parseDomainList } from '../access/access-core';
@@ -71,7 +72,9 @@ const STATUSES = ['queued', 'running', 'needs_approval', 'review', 'done', 'fail
  * TasksService is resolved lazily (module cycle: tasks → queue → agent executor → this service).
  */
 export interface ResourceProposal {
-  action: 'create' | 'update' | 'delete';
+  action: 'create' | 'update' | 'append' | 'delete';
+  /** update: allow a text that is much shorter than the note (otherwise refused: use `append`, or say replace on purpose). */
+  replace?: boolean;
   id?: string;
   title?: string;
   description?: string;
@@ -510,7 +513,7 @@ export class PlatformAdminService {
 
   /** Why a resource proposal can't be accepted (null = fine). */
   private async checkResource(p: ResourceProposal): Promise<string | null> {
-    if (!['create', 'update', 'delete'].includes(p.action)) return 'action must be create, update or delete.';
+    if (!['create', 'update', 'append', 'delete'].includes(p.action)) return 'action must be create, update, append or delete.';
     if (p.action === 'create') {
       const bad = validateMeta({ title: p.title, description: p.description });
       if (bad) return bad;
@@ -523,7 +526,14 @@ export class PlatformAdminService {
     const r = await this.resources.get(p.id).catch(() => null);
     if (!r) return `no resource with id "${p.id}". Use resources_search.`;
     if (p.action === 'delete') return null;
+    if (p.action === 'append') {
+      if (r.kind !== 'text') return 'only text notes can be appended to.';
+      if (!p.text?.trim()) return 'give the text to add at the end of the note.';
+      return null;
+    }
     if (p.text !== undefined && r.kind !== 'text') return 'only text notes can be edited — files and images are replaced in the dashboard.';
+    // `text` REPLACES the whole note: a text that throws most of it away is how history notes were lost — say so before a card is opened
+    if (p.text !== undefined && !p.replace && shrinksTooMuch(r.size, Buffer.byteLength(p.text))) return `this would shrink the note from ${r.size} to ${Buffer.byteLength(p.text)} bytes — it looks like part of it is missing from your text. To ADD to it use action "append" (only the new lines). To replace it on purpose, send replace: true.`;
     if (p.title !== undefined || p.description !== undefined) {
       const bad = validateMeta({ title: p.title ?? r.title, description: p.description ?? r.description });
       if (bad) return bad;
@@ -544,6 +554,7 @@ export class PlatformAdminService {
         (i.id ?? '') === (input.id ?? '') &&
         (i.title ?? '') === (input.title ?? '') &&
         String(i.text ?? '') === String(input.text ?? '') &&
+        Boolean(i.replace) === Boolean(input.replace) &&
         (i.description ?? '') === (input.description ?? ''),
     );
     if (denied) return denied;
@@ -557,6 +568,11 @@ export class PlatformAdminService {
       const r = await this.resources.createNote({ title: input.title, description: input.description, tags: cleanTags(input.tags), agents: input.agents, text: input.text ?? '', source: 'note', project: input.project });
       await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Added note "${r.title}"${r.project ? ` to project "${r.project}"` : ''}` });
       return { ok: true, message: `Note "${r.title}" added to the ${r.project ? `library of project "${r.project}"` : 'global resource library'} (id ${r.id}). Agents will see it in their resource list.` };
+    }
+    if (input.action === 'append') {
+      const a = await this.resources.append(input.id!, input.text ?? '');
+      await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Added to note "${a.entry.title}" (${a.was} → ${a.bytes} bytes)` });
+      return { ok: true, message: `Added to "${a.entry.title}": the note now has ${a.lines} lines, ${a.bytes} bytes (was ${a.was}). The previous text is kept as a version.` };
     }
     const r = await this.resources.update(input.id!, { title: input.title, description: input.description, tags: input.tags ? cleanTags(input.tags) : undefined, agents: input.agents, text: input.text });
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_resource', summary: `Changed note "${r.title}"` });

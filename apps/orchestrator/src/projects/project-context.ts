@@ -194,6 +194,15 @@ export function extraWriteRootsFor(project: Pick<ProjectContext, 'workspaceRoot'
   return [...new Set(roots.map((r) => resolve(r)))].filter((r) => r !== task);
 }
 
+/**
+ * The parts of the project's shared folder that agents change only through the workspace tools: the memory (`workspace_note`), the project's note library and
+ * the brief. A hand-written change (Write, Edit, a shell redirect, a patch) is refused by the hook, whatever the model (see ClassifyOptions.protectedPaths).
+ */
+export function protectedPathsFor(project: Pick<ProjectContext, 'workspaceRoot' | 'briefFile'>): string[] {
+  const root = resolve(project.workspaceRoot);
+  return [join(root, 'memory'), join(root, 'library'), join(root, project.briefFile)];
+}
+
 /** Where a docs project's tasks work: `work/` of the project folder (no git, §2.5). */
 export function docsWorkDirOf(project: Pick<ProjectContext, 'workspaceRoot'>): string {
   return join(project.workspaceRoot, 'work');

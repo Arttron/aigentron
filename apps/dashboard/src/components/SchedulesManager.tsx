@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { describeSchedule } from '@lds/shared';
+import { useProjects } from '@/lib/use-projects';
 import { api, errMsg, type AgentInfo, type ChannelInfo, type ScheduleInfo } from '@/lib/api';
 import { DEFAULT_FORM, buildCron, parseCron, type Preset, type ScheduleFormState } from '@/lib/schedule-form';
 import { Button, Card, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
@@ -16,9 +17,14 @@ const PRESETS: { id: Preset; label: string }[] = [
 
 interface Draft {
   name: string;
-  kind: 'message' | 'task';
+  kind: 'message' | 'task' | 'script';
   text: string;
   agentName: string;
+  /** script kind: minutes the script may run (as typed) */
+  timeoutMin: string;
+  notifyOn: 'always' | 'failure';
+  /** the project a task / script runs in (slug; '' = the default project) */
+  project: string;
   taskMode: 'same' | 'new';
   approvalMode: 'inherit' | 'ask' | 'off';
   channelId: string;
@@ -37,12 +43,15 @@ const localTz = () => {
     return 'UTC';
   }
 };
-const newDraft = (): Draft => ({ name: '', kind: 'message', text: '', agentName: '', taskMode: 'same', approvalMode: 'inherit', channelId: '', chatId: '', timezone: localTz(), quiet: false, quietStart: '22:00', quietEnd: '08:00', when: DEFAULT_FORM });
+const newDraft = (): Draft => ({ name: '', kind: 'message', text: '', agentName: '', timeoutMin: '10', notifyOn: 'always', project: '', taskMode: 'same', approvalMode: 'inherit', channelId: '', chatId: '', timezone: localTz(), quiet: false, quietStart: '22:00', quietEnd: '08:00', when: DEFAULT_FORM });
 const fromSchedule = (s: ScheduleInfo): Draft => ({
   name: s.name,
   kind: s.kind,
   text: s.text,
   agentName: s.agentName ?? '',
+  timeoutMin: s.timeoutSec ? String(Math.round((s.timeoutSec / 60) * 100) / 100) : '10',
+  notifyOn: s.notifyOn ?? 'always',
+  project: s.project?.slug ?? '',
   taskMode: s.taskMode ?? 'same',
   approvalMode: s.approvalMode ?? 'inherit',
   channelId: s.channelId ?? '',
@@ -56,7 +65,7 @@ const fromSchedule = (s: ScheduleInfo): Draft => ({
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
-/** Settings → Schedules: reminders and recurring tasks. */
+/** Schedules: reminders, recurring tasks and scripts. */
 export function SchedulesManager() {
   const [items, setItems] = useState<ScheduleInfo[]>([]);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
@@ -65,6 +74,7 @@ export function SchedulesManager() {
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<{ id: string | null; draft: Draft } | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const { projects } = useProjects();
 
   const refresh = useCallback(async () => {
     try {
@@ -116,6 +126,8 @@ export function SchedulesManager() {
         agentName: d.kind === 'task' ? d.agentName || null : null,
         taskMode: d.taskMode,
         approvalMode: d.kind === 'task' ? d.approvalMode : 'inherit',
+        ...(d.kind === 'script' ? { timeoutSec: Math.max(1, Math.round((Number(d.timeoutMin) || 10) * 60)), notifyOn: d.notifyOn } : {}),
+        ...(d.kind !== 'message' && (projects?.length ?? 0) > 1 ? { project: d.project || null } : {}),
         channelId: d.channelId || null,
         chatId: d.channelId ? d.chatId || chatsOf(d.channelId)[0] || null : null,
         quietStart: d.quiet ? d.quietStart : null,
@@ -141,14 +153,14 @@ export function SchedulesManager() {
   return (
     <Card>
       <Row spaceBetween>
-        <SectionTitle>Schedules — reminders & recurring tasks</SectionTitle>
+        <SectionTitle>Schedules — reminders, recurring tasks & scripts</SectionTitle>
         <Button variant="primary" onClick={() => setEditing({ id: null, draft: newDraft() })}>
           + Add schedule
         </Button>
       </Row>
       <Muted>
         A <strong>message</strong> posts text to a chat (no model, free — good for reminders). A <strong>task</strong> starts an agent on a prompt each time
-        (uses model budget) and its updates arrive in the chat. Runs missed while the server was off are skipped, not fired late.
+        (uses model budget) and its updates arrive in the chat. A <strong>script</strong> runs a shell script on the server (no model, free; its output is kept here and can be posted to a chat). Runs missed while the server was off are skipped, not fired late.
       </Muted>
       {note && <Muted>{note}</Muted>}
 
@@ -164,20 +176,26 @@ export function SchedulesManager() {
           <div className={styles.facts}>
             <span>🕒 {s.when}</span>
             {s.quietStart && <span>🌙 quiet {s.quietStart}–{s.quietEnd}</span>}
-            <span>{s.kind === 'task' ? `🤖 task → ${s.agentName} (${s.taskMode === 'new' ? 'new task each time' : 'one ongoing task'}${s.approvalMode === 'off' ? ', no approvals' : ''})` : '💬 message'}</span>
+            <span>{s.kind === 'task' ? `🤖 task → ${s.agentName} (${s.taskMode === 'new' ? 'new task each time' : 'one ongoing task'}${s.approvalMode === 'off' ? ', no approvals' : ''})` : s.kind === 'script' ? `🧩 script (limit ${Math.round((s.timeoutSec ?? 600) / 60)} min${s.project ? `, project ${s.project.name}` : ''}${s.notifyOn === 'failure' ? ', chat only on failure' : ''})` : '💬 message'}</span>
             {s.channelId && (
               <span>
                 → {channelName(s.channelId)} · chat {s.chatId}
               </span>
             )}
           </div>
-          <div className={styles.text}>{s.text}</div>
+          <div className={styles.text} style={s.kind === 'script' ? { fontFamily: 'monospace', whiteSpace: 'pre-wrap', maxHeight: 140, overflow: 'auto' } : undefined}>{s.text}</div>
           <div className={styles.facts}>
             <span>next: {s.enabled ? fmt(s.nextRunAt) : '—'}</span>
             <span className={s.lastStatus === 'error' ? styles.bad : undefined}>
               last: {s.lastRunAt ? `${fmt(s.lastRunAt)} · ${s.lastStatus}${s.lastError ? ` (${s.lastError})` : ''}` : 'never'}
             </span>
           </div>
+          {s.kind === 'script' && s.lastOutput && (
+            <details style={{ margin: '6px 0' }}>
+              <summary>Last output</summary>
+              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, maxHeight: 220, overflow: 'auto', margin: '6px 0' }}>{s.lastOutput}</pre>
+            </details>
+          )}
           <div className={styles.buttons}>
             <Button
               disabled={busy}
@@ -214,11 +232,22 @@ export function SchedulesManager() {
             <input value={d.name} onChange={(e) => setDraft({ name: e.target.value })} placeholder="e.g. English practice" />
           </Field>
           <Field label="What happens">
-            <select value={d.kind} onChange={(e) => setDraft({ kind: e.target.value as 'message' | 'task' })}>
+            <select value={d.kind} onChange={(e) => setDraft({ kind: e.target.value as 'message' | 'task' | 'script' })}>
               <option value="message">Post a message to a chat (free)</option>
               <option value="task">Start a task for an agent (uses model budget)</option>
+              <option value="script">Run a script on the server (free, no model)</option>
             </select>
           </Field>
+          {d.kind === 'task' && (
+            <Muted>
+              Tip: if every run does the same steps (fetch data, calculate, draw a chart, post it), choose <strong>Run a script</strong> instead — no model cost and nothing for a small model to get lost in. Keep a task for work that needs judgement.
+            </Muted>
+          )}
+          {d.kind === 'task' && /\d+[.,]\d+/.test(d.text) && (
+            <Muted>
+              ⚠ The prompt contains numbers like <code>{(/\d+[.,]\d+/.exec(d.text) ?? [''])[0]}</code>. A small model may copy example numbers as if they were real data (it happened with a currency report). Write examples with placeholders such as <code>&lt;rate&gt;</code>.
+            </Muted>
+          )}
           {d.kind === 'task' && (
             <Field label="Agent">
               <select value={d.agentName} onChange={(e) => setDraft({ agentName: e.target.value })}>
@@ -249,9 +278,47 @@ export function SchedulesManager() {
               <Muted>Credentials, the charter files and the admin's platform changes are asked even then. The task's subtasks follow it.</Muted>
             </Field>
           )}
-          <Field label={d.kind === 'task' ? 'Prompt (what the agent should do each time)' : 'Message text'}>
-            <textarea rows={3} value={d.text} onChange={(e) => setDraft({ text: e.target.value })} />
+          {d.kind !== 'message' && (projects?.length ?? 0) > 1 && (
+            <Field label={d.kind === 'script' ? 'Project (the script runs in its folder)' : 'Project'}>
+              <select value={d.project} onChange={(e) => setDraft({ project: e.target.value })}>
+                <option value="">Default project</option>
+                {(projects ?? []).filter((p) => !p.isDefault && !p.archivedAt).map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label={d.kind === 'task' ? 'Prompt (what the agent should do each time)' : d.kind === 'script' ? 'Script (shell)' : 'Message text'}>
+            <textarea
+              rows={d.kind === 'script' ? 9 : 3}
+              value={d.text}
+              onChange={(e) => setDraft({ text: e.target.value })}
+              style={d.kind === 'script' ? { fontFamily: 'monospace', fontSize: 13 } : undefined}
+              placeholder={d.kind === 'script' ? '#!/bin/sh\ncd reports && ./make-report.sh' : undefined}
+              spellCheck={d.kind !== 'script'}
+            />
           </Field>
+          {d.kind === 'script' && (
+            <>
+              <Muted>
+                Runs with <code>sh</code> in the project&apos;s folder, with the server&apos;s rights but a minimal environment (none of the server&apos;s keys; <code>LDS_SCHEDULE</code> holds the schedule&apos;s name). Its output (the last 4000
+                characters) is kept under the schedule and, if you choose a chat below, posted there. Files the script leaves in <code>$LDS_OUTPUT_DIR</code> (a chart, a report) are sent to that chat and deleted; <code>$LDS_DATA_DIR</code> keeps files between runs (a history). A new run is skipped while the previous one is still working. Only operators can create or change a script; the admin assistant cannot.
+              </Muted>
+              <Row wrap>
+                <Field label="Time limit (minutes)">
+                  <input type="number" min={0.1} max={360} step={1} value={d.timeoutMin} onChange={(e) => setDraft({ timeoutMin: e.target.value })} style={{ maxWidth: 140 }} />
+                </Field>
+                <Field label="Post to the chat">
+                  <select value={d.notifyOn} onChange={(e) => setDraft({ notifyOn: e.target.value as 'always' | 'failure' })}>
+                    <option value="always">after every run</option>
+                    <option value="failure">only when it fails</option>
+                  </select>
+                </Field>
+              </Row>
+            </>
+          )}
 
           <Field label="When">
             <select value={d.when.preset} onChange={(e) => setWhen({ preset: e.target.value as Preset, custom: e.target.value === 'custom' ? previewCron : d.when.custom })}>
@@ -307,7 +374,7 @@ export function SchedulesManager() {
           </Field>
           {previewCron && <Muted>→ {describeSchedule(previewCron, d.timezone || 'UTC')}</Muted>}
 
-          <Field label={d.kind === 'message' ? 'Send to (required)' : 'Send updates to (optional)'}>
+          <Field label={d.kind === 'message' ? 'Send to (required)' : d.kind === 'script' ? 'Send the result to (optional)' : 'Send updates to (optional)'}>
             <select value={d.channelId} onChange={(e) => setDraft({ channelId: e.target.value, chatId: chatsOf(e.target.value)[0] ?? '' })}>
               <option value="">{d.kind === 'message' ? '— choose a channel —' : '— nowhere (dashboard only) —'}</option>
               {channels.map((c) => (

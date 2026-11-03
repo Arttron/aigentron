@@ -19,7 +19,7 @@ import {
   type SessionTotals,
   type SubagentDefinition,
 } from '@lds/agent-runner';
-import { EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, isListedMarkdown, parseEscalationStep, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
+import { EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, describeModel, isListedMarkdown, parseEscalationStep, type ModelTier, parseFrontmatter, resolveProvider, type AgentModelEnv, type Provider } from '@lds/shared';
 import { LitellmService, routeName, routeParams, stripSelfPrefix } from '../litellm/litellm.service';
 import { AppConfigService } from '../config/app-config.service';
 import { encodeAttachments } from '../prisma/agent-event-attachments';
@@ -47,7 +47,7 @@ import { describeNow } from './clock';
 import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
 import { isImageName, isVideoName } from '../media/media-core';
-import { AnswerTracker, resumeTurnEvent } from './final-answer';
+import { AnswerTracker, isQuietTool, noToolsNote, resumeTurnEvent } from './final-answer';
 import { isPdf, isTextLike } from '../files/file-types';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
@@ -70,7 +70,7 @@ import { RunDeadline } from './run-watchdogs';
 import { getTaskLiteOrThrow } from './task-lite';
 import { AgentUserService } from './agent-user.service';
 import { ProjectsService } from '../projects/projects.service';
-import { extraWriteRootsFor, resolveWorkDir, type ProjectContext } from '../projects/project-context';
+import { extraWriteRootsFor, protectedPathsFor, resolveWorkDir, type ProjectContext } from '../projects/project-context';
 import { parsePushRefs } from '../projects/push-core';
 import { GitHubService } from '../worktrees/github.service';
 import { splitSubtaskReport } from '../tasks/subtask-report';
@@ -216,6 +216,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const workspaceOn = !chat; // chat agents and discussion participants get the tools, not the prompt block
     const orientation =
       (task.kind === 'ask' && !ctx.discussion ? buildAskOrientation(workDir) : chat ? buildChatOrientation(workDir) : docs ? buildDocsOrientation(workDir, project) : buildOrientation(workDir, ctx.worktreePath, task.branch, project.isolation === 'shared', project, !ctx.discussion && !!project.repoUrl)) +
+      (!chat && !ctx.discussion && task.createdByChannel?.startsWith('schedule:') ? `\n\n${SCHEDULED_RUN_HINT}` : '') +
       (workspaceOn ? `\n\n${workspace.orientation()}` : '');
     // What changes between runs (the project map, the workspace memory) goes into
     // the run's MESSAGE, never into the system append: a changed system block
@@ -235,16 +236,17 @@ export class RealAgentExecutor extends AgentExecutor {
     // turns, each re-sending the whole prompt). Only while its reference base is ready — otherwise the guides are inlined.
     const reference = agentDef?.name === 'admin' && !ctx.discussion && (await this.adminReference.index().catch(() => null)) ? await this.adminReference.relevant(ctx.followUpPrompt ?? task.prompt).catch(() => '') : '';
     const prepared = new Map<string, { agents: Record<string, SubagentDefinition>; systemAppend: string; runContext: string }>();
-    const prepare = async (leadProvider: string) => {
-      const hit = prepared.get(leadProvider);
+    const prepare = async (leadProvider: string, tier: ModelTier) => {
+      const key = `${leadProvider}|${tier}`;
+      const hit = prepared.get(key);
       if (hit) return hit;
       const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation, project);
       if (Object.keys(agents).length) {
         this.logger.log(`Task ${task.id} subagents on ${leadProvider}: [${Object.keys(agents).join(', ')}]`);
       }
-      const layers = assemblePromptLayers({ orientation, instructions, roster, projectMap, memory, reference });
+      const layers = assemblePromptLayers({ orientation, instructions, roster, projectMap, memory, reference, smallModelNote: tier === 'cheap' && !chat ? SMALL_MODEL_NOTE : '' });
       const p = { agents, systemAppend: layers.systemAppend, runContext: layers.runContext };
-      prepared.set(leadProvider, p);
+      prepared.set(key, p);
       return p;
     };
 
@@ -331,6 +333,7 @@ export class RealAgentExecutor extends AgentExecutor {
       mcpServers,
       chat,
       ask: task.kind === 'ask' && !ctx.discussion,
+      scheduled: Boolean(task.createdByChannel?.startsWith('schedule:')),
       attachmentPaths,
       attachmentOriginals,
       messageAttachments,
@@ -357,7 +360,8 @@ export class RealAgentExecutor extends AgentExecutor {
       const { provider, model } = chain[i]!;
       const isLast = i === chain.length - 1;
       const resume = i === 0 ? resumeSessionId : undefined;
-      const { agents, systemAppend, runContext } = await prepare(provider.name);
+      const tier = await this.tierFor(agentDef, provider, model);
+      const { agents, systemAppend, runContext } = await prepare(provider.name, tier);
       const esc = pendingEscalation;
       pendingEscalation = undefined;
       const run = (resumeId: string | undefined, refContext: string) =>
@@ -369,6 +373,7 @@ export class RealAgentExecutor extends AgentExecutor {
           agents,
           appendSystemPrompt: systemAppend,
           runContext,
+          modelTier: tier,
           resumeSessionId: resumeId,
           // A resumed session was already told about the task's files: list only the ones sent with THIS message (E-06).
           listedAttachments: resumeId && !chat ? attachmentPaths.filter((p) => messageAttachments.includes(basename(p))) : attachmentPaths,
@@ -642,6 +647,10 @@ export class RealAgentExecutor extends AgentExecutor {
     chat?: boolean;
     /** a question: the run may only read */
     ask?: boolean;
+    /** a schedule started this task */
+    scheduled?: boolean;
+    /** how strong the model of this attempt is (the hook asks a small one for more) */
+    modelTier?: ModelTier;
     /** Run the runtime as the separate agent OS user (S-01); null = as this process. */
     isolation: AgentIsolation | null;
     /** Every file of the task (chat agents read some of them inline). */
@@ -713,6 +722,9 @@ export class RealAgentExecutor extends AgentExecutor {
       taskId: ctx.taskId,
       agentSessionId: session.id,
       sharedDistPath: this.config.sharedDistPath,
+      // the project's memory, note library and brief change only through the workspace tools — the hook refuses a hand-written change
+      protectedPaths: protectedPathsFor(opts.project),
+      modelTier: opts.modelTier,
     };
 
     let seq = 0;
@@ -729,13 +741,22 @@ export class RealAgentExecutor extends AgentExecutor {
     let lastEventKind = 'system';
     let lastAssistantText = '';
     const answer = new AnswerTracker();
+    /** Tools this run really used (the reporting ones do not count): a scheduled report written without using any is not based on fresh data. */
+    let workTools = 0;
     const onEvent = (raw: AgentEvent): void => {
       let event = raw;
       // The answer an agent wrote as a message must stand in the final one (see finalWithAnswer); the dashboard drops its earlier copy.
       if (event.kind === 'assistant') answer.assistant(event.text);
       // work done after the message (any tool but the reporting ones) makes it a stage of the run, not the answer
-      if (event.kind === 'tool_use') answer.tool(event.toolName);
-      if (event.kind === 'result' && !event.isError && !ctx.discussion) event = { ...event, text: answer.result(event.text) };
+      if (event.kind === 'tool_use') {
+        answer.tool(event.toolName);
+        if (!isQuietTool(event.toolName)) workTools += 1;
+      }
+      if (event.kind === 'result' && !event.isError && !ctx.discussion) {
+        event = { ...event, text: answer.result(event.text) };
+        // a run that a schedule started and that read, fetched and ran nothing cannot have fresh data in its report: say so where the person reads it
+        event = { ...event, text: `${event.text}${noToolsNote(workTools, Boolean(opts.scheduled), Boolean(opts.chat))}` };
+      }
       // A discussion turn: its final answer becomes a message BY that participant (and is handed back to the discussion).
       if (ctx.discussion && event.kind === 'assistant' && event.text.trim()) lastAssistantText = event.text;
       if (ctx.discussion && event.kind === 'result') {
@@ -1271,6 +1292,17 @@ export class RealAgentExecutor extends AgentExecutor {
    * The message plus its attachments. A chat agent (the admin, a discussion participant) has no file-reading tool, so the text of this
    * message's text files (md/txt/csv/json …) is put into the prompt itself (bounded); everyone else gets the paths to Read.
    */
+  /**
+   * How strong the model of an attempt is: the agent's own `tier:` when it has one, else the model's price from the gateway's price map (`cheap` up to $1.5 per
+   * million input tokens), a local model by its size, a subscription model by its name. Unknown → `mid` (a wrong «weak» is worse than a missed one: the hard
+   * guards apply to every model anyway).
+   */
+  private async tierFor(agentDef: AgentDef | null, provider: Provider, model: string): Promise<ModelTier> {
+    if (agentDef?.tier) return agentDef.tier;
+    const prices = provider.kind === 'ollama' || provider.kind === 'codex' || provider.authMode === 'oauth-token' ? undefined : await this.litellm.priceMap().catch(() => ({}));
+    return describeModel(model, { prices, local: provider.kind === 'ollama' }).tier;
+  }
+
   private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; attachmentOriginals: Record<string, string>; listedAttachments: string[]; messageAttachments: string[] }): Promise<string> {
     if (!opts.chat) return withAttachments(prompt, opts.listedAttachments, opts.attachmentOriginals);
     const mine = new Set(opts.messageAttachments);
@@ -1785,6 +1817,32 @@ function isOauthToken(provider: Pick<Provider, 'authMode'>): boolean {
 }
 
 /** Orientation for a chat agent: no repo, no worktree — just a conversation. */
+/**
+ * What an agent that a SCHEDULE started is told: the same steps every time are better as a script (no model, free, reliable). Static for a task, so it lives in
+ * the system block.
+ */
+const SCHEDULED_RUN_HINT = [
+  '## This run was started by a schedule',
+  'If what you do on every run is always the same (fetch data, calculate, draw a chart, post it), a script does it better than you: no model cost and no steps to lose.',
+  'In that case do the job now, then say in your final summary that it should become a script schedule (Schedules → Run a script: it runs with `sh`, keeps a history in `$LDS_DATA_DIR`,',
+  'and files it leaves in `$LDS_OUTPUT_DIR` are sent to the chat and deleted — see docs/schedule-scripts.md), and, if you can, save the script into the workspace (`workspace_save`) so the person only has to paste it.',
+  'Keep work that needs judgement (reading, deciding, explaining) for yourself.',
+  'Finish every step INSIDE this run: no background processes, no "I will report later" — nobody continues after this run ends. Take numbers only from what you fetched or read in this run, never from an example in your instructions.',
+].join('\n');
+
+/**
+ * What a SMALL model is told, once, in its system block: the habits that went wrong (numbers copied from examples, a report before the work, background
+ * processes, shared notes rewritten). Static, so it does not change the prompt cache of a session.
+ */
+const SMALL_MODEL_NOTE = [
+  '## Work carefully',
+  '- One step at a time: finish a step and look at its result before the next. Do not combine steps to save time.',
+  '- Do the work FIRST (run the command, fetch the data), write the report AFTER. Every number in a report comes from a tool result of THIS run — never from an example in your instructions or from memory. If you could not get it, write "n/a".',
+  '- Finish inside this run: no background processes (`&`, nohup), no "I will report later" — nobody continues after you stop.',
+  '- Shared notes and project memory are changed only with the workspace tools, and only by ADDING; never rewrite a whole note from memory.',
+  '- If a step fails, say so in one line and report that; do not invent another method.',
+].join('\n');
+
 /** A question: read-only, in the project's folder when there is one. */
 function buildAskOrientation(workDir: string): string {
   return [

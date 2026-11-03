@@ -69,6 +69,8 @@ export function buildAgentEnv(
     env.LDS_APPROVAL_TIMEOUT_SECONDS = String(hook.approvalTimeoutSeconds);
     env.LDS_WORKSPACE_ROOT = workspaceRoot;
     if (extraWriteRoots.length) env.LDS_EXTRA_WRITE_ROOTS = extraWriteRoots.join(':');
+    if (hook.modelTier) env.LDS_MODEL_TIER = hook.modelTier;
+    if (hook.protectedPaths?.length) env.LDS_PROTECTED_PATHS = hook.protectedPaths.join(':');
     env.LDS_SHARED_DIST = hook.sharedDistPath;
     env.LDS_HOOK_SECRET = hook.secret;
   }

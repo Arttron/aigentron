@@ -21,6 +21,7 @@ function toDef(dto: AgentBodyDto) {
     provider: dto.provider,
     fallbackProviders: split(dto.fallbackProviders),
     escalation: split(dto.escalation),
+    tier: dto.tier,
     model: dto.model,
     skills: split(dto.skills),
     allowedTools: split(dto.allowedTools),

@@ -115,7 +115,7 @@ Provider    (name unique)              — an AI model endpoint (Anthropic/OpenA
 Channel     (name unique, kind, config Json) — a chat transport (Telegram shipped) — §6.8
  └─ ChannelThread                     — binds a (channel, external chat) to a Task
  └─ ChannelChatState                  — per-chat state: active task, chosen agent/model, muted
-Schedule                               — a recurring/one-off task or reminder (Settings → Schedules)
+Schedule                               — a recurring/one-off task or reminder (Schedules (main menu))
 KnowledgeBase → KnowledgeDoc → KnowledgeChunk — knowledge bases (`docs/knowledge-base.md`)
 AgentQuestion                          — an `ask_user` question awaiting an answer (`docs/questions.md`)
 ChannelMessageLink                     — channel message id → task id (reply addressing)

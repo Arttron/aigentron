@@ -28,6 +28,8 @@ type Form = {
   fallbackProviders: string[];
   /** `provider/model` steps, cheaper first */
   escalation: string[];
+  /** model strength override ('' = guessed) */
+  tier: '' | 'cheap' | 'mid' | 'top';
   model: string;
   skills: string[];
   allowedTools: string;
@@ -44,6 +46,7 @@ const emptyForm: Form = {
   provider: '',
   fallbackProviders: [],
   escalation: [],
+  tier: '',
   model: '',
   skills: [],
   allowedTools: '',
@@ -161,6 +164,7 @@ export function AgentsPage() {
         provider: a.provider ?? '',
         fallbackProviders: a.fallbackProviders ?? [],
         escalation: a.escalation ?? [],
+        tier: a.tier ?? '',
         model: a.model ?? '',
         maxTurns: a.maxTurns ? String(a.maxTurns) : '',
         skills: a.skills ?? [],
@@ -196,6 +200,7 @@ export function AgentsPage() {
               description: t.description ?? '',
               fallbackProviders: t.fallbackProviders ?? [],
               escalation: t.escalation ?? [],
+              tier: t.tier ?? '',
               model: t.model ?? '',
               skills: t.skills ?? [],
               allowedTools: (t.allowedTools ?? []).join(', '),
@@ -236,6 +241,7 @@ export function AgentsPage() {
         provider: form.provider || undefined,
         fallbackProviders: form.fallbackProviders.join(', '),
         escalation: form.escalation.filter((e) => parseEscalationStep(e)).join(', '),
+        tier: form.tier || undefined,
         model: form.model || undefined,
         skills: form.skills.join(', '),
         allowedTools: form.allowedTools,
@@ -428,6 +434,15 @@ export function AgentsPage() {
                 placeholder="40"
               />
               <Muted className={styles.modelHint}>When a run uses them all without finishing, you are asked whether to continue. Give a lead that plans big work more (e.g. 80).</Muted>
+            </Field>
+            <Field label="Model strength (how much care the platform takes with this agent)">
+              <select value={form.tier} onChange={(e) => setForm((f) => (f ? { ...f, tier: e.target.value as Form['tier'] } : f))}>
+                <option value="">Automatic (from the model's price / name)</option>
+                <option value="cheap">Small / cheap — more care</option>
+                <option value="mid">Medium</option>
+                <option value="top">Strong</option>
+              </select>
+              <Muted className={styles.modelHint}>A small model gets a short «work carefully» note in its instructions and is asked before it starts tasks even when approvals are off. Writing into the project&apos;s memory, library and brief by hand is refused for every model.</Muted>
             </Field>
             <Field label="Escalation: stronger models for work the agent could not finish (cheaper → stronger)">
               <EscalationEditor steps={form.escalation} providers={providers.map((p) => p.name)} onChange={(v) => setForm((f) => (f ? { ...f, escalation: v } : f))} />

@@ -15,6 +15,7 @@ interface Item {
 
 const WORK: Item[] = [
   { to: '/', icon: '📋', label: 'Tasks', also: '/tasks' },
+  { to: '/schedules', icon: '⏰', label: 'Schedules' },
   { to: '/projects', icon: '🗂', label: 'Projects' },
   { to: '/agents', icon: '🧑‍💻', label: 'Agents' },
 ];

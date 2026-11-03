@@ -13,7 +13,6 @@ import { McpManager } from '@/components/McpManager';
 import { McpEndpointManager } from '@/components/settings/McpEndpointManager';
 import { ChannelsManager } from '@/components/ChannelsManager';
 import { UsersManager } from '@/components/UsersManager';
-import { SchedulesManager } from '@/components/SchedulesManager';
 import { DiskSettings } from '@/components/settings/DiskSettings';
 import { TitleSettings } from '@/components/settings/TitleSettings';
 import { ApprovalSettings } from '@/components/settings/ApprovalSettings';
@@ -27,7 +26,7 @@ import { VoiceSettings } from '@/components/settings/VoiceSettings';
 
 /**
  * Grouped by what the person is doing: the everyday look and upkeep (General), how agents work (Work), who may get in (Security), the AI behind them
- * (Providers, LiteLLM, Voice & vision), what they connect to (MCP, Channels, Schedules) and who the people are (Users).
+ * (Providers, LiteLLM, Voice & vision), what they connect to (MCP, Channels) and who the people are (Users).
  */
 const TABS = [
   { id: 'general', label: 'General' },
@@ -37,7 +36,6 @@ const TABS = [
   { id: 'litellm', label: 'LiteLLM' },
   { id: 'mcp', label: 'MCP' },
   { id: 'channels', label: 'Channels' },
-  { id: 'schedules', label: 'Schedules' },
   { id: 'voice', label: 'Voice & vision' },
   { id: 'users', label: 'Users' },
 ] as const satisfies ReadonlyArray<TabDef<string>>;
@@ -90,7 +88,6 @@ export function SettingsPage() {
         </>
       )}
       {tab === 'channels' && <ChannelsManager />}
-      {tab === 'schedules' && <SchedulesManager />}
       {tab === 'voice' && (
         <>
           <VoiceSettings />

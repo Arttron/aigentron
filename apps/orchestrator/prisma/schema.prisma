@@ -659,7 +659,7 @@ model Schedule {
   enabled    Boolean   @default(true)
   cron       String
   timezone   String    @default("UTC")
-  // message | task
+  // message | task | script
   kind       String
   // message text, or the task prompt
   text       String
@@ -684,6 +684,10 @@ model Schedule {
   // ok | skipped | error
   lastStatus String?
   lastError  String?
+  // script kind: the tail of what the last run printed, how many seconds it may take (null = 10 minutes), and when to post to the chat (always | failure)
+  lastOutput String?
+  timeoutSec Int?
+  notifyOn   String    @default("always")
   createdBy  String?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt

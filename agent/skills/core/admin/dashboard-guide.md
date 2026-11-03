@@ -74,7 +74,7 @@ A person who wants to edit and test the code on the server: `docs/work-on-server
 
 ## Stats (`/stats`)
 
-Tokens, requests, cost (Codex "—"); Today/7/30 days/all. Three views: **By provider** (with the stacked chart), **By project** (click a project to see it by provider), **By day** (columns per day, your time zone). A **Project** selector (2+ projects) limits the numbers to one project; the **Show:** tick boxes switch the columns off — Sessions, Requests, Input, Output, Cache, Est. cost (remembered in that browser; the charts follow the token ones). Below: **Escalations** (runs that moved to a stronger model, by reason and from→to), **Questions** (light-mode questions and their cost) and **Saved by our text filters** (per filter and per project); they appear once there is something to show.
+Tokens, requests, cost (Codex "—"); Today/7/30 days/all. Three views: **By provider** (with the stacked chart), **By project** (click a project to see it by provider), **By day** (columns per day, your time zone). A **Project** selector (2+ projects) limits the numbers to one project; the **Show:** tick boxes switch the columns off — Sessions, Requests, Input, Output, Cache, Est. cost (remembered in that browser; the charts follow the token ones). Below: **How runs ended, by model** (done / failed / blocked / no report per model — where a cheap model keeps failing), **Escalations** (runs that moved to a stronger model, by reason and from→to), **Questions** (light-mode questions and their cost) and **Saved by our text filters** (per filter and per project); they appear once there is something to show.
 
 ## Settings, channels, schedules, languages, proxy
 

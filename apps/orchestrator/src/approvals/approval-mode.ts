@@ -12,11 +12,14 @@ export const parseApprovalMode = (raw: unknown): ApprovalMode => (raw === 'off' 
 /** The internal tools an agent may run without a card in `off` mode (they are the agent's own work, not a platform change; `propose_task` starts a task for an agent of the same project — a project's admin cannot reach further). */
 const AGENT_OWN_INTERNAL = new Set([PUSH_BRANCH_TOOL.toLowerCase(), CREATE_TASK_TOOL.toLowerCase(), PROPOSE_TASK_TOOL.toLowerCase()]);
 
-export function approvalWaived(mode: ApprovalMode, toolName: string, verdict: Pick<DangerVerdict, 'dangerous' | 'hard' | 'guard'>): boolean {
+/** Starting work for others: a small model asks even in the no-approvals mode (it starts tasks too readily and too sloppily; a strong model is trusted with it). */
+const STARTS_WORK = new Set([CREATE_TASK_TOOL.toLowerCase(), PROPOSE_TASK_TOOL.toLowerCase()]);
+
+export function approvalWaived(mode: ApprovalMode, toolName: string, verdict: Pick<DangerVerdict, 'dangerous' | 'hard' | 'guard'>, tier?: 'cheap' | 'mid' | 'top'): boolean {
   // a merge, an action on main / master and anything outside the working directory are asked about even here (verdict.guard)
   if (mode !== 'off' || !verdict.dangerous || verdict.hard || verdict.guard) return false;
   const name = toolName.toLowerCase();
-  if (name.startsWith(INTERNAL_TOOL_PREFIX)) return AGENT_OWN_INTERNAL.has(name);
+  if (name.startsWith(INTERNAL_TOOL_PREFIX)) return AGENT_OWN_INTERNAL.has(name) && !(tier === 'cheap' && STARTS_WORK.has(name));
   return true;
 }
 

@@ -9,6 +9,7 @@ import { UsageChart } from './UsageChart';
 import { DailyChart } from './DailyChart';
 import { CompressionStats } from './CompressionStats';
 import { EscalationStats } from './EscalationStats';
+import { ModelOutcomeStats } from './ModelOutcomeStats';
 import styles from './StatsPage.module.css';
 
 type RangeKey = 'today' | '7d' | '30d' | 'all';
@@ -214,6 +215,7 @@ export function StatsPage() {
           </div>
         )}
 
+        {hasUsage && data && (data.models?.length ?? 0) > 0 && <ModelOutcomeStats report={data} />}
         {data && ((data.escalation?.runs ?? 0) > 0 || (data.ask?.sessions ?? 0) > 0) && <EscalationStats report={data} />}
         {data?.compression && data.compression.runs > 0 && <CompressionStats report={data} />}
 

@@ -50,3 +50,11 @@ export class AnswerTracker {
     return out;
   }
 }
+
+/**
+ * A note for the end of a report written by a run that a schedule started and that used no tool at all (nothing read, fetched or run): its numbers cannot be fresh —
+ * a small model once sent a report copied from the example in its own prompt. Empty for every other run.
+ */
+export function noToolsNote(workTools: number, scheduled: boolean, chat: boolean): string {
+  return scheduled && !chat && workTools === 0 ? '\n\n⚠ No tools were used in this run (nothing was read, fetched or run) — the report is not based on fresh data.' : '';
+}

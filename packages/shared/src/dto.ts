@@ -17,6 +17,10 @@ export interface HookCheckInput {
   /** Worktree root, so the orchestrator classifies writes consistently. */
   workspaceRoot?: string;
   extraWriteRoots?: string[];
+  /** Shared project knowledge written only through its tools (see ClassifyOptions.protectedPaths). */
+  protectedPaths?: string[];
+  /** `cheap` | `mid` | `top`: how strong the run's model is. */
+  modelTier?: string;
   /** `$LDS_ATTACHMENTS_DIR` / `$TMPDIR` of the agent's shell (the classifier reads them as those paths). */
   knownVars?: Record<string, string>;
 }

@@ -7,7 +7,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 ## Settings (`/settings`) — tabs
 
-General, Work, Security, Providers, LiteLLM, MCP, Channels, Schedules, Voice & vision, Users.
+General, Work, Security, Providers, LiteLLM, MCP, Channels, Voice & vision, Users. (Schedules is its own page in the main menu, right after Tasks.)
 
 **General** (everyday look and upkeep; cards top to bottom):
 - *Display*: **Theme** (per browser), **Assistant** (put the mascot back), debug mode.
@@ -41,7 +41,7 @@ Quiet by default: answers and what needs the person; `/progress on|off` toggles 
 
 ## Schedules
 
-Settings → **Schedules**: time ("every day at 09:30", weekdays, days, every N hours, raw cron), time zone, quiet hours, action: **post a message** (free) or **start a task** (budget; updates go to that chat). Task schedules also have **Approvals for this schedule's tasks** (follow the project / No approvals / Ask): nobody is there to answer a card at 03:00, so a job that sends a chart and deletes it should be set to *No approvals* (credentials and platform changes are still asked). Buttons: Run now, Turn on/off, Edit, Delete. Missed runs are skipped. I manage them (`propose_schedule`, `schedules_list`).
+Main menu → **Schedules** (⏰, after Tasks; it used to be a Settings tab): time ("every day at 09:30", weekdays, days, every N hours, raw cron), time zone, quiet hours, action: **post a message** (free), **start a task** (budget; updates go to that chat) or **run a script** (a shell script on the server, free, no model: runs in the project's folder with a minimal environment, time limit, last output kept on the card and posted to a chat after every run or only on failure; files a script leaves in `$LDS_OUTPUT_DIR` (a chart) are sent to the chat and deleted, `$LDS_DATA_DIR` keeps a history between runs (`docs/schedule-scripts.md`); only an operator creates or edits it — I cannot, an agent cannot; a new run is skipped while the previous works). Task schedules also have **Approvals for this schedule's tasks** (follow the project / No approvals / Ask): nobody is there to answer a card at 03:00, so a job that sends a chart and deletes it should be set to *No approvals* (credentials and platform changes are still asked). Buttons: Run now, Turn on/off, Edit, Delete. Missed runs are skipped. I manage them (`propose_schedule`, `schedules_list`).
 
 ## Approvals
 

@@ -139,6 +139,12 @@ export class ResourcesService {
     return cur;
   }
 
+  /** Add text at the end of a text note (nothing in it is touched; the old text is kept as a version). */
+  async append(id: string, text: string): Promise<{ entry: ResourceEntry; lines: number; bytes: number; was: number }> {
+    const { lib } = await this.locate(id);
+    return lib.append(id, text);
+  }
+
   private async move(from: ResourceLibrary, r: ResourceEntry, to: string | null): Promise<ResourceEntry> {
     const target = await this.library(to);
     if (target === from) return r;
