@@ -4,11 +4,7 @@ import { useDetailsDismiss } from '@/lib/use-details-dismiss';
 import { ApprovalModePicker } from '@/components/ApprovalModePicker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import {
-  SERVER_EVENT,
-  isTerminalStatus,
-  type TaskStatus,
-} from '@lds/shared';
+import { SERVER_EVENT, isTerminalStatus, type TaskStatus, type PendingFollowUp } from '@lds/shared';
 import { api, type TaskDetail } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
@@ -39,7 +35,8 @@ import {
 import styles from './TaskDetailPage.module.css';
 
 /** Keyed by the route id: parent → subtask navigation remounts the page, so no state (lines, form draft, staged files) leaks between tasks. */
-const CONTINUE_PROMPT = 'Continue the task from where you left off. Finish the remaining work, then report your status.';
+const CONTINUE_PROMPT =
+  'Continue the task from where you left off. Finish the remaining work, then report your status.';
 
 /** The full-screen toggle in a conversation's bottom-right corner, like a video player's. */
 function FullToggle({ full, onToggle }: { full: boolean; onToggle: () => void }) {
@@ -52,8 +49,22 @@ function FullToggle({ full, onToggle }: { full: boolean; onToggle: () => void })
       aria-label={full ? 'Exit full screen' : 'Full screen'}
       aria-pressed={full}
     >
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        {full ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+      <svg
+        viewBox="0 0 24 24"
+        width="18"
+        height="18"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {full ? (
+          <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+        ) : (
+          <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+        )}
       </svg>
     </button>
   );
@@ -113,7 +124,12 @@ function TaskDetailView({ id }: { id: string }) {
     if (!fullChat) return;
     const onKey = (e: KeyboardEvent) => {
       // an open dialog (the picture viewer, a modal) takes the Escape first; the conversation leaves full screen only when none is open
-      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[aria-modal="true"]')) setFullChat(false);
+      if (
+        e.key === 'Escape' &&
+        !e.defaultPrevented &&
+        !document.querySelector('[aria-modal="true"]')
+      )
+        setFullChat(false);
     };
     document.addEventListener('keydown', onKey);
     document.documentElement.dataset.pinned = '1';
@@ -214,7 +230,9 @@ function TaskDetailView({ id }: { id: string }) {
   };
 
   // A lead with unfinished subtasks: ask what to do with them (accepting the lead does not accept them).
-  const openSubtasks = (task?.subtasks ?? []).filter((s) => !['done', 'cancelled', 'failed'].includes(s.status));
+  const openSubtasks = (task?.subtasks ?? []).filter(
+    (s) => !['done', 'cancelled', 'failed'].includes(s.status),
+  );
   const [askDone, setAskDone] = useState(false);
   const markDone = async (cancelOpen = false) => {
     setAskDone(false);
@@ -243,6 +261,8 @@ function TaskDetailView({ id }: { id: string }) {
 
   // A follow-up is shown in the conversation AT ONCE ("sending…"), not when the agent run starts and the server echoes it.
   const [pending, setPending] = useState<PendingMessage[]>([]);
+  // messages waiting on the server (sent before a refresh, or from a channel / another tab) — shown in the conversation as well as in the composer
+  const [queued, setQueued] = useState<PendingFollowUp[]>([]);
   const sendFollowUp = async (prompt: string, attachments: string[], references: string[]) => {
     const mine = prompt.trim() ? newPending(prompt) : null;
     if (mine) setPending((p) => [...p, mine]);
@@ -257,7 +277,12 @@ function TaskDetailView({ id }: { id: string }) {
 
   const resumable = ['blocked', 'stalled', 'failed'].includes(task?.status ?? '');
   const promote = async () => {
-    if (!window.confirm('Move this subtask out of its lead to the top level? It keeps its history and project, gets its own subtasks and review, and links back to the lead.')) return;
+    if (
+      !window.confirm(
+        'Move this subtask out of its lead to the top level? It keeps its history and project, gets its own subtasks and review, and links back to the lead.',
+      )
+    )
+      return;
     setBusy(true);
     try {
       await api.promoteTask(id);
@@ -282,7 +307,8 @@ function TaskDetailView({ id }: { id: string }) {
   const doneModal = askDone && (
     <Modal title="Unfinished subtasks" onClose={() => setAskDone(false)}>
       <p>
-        {openSubtasks.length} subtask{openSubtasks.length === 1 ? ' is' : 's are'} still open. Accepting this task does not accept them.
+        {openSubtasks.length} subtask{openSubtasks.length === 1 ? ' is' : 's are'} still open.
+        Accepting this task does not accept them.
       </p>
       <ul style={{ margin: '8px 0 12px 18px' }}>
         {openSubtasks.map((s) => (
@@ -318,7 +344,10 @@ function TaskDetailView({ id }: { id: string }) {
   // (the final answer is already shown once as 'result').
   const promptText = task?.prompt;
   const promptTs = task?.createdAt;
-  const echoedPrompts = useMemo(() => lines.filter((l) => l.kind === 'prompt').map((l) => l.text), [lines]);
+  const echoedPrompts = useMemo(
+    () => lines.filter((l) => l.kind === 'prompt').map((l) => l.text),
+    [lines],
+  );
   useEffect(() => {
     setPending((p) => {
       const next = reconcilePending(p, echoedPrompts);
@@ -326,15 +355,38 @@ function TaskDetailView({ id }: { id: string }) {
     });
   }, [echoedPrompts]);
   const visibleLines = useMemo(() => {
-    const real = debug ? lines : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
-    const vis = [...real, ...pending.map((p) => ({ id: p.id, kind: 'prompt', text: p.text, ts: new Date(p.at).toISOString() }))];
+    const real = debug
+      ? lines
+      : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
+    const queuedTexts = queued.map((q) => q.text.replace(/\s+/g, ' ').trim());
+    // a local "sending…" message that is already in the server queue is the same message
+    const localOnly = pending.filter((p) => {
+      const i = queuedTexts.indexOf(p.text.replace(/\s+/g, ' ').trim());
+      if (i >= 0) queuedTexts.splice(i, 1);
+      return i < 0;
+    });
+    const vis = [
+      ...real,
+      ...queued.map((q) => ({
+        id: `queued-${q.id}`,
+        kind: 'prompt',
+        text: q.text,
+        ts: q.createdAt,
+      })),
+      ...localOnly.map((p) => ({
+        id: p.id,
+        kind: 'prompt',
+        text: p.text,
+        ts: new Date(p.at).toISOString(),
+      })),
+    ];
     // Until the run emits the opening `prompt` event, seed the request from the
     // task so the conversation always shows what was asked.
     if (promptText !== undefined && !real.some((l) => l.kind === 'prompt')) {
       return [{ id: 'seed-prompt', kind: 'prompt', text: promptText, ts: promptTs }, ...vis];
     }
     return vis;
-  }, [lines, debug, promptText, promptTs, pending]);
+  }, [lines, debug, promptText, promptTs, pending, queued]);
 
   // Phone: an app-like shell. Header + tabs on top, the conversation fills what is left, the message box is pinned to the bottom.
   useEffect(() => {
@@ -379,9 +431,21 @@ function TaskDetailView({ id }: { id: string }) {
                 </ButtonLink>
               )}
               <ApprovalModePicker scope={{ task: id }} />
-              {resumable && <Button onClick={continueTask} disabled={busy}>▶ Continue</Button>}
-              {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && <Button onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())}>✅ Mark as done</Button>}
-              {task.parentId && terminal && <Button onClick={promote} disabled={busy}>⬆ To top level</Button>}
+              {resumable && (
+                <Button onClick={continueTask} disabled={busy}>
+                  ▶ Continue
+                </Button>
+              )}
+              {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && (
+                <Button onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())}>
+                  ✅ Mark as done
+                </Button>
+              )}
+              {task.parentId && terminal && (
+                <Button onClick={promote} disabled={busy}>
+                  ⬆ To top level
+                </Button>
+              )}
               {terminal && <Button onClick={() => setDiscussing(true)}>💬 Discuss</Button>}
               {!terminal && (
                 <Button variant="red" onClick={cancel} disabled={busy}>
@@ -418,7 +482,9 @@ function TaskDetailView({ id }: { id: string }) {
           />
         </div>
 
-        <div className={tab === 'chat' ? `${styles.paneChat} ${styles.chatBox}` : styles.paneScroll}>
+        <div
+          className={tab === 'chat' ? `${styles.paneChat} ${styles.chatBox}` : styles.paneScroll}
+        >
           {tab === 'chat' && <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />}
           {tab === 'chat' && <DiscussionBar taskId={id} running={!terminal} />}
           {tab === 'chat' && (
@@ -433,19 +499,40 @@ function TaskDetailView({ id }: { id: string }) {
               onAsk={(p, a) => sendFollowUp(p, a, [])}
             />
           )}
-          {tab === 'chat' && <FullToggle full={phoneFull} onToggle={() => setFullChat((v) => !v)} />}
+          {tab === 'chat' && (
+            <FullToggle full={phoneFull} onToggle={() => setFullChat((v) => !v)} />
+          )}
           {tab === 'files' && (
-            <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} onAsk={(p, a) => sendFollowUp(p, a, [])} />
+            <Attachments
+              taskId={id}
+              reloadSignal={`${task.status}:${assetTick}`}
+              onAsk={(p, a) => sendFollowUp(p, a, [])}
+            />
           )}
           {tab === 'tasks' && <TaskRelations task={task} onChange={refreshTask} />}
         </div>
 
         {tab === 'chat' && (
-          <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact />
+          <FollowUpForm
+            key={id}
+            taskId={id}
+            terminal={terminal}
+            onSend={sendFollowUp}
+            onQueue={setQueued}
+            lastReply={lastReply}
+            compact
+          />
         )}
         {/* the phone layout returns early: the discussion window has to be here as well */}
         {doneModal}
-        {discussing && <DiscussionModal taskId={id} initialTopic={task.prompt} onClose={() => setDiscussing(false)} onStarted={() => refreshTask()} />}
+        {discussing && (
+          <DiscussionModal
+            taskId={id}
+            initialTopic={task.prompt}
+            onClose={() => setDiscussing(false)}
+            onStarted={() => refreshTask()}
+          />
+        )}
       </div>
     );
   }
@@ -481,22 +568,39 @@ function TaskDetailView({ id }: { id: string }) {
                   </ButtonLink>
                 )}
                 {resumable && (
-                  <Button variant="primary" onClick={continueTask} disabled={busy} title="Resume the same session: the agent picks up where it stopped">
+                  <Button
+                    variant="primary"
+                    onClick={continueTask}
+                    disabled={busy}
+                    title="Resume the same session: the agent picks up where it stopped"
+                  >
                     ▶ Continue
                   </Button>
                 )}
                 {['review', 'blocked', 'stalled', 'failed'].includes(task.status) && (
-                  <Button variant={task.status === 'review' ? 'primary' : undefined} onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())} disabled={busy} title="Accept the result — the task becomes “done”">
+                  <Button
+                    variant={task.status === 'review' ? 'primary' : undefined}
+                    onClick={() => (openSubtasks.length ? setAskDone(true) : markDone())}
+                    disabled={busy}
+                    title="Accept the result — the task becomes “done”"
+                  >
                     ✅ Mark as done
                   </Button>
                 )}
                 {task.parentId && terminal && (
-                  <Button onClick={promote} disabled={busy} title="Move this subtask out of its lead: it becomes a top-level task of the same project">
+                  <Button
+                    onClick={promote}
+                    disabled={busy}
+                    title="Move this subtask out of its lead: it becomes a top-level task of the same project"
+                  >
                     ⬆ To top level
                   </Button>
                 )}
                 {terminal && (
-                  <Button onClick={() => setDiscussing(true)} title="Let several agents discuss in this chat">
+                  <Button
+                    onClick={() => setDiscussing(true)}
+                    title="Let several agents discuss in this chat"
+                  >
                     💬 Discuss
                   </Button>
                 )}
@@ -532,30 +636,60 @@ function TaskDetailView({ id }: { id: string }) {
           )}
 
           {/* One tree whether or not it is full screen, so a half-typed message and the scroll position survive the switch. */}
-          <div className={fullChat ? styles.fullChat : undefined} role={fullChat ? 'dialog' : undefined} aria-label={fullChat ? 'Conversation, full screen' : undefined}>
+          <div
+            className={fullChat ? styles.fullChat : undefined}
+            role={fullChat ? 'dialog' : undefined}
+            aria-label={fullChat ? 'Conversation, full screen' : undefined}
+          >
             <Card className={fullChat ? styles.fullCard : undefined}>
               <Row spaceBetween>
                 <SectionTitle>{fullChat ? task.title : 'Conversation'}</SectionTitle>
-                <Row>
-                  {fullChat && <StatusBadge status={task.status} />}
-                </Row>
+                <Row>{fullChat && <StatusBadge status={task.status} />}</Row>
               </Row>
               <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />
               <DiscussionBar taskId={id} running={!terminal} />
               <div className={`${styles.chatBox} ${fullChat ? styles.chatBoxFull : ''}`}>
-                <Transcript taskId={id} lines={visibleLines} status={task.status} terminal={terminal} activityAt={activityAt} localModel={localModel} fill={fullChat} onAsk={(p, a) => sendFollowUp(p, a, [])} />
+                <Transcript
+                  taskId={id}
+                  lines={visibleLines}
+                  status={task.status}
+                  terminal={terminal}
+                  activityAt={activityAt}
+                  localModel={localModel}
+                  fill={fullChat}
+                  onAsk={(p, a) => sendFollowUp(p, a, [])}
+                />
                 <FullToggle full={fullChat} onToggle={() => setFullChat((v) => !v)} />
               </div>
             </Card>
-            <FollowUpForm key={id} taskId={id} terminal={terminal} onSend={sendFollowUp} lastReply={lastReply} compact={fullChat} />
+            <FollowUpForm
+              key={id}
+              taskId={id}
+              terminal={terminal}
+              onSend={sendFollowUp}
+              onQueue={setQueued}
+              lastReply={lastReply}
+              compact={fullChat}
+            />
           </div>
 
-          <Attachments taskId={id} reloadSignal={`${task.status}:${assetTick}`} onAsk={(p, a) => sendFollowUp(p, a, [])} />
+          <Attachments
+            taskId={id}
+            reloadSignal={`${task.status}:${assetTick}`}
+            onAsk={(p, a) => sendFollowUp(p, a, [])}
+          />
           <TaskRelations task={task} onChange={refreshTask} />
         </>
       )}
       {doneModal}
-      {discussing && <DiscussionModal taskId={id} initialTopic={task?.prompt} onClose={() => setDiscussing(false)} onStarted={() => refreshTask()} />}
+      {discussing && (
+        <DiscussionModal
+          taskId={id}
+          initialTopic={task?.prompt}
+          onClose={() => setDiscussing(false)}
+          onStarted={() => refreshTask()}
+        />
+      )}
     </>
   );
 }

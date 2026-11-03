@@ -5,7 +5,15 @@ import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { CameraCapture } from '@/components/CameraCapture';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
-import { Card, SectionTitle, Row, Button, Muted, ErrorText, HiddenFileInput } from '@/components/ui';
+import {
+  Card,
+  SectionTitle,
+  Row,
+  Button,
+  Muted,
+  ErrorText,
+  HiddenFileInput,
+} from '@/components/ui';
 import { cn } from '@/lib/cn';
 import { useLook } from '@/lib/transcript-look';
 import { useIsShort } from '@/lib/use-media';
@@ -54,6 +62,7 @@ export function FollowUpForm({
   onSend,
   compact = false,
   lastReply = null,
+  onQueue: reportQueue,
 }: {
   taskId: string;
   terminal: boolean;
@@ -62,6 +71,8 @@ export function FollowUpForm({
   /** The agent's latest answer — read aloud in voice-only mode. */
   lastReply?: VoiceReply | null;
   onSend: (prompt: string, attachments: string[], references: string[]) => Promise<void>;
+  /** the server-side queue, as it changes — the page shows queued messages in the conversation too (after a refresh they would otherwise vanish) */
+  onQueue?: (queue: PendingFollowUp[]) => void;
 }) {
   const [look] = useLook();
   const voiceCfg = useVoice();
@@ -83,6 +94,9 @@ export function FollowUpForm({
   const [camera, setCamera] = useState(false);
 
   const [queue, setQueue] = useState<PendingFollowUp[]>([]);
+  useEffect(() => {
+    reportQueue?.(queue);
+  }, [queue]); // eslint-disable-line react-hooks/exhaustive-deps
   // Id of the queued message currently loaded into the composer for editing.
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -273,7 +287,9 @@ export function FollowUpForm({
       <HiddenFileInput ref={fileRef} accept={ATTACH_ACCEPT} multiple onFiles={pickFiles} />
       {/* No live camera (plain HTTP): the phone's own camera app takes the shot. */}
       <HiddenFileInput ref={camRef} accept="image/*,video/*" capture onFiles={pickFiles} />
-      {camera && <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void pickFiles(files)} />}
+      {camera && (
+        <CameraCapture onClose={() => setCamera(false)} onDone={(files) => void pickFiles(files)} />
+      )}
     </>
   );
   const queueEl = (
@@ -402,7 +418,8 @@ export function FollowUpForm({
         {pasteNotice}
         <div className={styles.dockRow}>
           <AttachMenu compact onPick={onAttachKind} busy={uploading} />
-          <textarea dir="auto"
+          <textarea
+            dir="auto"
             ref={taRef}
             className={styles.dockInput}
             aria-label="Message"
@@ -445,7 +462,8 @@ export function FollowUpForm({
             you&gt;
           </span>
         )}
-        <textarea dir="auto"
+        <textarea
+          dir="auto"
           className={styles.input}
           aria-label="Message"
           placeholder="Type a message — Enter sends, Shift+Enter adds a line. Attach images/PDFs with 📎"

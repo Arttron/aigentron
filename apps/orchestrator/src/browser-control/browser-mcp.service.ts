@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ApprovalsService } from '../approvals/approvals.service';
 import { BrowserBridgeService, type ExtResult } from './browser-bridge.service';
 import { deniedReason, isLocalHost, parseWebUrl, searchUrl } from './browser-policy';
+import { pageContent, type Content, type PageData } from './page-content';
 
 type Level = 'read' | 'interact';
 /** Commands that DO something on the page (they need `interact`; after one that was carried out, a retry must not repeat it). */
@@ -189,17 +190,23 @@ export class BrowserMcpService {
     const server = new McpServer({ name: 'browser-ext', version: '1.0.0' });
     const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] });
     const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: e instanceof Error ? e.message : String(e) }] });
-    const guard = <A>(fn: (a: A) => Promise<{ content: { type: 'text'; text: string }[] } | { content: { type: 'image'; data: string; mimeType: string }[] }>) => async (a: A) => {
+    const guard = <A>(fn: (a: A) => Promise<{ content: Content[] }>) => async (a: A) => {
       try {
         return await fn(a);
       } catch (e) {
         return fail(e);
       }
     };
-    const page = (d: unknown) => {
-      const o = d as { text?: string; url?: string; title?: string; tabId?: number; more?: boolean; offset?: number };
-      return text(`${o.tabId !== undefined ? `Tab ${o.tabId}` : 'Page'}${o.title ? ` — ${o.title}` : ''}${o.url ? ` (${o.url})` : ''}\n${UNTRUSTED}${String(o.text ?? '').slice(0, 24_000)}${o.more ? `\n[more text follows: call browser_read with offset ${o.offset ?? 0}]` : ''}`);
+    /** What a vision model reads off a picture of a page (the model of this agent may not see images). Null when no vision model is set up. */
+    const readPicture = async (image: string, question: string): Promise<string | null> => {
+      try {
+        const { VisionService } = await import('../media/vision.service');
+        return await this.moduleRef.get(VisionService, { strict: false }).describe([{ data: Buffer.from(image, 'base64'), mime: 'image/jpeg' }], question);
+      } catch {
+        return null;
+      }
     };
+    const page = (d: unknown) => pageContent(d as PageData, UNTRUSTED, readPicture);
 
     server.registerTool('browser_tabs', { description: 'List the tabs you can use in the person\'s browser (the ones you opened, and any the person shared): id, title, address. You work in a separate window; you never see their other tabs.', inputSchema: {} }, guard(async () => {
       const d = (await this.run(ctx, 'tabs', {})) as { tabs?: { id: number; title: string; url: string }[] };
@@ -220,9 +227,13 @@ export class BrowserMcpService {
     server.registerTool('browser_select', { description: 'Choose an option of a drop-down (by its [eN] reference) by its text or value.', inputSchema: { tabId: z.number(), ref: z.string(), value: z.string() } }, guard(async (a: { tabId: number; ref: string; value: string }) => act(await this.run(ctx, 'select', { tabId: a.tabId, ref: a.ref, value: a.value.slice(0, 200) }))));
     server.registerTool('browser_press', { description: 'Press a key in the focused element: Enter, Tab, Escape, ArrowDown, ArrowUp, PageDown, … Enter inside a form SUBMITS it, so it asks the person like a submit button.', inputSchema: { tabId: z.number(), key: z.string() } }, guard(async (a: { tabId: number; key: string }) => act(await this.run(ctx, 'press', { tabId: a.tabId, key: a.key.slice(0, 20) }))));
     server.registerTool('browser_scroll', { description: 'Scroll the page: `direction` down / up / top / bottom, or bring an element (by its [eN] reference) into view.', inputSchema: { tabId: z.number(), direction: z.enum(['down', 'up', 'top', 'bottom']).optional(), ref: z.string().optional() } }, guard(async (a: { tabId: number; direction?: 'down' | 'up' | 'top' | 'bottom'; ref?: string }) => act(await this.run(ctx, 'scroll', { tabId: a.tabId, direction: a.direction ?? 'down', ...(a.ref ? { ref: a.ref } : {}) }))));
-    server.registerTool('browser_screenshot', { description: 'A picture of the page as the person sees it (the visible part).', inputSchema: { tabId: z.number() } }, guard(async (a: { tabId: number }) => {
+    server.registerTool('browser_screenshot', { description: 'A picture of the page as the person sees it (the visible part). With `question` (what to read from it: the numbers, a rating, a price) a vision model answers in text — use that when your own model cannot see images or the page text had nothing.', inputSchema: { tabId: z.number(), question: z.string().optional() } }, guard(async (a: { tabId: number; question?: string }) => {
       const d = (await this.run(ctx, 'screenshot', { tabId: a.tabId })) as { image?: string };
       if (!d.image) throw new Error('The browser did not return a picture.');
+      if (a.question?.trim()) {
+        const read = await readPicture(d.image, `${a.question.trim().slice(0, 500)}\nAnswer only from what is visible; if it is not visible, say so.`);
+        if (read) return text(`Read from a screenshot (vision model):\n${UNTRUSTED}${read.slice(0, 8000)}`);
+      }
       return { content: [{ type: 'image' as const, data: d.image, mimeType: 'image/jpeg' }] };
     }));
     server.registerTool('browser_close', { description: 'Close a tab you opened when you are done with it.', inputSchema: { tabId: z.number() } }, guard(async (a: { tabId: number }) => {

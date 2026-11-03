@@ -3,6 +3,7 @@
 // server says this task may use; a frame with a Stop button shows in every tab the agent works in.
 import { actInPage, agentFrame, readPage, snapshotPage } from './agentpage.js';
 import { deniedReason, webUrl } from './policy.js';
+import { FETCHED_NOTE, FETCHED_THIN_NOTE, isScriptBlocked, isScriptRefusal, readableFromHtml } from './htmltext.js';
 import { getConfig } from './store.js';
 
 const KEY = 'agentState';
@@ -112,6 +113,13 @@ const inTab = async (tabId, func, args = []) => {
   return r?.result;
 };
 
+/** A picture of a tab of the agent's own window (the visible part), as a JPEG in base64. */
+async function shotOf(tab) {
+  await chrome.tabs.update(tab.id, { active: true }); // the active tab OF ITS OWN window: the person's window is not touched
+  const png = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  return jpeg(png);
+}
+
 /** Downscale a screenshot to at most 1280 px wide and encode it as JPEG (what goes back to the model). */
 async function jpeg(dataUrl) {
   const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
@@ -131,6 +139,7 @@ async function act(kind, args) {
   const need = await gate(tab, args, 'interact');
   if (need) return { ok: false, needsGrant: need.needsGrant, needsUrl: need.needsUrl, level: 'interact', error: 'clicking and typing on this site is not allowed yet', data: { tabId: tab.id } };
   frame(tab.id);
+  if (isScriptBlocked(tab.url)) return { ok: false, error: 'Chrome does not let an extension run scripts on this page (its own pages, the Web Store): you can only READ it (browser_read / browser_snapshot give the text of its source), not click or type.', data: { tabId: tab.id } };
   let r = await inTab(tab.id, actInPage, [{ kind, ...args }]);
   if (r?.goesTo) {
     // a link / form that leaves this site: the destination is judged BEFORE the click, like an address given to `navigate`
@@ -188,12 +197,41 @@ const COMMANDS = {
     return COMMANDS.snapshot({ ...args, tabId: done.id });
   },
 
+  /** The page's source read like any client does it, for the pages the browser forbids scripting. */
+  async fetchedPage(tab, args) {
+    const res = await fetch(tab.url, { credentials: 'omit', redirect: 'follow', headers: { accept: 'text/html,*/*' } }).catch((e) => {
+      throw new Error(`Could not fetch the page: ${e.message}`);
+    });
+    if (!res.ok) throw new Error(`The site answered ${res.status} when the page source was fetched.`);
+    const html = (await res.text()).slice(0, 2_000_000);
+    const page = readableFromHtml(html, tab.url, args.offset ?? 0, 12000);
+    const { thin, ...rest } = page;
+    const data = { tabId: tab.id, ...rest, refs: 0, note: FETCHED_NOTE };
+    // the third stage: the source gave nothing — a picture of the page (the server reads it with a vision model, or the agent looks at it)
+    if (thin && !(args.offset > 0)) {
+      try {
+        data.image = await shotOf(tab);
+        data.note += FETCHED_THIN_NOTE;
+      } catch (e) {
+        data.note += ` A picture could not be taken either (${String(e?.message ?? e).slice(0, 120)}).`;
+      }
+    }
+    return { ok: true, data };
+  },
+
   async snapshot(args) {
     const tab = await usableTab(args);
     const need = await gate(tab, args);
     if (need) return { ok: false, needsGrant: need.needsGrant, needsUrl: need.needsUrl, data: { tabId: tab.id }, error: 'the tab is on a site that is not granted' };
+    if (isScriptBlocked(tab.url)) return COMMANDS.fetchedPage(tab, args);
     frame(tab.id);
-    const r = await inTab(tab.id, snapshotPage);
+    let r;
+    try {
+      r = await inTab(tab.id, snapshotPage);
+    } catch (e) {
+      if (isScriptRefusal(e)) return COMMANDS.fetchedPage(tab, args);
+      throw e;
+    }
     return { ok: true, data: { tabId: tab.id, ...r } };
   },
 
@@ -201,8 +239,15 @@ const COMMANDS = {
     const tab = await usableTab(args);
     const need = await gate(tab, args);
     if (need) return { ok: false, needsGrant: need.needsGrant, needsUrl: need.needsUrl, data: { tabId: tab.id }, error: 'the tab is on a site that is not granted' };
+    if (isScriptBlocked(tab.url)) return COMMANDS.fetchedPage(tab, args);
     frame(tab.id);
-    const r = await inTab(tab.id, readPage, [args.offset ?? 0, 12000]);
+    let r;
+    try {
+      r = await inTab(tab.id, readPage, [args.offset ?? 0, 12000]);
+    } catch (e) {
+      if (isScriptRefusal(e)) return COMMANDS.fetchedPage(tab, args);
+      throw e;
+    }
     return { ok: true, data: { tabId: tab.id, ...r } };
   },
 
@@ -211,9 +256,7 @@ const COMMANDS = {
     const need = await gate(tab, args);
     if (need) return { ok: false, needsGrant: need.needsGrant, needsUrl: need.needsUrl, data: { tabId: tab.id }, error: 'the tab is on a site that is not granted' };
     frame(tab.id);
-    await chrome.tabs.update(tab.id, { active: true }); // the active tab OF ITS OWN window: the person's window is not touched
-    const png = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    return { ok: true, data: { tabId: tab.id, image: await jpeg(png) } };
+    return { ok: true, data: { tabId: tab.id, image: await shotOf(tab) } };
   },
 
   // ---- acting on a page (interact level) ----

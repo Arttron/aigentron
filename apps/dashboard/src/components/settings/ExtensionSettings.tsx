@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
+import { usePolling } from '@/lib/use-polling';
 import { connectExtension, disconnectExtension, extensionDownloadUrl, extensionOutdated, ping, useExtension } from '@/lib/extension-bridge';
 import { Badge, Button, Card, ErrorText, Muted, Row, SectionTitle } from '@/components/ui';
 import styles from '@/components/ExtensionBanner.module.css';
@@ -12,6 +13,8 @@ export function ExtensionSettings() {
 
   const load = () => void api.extensionInfo().then(setInfo).catch((e: Error) => setError(e.message));
   useEffect(load, []);
+  // the list of browsers (version, access to sites) is told to the server by the extensions themselves: keep it fresh while this tab is open
+  usePolling(load, 8000);
   // a browser that just connected (or was disconnected from its own popup) shows up in the list
   useEffect(() => {
     if (ext.connected) load();

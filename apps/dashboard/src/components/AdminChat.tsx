@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { SERVER_EVENT, type TaskStatus } from '@lds/shared';
+import { SERVER_EVENT, type PendingFollowUp, type TaskStatus } from '@lds/shared';
 import { api } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
@@ -34,7 +34,6 @@ interface Msg {
   from: 'me' | 'admin';
   text: string;
 }
-
 
 function readId(): string | null {
   try {
@@ -95,7 +94,9 @@ export function AdminChat() {
     setTab(null);
     writeEdgeTab(null);
   };
-  const { items: msgs } = useTaskStream<Msg>(taskId, toMsgEntry, { onReconnect: () => setReconnects((n) => n + 1) });
+  const { items: msgs } = useTaskStream<Msg>(taskId, toMsgEntry, {
+    onReconnect: () => setReconnects((n) => n + 1),
+  });
   // What I just sent is shown at once, marked "sending…", until the server echoes it as a message of the chat.
   const [pending, setPending] = useState<PendingMessage[]>([]);
   const echoed = msgs.filter((m) => m.from === 'me').map((m) => m.text);
@@ -105,6 +106,25 @@ export function AdminChat() {
       return next.length === p.length ? p : next;
     });
   }, [msgs]);
+  // Messages that wait on the server (sent before a page refresh, or from a channel): they are not echoed yet, so the chat shows them as queued.
+  const [queued, setQueued] = useState<PendingFollowUp[]>([]);
+  useEffect(() => {
+    if (!taskId) return;
+    let live = true;
+    api
+      .listPendingFollowUps(taskId)
+      .then((q) => live && setQueued(q))
+      .catch(() => undefined);
+    const socket = getSocket();
+    const onQueue = (e: { taskId: string; queue: PendingFollowUp[] }) => {
+      if (e.taskId === taskId) setQueued(e.queue);
+    };
+    socket.on(SERVER_EVENT.followUpQueue, onQueue);
+    return () => {
+      live = false;
+      socket.off(SERVER_EVENT.followUpQueue, onQueue);
+    };
+  }, [taskId]);
   const [reconnects, setReconnects] = useState(0);
   const [status, setStatus] = useState<TaskStatus | null>(null);
   const [text, setText] = useState('');
@@ -373,21 +393,40 @@ export function AdminChat() {
             )}
             {msgs.map((m) => (
               <div key={m.id} className={m.from === 'me' ? styles.me : styles.admin}>
-                {m.from === 'me' ? <UserText text={m.text} /> : <MediaTaskContext.Provider value={taskId ?? undefined}><Markdown text={m.text} /></MediaTaskContext.Provider>}
+                {m.from === 'me' ? (
+                  <UserText text={m.text} />
+                ) : (
+                  <MediaTaskContext.Provider value={taskId ?? undefined}>
+                    <Markdown text={m.text} />
+                  </MediaTaskContext.Provider>
+                )}
                 {m.id === lastAdmin?.id && autoSpeak && <SpeakButton text={m.text} abs />}
                 <div className={styles.copyRow}>
-                  <CopyButton text={m.text} label={m.from === 'me' ? 'Copy your message' : 'Copy message'} />
+                  <CopyButton
+                    text={m.text}
+                    label={m.from === 'me' ? 'Copy your message' : 'Copy message'}
+                  />
                 </div>
               </div>
             ))}
-            {pending.map((p) => (
-              <div key={p.id} className={`${styles.me} ${styles.sending}`} aria-busy="true">
-                {p.text}
+            {queued.map((q) => (
+              <div key={`queued-${q.id}`} className={`${styles.me} ${styles.sending}`}>
+                {q.text}
                 <div className={styles.copyRow}>
-                  <span className={styles.sendingNote}>sending…</span>
+                  <span className={styles.sendingNote}>queued — sent when the run ends</span>
                 </div>
               </div>
             ))}
+            {pending
+              .filter((p) => !queued.some((q) => q.text.trim() === p.text.trim()))
+              .map((p) => (
+                <div key={p.id} className={`${styles.me} ${styles.sending}`} aria-busy="true">
+                  {p.text}
+                  <div className={styles.copyRow}>
+                    <span className={styles.sendingNote}>sending…</span>
+                  </div>
+                </div>
+              ))}
             {working && <div className={styles.typing}>Admin is typing…</div>}
             {waitingApproval && (
               <div className={styles.typing}>
@@ -421,7 +460,8 @@ export function AdminChat() {
                 />
                 {pasteNotice}
                 <div className={styles.composer}>
-                  <textarea dir="auto"
+                  <textarea
+                    dir="auto"
                     className={styles.input}
                     rows={2}
                     value={text}

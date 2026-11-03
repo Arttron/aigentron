@@ -331,7 +331,12 @@ export function startInbox() {
     }
   });
   watchTabs();
-  chrome.permissions.onAdded.addListener(() => void render({ announce: false }));
-  chrome.permissions.onRemoved.addListener(() => void render({ announce: false }));
+  // a change of what the browser lets the extension do is told to the server at once (its Add-ons page shows who has no access to sites)
+  const permissionsChanged = () => {
+    void render({ announce: false });
+    void apiFetch('/api/extension/me').catch(() => undefined);
+  };
+  chrome.permissions.onAdded.addListener(permissionsChanged);
+  chrome.permissions.onRemoved.addListener(permissionsChanged);
   void ensure();
 }

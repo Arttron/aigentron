@@ -1,10 +1,13 @@
-Aigentron v0.1.110
+Aigentron v0.1.111
 
-For people who are not programmers: agents can now actually use your browser, once you allow it with one button.
+For people who are not programmers: agents read more pages in your browser, and your queued messages no longer disappear.
 
 Fixed
-- Agents in your browser (the extension) failed on real sites with "This tab is not showing a web page", and the open tabs showed no title or address. The cause was that Chrome had not given the extension access to websites, and nothing asked for it in the right words. Now the agent is told plainly what is missing before you are asked to approve a site, the extension's icon shows a notice and a button "Allow agents to use my browser" (Chrome asks once), and Add-ons → Extension warns which browsers still have no access. Agents still work only in their own window, only on sites you approve for each task, ask you before every form is sent, never fill passwords or cards, and never touch banks, mail or the dashboard.
+- Messages you send while an agent is still working stay visible in the chat after you refresh the page (in task chats and in the admin chat), marked as queued.
+- When you allow agents to use your browser, Add-ons → Extension notices it at once instead of showing the old warning.
 
-To use it: update the extension (its icon → "Update the extension"), press "Allow agents to use my browser", and ask the agent again.
+Improved
+- Pages Chrome refuses to let extensions touch (the Chrome Web Store, chrome:// pages) are now read from their source: title, descriptions, structured data and visible text, with a note about what may be missing.
+- If the source is almost empty (a page drawn by scripts), the extension takes a screenshot as a last step: the vision model turns it into text, or the agent gets the image. The browser screenshot tool can also take a question about the picture.
 
-Update note: no database changes.
+Update note: update the extension (its icon → "Update the extension"). No database changes.
