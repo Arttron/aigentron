@@ -157,6 +157,17 @@ export function oomVictim(runs: readonly { taskId: string; startedAt: number }[]
   return [...runs].sort((a, b) => b.startedAt - a.startedAt)[0]!.taskId;
 }
 
+/**
+ * How many chat turns may run at once. A turn is short and mostly waits for the model, but each one is still an agent process (a few hundred MB):
+ * about one per CPU, one per 1.5 GB beyond the 1 GB the system needs, never fewer than 2 (the admin must not wait behind a single other chat), at most 6.
+ */
+export function recommendChatSlots(cpuCount: number, totalMemMb: number): number {
+  const byMem = Math.floor((totalMemMb / 1024 - 1) / 1.5);
+  return Math.max(2, Math.min(6, cpuCount, byMem));
+}
+
+export const machineChatSlots = (): number => recommendChatSlots(Math.max(1, cpus().length), totalmem() / 1_048_576);
+
 export const machineConcurrency = (): number => recommendConcurrency(Math.max(1, cpus().length), totalmem() / 1_048_576);
 
 /**

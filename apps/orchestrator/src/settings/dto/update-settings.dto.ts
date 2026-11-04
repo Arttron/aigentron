@@ -26,6 +26,12 @@ export class UpdateSettingsDto {
   concurrency?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(12)
+  chatConcurrency?: number;
+
+  @IsOptional()
   @IsBoolean()
   debugMode?: boolean;
 

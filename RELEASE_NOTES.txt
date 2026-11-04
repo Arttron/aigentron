@@ -1,8 +1,11 @@
-Aigentron v0.1.112
+Aigentron v0.1.113
 
-For people who are not programmers: a click on the browser extension's notification now always takes you somewhere useful.
+For people who are not programmers: chats can run in more parallel slots, and a question card no longer sticks out.
+
+New
+- Settings → Task queue → "Chat slots": how many chat turns and questions run at once, beside the long tasks. Automatic by default (about one per CPU, from 2 to 6), changes apply at once. A chat turn never waits for the processor, only for free memory.
 
 Fixed
-- Clicking a notification from the extension sometimes did nothing (when the request had already been answered, or the extension had just woken up). Now it always opens the dashboard: the task if it is known, the main page if not, and it switches to a tab that is already open instead of opening another.
+- A long answer option in the question card (the floating window with approvals and questions) no longer sticks out of the card or makes the window scroll sideways; it wraps inside.
 
-Update note: update the extension (its icon → "Update the extension"). No database changes.
+Update note: the database gets one new column (added automatically on start).

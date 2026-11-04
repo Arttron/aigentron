@@ -34,6 +34,9 @@ model AppSettings {
   // service.ts), so a change here takes effect without a restart.
   concurrency Int @default(2)
 
+  // Slots of the chat lane (chat agents' turns and questions), which runs beside the task cap. 0 = automatic, chosen for this machine.
+  chatConcurrency Int @default(0)
+
   // when true the dashboard shows verbose 'assistant' transcript lines
   debugMode Boolean @default(false)
 

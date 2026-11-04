@@ -1,4 +1,6 @@
 .card {
+  min-width: 0;
+  box-sizing: border-box;
   border: none;
   border-radius: var(--radius);
   padding: 14px;
@@ -19,6 +21,7 @@
   border-radius: var(--radius-sm);
 }
 .text {
+  overflow-wrap: anywhere;
   font-weight: 600;
   margin-bottom: 10px;
   white-space: pre-wrap;
@@ -28,6 +31,13 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
+}
+/* a long answer option wraps inside the card instead of sticking out of it */
+.options > button {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 .own {
   display: flex;

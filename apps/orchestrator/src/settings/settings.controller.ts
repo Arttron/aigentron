@@ -9,7 +9,7 @@ import { SettingsService, parseCompression, type SettingsPatch } from './setting
 import { normalizeCompression, parseEscalationStep, validRulePattern } from '@lds/shared';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppConfigService } from '../config/app-config.service';
-import { machineConcurrency } from '../queue/capacity-gate';
+import { machineChatSlots, machineConcurrency } from '../queue/capacity-gate';
 
 class VerifyWizardPasswordDto {
   @IsString()
@@ -24,6 +24,8 @@ function serialize(s: SettingsRow) {
   return {
     /** what the queue really uses now (a stored 0 = automatic, resolved for this machine) */
     concurrencyEffective: s.concurrency <= 0 ? machineConcurrency() : s.concurrency,
+    chatConcurrency: s.chatConcurrency,
+    chatConcurrencyEffective: s.chatConcurrency <= 0 ? machineChatSlots() : s.chatConcurrency,
     approvalTimeoutSeconds: s.approvalTimeoutSeconds,
     verifyCommands: s.verifyCommands ?? '',
     verifyMaxAttempts: s.verifyMaxAttempts,
@@ -54,6 +56,7 @@ function toPatch(dto: UpdateSettingsDto): SettingsPatch {
   if (dto.verifyCommands !== undefined) patch.verifyCommands = dto.verifyCommands || null;
   if (dto.verifyMaxAttempts !== undefined) patch.verifyMaxAttempts = dto.verifyMaxAttempts;
   if (dto.concurrency !== undefined) patch.concurrency = dto.concurrency;
+  if (dto.chatConcurrency !== undefined) patch.chatConcurrency = dto.chatConcurrency;
   if (dto.debugMode !== undefined) patch.debugMode = dto.debugMode;
   if (dto.askModel !== undefined) {
     const v = dto.askModel.trim();

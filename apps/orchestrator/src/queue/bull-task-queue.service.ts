@@ -89,6 +89,10 @@ export class BullTaskQueue extends TaskQueue implements OnModuleInit, OnModuleDe
     return false;
   }
 
+  setChatConcurrency(concurrency: number): void {
+    if (this.chatWorker) this.chatWorker.concurrency = Math.max(1, concurrency);
+  }
+
   setConcurrency(concurrency: number): void {
     // BullMQ's Worker applies a reassigned `.concurrency` to future dispatch
     // without needing a restart. No-op if the worker hasn't started yet —

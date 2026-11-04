@@ -24,6 +24,7 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
   private concurrency = 1;
   private inFlight = 0;
   private chatInFlight = 0;
+  private chatConcurrency = CHAT_LANE_CONCURRENCY;
   private stopped = false;
 
   constructor(private readonly prisma: PrismaService) {
@@ -74,6 +75,11 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
     return (await this.prisma.queueJob.count({ where: { taskId, ...(opts.includeActive ? {} : { claimedAt: null }) } })) > 0;
   }
 
+  setChatConcurrency(concurrency: number): void {
+    this.chatConcurrency = Math.max(1, concurrency);
+    setImmediate(() => void this.tick());
+  }
+
   setConcurrency(concurrency: number): void {
     this.concurrency = Math.max(1, concurrency);
     // A slot may now be free (raised) — don't wait for the next poll tick.
@@ -100,7 +106,7 @@ export class EmbeddedTaskQueue extends TaskQueue implements OnModuleDestroy {
           if (!this.stopped) setImmediate(() => void this.tick());
         });
       }
-      while (this.chatInFlight < CHAT_LANE_CONCURRENCY) {
+      while (this.chatInFlight < this.chatConcurrency) {
         const job = await this.claimNext(true);
         if (!job) break;
         this.chatInFlight++;

@@ -13,7 +13,7 @@ const SECTION_FIELDS: Record<SettingsSection, readonly (keyof SettingsUpdate)[]>
   escalations: ['notifyChannelId', 'notifyChatId'],
   instructions: ['agentInstructions'],
   verify: ['verifyCommands', 'verifyMaxAttempts'],
-  queue: ['concurrency'],
+  queue: ['concurrency', 'chatConcurrency'],
   approvals: ['approvalTimeoutSeconds'],
   display: ['debugMode'],
 };
@@ -57,6 +57,7 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
           verifyCommands: data.verifyCommands,
           verifyMaxAttempts: data.verifyMaxAttempts,
           concurrency: data.concurrency,
+          chatConcurrency: data.chatConcurrency ?? 0,
           debugMode: data.debugMode,
           agentInstructions: data.agentInstructions,
           notifyChannelId: data.notifyChannelId ?? '',
@@ -249,6 +250,29 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
               onChange={(e) => set('concurrency', Number(e.target.value))}
             />
           </Field>
+          <Field label="Chat slots — chat turns and questions that run beside the tasks (they never wait behind long work)">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <input
+                type="checkbox"
+                checked={(form.chatConcurrency ?? 0) === 0}
+                onChange={(e) => set('chatConcurrency', e.target.checked ? 0 : Math.max(1, s?.chatConcurrencyEffective ?? 2))}
+                style={{ width: 'auto', margin: 0 }}
+              />{' '}
+              Choose automatically for this machine{(form.chatConcurrency ?? 0) === 0 && s?.chatConcurrencyEffective ? ` (now ${s?.chatConcurrencyEffective})` : ''}
+            </label>
+            <input
+              className={styles.narrow}
+              type="number"
+              min={1}
+              max={12}
+              disabled={(form.chatConcurrency ?? 0) === 0}
+              value={(form.chatConcurrency ?? 0) === 0 ? (s?.chatConcurrencyEffective ?? 2) : (form.chatConcurrency ?? 2)}
+              onChange={(e) => set('chatConcurrency', Number(e.target.value))}
+            />
+          </Field>
+          <Muted className={styles.note}>
+            Chat slots: a chat turn does not wait for the CPU, only for free memory. Automatic = about one per CPU, 2 to 6.
+          </Muted>
           <Muted className={styles.note}>
             Takes effect live, within ~10s — no restart needed. In shared-workspace mode (one
             worktree for all tasks) this is effectively capped at 1 regardless of this value. Automatic = one less than the CPUs on a small server (2 vCPU → 1), memory permitting.

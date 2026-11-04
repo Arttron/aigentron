@@ -481,6 +481,9 @@ export interface Settings {
   concurrency: number;
   /** what the queue really uses now (0 = automatic is resolved for this machine) */
   concurrencyEffective?: number;
+  /** slots of the chat lane (0 = automatic) and what is used now */
+  chatConcurrency?: number;
+  chatConcurrencyEffective?: number;
   debugMode: boolean;
   /** Text compression / filtering (Settings → Work → Compression). */
   compression?: CompressionConfig;
@@ -506,6 +509,7 @@ export type SettingsUpdate = Partial<{
   verifyCommands: string;
   verifyMaxAttempts: number;
   concurrency: number;
+  chatConcurrency: number;
   debugMode: boolean;
   compression: CompressionConfig;
   askModel: string;

@@ -50,6 +50,7 @@ export class TaskWorkerService implements OnModuleInit {
   /** Jobs currently waiting for a project lock (each one lends its slot to the rest). */
   private waiting = 0;
   private lastConcurrency = 0;
+  private lastChatConcurrency = 0;
   /** the last time a start was held back by the machine's load (for the admin's metrics) */
   /** Run starts go through one at a time, spread out (a burst of held runs must not all start in the same second). */
   private readonly starts = new StartThrottle();
@@ -83,6 +84,8 @@ export class TaskWorkerService implements OnModuleInit {
     // needed here for "not set yet".
     this.lastConcurrency = await this.settings.concurrency();
     await this.queue.startWorker((data) => this.process(data), this.lastConcurrency);
+    this.lastChatConcurrency = await this.settings.chatConcurrency();
+    this.queue.setChatConcurrency(this.lastChatConcurrency);
     setInterval(() => void this.syncConcurrency(), CONCURRENCY_SYNC_MS);
     // Tasks left `queued` by a previous process whose job is gone would wait forever: run them again, or stall them (resumable) — at boot
     // (what is claimed belongs to a dead process) and then every few minutes for jobs that vanished while the server kept running.
@@ -120,6 +123,12 @@ export class TaskWorkerService implements OnModuleInit {
   /** Poll Settings for a changed concurrency and push it into the running
    *  worker live — see TaskQueue.setConcurrency's doc for why this is a poll. */
   private async syncConcurrency(): Promise<void> {
+    const chat = await this.settings.chatConcurrency().catch(() => this.lastChatConcurrency);
+    if (chat !== this.lastChatConcurrency) {
+      this.lastChatConcurrency = chat;
+      this.queue.setChatConcurrency(chat);
+      this.logger.log(`Chat lane slots updated to ${chat}`);
+    }
     const n = await this.settings.concurrency().catch(() => this.lastConcurrency);
     if (n === this.lastConcurrency) return;
     this.lastConcurrency = n;
@@ -176,6 +185,17 @@ export class TaskWorkerService implements OnModuleInit {
       const held = await (this.config.agentStartGapMs > 0 ? this.starts.enter({ ...gate, gapMs: this.config.agentStartGapMs }) : waitForCapacity(gate)).finally(() => clearHold(taskId));
       if (held.waitedMs > 1000) this.logger.log(`Task ${taskId} waited ${Math.round(held.waitedMs / 1000)} s for the machine${held.forced ? ' (starts anyway: waited the maximum)' : ''}`);
       this.capacityHeld = { at: Date.now(), waitedMs: held.waitedMs, forced: held.forced };
+    }
+    // A chat turn never waits for the CPU, but it does not start into a memory shortage either (that gets the whole service killed).
+    if (chat) {
+      await waitForCapacity({
+        limits: { maxLoadPerCpu: 0, maxStealPct: 0, minFreeMemMb: this.config.agentMinFreeMemMb },
+        maxMemoryWaitMs: 5 * 60_000,
+        onWait: (why: string) => {
+          this.logger.warn(`Chat turn ${taskId} waits to start: ${why}`);
+          setHold(taskId, `waiting to start: ${why}`);
+        },
+      }).finally(() => clearHold(taskId));
     }
     const release = await this.lockProject(project, taskId);
     try {

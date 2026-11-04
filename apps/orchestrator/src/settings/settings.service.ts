@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { DEFAULT_PROJECT_ID, normalizeSubdir } from '../projects/project-core';
-import { machineConcurrency } from '../queue/capacity-gate';
+import { machineChatSlots, machineConcurrency } from '../queue/capacity-gate';
 import { normalizeCompression, type CompressionConfig } from '@lds/shared';
 
 const SINGLETON_ID = 'singleton';
@@ -16,6 +16,7 @@ export interface SettingsPatch {
   verifyCommands?: string | null;
   verifyMaxAttempts?: number;
   concurrency?: number;
+  chatConcurrency?: number;
   debugMode?: boolean;
   compression?: string | null;
   askModel?: string | null;
@@ -151,6 +152,12 @@ export class SettingsService {
     const stored = (await this.load()).concurrency;
     // 0 = automatic: what this machine suits (one less than the CPUs on a small box, memory permitting)
     return stored <= 0 ? machineConcurrency() : Math.max(1, stored);
+  }
+
+  /** Slots of the chat lane (chat agents, questions) — polled live like `concurrency`. 0 stored = automatic. */
+  async chatConcurrency(): Promise<number> {
+    const stored = (await this.load()).chatConcurrency;
+    return stored <= 0 ? machineChatSlots() : Math.max(1, stored);
   }
 
   /** Whether the number of parallel runs is chosen by the server (stored as 0). */

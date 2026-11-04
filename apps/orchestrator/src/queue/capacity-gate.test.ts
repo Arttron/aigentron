@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StartThrottle, autoNodeHeapMb, oomVictim, parseMeminfo, capacityVerdict, parseCpuStat, recommendConcurrency, stealBetween, waitForCapacity, type CapacitySample } from './capacity-gate';
+import { StartThrottle, autoNodeHeapMb, oomVictim, parseMeminfo, capacityVerdict, parseCpuStat, recommendChatSlots, recommendConcurrency, stealBetween, waitForCapacity, type CapacitySample } from './capacity-gate';
 
 const s = (over: Partial<CapacitySample> = {}): CapacitySample => ({ loadPerCpu: 0.5, load1: 1, cpus: 2, freeMemMb: 2000, stealPct: 0, ...over });
 
@@ -142,5 +142,15 @@ describe('memory', () => {
     t = 0;
     const r2 = await waitForCapacity({ limits: { maxLoadPerCpu: 1, minFreeMemMb: 0 }, sample: () => s({ loadPerCpu: 5 }), sleep: async (ms) => void (t += ms), now: () => t, pollMs: 60_000, maxWaitMs: 10 * 60_000, maxMemoryWaitMs: 30 * 60_000 });
     expect(r2).toEqual({ waitedMs: 10 * 60_000, forced: true });
+  });
+});
+
+describe('recommendChatSlots', () => {
+  it('is at least 2, about one per CPU, memory-bound, at most 6', () => {
+    expect(recommendChatSlots(1, 1024)).toBe(2);
+    expect(recommendChatSlots(2, 4096)).toBe(2);
+    expect(recommendChatSlots(4, 8192)).toBe(4);
+    expect(recommendChatSlots(16, 65536)).toBe(6);
+    expect(recommendChatSlots(8, 3072)).toBe(2); // memory: (3 − 1) / 1.5 = 1 → floor of 2
   });
 });

@@ -464,3 +464,9 @@ A message sent while the agent was running was shown in the conversation only fr
 
 ## Clicking an extension notification did nothing (fixed, cause partly inferred)
 The click handler opened the task only if the request was still in the extension's memory (a woken service worker, or a request already answered, left nothing to open) and failed silently otherwise. Now the click always opens the dashboard: the task if known, the main page if not, focusing an already open tab; errors are logged. If it still does nothing for a notification that is not an approval/question, the notification text is needed to find the cause.
+
+## A long answer option stuck out of the question card (fixed)
+In the floating approvals/questions dock a long option button (`white-space: nowrap`) was wider than the card: it overflowed on the right and the list scrolled sideways, so the card's left padding looked gone. Now the options wrap inside the card, long words break, and the dock list never scrolls horizontally.
+
+## Chat lane slots were fixed at 2 and chats ignored memory (improved)
+The reserved lane for chat turns and questions had a hard-coded 2 slots and never looked at the machine. Now `Settings → Task queue → Chat slots` (`chatConcurrency`, 0 = automatic: about one per CPU, 2–6, memory permitting; applied live) and a chat turn waits (up to 5 min) only while free memory is below the limit, never for the CPU load.
