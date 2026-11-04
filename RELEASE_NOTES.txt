@@ -1,16 +1,8 @@
-Aigentron v0.1.114
+Aigentron v0.1.115
 
-For people who are not programmers: heavy work (builds, tests, installs) no longer runs side by side and no longer overloads a small server.
-
-New
-- Command pipeline. When an agent needs to install packages, build or run tests, the command goes through one queue on the server instead of running on its own. Only a few run at once (one on a small machine; chosen automatically), each starts only while the machine is not busy, and the agent simply waits for the result. The task page shows why it is waiting ("a heavy command waits for its turn"). Light commands (git, reading files) and servers that keep running are not affected. Cancelling, closing or deleting a task stops its commands at once.
-- Settings → Task queue: "Command pipeline" (on/off and how many run at once) and "Chat slots" (how many chat turns run beside the long tasks; chats wait only for free memory, never for the processor). Both are automatic by default and apply at once.
+For people who are not programmers: the "Update" button in Settings works again when some tasks are running.
 
 Fixed
-- Built-in tool servers (research, browser, command pipeline) are now created at start; before, a fresh installation had them only after someone opened the MCP page.
-- A long answer option in the question card no longer sticks out of the window.
-- Messages waiting in the queue stay visible in the chat after you refresh the page.
-- Clicking a browser-extension notification always opens the dashboard.
-- The browser extension tells the server at once when you allow agents to use your browser, and reads pages Chrome will not let it touch (the Web Store) from their source, with a screenshot as a last resort.
+- The "Update to …" button in Settings → General did nothing when any task was running or queued. Now it asks for confirmation, tells how many tasks would be interrupted, and starts the update when you agree.
 
-Update note: the database gets three new columns (added automatically on start). Update the extension (its icon → "Update the extension").
+Update note: no database changes.

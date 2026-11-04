@@ -69,16 +69,15 @@ export function UpdateSettings() {
   }, [target, phase, running]);
 
   const apply = async () => {
-    if (!st?.latest) return;
-    const running = st.runningTasks;
-    if (running) return;
-    if (!window.confirm(`Update the server from ${st.current} to ${st.latest}?\n\nThe server restarts for a minute or two — the dashboard and chats are unreachable meanwhile.${running ? `\n\n${running} running or queued task(s) will be interrupted.` : ''}\n\nThe previous version is kept for a rollback.`)) return;
+    if (!st?.latest || running) return; // (`running` = an update is already being installed)
+    const tasks = st.runningTasks;
+    if (!window.confirm(`Update the server from ${st.current} to ${st.latest}?\n\nThe server restarts for a minute or two — the dashboard and chats are unreachable meanwhile.${tasks ? `\n\n${tasks} running or queued task(s) will be interrupted.` : ''}\n\nThe previous version is kept for a rollback.`)) return;
     setBusy(true);
     setErr(null);
     const r = await fetch(`${API_BASE}/update/apply`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ version: st.latest, force: running > 0 }),
+      body: JSON.stringify({ version: st.latest, force: tasks > 0 }),
     }).catch(() => null);
     const j = (await r?.json().catch(() => ({}))) as { message?: string | string[] };
     setBusy(false);
