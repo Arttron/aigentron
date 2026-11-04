@@ -35,7 +35,7 @@ export function validateProviderProposal(p: Partial<ProviderProposal>): string |
 }
 
 /** Settings the admin may change (no secrets, no repo URL, no providers/channels/users). */
-const SETTINGS_KEYS = ['defaultAgent', 'verifyCommands', 'verifyMaxAttempts', 'concurrency', 'chatConcurrency', 'heavySlots', 'commandPipeline', 'approvalTimeoutSeconds', 'agentInstructions', 'repoBranch', 'workspaceSubdir'] as const;
+const SETTINGS_KEYS = ['defaultAgent', 'verifyCommands', 'verifyMaxAttempts', 'concurrency', 'chatConcurrency', 'heavySlots', 'commandPipeline', 'approvalChatDelay', 'approvalChatNobodyAtOnce', 'approvalTimeoutSeconds', 'agentInstructions', 'repoBranch', 'workspaceSubdir'] as const;
 const SUBDIR_RE = /^(?!\/)(?!.*(:|@|\\|(^|\/)\.\.(\/|$)))[^\s]*$/;
 
 /** Why a settings proposal is malformed (null = fine). Agent existence is checked separately (async). */
@@ -47,9 +47,10 @@ export function validateSettingsChanges(ch: Record<string, unknown> | undefined)
     const v = ch[k];
     return v === undefined || (typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi) ? null : `${k} must be an integer between ${lo} and ${hi}.`;
   };
-  const err = int('verifyMaxAttempts', 0, 10) ?? int('concurrency', 0, 16) ?? int('chatConcurrency', 0, 12) ?? int('heavySlots', 0, 8) ?? int('approvalTimeoutSeconds', 30, 3600);
+  const err = int('verifyMaxAttempts', 0, 10) ?? int('concurrency', 0, 16) ?? int('chatConcurrency', 0, 12) ?? int('heavySlots', 0, 8) ?? int('approvalChatDelay', -1, 3600) ?? int('approvalTimeoutSeconds', 30, 3600);
   if (err) return err;
   if (ch.commandPipeline !== undefined && typeof ch.commandPipeline !== 'boolean') return 'commandPipeline must be true or false.';
+  if (ch.approvalChatNobodyAtOnce !== undefined && typeof ch.approvalChatNobodyAtOnce !== 'boolean') return 'approvalChatNobodyAtOnce must be true or false.';
   if (ch.defaultAgent !== undefined && (typeof ch.defaultAgent !== 'string' || !/^[\p{L}\p{N}\p{M}_-]{1,60}$/u.test(ch.defaultAgent))) return 'defaultAgent must be an agent name.';
   if (ch.verifyCommands !== undefined && (typeof ch.verifyCommands !== 'string' || ch.verifyCommands.length > 2000)) return 'verifyCommands must be text up to 2000 characters.';
   if (ch.agentInstructions !== undefined && (typeof ch.agentInstructions !== 'string' || !ch.agentInstructions.trim() || ch.agentInstructions.length > 4000)) return 'agentInstructions must be non-empty text up to 4000 characters.';

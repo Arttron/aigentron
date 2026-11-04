@@ -1,8 +1,13 @@
-Aigentron v0.1.115
+Aigentron v0.1.116
 
-For people who are not programmers: the "Update" button in Settings works again when some tasks are running.
+For people who are not programmers: subtasks can be put in order, you choose when requests reach Telegram, and queued messages no longer disappear.
+
+New
+- Ordered subtasks. A lead agent can now say that a subtask starts only after earlier ones are done ("research, then build, then review"). The waiting subtask shows on its page what it waits for, starts by itself with the earlier results in front of it, and is stopped with a clear reason if an earlier one failed (the lead is then asked what to do). The lead is also told how many tasks the server runs at once, so it knows how far subtasks really run in parallel.
+- Settings → Escalations: you choose when approval requests, questions and "needs input" notices reach the chats such as Telegram — after a pause if you have not answered on the dashboard (default 10 s), at once, or never (a task started from a chat still asks in that chat). A separate switch says whether a dashboard nobody is looking at sends at once; turn it off to always keep the pause.
+- When a task continues, its lead is told which agents joined the team since its last run, so it does not insist that a new agent is missing.
 
 Fixed
-- The "Update to …" button in Settings → General did nothing when any task was running or queued. Now it asks for confirmation, tells how many tasks would be interrupted, and starts the update when you agree.
+- A message you sent while the agent was busy stayed visible only until you refreshed the page; now it also shows while its run is waiting for the server to start ("starting — waiting for the server"), in the task chat and in the admin chat.
 
-Update note: no database changes.
+Update note: the database gets two new columns (added automatically on start).

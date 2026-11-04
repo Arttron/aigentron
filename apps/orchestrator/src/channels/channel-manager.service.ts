@@ -28,6 +28,7 @@ import { SecretLinksService, secretLabel } from '../approvals/secret-links.servi
 import { ChannelGateway, type MessageRef } from './channel-gateway.service';
 import { ChatDestinationService } from './chat-destination.service';
 import { ProjectsService } from '../projects/projects.service';
+import { DEFAULT_CHAT_POLICY, chatWait, type ChatPolicy } from './chat-policy';
 import { approvalOutcome, compactProcessLine, questionButtons, questionOutcome, questionText, reactionIcon, resultMessage, withQuote } from './chat-format';
 import { chatTargets, type ChatRef } from './project-chats';
 import { resolveTarget, spokenToTask, type RoutingFacts } from './inbound-routing';
@@ -45,7 +46,7 @@ interface ApprovalMsg {
   toolInput?: unknown;
 }
 
-/** Grace period before an unattended dashboard approval is pushed to channels. */
+/** The shortest grace the periodic sweep looks at (the setting may make it longer, never shorter than a chat's own first post). */
 const ESCALATE_DELAY_MS = 10_000;
 /** How often pending approvals/questions that reached no chat are looked for (the timers above live in memory only). */
 const SWEEP_MS = 30_000;
@@ -630,15 +631,27 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
       if (await still()) await send();
     };
     const failed = (err: unknown) => this.logger.warn(`escalation to the chats failed: ${(err as Error).message}`);
-    if (!this.presence.anyoneFocused()) {
-      void run().catch(failed);
-      return;
+    void this.chatPolicy().then((policy) => {
+      const wait = chatWait(policy, this.presence.anyoneFocused());
+      if (wait === null) return; // never: only the chat a task came from is asked
+      if (wait === 0) return void run().catch(failed);
+      const timer = setTimeout(() => {
+        this.escalationTimers.delete(timer);
+        void run().catch(failed);
+      }, wait);
+      this.escalationTimers.add(timer);
+    }).catch(failed);
+  }
+
+  /** When a request that waits for a person reaches the chats (Settings → Escalations). Defaults when the settings cannot be read. */
+  private async chatPolicy(): Promise<ChatPolicy> {
+    let row: { approvalChatDelay: number; approvalChatNobodyAtOnce: boolean } | null = null;
+    try {
+      row = await this.prisma.appSettings.findUnique({ where: { id: 'singleton' }, select: { approvalChatDelay: true, approvalChatNobodyAtOnce: true } });
+    } catch {
+      row = null; // unreadable: the defaults
     }
-    const timer = setTimeout(() => {
-      this.escalationTimers.delete(timer);
-      void run().catch(failed);
-    }, ESCALATE_DELAY_MS);
-    this.escalationTimers.add(timer);
+    return { delaySec: row?.approvalChatDelay ?? DEFAULT_CHAT_POLICY.delaySec, nobodyAtOnce: row?.approvalChatNobodyAtOnce ?? DEFAULT_CHAT_POLICY.nobodyAtOnce };
   }
 
   /** A request nobody answered (the sweep, or the timer of a restarted process): to the chats if it is still pending. */
@@ -700,24 +713,27 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     if (this.sweeping || !this.gateway.adapters.size) return;
     this.sweeping = true;
     try {
+      const policy = await this.chatPolicy();
       const since = new Date(Date.now() - ESCALATE_DELAY_MS);
+      // a request with no chat of its own waits as long as the setting says (never: it is not pushed to the chats at all)
+      const waitedEnough = (createdAt: Date): boolean => policy.delaySec >= 0 && Date.now() - createdAt.getTime() >= policy.delaySec * 1000;
       const approvals = await this.prisma.approvalRequest.findMany({
         where: { status: 'pending', createdAt: { lt: since } },
-        select: { id: true, taskId: true, summary: true, reason: true, toolName: true, toolInput: true },
+        select: { id: true, taskId: true, summary: true, reason: true, toolName: true, toolInput: true, createdAt: true },
         take: 20,
       });
       for (const a of approvals) {
         if (await this.anyMessageFor('approval', a.id)) continue;
         const dest = await this.dest.destForTask(a.taskId);
         if (dest) await this.postApproval(dest.channelId, dest.chatId, a);
-        else await this.escalateIfUnattended(a);
+        else if (waitedEnough(a.createdAt)) await this.escalateIfUnattended(a);
       }
       const questions = (await this.questions.list('pending')).filter((q) => new Date(q.createdAt) < since);
       for (const q of questions) {
         if (await this.anyMessageFor('question', q.id)) continue;
         const dest = await this.dest.destForTask(q.taskId);
         if (dest) await this.postQuestion(dest.channelId, dest.chatId, q);
-        else await this.escalateQuestion(q);
+        else if (waitedEnough(new Date(q.createdAt))) await this.escalateQuestion(q);
       }
     } finally {
       this.sweeping = false;

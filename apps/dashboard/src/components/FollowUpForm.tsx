@@ -93,10 +93,12 @@ export function FollowUpForm({
   const camRef = useRef<HTMLInputElement>(null);
   const [camera, setCamera] = useState(false);
 
-  const [queue, setQueue] = useState<PendingFollowUp[]>([]);
-  useEffect(() => {
-    reportQueue?.(queue);
-  }, [queue]); // eslint-disable-line react-hooks/exhaustive-deps
+  // `queue` = what can still be edited or removed; a message whose run is already waiting to start (`starting`) is only reported to the page, which shows it in the conversation
+  const [queue, setQueueOnly] = useState<PendingFollowUp[]>([]);
+  const setQueue = (all: PendingFollowUp[]) => {
+    setQueueOnly(all.filter((m) => !m.starting));
+    reportQueue?.(all);
+  };
   // Id of the queued message currently loaded into the composer for editing.
   const [editingId, setEditingId] = useState<string | null>(null);
 

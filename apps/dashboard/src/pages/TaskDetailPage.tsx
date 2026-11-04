@@ -1,4 +1,5 @@
 import { StartHoldNotice } from '@/components/StartHoldNotice';
+import { WaitingOnNotice } from '@/components/WaitingOnNotice';
 import { usePolling } from '@/lib/use-polling';
 import { useDetailsDismiss } from '@/lib/use-details-dismiss';
 import { ApprovalModePicker } from '@/components/ApprovalModePicker';
@@ -14,7 +15,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { ProjectBadge } from '@/components/ProjectBadge';
 import { ApprovalCard } from '@/components/ApprovalCard';
 import { Transcript, type LogLine } from '@/components/Transcript';
-import { newPending, reconcilePending, type PendingMessage } from '@/lib/pending-messages';
+import { newPending, reconcilePending, visibleStarting, type PendingMessage } from '@/lib/pending-messages';
 import { DiscussionModal } from '@/components/DiscussionModal';
 import { DiscussionBar } from '@/components/DiscussionBar';
 import { FollowUpForm } from '@/components/FollowUpForm';
@@ -358,7 +359,8 @@ function TaskDetailView({ id }: { id: string }) {
     const real = debug
       ? lines
       : lines.filter((l) => l.kind !== 'assistant' || Boolean(l.attachments?.length));
-    const queuedTexts = queued.map((q) => q.text.replace(/\s+/g, ' ').trim());
+    const shownQueue = visibleStarting(queued, task?.status, lines.filter((l) => l.kind === 'prompt').slice(-5).map((l) => l.text));
+    const queuedTexts = shownQueue.map((q) => q.text.replace(/\s+/g, ' ').trim());
     // a local "sending…" message that is already in the server queue is the same message
     const localOnly = pending.filter((p) => {
       const i = queuedTexts.indexOf(p.text.replace(/\s+/g, ' ').trim());
@@ -367,7 +369,7 @@ function TaskDetailView({ id }: { id: string }) {
     });
     const vis = [
       ...real,
-      ...queued.map((q) => ({
+      ...shownQueue.map((q) => ({
         id: `queued-${q.id}`,
         kind: 'prompt',
         text: q.text,
@@ -386,7 +388,7 @@ function TaskDetailView({ id }: { id: string }) {
       return [{ id: 'seed-prompt', kind: 'prompt', text: promptText, ts: promptTs }, ...vis];
     }
     return vis;
-  }, [lines, debug, promptText, promptTs, pending, queued]);
+  }, [lines, debug, promptText, promptTs, pending, queued, task?.status]);
 
   // Phone: an app-like shell. Header + tabs on top, the conversation fills what is left, the message box is pinned to the bottom.
   useEffect(() => {
@@ -485,7 +487,7 @@ function TaskDetailView({ id }: { id: string }) {
         <div
           className={tab === 'chat' ? `${styles.paneChat} ${styles.chatBox}` : styles.paneScroll}
         >
-          {tab === 'chat' && <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />}
+          {tab === 'chat' && <><StartHoldNotice hold={task.hold} queued={task.status === 'queued'} /><WaitingOnNotice waitingOn={task.waitingOn} /></>}
           {tab === 'chat' && <DiscussionBar taskId={id} running={!terminal} />}
           {tab === 'chat' && (
             <Transcript
@@ -646,7 +648,7 @@ function TaskDetailView({ id }: { id: string }) {
                 <SectionTitle>{fullChat ? task.title : 'Conversation'}</SectionTitle>
                 <Row>{fullChat && <StatusBadge status={task.status} />}</Row>
               </Row>
-              <StartHoldNotice hold={task.hold} queued={task.status === 'queued'} />
+              <><StartHoldNotice hold={task.hold} queued={task.status === 'queued'} /><WaitingOnNotice waitingOn={task.waitingOn} /></>
               <DiscussionBar taskId={id} running={!terminal} />
               <div className={`${styles.chatBox} ${fullChat ? styles.chatBoxFull : ''}`}>
                 <Transcript

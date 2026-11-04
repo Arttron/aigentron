@@ -132,7 +132,16 @@ export interface RunAgentParams {
    * independent child tasks. Each call creates + enqueues a subtask and resolves
    * with the new task's id/title. Wire this only for lead agents.
    */
-  onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{ id: string; title: string; /** an equivalent open subtask already existed: nothing new was created */ reused?: boolean }>;
+  onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{
+    id: string;
+    title: string;
+    /** an equivalent open subtask already existed: nothing new was created */
+    reused?: boolean;
+    /** ids it waits for (`after`): it is held until they are done */
+    waiting?: string[];
+    /** how many tasks this server runs at once (told to the lead, so it knows how far subtasks run in parallel) */
+    parallel?: number;
+  }>;
   /**
    * When set (a code project with a remote), the agent gets a `push_branch` tool: publish a LOCAL branch to the project's remote through
    * the orchestrator (the agent holds no credentials; a person approves each push). Resolves with a message for the model.
@@ -331,6 +340,8 @@ export interface CreateSubtaskInput {
   prompt: string;
   /** Specialist agent to run the subtask (e.g. backend); omit for the default. */
   agent?: string;
+  /** ids of earlier subtasks of this task that must be done before this one starts */
+  after?: string[];
 }
 
 /** Structured outcome an agent declares via the `report_task_status` tool. */

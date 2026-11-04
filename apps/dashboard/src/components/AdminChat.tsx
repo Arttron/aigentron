@@ -7,7 +7,7 @@ import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
 import { Markdown, MediaTaskContext } from './Markdown';
 import { UserText } from './UserText';
 import { useSmartPaste } from './SmartPaste';
-import { newPending, reconcilePending, type PendingMessage } from '@/lib/pending-messages';
+import { newPending, reconcilePending, visibleStarting, type PendingMessage } from '@/lib/pending-messages';
 import type { StateName } from '@/lib/mascot';
 import {
   ASSISTANT_RESET_EVENT,
@@ -127,6 +127,8 @@ export function AdminChat() {
   }, [taskId]);
   const [reconnects, setReconnects] = useState(0);
   const [status, setStatus] = useState<TaskStatus | null>(null);
+  // a "starting" message (its run waits for the machine) stays until the chat echoes it
+  const shownQueue = visibleStarting(queued, status, echoed.slice(-5));
   const [text, setText] = useState('');
   const { onPaste, notice: pasteNotice } = useSmartPaste(setText);
   const [sending, setSending] = useState(false);
@@ -409,16 +411,16 @@ export function AdminChat() {
                 </div>
               </div>
             ))}
-            {queued.map((q) => (
+            {shownQueue.map((q) => (
               <div key={`queued-${q.id}`} className={`${styles.me} ${styles.sending}`}>
                 {q.text}
                 <div className={styles.copyRow}>
-                  <span className={styles.sendingNote}>queued — sent when the run ends</span>
+                  <span className={styles.sendingNote}>{q.starting ? 'starting — waiting for the server' : 'queued — sent when the run ends'}</span>
                 </div>
               </div>
             ))}
             {pending
-              .filter((p) => !queued.some((q) => q.text.trim() === p.text.trim()))
+              .filter((p) => !shownQueue.some((q) => q.text.trim() === p.text.trim()))
               .map((p) => (
                 <div key={p.id} className={`${styles.me} ${styles.sending}`} aria-busy="true">
                   {p.text}

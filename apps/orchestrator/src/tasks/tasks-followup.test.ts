@@ -75,6 +75,7 @@ function make(row: Row) {
     attachments: { list: async () => [] },
     moduleRef: { get: () => null },
     runs: new Map(),
+    dispatched: new Map(),
     get: async (id: string) => {
       const r = rows.find((x) => x.id === id);
       if (!r) throw new Error('not found');
@@ -109,6 +110,35 @@ describe('TasksService.followUp — one run per task', () => {
     expect(r.queued).toBe(false);
     expect(calls).toContain('queue.enqueue:go');
     expect(rows[0]!.status).toBe('queued');
+  });
+});
+
+describe('TasksService — a message whose run waits to start stays listed', () => {
+  it('after it leaves the queue (its run is queued) it is listed as `starting`, and goes when the run starts, is cancelled or does not start', async () => {
+    const { svc } = make(row('review'));
+    await svc.followUp('T', 'build it');
+    expect((await svc.listPendingFollowUps('T')).map((m) => [m.text, m.starting])).toEqual([['build it', true]]);
+    // the run starts: the entry stays a few seconds (the conversation echoes the message meanwhile), then goes
+    vi.useFakeTimers();
+    try {
+      await svc.startRunning('T');
+      expect((await svc.listPendingFollowUps('T')).some((m) => m.starting)).toBe(true);
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(await svc.listPendingFollowUps('T')).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is listed before the queued messages, never counts as one, and cancel clears it', async () => {
+    const { svc, rows } = make(row('review'));
+    await svc.followUp('T', 'first');
+    await svc.followUp('T', 'second'); // the task is queued now: held
+    const list = await svc.listPendingFollowUps('T');
+    expect(list.map((m) => [m.text, Boolean(m.starting)])).toEqual([['first', true], ['second', false]]);
+    rows[0]!.status = 'running';
+    await svc.cancel('T');
+    expect(await svc.listPendingFollowUps('T')).toEqual([]);
   });
 });
 

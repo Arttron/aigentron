@@ -40,7 +40,7 @@ export class TasksController {
   @Get(':id')
   async get(@Param('id') id: string) {
     // `hold`: why a queued task has not started yet (the machine is busy / its turn), or null
-    return { ...(await this.tasks.get(id)), hold: getHold(id) };
+    return { ...(await this.tasks.get(id)), hold: getHold(id), waitingOn: await this.tasks.waitingOn(id) };
   }
 
   @Get(':id/transcript')

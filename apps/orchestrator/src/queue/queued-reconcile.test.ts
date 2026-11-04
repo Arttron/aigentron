@@ -23,6 +23,7 @@ describe('TaskWorkerService.reconcileQueued', () => {
     Object.assign(w, {
       logger: { warn: () => undefined, log: () => undefined },
       tasks: {
+        releaseAllReady: async () => 0,
         queuedTasksBefore: async () => queued,
         requeue: async (id: string) => void calls.push(`requeue:${id}`),
         setStatus: async (id: string, s: string, e?: string) => void calls.push(`status:${id}:${s}:${(e ?? '').slice(0, 20)}`),
@@ -57,7 +58,7 @@ describe('TaskWorkerService.reconcileQueued', () => {
 
   it('never throws', async () => {
     const w = Object.create(TaskWorkerService.prototype) as TaskWorkerService;
-    Object.assign(w, { logger: { warn: () => undefined }, tasks: { queuedTasksBefore: async () => { throw new Error('db down'); } }, queue: {} });
+    Object.assign(w, { logger: { warn: () => undefined }, tasks: { releaseAllReady: async () => 0, queuedTasksBefore: async () => { throw new Error('db down'); } }, queue: {} });
     expect(await w.reconcileQueued(0, false)).toEqual({ requeued: 0, stalled: 0 });
   });
 });

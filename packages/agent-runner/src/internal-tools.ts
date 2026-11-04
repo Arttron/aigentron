@@ -136,17 +136,19 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
     specs.push({
       name: 'create_subtask',
       description:
-        "Split this task into an independent subtask that starts at once in its own worktree. `prompt`: a full instruction in terse English (facts and the next action), `title?`, `agent?` (a specialist). Returns the subtask id. Call check_subtasks first: reuse an existing subtask and do not split what one subtask can do.",
-      shape: { prompt: z.string(), title: z.string().optional(), agent: z.string().optional() },
+        "Split this task into a subtask in its own worktree. `prompt`: a full instruction in terse English (facts and the next action), `title?`, `agent?` (a specialist), `after?` (ids of EARLIER subtasks that must be done first: this one then waits and gets their results; without `after` it starts at once, in parallel with the others as far as the server allows). Order dependent steps with `after` (research → build → review); leave independent ones without it. Returns the subtask id. Call check_subtasks first: reuse an existing subtask and do not split what one subtask can do.",
+      shape: { prompt: z.string(), title: z.string().optional(), agent: z.string().optional(), after: z.array(z.string()).optional() },
       handler: async (args) => {
         const created = await params.onCreateSubtask!({
           prompt: String(args.prompt),
           title: typeof args.title === 'string' ? args.title : undefined,
           agent: typeof args.agent === 'string' ? args.agent : undefined,
+          after: Array.isArray(args.after) ? args.after.map(String) : undefined,
         });
+        if (created.waiting?.length) return `Created subtask ${created.id} — "${created.title}". It is held: it starts when ${created.waiting.join(', ')} ${created.waiting.length > 1 ? 'are' : 'is'} done, with ${created.waiting.length > 1 ? 'their' : 'its'} result in its context.`;
         return created.reused
           ? `NOT created: an equivalent subtask is already open — ${created.id} «${created.title}». Wait for it (check_subtasks) instead of starting a duplicate.`
-          : `Created and queued subtask ${created.id} — "${created.title}".`;
+          : `Created and queued subtask ${created.id} — "${created.title}".${created.parallel ? ` The server runs ${created.parallel} task(s) at a time, so subtasks beyond that wait their turn.` : ''}`;
       },
     });
   }

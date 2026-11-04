@@ -10,7 +10,7 @@ import styles from './GeneralSettingsForm.module.css';
 export type SettingsSection = 'repo' | 'escalations' | 'instructions' | 'verify' | 'queue' | 'approvals' | 'display';
 const SECTION_FIELDS: Record<SettingsSection, readonly (keyof SettingsUpdate)[]> = {
   repo: ['repoUrl', 'repoBranch', 'workspaceSubdir', 'githubToken'],
-  escalations: ['notifyChannelId', 'notifyChatId'],
+  escalations: ['notifyChannelId', 'notifyChatId', 'approvalChatDelay', 'approvalChatNobodyAtOnce'],
   instructions: ['agentInstructions'],
   verify: ['verifyCommands', 'verifyMaxAttempts'],
   queue: ['concurrency', 'chatConcurrency', 'heavySlots', 'commandPipeline'],
@@ -59,6 +59,8 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
           concurrency: data.concurrency,
           chatConcurrency: data.chatConcurrency ?? 0,
           heavySlots: data.heavySlots ?? 0,
+          approvalChatDelay: data.approvalChatDelay ?? 10,
+          approvalChatNobodyAtOnce: data.approvalChatNobodyAtOnce ?? true,
           commandPipeline: data.commandPipeline ?? true,
           debugMode: data.debugMode,
           agentInstructions: data.agentInstructions,
@@ -176,6 +178,33 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
               placeholder="e.g. 123456789"
             />
           </Field>
+          <Field label="Approvals and questions from the dashboard — when the chats hear about them">
+            <select
+              className={styles.narrow}
+              value={(form.approvalChatDelay ?? 10) < 0 ? 'never' : (form.approvalChatDelay ?? 10) === 0 ? 'now' : 'wait'}
+              onChange={(e) => set('approvalChatDelay', e.target.value === 'never' ? -1 : e.target.value === 'now' ? 0 : 10)}
+            >
+              <option value="wait">after a pause, if still open (the dashboard hears first)</option>
+              <option value="now">at once, together with the dashboard</option>
+              <option value="never">never (only the chat a task came from is asked)</option>
+            </select>
+          </Field>
+          {(form.approvalChatDelay ?? 10) > 0 && (
+            <>
+              <Field label="Pause in seconds">
+                <input className={styles.narrow} type="number" min={1} max={3600} value={form.approvalChatDelay ?? 10} onChange={(e) => set('approvalChatDelay', Math.max(1, Number(e.target.value) || 1))} />
+              </Field>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <input type="checkbox" checked={form.approvalChatNobodyAtOnce ?? true} onChange={(e) => set('approvalChatNobodyAtOnce', e.target.checked)} style={{ width: 'auto', margin: 0 }} />
+                When nobody is looking at the dashboard, send at once (no pause)
+              </label>
+            </>
+          )}
+          <Muted className={styles.note}>
+            A request from a task started in the dashboard (an approval, a question, a task that needs input) appears there first; the chats above hear about it after the pause if nobody has
+            answered. «Looking» means a dashboard window in front of someone — a tab in the background does not count, so turn the checkbox off to always keep the pause. A task started from a chat always
+            asks in that chat, whatever is set here.
+          </Muted>
           <Muted className={styles.note}>
             When an agent needs input on a task that has no channel of its own, its question is posted
             here. Reply in that chat to answer (routed back as a follow-up). Leave the channel blank to

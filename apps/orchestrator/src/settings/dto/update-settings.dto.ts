@@ -38,6 +38,16 @@ export class UpdateSettingsDto {
   heavySlots?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(-1)
+  @Max(3600)
+  approvalChatDelay?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  approvalChatNobodyAtOnce?: boolean;
+
+  @IsOptional()
   @IsBoolean()
   commandPipeline?: boolean;
 

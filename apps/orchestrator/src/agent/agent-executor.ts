@@ -31,7 +31,7 @@ export interface TaskRunContext {
    * `create_subtask` tool. The worker wires it for top-level tasks only, so
    * subtasks can't recursively spawn more.
    */
-  onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{ id: string; title: string; reused?: boolean }>;
+  onCreateSubtask?: (input: CreateSubtaskInput) => Promise<{ id: string; title: string; reused?: boolean; waiting?: string[]; parallel?: number }>;
   /** The lead accepts one of its subtasks as done. */
   onCompleteSubtask?: (id: string) => Promise<string>;
   /** When set, the agent can inspect this task's subtasks (status + result). */

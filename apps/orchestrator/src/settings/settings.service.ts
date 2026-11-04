@@ -18,6 +18,8 @@ export interface SettingsPatch {
   concurrency?: number;
   chatConcurrency?: number;
   heavySlots?: number;
+  approvalChatDelay?: number;
+  approvalChatNobodyAtOnce?: boolean;
   commandPipeline?: boolean;
   debugMode?: boolean;
   compression?: string | null;

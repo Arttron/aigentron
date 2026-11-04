@@ -103,6 +103,8 @@ export interface Task {
   createdById: string | null;
   /** Parent task when this is a subtask from decomposition (null = top-level). */
   parentId: string | null;
+  /** ids of the sibling subtasks this one waits for (`after`); empty / absent = not waiting */
+  waitingFor?: string[];
   /** The project the task belongs to (every task has one; `default` for everything made before projects). */
   projectId: string;
   project: ProjectRef;
@@ -227,6 +229,8 @@ export interface PendingFollowUp {
   attachments: string[];
   references: string[];
   createdAt: string;
+  /** The message has left the queue and its run is waiting to start (the machine is busy, or its turn): shown, but it can no longer be edited or removed. */
+  starting?: boolean;
 }
 
 /** Usage aggregated for one provider over a time range (per-provider stats). */

@@ -28,6 +28,15 @@ import type { CreateTaskDto } from './dto/create-task.dto';
 /** Prisma row shape for a task (dates as Date). */
 type TaskRow = Awaited<ReturnType<PrismaService['task']['create']>>;
 
+function parseIds(raw: string | null | undefined): string[] {
+  try {
+    const v = JSON.parse(raw || '[]');
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Serialize a Prisma task row into the wire-facing shared Task shape. */
 export function serializeTask(row: TaskRow & { project?: { slug: string; name: string } | null }): Task {
   return {
@@ -43,6 +52,7 @@ export function serializeTask(row: TaskRow & { project?: { slug: string; name: s
     error: row.error,
     createdById: row.createdById,
     parentId: row.parentId,
+    waitingFor: parseIds(row.waitingFor),
     projectId: row.projectId,
     // the relation when the caller loaded it, else the label cache (ProjectsService keeps it current)
     project: row.project ? { slug: row.project.slug, name: row.project.name } : projectLabel(row.projectId),
@@ -59,6 +69,8 @@ export interface SubtaskInput {
   title?: string;
   prompt: string;
   agentName?: string;
+  /** ids of sibling subtasks that must be done before this one starts */
+  after?: string[];
 }
 
 /** Cap on pending follow-ups per task — matches the old client-only queue's
@@ -89,6 +101,12 @@ function serializePendingFollowUp(row: PendingFollowUpRow): PendingFollowUp {
 
 @Injectable()
 export class TasksService {
+  /**
+   * Messages that left the follow-up queue and whose run has not started yet (it waits for the machine or its turn). Until the run starts and the
+   * conversation echoes the message, it is in neither place — so it is listed with the queue, flagged `starting`. In memory: it describes seconds or minutes.
+   */
+  private readonly dispatched = new Map<string, { text: string; at: string }>();
+
   private readonly logger = new Logger(TasksService.name);
 
   constructor(
@@ -189,7 +207,7 @@ export class TasksService {
     );
   }
 
-  async create(dto: CreateTaskDto, createdById?: string, opts: { byAgent?: boolean } = {}) {
+  async create(dto: CreateTaskDto, createdById?: string, opts: { byAgent?: boolean; waitingFor?: string[] } = {}) {
     // A subtask's parent must exist; reject a dangling parentId early. A subtask is in its parent's project
     // (create_subtask does not change the project); otherwise the given slug (archived → 400), else the default.
     const parent = dto.parentId ? await this.get(dto.parentId) : null;
@@ -223,6 +241,7 @@ export class TasksService {
         titleState: titleStateFor({ given: Boolean(given), byAgent: opts.byAgent }),
         kind: (dto as { kind?: string }).kind === 'discussion' ? 'discussion' : dto.kind === 'ask' ? 'ask' : 'task',
         status: 'queued',
+        waitingFor: JSON.stringify(opts.waitingFor ?? []),
         agentName: agent?.name ?? null,
         createdById: createdById ?? null,
         parentId: dto.parentId ?? null,
@@ -271,20 +290,95 @@ export class TasksService {
       }
     }
     const inheritedRefs = parent.linksOut?.map((l) => l.toTaskId) ?? [];
+    // `after`: sibling subtasks that must finish first. Their results fold into this one's context; while any is still going it is held (no job).
+    const { waiting, after } = await this.resolveAfter(parentId, input.after);
     const child = await this.create(
       {
         prompt: input.prompt,
         title: input.title,
         agentName: input.agentName,
         parentId,
-        references: inheritedRefs,
+        references: [...new Set([...inheritedRefs, ...after])],
+        ...(waiting.length ? { autostart: false } : {}),
       },
       createdById ?? parent.createdById ?? undefined,
-      { byAgent: opts.fromAgent === true },
+      { byAgent: opts.fromAgent === true, waitingFor: waiting },
     );
+    if (waiting.length) this.logger.log(`Subtask ${child.id} of ${parentId} waits for ${waiting.join(', ')}`);
     // Mark the parent so it's resumed with results once all subtasks finish.
     await this.prisma.task.update({ where: { id: parentId }, data: { awaitingSubtasks: true } });
-    return child;
+    return { ...child, waitingFor: waiting }; // as a list (the row's own column is the JSON text)
+  }
+
+  /**
+   * The `after` of a new subtask: every id must be a subtask of the SAME lead (a cycle is impossible: only earlier subtasks can be named), and none may
+   * have ended badly — waiting for work that will never come would hang for ever. Returns the ids still going (`waiting`) and all ids given (`after`).
+   */
+  private async resolveAfter(parentId: string, raw: readonly string[] | undefined): Promise<{ waiting: string[]; after: string[] }> {
+    const after = [...new Set((raw ?? []).map((x) => String(x).trim()).filter(Boolean))];
+    if (!after.length) return { waiting: [], after: [] };
+    if (after.length > 10) throw new ConflictException('`after` names at most 10 subtasks.');
+    const rows = await this.prisma.task.findMany({ where: { id: { in: after }, parentId }, select: { id: true, title: true, status: true } });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const missing = after.filter((id) => !byId.has(id));
+    if (missing.length) throw new ConflictException(`after: ${missing.join(', ')} ${missing.length > 1 ? 'are' : 'is'} not a subtask of this task — use the ids check_subtasks / create_subtask returned.`);
+    const bad = rows.find((r) => isTerminalStatus(r.status as TaskStatus) && !AFTER_OK.includes(r.status));
+    if (bad) throw new ConflictException(`after: subtask ${bad.id} «${bad.title}» ended ${bad.status} — there is nothing to wait for. Fix or redo it first (or do not depend on it).`);
+    return { waiting: rows.filter((r) => !isTerminalStatus(r.status as TaskStatus)).map((r) => r.id), after };
+  }
+
+  /**
+   * A task settled: start the subtasks that were waiting for it when everything they wait for is done, or block them when something ended badly.
+   * State-driven and idempotent (the claim is atomic), so it is safe to call from every settle point, from the sweep and after a restart.
+   */
+  async releaseDependents(predecessorId: string): Promise<void> {
+    const rows = await this.prisma.task.findMany({ where: { waitingFor: { contains: predecessorId }, status: 'queued' }, select: { id: true } });
+    for (const r of rows) await this.settleDependent(r.id).catch((e) => this.logger.warn(`could not release ${r.id}: ${(e as Error).message}`));
+  }
+
+  /** What a held subtask waits for, with titles and states (the task page says it in words). Empty when it is not waiting. */
+  async waitingOn(id: string): Promise<{ id: string; title: string; status: string }[]> {
+    const row = await this.prisma.task.findUnique({ where: { id }, select: { waitingFor: true } });
+    const ids = parseIds(row?.waitingFor);
+    if (!ids.length) return [];
+    const preds = await this.prisma.task.findMany({ where: { id: { in: ids } }, select: { id: true, title: true, status: true } });
+    const byId = new Map(preds.map((p) => [p.id, p]));
+    return ids.map((pid) => {
+      const p = byId.get(pid);
+      return p ? { id: p.id, title: p.title, status: p.status } : { id: pid, title: '(deleted)', status: 'cancelled' };
+    });
+  }
+
+  /** Every held subtask is looked at again (boot, and the periodic sweep): a release that was missed (a restart in the middle) is made up. */
+  async releaseAllReady(): Promise<number> {
+    const rows = await this.prisma.task.findMany({ where: { waitingFor: { not: '[]' }, status: 'queued' }, select: { id: true } });
+    let n = 0;
+    for (const r of rows) if (await this.settleDependent(r.id).catch(() => false)) n++;
+    return n;
+  }
+
+  /** True when the task was released or blocked now. */
+  private async settleDependent(id: string): Promise<boolean> {
+    const row = await this.prisma.task.findUnique({ where: { id }, select: { id: true, status: true, waitingFor: true, agentName: true, parentId: true } });
+    if (!row || row.status !== 'queued' || row.waitingFor === '[]') return false;
+    const ids = JSON.parse(row.waitingFor || '[]') as string[];
+    const preds = await this.prisma.task.findMany({ where: { id: { in: ids } }, select: { id: true, title: true, status: true } });
+    const seen = new Map(preds.map((p) => [p.id, p]));
+    const state = ids.map((pid) => seen.get(pid) ?? { id: pid, title: '(deleted)', status: 'cancelled' });
+    if (state.some((p) => !isTerminalStatus(p.status as TaskStatus))) return false; // still going
+    // the atomic claim: of two settlements arriving together only one acts
+    const claimed = await this.prisma.task.updateMany({ where: { id, status: 'queued', waitingFor: row.waitingFor }, data: { waitingFor: '[]' } });
+    if (claimed.count === 0) return false;
+    const bad = state.find((p) => !AFTER_OK.includes(p.status));
+    if (bad) {
+      const why = `Not started: the subtask it waited for — «${bad.title}» (${bad.id}) — ended ${bad.status}.`;
+      this.logger.log(`Subtask ${id}: ${why}`);
+      await this.setStatus(id, 'blocked', why); // terminal: the lead is woken once nothing else is going
+      return true;
+    }
+    this.logger.log(`Subtask ${id}: what it waited for is done — starting it`);
+    await this.enqueueRun({ taskId: id }, row.agentName);
+    return true;
   }
 
   /**
@@ -342,6 +436,7 @@ export class TasksService {
         this.logger.warn(`escalation failed for ${taskId}: ${(e as Error).message}`),
       );
     }
+    await this.releaseDependents(taskId); // subtasks that waited for this one (`after`) start now, or are blocked
     await this.wakeIfSubtasksDone(taskId); // this task may itself be a parent
     if (task.parentId) await this.wakeIfSubtasksDone(task.parentId);
   }
@@ -562,6 +657,8 @@ export class TasksService {
       return this.enqueueFollowUp(id, prompt, attachments);
     }
     this.publishStatus(id, 'queued');
+    this.dispatched.set(id, { text: prompt, at: new Date().toISOString() });
+    await this.publishFollowUpQueue(id).catch(() => undefined);
     await this.enqueueRun({ taskId: id, followUpPrompt: prompt, attachments }, (await this.getLite(id)).agentName);
     const queueLength = await this.prisma.pendingFollowUp.count({ where: { taskId: id } });
     return { ...(await this.get(id)), queued: false as const, queueLength };
@@ -622,7 +719,23 @@ export class TasksService {
       where: { taskId },
       orderBy: { createdAt: 'asc' },
     });
-    return rows.map(serializePendingFollowUp);
+    const list = rows.map(serializePendingFollowUp);
+    const d = this.dispatched.get(taskId);
+    return d ? [{ id: `starting-${taskId}`, taskId, text: d.text, attachments: [], references: [], createdAt: d.at, starting: true }, ...list] : list;
+  }
+
+  /** The run that was waiting for the machine has started: its message is echoed by the conversation itself in a moment, so the "starting" entry goes shortly after. */
+  private clearDispatched(id: string, afterMs = 5_000): void {
+    if (!this.dispatched.has(id)) return;
+    const at = this.dispatched.get(id)!.at;
+    const drop = () => {
+      if (this.dispatched.get(id)?.at === at) {
+        this.dispatched.delete(id);
+        void this.publishFollowUpQueue(id).catch(() => undefined);
+      }
+    };
+    if (afterMs > 0) setTimeout(drop, afterMs).unref?.();
+    else drop();
   }
 
   /** Remove one queued follow-up (e.g. the dashboard's ✕ button). Scoped by
@@ -892,6 +1005,7 @@ export class TasksService {
     await this.attachments.remove(id).catch(() => undefined);
     await this.prisma.task.delete({ where: { id } });
     this.bus.publish({ type: 'task-deleted', payload: { taskId: id } });
+    await this.releaseDependents(id).catch(() => undefined); // what waited for it is blocked, not left waiting for ever
     this.logger.log(`Deleted task ${id}`);
     return { id, deleted: true };
   }
@@ -918,6 +1032,7 @@ export class TasksService {
       await this.publishFollowUpQueue(id).catch(() => undefined);
     }
     await this.queue.removeForTask(id);
+    this.clearDispatched(id, 0);
     const cancelled = await this.setStatus(id, 'cancelled');
     this.executor.cancel(id);
     return cancelled ?? (await this.get(id));
@@ -943,6 +1058,7 @@ export class TasksService {
       data: { status: 'running' },
     });
     if (r.count === 0) {
+      this.clearDispatched(id, 0); // this run did not start: its message is held again, or the task is gone
       const row = await this.prisma.task.findUnique({ where: { id }, select: { status: true } });
       return row && (row.status === 'running' || row.status === 'needs_approval') ? 'busy' : 'gone';
     }
@@ -951,6 +1067,7 @@ export class TasksService {
     this.runs.get(id)?.resolve();
     this.runs.set(id, { settled, resolve });
     this.publishStatus(id, 'running');
+    this.clearDispatched(id);
     return 'started';
   }
 
@@ -1018,7 +1135,7 @@ export class TasksService {
 
   /** `queued` tasks last touched before `cutoff`, with how many agent runs each has had (for the queue-vs-status reconcile). */
   async queuedTasksBefore(cutoff: Date): Promise<{ id: string; agentName: string | null; sessions: number }[]> {
-    const rows = await this.prisma.task.findMany({ where: { status: 'queued', updatedAt: { lt: cutoff } }, select: { id: true, agentName: true, _count: { select: { sessions: true } } } });
+    const rows = await this.prisma.task.findMany({ where: { status: 'queued', waitingFor: '[]', updatedAt: { lt: cutoff } }, select: { id: true, agentName: true, _count: { select: { sessions: true } } } });
     return rows.map((r) => ({ id: r.id, agentName: r.agentName, sessions: r._count.sessions }));
   }
 
@@ -1054,6 +1171,8 @@ export class TasksService {
       await this.drainPendingFollowUp(id).catch((err) =>
         this.logger.warn(`drain pending follow-up failed for ${id}: ${(err as Error).message}`),
       );
+      // a subtask that waited for this one (`after`): start it now, or block it when this one ended badly (a run of the worker does it in fanInAfterSettle)
+      await this.releaseDependents(id).catch((err) => this.logger.warn(`release of the subtasks waiting for ${id} failed: ${(err as Error).message}`));
     }
     return task;
   }
@@ -1061,3 +1180,5 @@ export class TasksService {
 
 /** How much of a subtask's final answer its lead is handed (fan-in and check_subtasks). */
 const SUBTASK_RESULT_CHARS = 4000;
+/** A subtask that ended like this satisfies an `after` (the others — failed, cancelled, blocked, stalled — do not). */
+const AFTER_OK: readonly string[] = ['done', 'review'];

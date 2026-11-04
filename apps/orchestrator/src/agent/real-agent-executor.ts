@@ -38,6 +38,7 @@ import { readDocumentText } from '../knowledge/extract';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { BrowserMcpService } from '../browser-control/browser-mcp.service';
 import { COMMANDS_TOOL } from '@lds/agent-runner';
+import { newColleaguesNote, type Colleague } from './roster-note';
 import { CommandPipelineService } from '../commands/command-pipeline.service';
 import { mcpWithCommands } from '../commands/commands-policy';
 import { mcpWithBrowser } from '../browser-control/browser-policy';
@@ -126,6 +127,8 @@ const SESSION_GONE = /No conversation found with session ID/i;
 export class RealAgentExecutor extends AgentExecutor {
   private readonly logger = new Logger(RealAgentExecutor.name);
   /** AbortControllers for runs currently in flight, keyed by task id. */
+  /** The colleagues each task's lead was last told about (to say who joined since). In memory: after a restart the first continued run just says nothing. */
+  private readonly rosterSeen = new Map<string, string[]>();
   private readonly active = new Map<string, AbortController>();
   /** Runs in flight for the memory guard: when each started and how to stop it (with the memory left, for the transcript). */
   private readonly guarded = new Map<string, { startedAt: number; stop: (availableMb: number) => void }>();
@@ -241,16 +244,28 @@ export class RealAgentExecutor extends AgentExecutor {
     // turns, each re-sending the whole prompt). Only while its reference base is ready — otherwise the guides are inlined.
     const reference = agentDef?.name === 'admin' && !ctx.discussion && (await this.adminReference.index().catch(() => null)) ? await this.adminReference.relevant(ctx.followUpPrompt ?? task.prompt).catch(() => '') : '';
     const prepared = new Map<string, { agents: Record<string, SubagentDefinition>; systemAppend: string; runContext: string }>();
+    let joinedNote: string | undefined;
     const prepare = async (leadProvider: string, tier: ModelTier) => {
       const key = `${leadProvider}|${tier}`;
       const hit = prepared.get(key);
       if (hit) return hit;
-      const { map: agents, roster } = chat ? { map: {}, roster: '' } : await this.buildSubagents(task.agentName, leadProvider, orientation, project);
+      const { map: agents, roster, colleagues } = chat ? { map: {}, roster: '', colleagues: [] as Colleague[] } : await this.buildSubagents(task.agentName, leadProvider, orientation, project);
       if (Object.keys(agents).length) {
         this.logger.log(`Task ${task.id} subagents on ${leadProvider}: [${Object.keys(agents).join(', ')}]`);
       }
       const layers = assemblePromptLayers({ orientation, instructions, roster, projectMap, memory, reference, smallModelNote: tier === 'cheap' && !chat ? SMALL_MODEL_NOTE : '' });
-      const p = { agents, systemAppend: layers.systemAppend, runContext: layers.runContext };
+      // a continued run: who joined the team since the lead's last run (its earlier replies may say they are missing)
+      // (once per run: a second attempt on another provider repeats the same note, it does not lose it)
+      if (joinedNote === undefined) {
+        joinedNote = chat ? '' : newColleaguesNote(this.rosterSeen.get(task.id), colleagues);
+        if (!chat) {
+          this.rosterSeen.delete(task.id);
+          this.rosterSeen.set(task.id, colleagues.map((c) => c.name));
+          if (this.rosterSeen.size > 500) this.rosterSeen.delete(this.rosterSeen.keys().next().value as string);
+        }
+      }
+      const joined = joinedNote;
+      const p = { agents, systemAppend: layers.systemAppend, runContext: joined ? `${layers.runContext}\n\n${joined}` : layers.runContext };
       prepared.set(key, p);
       return p;
     };
@@ -1611,7 +1626,7 @@ export class RealAgentExecutor extends AgentExecutor {
     leadProvider: string,
     orientation: string,
     project: Pick<ProjectContext, 'id' | 'slug' | 'repoPath'>,
-  ): Promise<{ map: Record<string, SubagentDefinition>; roster: string }> {
+  ): Promise<{ map: Record<string, SubagentDefinition>; roster: string; colleagues: Colleague[] }> {
     const map: Record<string, SubagentDefinition> = {};
     const others: { name: string; description: string; how: string }[] = [];
     // The connection the run uses is the LEAD's provider (its own, or the default): a subscription login there cannot be shared.
@@ -1652,7 +1667,7 @@ export class RealAgentExecutor extends AgentExecutor {
     const roster = others.length
       ? `\n\n## Your colleagues\nReach each one the way it says — an agent marked "create_subtask only" is NOT available to the Task tool (do not try it there); start it with create_subtask {agent, prompt}. Names are exact.\n${others.map((o) => `- ${o.name}: ${o.description} — ${o.how}`).join('\n')}`
       : '';
-    return { map, roster };
+    return { map, roster, colleagues: others.map((o) => ({ name: o.name, how: o.how })) };
   }
 
   /** Why an agent cannot be a Task-tool subagent of this lead (null = it can). */

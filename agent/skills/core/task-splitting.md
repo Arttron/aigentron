@@ -21,3 +21,6 @@ Do NOT split just because the task is long, or to dodge the subtask limit (25 op
 2. Write a COMPLETE brief for the new task: the goal, what is already done and where (task ids, branches, files), what is left, what "done" means. The new task does not see this chat — copy the essence, do not just point at it.
 3. `create_task {project, prompt, title, agent?, reason, related}` — `project` is the slug of the project it belongs to; `related`: ids of the tasks it grows out of (they are linked, so their summaries fold into the new task's context). Pick `agent` (usually a lead such as `pm`) that will break it down further.
 4. Tell the person what you moved and why; keep the old subtasks as they are — settle them (`complete_subtask`) or leave them for the person.
+
+## Order of subtasks
+`create_subtask` starts a subtask at once, in parallel with the others as far as the server allows. For steps that depend on each other (research → build → review) pass `after: [ids of the earlier subtasks]`: the later one waits, then starts by itself with their results in its context; if an earlier one fails, the later one is blocked and you are woken to decide. Leave independent parts without `after`.

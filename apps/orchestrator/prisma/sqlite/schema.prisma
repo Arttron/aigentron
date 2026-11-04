@@ -40,6 +40,12 @@ model AppSettings {
   // The command pipeline: heavy commands (builds, tests, installs) of every task run through one server-side queue.
   // heavySlots = how many at once (0 = automatic, chosen for this machine); commandPipeline = the switch.
   heavySlots      Int     @default(0)
+
+  // A request that waits for a person (approval, question, a task that needs input) from a task with no chat of its own: the dashboard hears first; the
+  // chats hear after `approvalChatDelay` seconds if it is still open (0 = at once, -1 = never — only the chat a task came from is asked). With nobody
+  // looking at the dashboard it goes at once unless `approvalChatNobodyAtOnce` is off.
+  approvalChatDelay        Int     @default(10)
+  approvalChatNobodyAtOnce Boolean @default(true)
   commandPipeline Boolean @default(true)
 
   // when true the dashboard shows verbose 'assistant' transcript lines
@@ -239,6 +245,9 @@ model Task {
   // True while this task has live subtasks it should be resumed for once they
   // all finish (fan-in). Set when it creates a subtask, cleared on wake.
   awaitingSubtasks Boolean @default(false)
+  // A subtask created with `after`: JSON array of the sibling subtask ids it waits for. While it is not "[]" the task is `queued` but has NO job; the
+  // server (TasksService.releaseDependents / releaseAllReady) starts it when they are done, or blocks it when one of them failed.
+  waitingFor String @default("[]")
   // approvals for this task and its subtasks: ask | off; null = follow the project / global setting
   approvalMode String?
 

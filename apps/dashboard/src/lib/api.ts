@@ -107,6 +107,8 @@ export type TaskDetail = Task & {
   linksOut: TaskLinkOut[];
   /** why a queued task has not started yet (the machine is busy / its turn), or null */
   hold?: { reason: string; since: string; kind?: 'start' | 'command' } | null;
+  /** the subtasks this one waits for (`after`), with their states */
+  waitingOn?: { id: string; title: string; status: string }[];
 };
 
 /** How long and how far one agent run may go (Settings → Run limits). */
@@ -487,6 +489,9 @@ export interface Settings {
   /** heavy commands (builds, tests) running at once through the pipeline (0 = automatic) and what is used now; the switch */
   heavySlots?: number;
   heavySlotsEffective?: number;
+  /** when a request that waits for a person reaches the chats: seconds (0 = at once, -1 = never) and whether an unattended dashboard sends it at once */
+  approvalChatDelay?: number;
+  approvalChatNobodyAtOnce?: boolean;
   commandPipeline?: boolean;
   debugMode: boolean;
   /** Text compression / filtering (Settings → Work → Compression). */
@@ -516,6 +521,8 @@ export type SettingsUpdate = Partial<{
   chatConcurrency: number;
   heavySlots: number;
   commandPipeline: boolean;
+  approvalChatDelay: number;
+  approvalChatNobodyAtOnce: boolean;
   debugMode: boolean;
   compression: CompressionConfig;
   askModel: string;

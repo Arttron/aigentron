@@ -31,3 +31,21 @@ export function reconcilePending(pending: readonly PendingMessage[], echoedTexts
 
 let counter = 0;
 export const newPending = (text: string, now = Date.now()): PendingMessage => ({ id: `pending-${now}-${++counter}`, text, at: now });
+
+/**
+ * Which "starting" messages (they left the queue, their run is waiting to start) the conversation still has to show: all of them while the task waits to
+ * start; once it runs, only those the conversation has not echoed yet (the echo comes a moment after the start).
+ */
+export function visibleStarting<T extends { text: string; starting?: boolean }>(items: readonly T[], status: string | null | undefined, echoedTexts: readonly string[]): T[] {
+  const unconsumed = echoedTexts.map(norm);
+  return items.filter((q) => {
+    if (!q.starting) return true;
+    if (status === 'queued') return true;
+    const i = unconsumed.indexOf(norm(q.text));
+    if (i >= 0) {
+      unconsumed.splice(i, 1);
+      return false;
+    }
+    return true;
+  });
+}

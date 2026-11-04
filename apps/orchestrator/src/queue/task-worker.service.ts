@@ -99,6 +99,9 @@ export class TaskWorkerService implements OnModuleInit {
     let requeued = 0;
     let stalled = 0;
     try {
+      // subtasks held by `after` whose predecessors finished while nobody was looking (a restart in between)
+      const released = await this.tasks.releaseAllReady();
+      if (released) this.logger.log(`Released or blocked ${released} subtask(s) that waited for finished subtasks`);
       for (const t of await this.tasks.queuedTasksBefore(new Date(Date.now() - minAgeMs))) {
         const fate = queuedFate({ hasJob: await this.queue.hasJobFor(t.id, { includeActive }), sessions: t.sessions });
         if (fate === 'keep') continue;
@@ -246,10 +249,11 @@ export class TaskWorkerService implements OnModuleInit {
       // Top-level tasks may decompose into subtasks; subtasks may not (no nesting).
       const onCreateSubtask = task.parentId
         ? undefined
-        : (input: { prompt: string; title?: string; agent?: string }) =>
-            this.tasks
-              .createSubtask(taskId, { prompt: input.prompt, title: input.title, agentName: input.agent }, undefined, { fromAgent: true })
-              .then((t) => ({ id: t.id, title: t.title, reused: (t as { reused?: boolean }).reused }));
+        : async (input: { prompt: string; title?: string; agent?: string; after?: string[] }) => {
+            const t = await this.tasks.createSubtask(taskId, { prompt: input.prompt, title: input.title, agentName: input.agent, after: input.after }, undefined, { fromAgent: true });
+            const waiting = (t as { waitingFor?: string[] }).waitingFor;
+            return { id: t.id, title: t.title, reused: (t as { reused?: boolean }).reused, waiting, parallel: waiting?.length ? undefined : await this.settings.concurrency().catch(() => undefined) };
+          };
       // Same gating: only a decomposing lead can inspect its subtasks.
       const onCheckSubtasks = task.parentId ? undefined : () => this.tasks.subtaskStatuses(taskId);
       const onCompleteSubtask = task.parentId ? undefined : (id: string) => this.tasks.completeSubtask(taskId, id);

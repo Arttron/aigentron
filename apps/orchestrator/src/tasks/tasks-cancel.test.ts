@@ -63,6 +63,7 @@ function make(row: Row, pending: { id: string; taskId: string }[] = []) {
     executor: { cancel: () => void calls.push('executor.cancel') },
     bus: { publish: () => undefined },
     runs: new Map(),
+    dispatched: new Map(),
     worktrees: { cleanup: async () => void calls.push('worktrees.cleanup') },
     attachments: { remove: async () => undefined, list: async () => [] },
     get: async (id: string) => {
