@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
 import { DEFAULT_PROJECT_ID, normalizeSubdir } from '../projects/project-core';
-import { machineChatSlots, machineConcurrency } from '../queue/capacity-gate';
+import { machineChatSlots, machineConcurrency, machineHeavySlots } from '../queue/capacity-gate';
 import { normalizeCompression, type CompressionConfig } from '@lds/shared';
 
 const SINGLETON_ID = 'singleton';
@@ -17,6 +17,8 @@ export interface SettingsPatch {
   verifyMaxAttempts?: number;
   concurrency?: number;
   chatConcurrency?: number;
+  heavySlots?: number;
+  commandPipeline?: boolean;
   debugMode?: boolean;
   compression?: string | null;
   askModel?: string | null;
@@ -158,6 +160,17 @@ export class SettingsService {
   async chatConcurrency(): Promise<number> {
     const stored = (await this.load()).chatConcurrency;
     return stored <= 0 ? machineChatSlots() : Math.max(1, stored);
+  }
+
+  /** How many heavy commands run at once across all tasks (0 stored = automatic) — read each time a command is queued. */
+  async heavySlots(): Promise<number> {
+    const stored = (await this.load()).heavySlots;
+    return stored <= 0 ? machineHeavySlots() : Math.max(1, stored);
+  }
+
+  /** Whether heavy commands go through the pipeline (the switch in Settings). */
+  async commandPipeline(): Promise<boolean> {
+    return (await this.load()).commandPipeline;
   }
 
   /** Whether the number of parallel runs is chosen by the server (stored as 0). */

@@ -166,6 +166,18 @@ export function recommendChatSlots(cpuCount: number, totalMemMb: number): number
   return Math.max(2, Math.min(6, cpuCount, byMem));
 }
 
+/**
+ * How many heavy commands (builds, tests, installs) may run at once across all tasks: one on a small machine, a second from 5 CPUs, a third from 9;
+ * and never more than the memory allows (about 2.5 GB for each beyond the 1 GB the system needs). Never below 1.
+ */
+export function recommendHeavySlots(cpuCount: number, totalMemMb: number): number {
+  const byCpu = cpuCount <= 4 ? 1 : cpuCount <= 8 ? 2 : 3;
+  const byMem = Math.floor((totalMemMb / 1024 - 1) / 2.5);
+  return Math.max(1, Math.min(byCpu, byMem));
+}
+
+export const machineHeavySlots = (): number => recommendHeavySlots(Math.max(1, cpus().length), totalmem() / 1_048_576);
+
 export const machineChatSlots = (): number => recommendChatSlots(Math.max(1, cpus().length), totalmem() / 1_048_576);
 
 export const machineConcurrency = (): number => recommendConcurrency(Math.max(1, cpus().length), totalmem() / 1_048_576);
@@ -210,6 +222,8 @@ export interface GateOptions {
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   onWait?: (reason: string) => void;
+  /** stop waiting (the run was cancelled): the wait ends at once, `aborted` is set in the result */
+  signal?: AbortSignal;
 }
 
 export interface GateResult {
@@ -217,6 +231,8 @@ export interface GateResult {
   waitedMs: number;
   /** it started because the wait ran out, not because the machine calmed down */
   forced: boolean;
+  /** the wait was ended by `signal`; the run must not start */
+  aborted?: boolean;
 }
 
 /** Hold a start while the machine is over its limits. Resolves when it may go (or after `maxWaitMs`). */
@@ -230,6 +246,7 @@ export async function waitForCapacity(o: GateOptions): Promise<GateResult> {
   const started = now();
   let told = false;
   for (;;) {
+    if (o.signal?.aborted) return { waitedMs: now() - started, forced: false, aborted: true };
     const v = capacityVerdict(sample(), o.limits);
     if (v.ok) return { waitedMs: now() - started, forced: false };
     if (now() - started >= (v.kind === 'memory' ? maxMemory : max)) return { waitedMs: now() - started, forced: true };
@@ -237,7 +254,9 @@ export async function waitForCapacity(o: GateOptions): Promise<GateResult> {
       told = true;
       o.onWait?.(v.reason ?? 'the machine is busy');
     }
-    await sleep(poll);
+    // an abort ends the sleep at once (the default sleep only; an injected one is the caller's)
+    if (o.signal && !o.sleep) await new Promise<void>((r) => { const t = setTimeout(r, poll); o.signal!.addEventListener('abort', () => { clearTimeout(t); r(); }, { once: true }); });
+    else await sleep(poll);
   }
 }
 

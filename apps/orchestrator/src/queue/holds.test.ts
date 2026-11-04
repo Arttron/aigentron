@@ -8,7 +8,7 @@ describe('start holds', () => {
     const first = getHold('t1')!;
     expect(first.reason).toBe('its turn');
     setHold('t1', 'the machine is busy');
-    expect(getHold('t1')).toEqual({ reason: 'the machine is busy', since: first.since });
+    expect(getHold('t1')).toEqual({ reason: 'the machine is busy', since: first.since, kind: 'start' });
     clearHold('t1');
     expect(getHold('t1')).toBeNull();
   });

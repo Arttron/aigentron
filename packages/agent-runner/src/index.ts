@@ -2,7 +2,7 @@ export * from './types';
 export { runAgent } from './run';
 export { emptyUsage, addUsage } from './usage';
 export { writeAgentSettings } from './settings';
-export { buildAgentEnv } from './env';
+export { COMMANDS_TOOL, applyNodeHeapLimit, buildAgentEnv, buildCommandEnv, withCommandsTool } from './env';
 export { buildInternalToolSpecs } from './internal-tools';
 export type { InternalToolSpec, InternalToolHandlers } from './internal-tools';
 export { claudeCodeRuntime, codexRuntime, runtimeForProviderKind } from './runtime';

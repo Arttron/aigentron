@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StartThrottle, autoNodeHeapMb, oomVictim, parseMeminfo, capacityVerdict, parseCpuStat, recommendChatSlots, recommendConcurrency, stealBetween, waitForCapacity, type CapacitySample } from './capacity-gate';
+import { StartThrottle, autoNodeHeapMb, oomVictim, parseMeminfo, capacityVerdict, parseCpuStat, recommendChatSlots, recommendHeavySlots, recommendConcurrency, stealBetween, waitForCapacity, type CapacitySample } from './capacity-gate';
 
 const s = (over: Partial<CapacitySample> = {}): CapacitySample => ({ loadPerCpu: 0.5, load1: 1, cpus: 2, freeMemMb: 2000, stealPct: 0, ...over });
 
@@ -152,5 +152,29 @@ describe('recommendChatSlots', () => {
     expect(recommendChatSlots(4, 8192)).toBe(4);
     expect(recommendChatSlots(16, 65536)).toBe(6);
     expect(recommendChatSlots(8, 3072)).toBe(2); // memory: (3 − 1) / 1.5 = 1 → floor of 2
+  });
+});
+
+describe('recommendHeavySlots', () => {
+  it('one on a small machine, more with CPUs and memory, never below 1', () => {
+    expect(recommendHeavySlots(2, 4096)).toBe(1);
+    expect(recommendHeavySlots(4, 16384)).toBe(1);
+    expect(recommendHeavySlots(8, 16384)).toBe(2);
+    expect(recommendHeavySlots(16, 65536)).toBe(3);
+    expect(recommendHeavySlots(16, 4096)).toBe(1); // memory: (4 − 1) / 2.5 = 1
+    expect(recommendHeavySlots(8, 1024)).toBe(1);
+  });
+});
+
+describe('waitForCapacity with a cancel signal', () => {
+  it('stops waiting at once when the signal fires, and says it was aborted', async () => {
+    const ctrl = new AbortController();
+    const busy: CapacitySample = { loadPerCpu: 9, load1: 9, cpus: 1, freeMemMb: 9999, stealPct: 0 };
+    const t = Date.now();
+    const p = waitForCapacity({ limits: { maxLoadPerCpu: 1, minFreeMemMb: 0 }, sample: () => busy, pollMs: 60_000, signal: ctrl.signal });
+    setTimeout(() => ctrl.abort(), 50);
+    const r = await p;
+    expect(r.aborted).toBe(true);
+    expect(Date.now() - t).toBeLessThan(2000);
   });
 });

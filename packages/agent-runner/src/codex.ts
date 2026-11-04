@@ -1,6 +1,6 @@
 import { chmod, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { applyNodeHeapLimit, buildAgentEnv } from './env';
+import { applyNodeHeapLimit, buildAgentEnv, withCommandsTool } from './env';
 import { assertIsolationReady, chownTree, spawnAsAgent } from './isolation';
 import { hooksConfig } from './settings';
 import { emptyUsage } from './usage';
@@ -200,7 +200,7 @@ export async function runCodex(params: RunAgentParams, onEvent: AgentEventHandle
   if (opts.apiKey) env.CODEX_API_KEY = opts.apiKey;
   if (opts.internalMcp) env[INTERNAL_MCP_TOKEN_ENV] = opts.internalMcp.token;
   if (params.disallowedTools?.length) env.LDS_DISALLOWED_TOOLS = params.disallowedTools.join(',');
-  if (params.allowedTools?.length) env.LDS_ALLOWED_TOOLS = params.allowedTools.join(',');
+  if (params.allowedTools?.length) env.LDS_ALLOWED_TOOLS = (withCommandsTool(params.allowedTools, Boolean(params.mcpServers && 'commands' in params.mcpServers)) ?? []).join(',');
   // Hooks and shell tools need a usable PATH/HOME; buildAgentEnv's allowlist supplies them.
 
   const args = ['exec'];

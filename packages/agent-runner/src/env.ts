@@ -72,9 +72,33 @@ export function buildAgentEnv(
     if (hook.modelTier) env.LDS_MODEL_TIER = hook.modelTier;
     if (hook.protectedPaths?.length) env.LDS_PROTECTED_PATHS = hook.protectedPaths.join(':');
     env.LDS_SHARED_DIST = hook.sharedDistPath;
+    if (hook.commandsPipe) env.LDS_COMMANDS_PIPE = '1';
     env.LDS_HOOK_SECRET = hook.secret;
   }
   return env;
+}
+
+/**
+ * The environment of a command the server runs FOR an agent (the command pipeline): the same allowlist of base variables as the agent's own shell —
+ * no model credentials, no hook secrets, nothing of the orchestrator's — plus the folders the agent's commands expect.
+ */
+export function buildCommandEnv(base: Record<string, string | undefined>, attachmentsDir?: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of ALLOWED_BASE_ENV) {
+    const v = base[key];
+    if (v !== undefined) env[key] = v;
+  }
+  if (attachmentsDir) env.LDS_ATTACHMENTS_DIR = attachmentsDir;
+  return env;
+}
+
+/** The pipeline's tool, as the runtimes name it. An agent with an exclusive tool whitelist needs it listed, or the hook's "use run_command" would be a dead end. */
+export const COMMANDS_TOOL = 'mcp__commands__run_command';
+
+/** A tool whitelist plus the pipeline's tool when the run has the `commands` server (no whitelist = everything is allowed already). */
+export function withCommandsTool(list: readonly string[] | undefined, hasServer: boolean): string[] | undefined {
+  if (!list?.length || !hasServer || list.includes(COMMANDS_TOOL)) return list ? [...list] : undefined;
+  return [...list, COMMANDS_TOOL];
 }
 
 /** NODE_OPTIONS with a heap cap for the Node processes an agent starts (tsc, vitest, builds). Keeps an existing --max-old-space-size untouched. */

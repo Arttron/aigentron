@@ -14,6 +14,8 @@ export interface HookWiring {
   agentSessionId: string;
   /** Absolute path to the compiled @lds/shared entry, so the hook can reuse the classifier. */
   sharedDistPath: string;
+  /** The command pipeline serves this run: the hook refuses a heavy Bash command and points at `run_command` (LDS_COMMANDS_PIPE). */
+  commandsPipe?: boolean;
   /** Shared project knowledge that is written only through its tools (memory, the note library, the brief): the hook refuses hand-written changes. */
   protectedPaths?: string[];
   /** How strong the run's model is: a small model is asked about more. */

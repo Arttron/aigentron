@@ -13,7 +13,7 @@ const SECTION_FIELDS: Record<SettingsSection, readonly (keyof SettingsUpdate)[]>
   escalations: ['notifyChannelId', 'notifyChatId'],
   instructions: ['agentInstructions'],
   verify: ['verifyCommands', 'verifyMaxAttempts'],
-  queue: ['concurrency', 'chatConcurrency'],
+  queue: ['concurrency', 'chatConcurrency', 'heavySlots', 'commandPipeline'],
   approvals: ['approvalTimeoutSeconds'],
   display: ['debugMode'],
 };
@@ -58,6 +58,8 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
           verifyMaxAttempts: data.verifyMaxAttempts,
           concurrency: data.concurrency,
           chatConcurrency: data.chatConcurrency ?? 0,
+          heavySlots: data.heavySlots ?? 0,
+          commandPipeline: data.commandPipeline ?? true,
           debugMode: data.debugMode,
           agentInstructions: data.agentInstructions,
           notifyChannelId: data.notifyChannelId ?? '',
@@ -270,6 +272,34 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
               onChange={(e) => set('chatConcurrency', Number(e.target.value))}
             />
           </Field>
+          <Field label="Command pipeline — builds, tests and installs of all tasks wait in one queue">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <input type="checkbox" checked={form.commandPipeline ?? true} onChange={(e) => set('commandPipeline', e.target.checked)} style={{ width: 'auto', margin: 0 }} /> On
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <input
+                type="checkbox"
+                checked={(form.heavySlots ?? 0) === 0}
+                disabled={!(form.commandPipeline ?? true)}
+                onChange={(e) => set('heavySlots', e.target.checked ? 0 : Math.max(1, s?.heavySlotsEffective ?? 1))}
+                style={{ width: 'auto', margin: 0 }}
+              />{' '}
+              Choose the number running at once automatically{(form.heavySlots ?? 0) === 0 && s?.heavySlotsEffective ? ` (now ${s?.heavySlotsEffective})` : ''}
+            </label>
+            <input
+              className={styles.narrow}
+              type="number"
+              min={1}
+              max={8}
+              disabled={!(form.commandPipeline ?? true) || (form.heavySlots ?? 0) === 0}
+              value={(form.heavySlots ?? 0) === 0 ? (s?.heavySlotsEffective ?? 1) : (form.heavySlots ?? 1)}
+              onChange={(e) => set('heavySlots', Number(e.target.value))}
+            />
+          </Field>
+          <Muted className={styles.note}>
+            Command pipeline: an agent runs a heavy command (install, build, tests, type check) through the server, which lets only this many run at once and starts each only while the machine is not busy; the agent just waits for the result.
+            Light commands (git, ls, reading files) and servers that keep running are not affected. Automatic = 1 on a small machine, more with CPUs and memory.
+          </Muted>
           <Muted className={styles.note}>
             Chat slots: a chat turn does not wait for the CPU, only for free memory. Automatic = about one per CPU, 2 to 6.
           </Muted>

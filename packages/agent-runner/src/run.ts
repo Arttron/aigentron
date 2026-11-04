@@ -3,7 +3,7 @@ import {
   INTERNAL_MCP_SERVER,
   INTERNAL_TOOL_PREFIX,
 } from '@lds/shared';
-import { applyNodeHeapLimit, buildAgentEnv } from './env';
+import { applyNodeHeapLimit, buildAgentEnv, withCommandsTool } from './env';
 import { AGENT_EXEC_ENV, AGENT_NICE_ENV, assertIsolationReady, cleanNice, isolationEnv, niceWrapperPath, resolveClaudeExecutable } from './isolation';
 import { writeAgentSettings } from './settings';
 import { emptyUsage } from './usage';
@@ -315,10 +315,10 @@ export async function runAgent(
 
   // `allowedTools` is an exclusive whitelist — if one is set, our in-process
   // status tools must be added or the agent could never report (→ stalled).
-  const allowedTools =
-    params.allowedTools?.length && statusServer
-      ? [...params.allowedTools, ...internalToolNames(params)]
-      : params.allowedTools;
+  const allowedTools = withCommandsTool(
+    params.allowedTools?.length && statusServer ? [...params.allowedTools, ...internalToolNames(params)] : params.allowedTools,
+    Boolean(params.mcpServers && 'commands' in params.mcpServers),
+  );
 
   const result: AgentRunResult = {
     sessionId: params.resumeSessionId ?? null,

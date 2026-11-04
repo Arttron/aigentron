@@ -106,7 +106,7 @@ export type TaskDetail = Task & {
   subtasks: TaskRef[];
   linksOut: TaskLinkOut[];
   /** why a queued task has not started yet (the machine is busy / its turn), or null */
-  hold?: { reason: string; since: string } | null;
+  hold?: { reason: string; since: string; kind?: 'start' | 'command' } | null;
 };
 
 /** How long and how far one agent run may go (Settings → Run limits). */
@@ -484,6 +484,10 @@ export interface Settings {
   /** slots of the chat lane (0 = automatic) and what is used now */
   chatConcurrency?: number;
   chatConcurrencyEffective?: number;
+  /** heavy commands (builds, tests) running at once through the pipeline (0 = automatic) and what is used now; the switch */
+  heavySlots?: number;
+  heavySlotsEffective?: number;
+  commandPipeline?: boolean;
   debugMode: boolean;
   /** Text compression / filtering (Settings → Work → Compression). */
   compression?: CompressionConfig;
@@ -510,6 +514,8 @@ export type SettingsUpdate = Partial<{
   verifyMaxAttempts: number;
   concurrency: number;
   chatConcurrency: number;
+  heavySlots: number;
+  commandPipeline: boolean;
   debugMode: boolean;
   compression: CompressionConfig;
   askModel: string;

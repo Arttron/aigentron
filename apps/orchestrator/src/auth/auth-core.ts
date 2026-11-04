@@ -121,7 +121,7 @@ export function isPublicRoute(path: string): boolean {
  * they are not reachable through a public tunnel.
  */
 export function isMachineRoute(path: string): boolean {
-  return /^\/api\/approvals\/check$/.test(path) || /^\/api\/approvals\/[^/]+\/wait$/.test(path) || path.startsWith('/api/internal-mcp') || path.startsWith('/api/research-mcp') || path.startsWith('/api/browser-mcp');
+  return /^\/api\/approvals\/check$/.test(path) || /^\/api\/approvals\/[^/]+\/wait$/.test(path) || path.startsWith('/api/internal-mcp') || path.startsWith('/api/research-mcp') || path.startsWith('/api/browser-mcp') || path.startsWith('/api/commands-mcp');
 }
 
 /** Failed sign-ins per key (client address): 5 misses → locked, doubling up to 15 minutes. Old failures are forgotten after an hour. */

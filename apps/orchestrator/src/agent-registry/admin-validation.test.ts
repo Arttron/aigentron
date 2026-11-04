@@ -20,6 +20,11 @@ describe('validateProviderProposal', () => {
 });
 
 describe('validateSettingsChanges', () => {
+  it('checks the command pipeline settings', () => {
+    expect(validateSettingsChanges({ commandPipeline: false, heavySlots: 2, chatConcurrency: 3 })).toBeNull();
+    expect(validateSettingsChanges({ commandPipeline: 'off' })).toMatch(/true or false/);
+    expect(validateSettingsChanges({ heavySlots: 99 })).toMatch(/heavySlots/);
+  });
   it('requires at least one known key', () => {
     expect(validateSettingsChanges({})).toMatch(/at least one/);
     expect(validateSettingsChanges({ githubToken: 'x' })).toMatch(/can't be changed/);

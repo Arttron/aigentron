@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, type OnModuleInit } from '@nestjs/common';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeMcpConfig } from '@lds/shared';
@@ -85,7 +85,7 @@ const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
  * `mcpServers` map at spawn time.
  */
 @Injectable()
-export class McpService {
+export class McpService implements OnModuleInit {
   private readonly logger = new Logger(McpService.name);
 
   constructor(
@@ -93,12 +93,17 @@ export class McpService {
     private readonly appConfig: AppConfigService,
   ) {}
 
+  /** The built-in servers (research, browser-ext, commands) must exist before the first agent run asks for them, not only after someone opens the MCP page. */
+  async onModuleInit(): Promise<void> {
+    await this.ensureSeeded().catch((e) => this.logger.warn(`MCP seeding failed: ${(e as Error).message}`));
+  }
+
   private async ensureSeeded(): Promise<void> {
     // Idempotent: adds any missing defaults without overwriting user edits.
     // Filtered here (not `createMany({skipDuplicates:true})`) since that
     // option isn't supported on SQLite.
     const existing = await this.prisma.mcpServer.findMany({
-      where: { name: { in: [...DEFAULT_MCP_SERVERS.map((s) => s.name), 'research', 'browser-ext'] } },
+      where: { name: { in: [...DEFAULT_MCP_SERVERS.map((s) => s.name), 'research', 'browser-ext', 'commands'] } },
       select: { name: true },
     });
     const existingNames = new Set(existing.map((s) => s.name));
@@ -118,7 +123,9 @@ export class McpService {
       name: 'browser-ext',
       config: { type: 'http', url: `${this.appConfig.approvalsApiUrl.replace(/\/$/, '')}/api/browser-mcp`, readOnlyTools: ['*'] },
     };
-    const missing = [...DEFAULT_MCP_SERVERS, researchSeed, browserSeed].filter((s) => !existingNames.has(s.name));
+    // The command pipeline (heavy commands through one queue): the dangerous-command check is made inside the server, exactly as for Bash.
+    const commandsSeed = { name: 'commands', config: { type: 'http', url: `${this.appConfig.approvalsApiUrl.replace(/\/$/, '')}/api/commands-mcp`, readOnlyTools: ['*'] } };
+    const missing = [...DEFAULT_MCP_SERVERS, researchSeed, browserSeed, commandsSeed].filter((s) => !existingNames.has(s.name));
     if (!missing.length) return;
     await this.prisma.mcpServer.createMany({ data: missing as Prisma.McpServerCreateManyInput[] });
     this.logger.log(`Seeded ${missing.length} default MCP server(s)`);

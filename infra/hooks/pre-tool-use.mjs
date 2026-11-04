@@ -47,6 +47,21 @@ function readStdin() {
   });
 }
 
+/**
+ * Is this Bash command heavy (a build, a test run, an install)? Then it belongs in the command pipeline. Fails OPEN (a missing dist means "not heavy"):
+ * the pipeline saves the machine, it is not a security check — the danger classifier below still sees every command that does run.
+ */
+async function isHeavy(distPath, command) {
+  if (!distPath || typeof command !== 'string') return false;
+  try {
+    const mod = await import(pathToFileURL(distPath).href);
+    const weight = mod.commandWeight ?? mod.default?.commandWeight;
+    return typeof weight === 'function' && weight(command) === 'heavy';
+  } catch {
+    return false;
+  }
+}
+
 /** Load the shared danger classifier from its compiled (CJS) dist, if present. */
 async function loadClassifier(distPath) {
   if (!distPath) return null;
@@ -117,6 +132,14 @@ async function main() {
 
   const denial = policyDenial(toolName);
   if (denial) return decide('deny', denial);
+
+  // The command pipeline serves this run: a heavy command waits its turn in the server's queue instead of running beside other builds.
+  if (toolName === 'Bash' && process.env.LDS_COMMANDS_PIPE === '1' && (await isHeavy(process.env.LDS_SHARED_DIST, toolInput.command))) {
+    return decide(
+      'deny',
+      'This is a heavy command (a build, test run or install). Run it with the run_command tool (mcp__commands__run_command, same command text) instead: it waits its turn in a shared queue so the server is not overloaded, and returns how it ended and the end of the output. Use Bash only for light commands.',
+    );
+  }
 
   const approvalsUrl = process.env.LDS_APPROVALS_URL;
   const taskId = process.env.LDS_TASK_ID;

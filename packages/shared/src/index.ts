@@ -8,3 +8,4 @@ export * from './frontmatter';
 export * from './mcp-config';
 export * from './compress';
 export * from './model-tier';
+export * from './heavy-command';

@@ -37,6 +37,9 @@ import { inlineBlock, readInlineFiles } from './inline-attachments';
 import { readDocumentText } from '../knowledge/extract';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { BrowserMcpService } from '../browser-control/browser-mcp.service';
+import { COMMANDS_TOOL } from '@lds/agent-runner';
+import { CommandPipelineService } from '../commands/command-pipeline.service';
+import { mcpWithCommands } from '../commands/commands-policy';
 import { mcpWithBrowser } from '../browser-control/browser-policy';
 import { ResearchMcpService } from '../research/research-mcp.service';
 import { ResourcesService } from '../resources/resources.service';
@@ -133,6 +136,7 @@ export class RealAgentExecutor extends AgentExecutor {
   /** Abort the in-flight run for a task (used by cancel). */
   override cancel(taskId: string): void {
     this.active.get(taskId)?.abort();
+    this.commands.cancelTask(taskId); // its builds and tests in the pipeline stop with it, at once
   }
 
   constructor(
@@ -156,6 +160,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly workspace: WorkspaceService,
     private readonly researchMcp: ResearchMcpService,
     private readonly browserMcp: BrowserMcpService,
+    private readonly commands: CommandPipelineService,
     private readonly media: MediaService,
     private readonly questions: QuestionsService,
     private readonly knowledge: KnowledgeService,
@@ -188,7 +193,7 @@ export class RealAgentExecutor extends AgentExecutor {
     // the server's own config says (a `${GITHUB_TOKEN}` placeholder becomes empty).
     const githubToken = (await this.credentials.apiTokenFor?.(project.git).catch(() => null)) ?? (await this.settings.githubToken());
     // A discussion participant only talks: none of the agent's own MCP servers (their tools could write somewhere).
-    const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(mcpWithBrowser(agentDef?.mcp ?? [], { available: this.browserMcp.available, isAdmin: agentDef?.name === 'admin', discussion: Boolean(ctx.discussion) }), { GITHUB_TOKEN: githubToken });
+    const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(mcpWithCommands(mcpWithBrowser(agentDef?.mcp ?? [], { available: this.browserMcp.available, isAdmin: agentDef?.name === 'admin', discussion: Boolean(ctx.discussion) }), { enabled: await this.settings.commandPipeline().catch(() => false), chat: agentDef?.mode === 'chat' || task.kind === 'ask', discussion: Boolean(ctx.discussion), allowedTools: agentDef?.allowedTools, disallowedTools: agentDef?.disallowedTools }), { GITHUB_TOKEN: githubToken });
     // The built-in research server lives in this process and only serves runs that carry a bearer (S-04): give this run its own.
     const researchCfg = mcpServers['research'] as { url?: string; headers?: Record<string, string> } | undefined;
     if (researchCfg?.url) researchCfg.headers = { ...(researchCfg.headers ?? {}), Authorization: `Bearer ${this.researchMcp.register().token}` };
@@ -927,6 +932,25 @@ export class RealAgentExecutor extends AgentExecutor {
     // What the agent may write to besides its task root: its project's folder (and, in shared mode, the checkout).
     // plus the task's own attachments folder ($LDS_ATTACHMENTS_DIR) — where SOUL.md tells it to put the files it hands over
     const extraWriteRoots = ctx.discussion ? undefined : [...extraWriteRootsFor(opts.project, ctx.worktreePath), resolve(this.attachments.dir(ctx.taskId))];
+    // The command pipeline: heavy commands (builds, tests, installs) go through the server's queue. This attempt's own token names the task and
+    // lends the pipeline the folder and the rules of this run; the hook then refuses a heavy Bash command and points at `run_command`.
+    let commandsToken: string | null = null;
+    const commandsCfg = opts.mcpServers['commands'] as { url?: string; headers?: Record<string, string> } | undefined;
+    if (commandsCfg?.url && !ctx.discussion) {
+      commandsToken = this.commands.register(ctx.taskId, {
+        cwd: opts.workDir,
+        workspaceRoot: ctx.worktreePath,
+        extraWriteRoots,
+        protectedPaths: hook.protectedPaths,
+        modelTier: opts.modelTier,
+        knownVars: { LDS_ATTACHMENTS_DIR: this.attachments.dir(ctx.taskId) },
+        isolation: opts.isolation,
+        agentSessionId: session.id,
+        nodeMaxMb: this.config.agentNodeMaxMb,
+      }).token;
+      commandsCfg.headers = { ...(commandsCfg.headers ?? {}), Authorization: `Bearer ${commandsToken}` };
+      hook.commandsPipe = true;
+    }
     // Internal control-plane tools: in-process for Claude, over HTTP MCP for Codex (same handlers).
     const toolHandlers: InternalToolHandlers = {
       onReportStatus,
@@ -1271,6 +1295,7 @@ export class RealAgentExecutor extends AgentExecutor {
       unsubscribeBus();
       if (idleTimer) clearInterval(idleTimer);
       internalReg?.dispose();
+      if (commandsToken) this.commands.unregister(commandsToken);
       if (this.active.get(ctx.taskId) === abortController) this.active.delete(ctx.taskId);
       this.guarded.delete(ctx.taskId);
       if (this.guarded.size === 0) this.stopMemoryGuard();
@@ -1617,7 +1642,8 @@ export class RealAgentExecutor extends AgentExecutor {
         description: def.description || s.name,
         prompt: `${orientation}\n\n${await this.buildInstructions(def, project)}`,
         model,
-        ...(def.allowedTools?.length ? { tools: def.allowedTools } : {}),
+        // a sub-agent with an exclusive tool list needs the pipeline's tool too: the hook sends its heavy Bash commands there
+        ...(def.allowedTools?.length ? { tools: def.allowedTools.includes('Bash') ? [...new Set([...def.allowedTools, COMMANDS_TOOL])] : def.allowedTools } : {}),
       };
       others.push({ name: s.name, description: desc, how: `Task tool, subagent_type "${s.name}" (or create_subtask)` });
     }

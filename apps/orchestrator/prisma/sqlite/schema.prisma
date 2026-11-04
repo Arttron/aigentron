@@ -37,6 +37,11 @@ model AppSettings {
   // Slots of the chat lane (chat agents' turns and questions), which runs beside the task cap. 0 = automatic, chosen for this machine.
   chatConcurrency Int @default(0)
 
+  // The command pipeline: heavy commands (builds, tests, installs) of every task run through one server-side queue.
+  // heavySlots = how many at once (0 = automatic, chosen for this machine); commandPipeline = the switch.
+  heavySlots      Int     @default(0)
+  commandPipeline Boolean @default(true)
+
   // when true the dashboard shows verbose 'assistant' transcript lines
   debugMode Boolean @default(false)
 

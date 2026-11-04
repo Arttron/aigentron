@@ -48,6 +48,7 @@ import { PacksModule } from './packs/packs.module';
 import { VoiceModule } from './voice/voice.module';
 import { ExtensionModule } from './extension/extension.module';
 import { BrowserControlModule } from './browser-control/browser-control.module';
+import { CommandsModule } from './commands/commands.module';
 import { StatsModule } from './stats/stats.module';
 import { AddonsModule } from './addons/addons.module';
 import { HealthController } from './health/health.controller';
@@ -78,6 +79,7 @@ import { HealthController } from './health/health.controller';
     VoiceModule,
     ExtensionModule,
     BrowserControlModule,
+    CommandsModule,
     PreflightModule,
     PrismaModule,
     BusModule,

@@ -7,13 +7,15 @@ export interface StartHold {
   reason: string;
   /** ISO time the wait began */
   since: string;
+  /** `start`: the task itself waits to start; `command`: a running task waits for a heavy command's turn in the pipeline */
+  kind?: 'start' | 'command';
 }
 
 const holds = new Map<string, StartHold>();
 
-export function setHold(taskId: string, reason: string): void {
+export function setHold(taskId: string, reason: string, kind: 'start' | 'command' = 'start'): void {
   const prev = holds.get(taskId);
-  holds.set(taskId, { reason, since: prev?.since ?? new Date().toISOString() });
+  holds.set(taskId, { reason, since: prev?.since ?? new Date().toISOString(), kind });
 }
 
 export const clearHold = (taskId: string): void => void holds.delete(taskId);
