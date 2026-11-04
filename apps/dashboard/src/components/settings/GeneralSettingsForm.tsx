@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type ChannelInfo, type Settings, type SettingsUpdate } from '@/lib/api';
 import { Card, SectionTitle, Field, Row, Button, Muted, ErrorText } from '@/components/ui';
+import { IntInput } from '@/components/IntInput';
 import { resetAssistant } from '@/lib/float-position';
 import { applyThemePref, getThemePref, type ThemePref } from '@/lib/theme';
 import styles from './GeneralSettingsForm.module.css';
@@ -192,7 +193,7 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
           {(form.approvalChatDelay ?? 10) > 0 && (
             <>
               <Field label="Pause in seconds">
-                <input className={styles.narrow} type="number" min={1} max={3600} value={form.approvalChatDelay ?? 10} onChange={(e) => set('approvalChatDelay', Math.max(1, Number(e.target.value) || 1))} />
+                <IntInput className={styles.narrow} min={1} max={3600} value={form.approvalChatDelay ?? 10} onCommit={(n) => set('approvalChatDelay', n)} />
               </Field>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                 <input type="checkbox" checked={form.approvalChatNobodyAtOnce ?? true} onChange={(e) => set('approvalChatNobodyAtOnce', e.target.checked)} style={{ width: 'auto', margin: 0 }} />
@@ -243,13 +244,12 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
             />
           </Field>
           <Field label="Max auto-fix attempts on failure (0 = fail without fixing)">
-            <input
+            <IntInput
               className={styles.narrow}
-              type="number"
               min={0}
               max={10}
               value={form.verifyMaxAttempts ?? 2}
-              onChange={(e) => set('verifyMaxAttempts', Number(e.target.value))}
+              onCommit={(n) => set('verifyMaxAttempts', n)}
             />
           </Field>
           <Muted className={styles.note}>
@@ -271,14 +271,13 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
               />{' '}
               Choose automatically for this machine{(form.concurrency ?? 1) === 0 && s?.concurrencyEffective ? ` (now ${s?.concurrencyEffective})` : ''}
             </label>
-            <input
+            <IntInput
               className={styles.narrow}
-              type="number"
               min={1}
               max={20}
               disabled={(form.concurrency ?? 1) === 0}
               value={(form.concurrency ?? 1) === 0 ? (s?.concurrencyEffective ?? 1) : (form.concurrency ?? 1)}
-              onChange={(e) => set('concurrency', Number(e.target.value))}
+              onCommit={(n) => set('concurrency', n)}
             />
           </Field>
           <Field label="Chat slots — chat turns and questions that run beside the tasks (they never wait behind long work)">
@@ -291,14 +290,13 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
               />{' '}
               Choose automatically for this machine{(form.chatConcurrency ?? 0) === 0 && s?.chatConcurrencyEffective ? ` (now ${s?.chatConcurrencyEffective})` : ''}
             </label>
-            <input
+            <IntInput
               className={styles.narrow}
-              type="number"
               min={1}
               max={12}
               disabled={(form.chatConcurrency ?? 0) === 0}
               value={(form.chatConcurrency ?? 0) === 0 ? (s?.chatConcurrencyEffective ?? 2) : (form.chatConcurrency ?? 2)}
-              onChange={(e) => set('chatConcurrency', Number(e.target.value))}
+              onCommit={(n) => set('chatConcurrency', n)}
             />
           </Field>
           <Field label="Command pipeline — builds, tests and installs of all tasks wait in one queue">
@@ -315,14 +313,13 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
               />{' '}
               Choose the number running at once automatically{(form.heavySlots ?? 0) === 0 && s?.heavySlotsEffective ? ` (now ${s?.heavySlotsEffective})` : ''}
             </label>
-            <input
+            <IntInput
               className={styles.narrow}
-              type="number"
               min={1}
               max={8}
               disabled={!(form.commandPipeline ?? true) || (form.heavySlots ?? 0) === 0}
               value={(form.heavySlots ?? 0) === 0 ? (s?.heavySlotsEffective ?? 1) : (form.heavySlots ?? 1)}
-              onChange={(e) => set('heavySlots', Number(e.target.value))}
+              onCommit={(n) => set('heavySlots', n)}
             />
           </Field>
           <Muted className={styles.note}>
@@ -343,13 +340,12 @@ export function GeneralSettingsForm({ sections }: { sections?: readonly Settings
         <Card>
           <SectionTitle>Approval timeout</SectionTitle>
           <Field label="Approval timeout (seconds) — fail-closed deny after this">
-            <input
+            <IntInput
               className={styles.narrow}
-              type="number"
               min={10}
               max={3600}
               value={form.approvalTimeoutSeconds ?? 300}
-              onChange={(e) => set('approvalTimeoutSeconds', Number(e.target.value))}
+              onCommit={(n) => set('approvalTimeoutSeconds', n)}
             />
           </Field>
         </Card>

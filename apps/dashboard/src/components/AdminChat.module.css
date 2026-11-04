@@ -7,6 +7,13 @@
   height: 104px;
   cursor: grab;
 }
+/* the square box only positions the mascot: taps pass through it to the page, and only its two buttons (the round mascot, the hide button) take them */
+.float {
+  pointer-events: none;
+}
+.float button {
+  pointer-events: auto;
+}
 .float:active {
   cursor: grabbing;
 }
@@ -28,6 +35,10 @@
   box-shadow: none;
   color: inherit;
   transition: background 200ms ease, transform 150ms ease;
+}
+.bubble * {
+  /* only the round button takes the tap: its animated drawing is a square, and its corners (empty page) must not swallow taps meant for what is under them */
+  pointer-events: none;
 }
 .bubble:hover {
   background: color-mix(in srgb, var(--bg-elev) 45%, transparent);

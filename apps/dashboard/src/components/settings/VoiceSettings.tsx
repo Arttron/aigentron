@@ -5,6 +5,7 @@ import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/comp
 import { ModelSelect, SelectWithOther } from '@/components/ModelSelect';
 import { VoiceTryout } from './VoiceTryout';
 import styles from './VoiceSettings.module.css';
+import { IntInput } from '@/components/IntInput';
 
 const STT_MODELS = ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1', 'whisper-large-v3-turbo'];
 const TTS_MODELS = ['gpt-4o-mini-tts', 'tts-1', 'tts-1-hd'];
@@ -260,7 +261,7 @@ export function VoiceSettings() {
               </>
             )}
             <Field label="Longest text to read aloud (characters; longer answers are cut at a sentence — the full text is always shown)">
-              <input type="number" min={200} max={4000} step={100} value={d.ttsMax} onChange={(e) => set({ ttsMax: Number(e.target.value) || 1500 })} />
+              <IntInput min={200} max={4000} value={d.ttsMax} onCommit={(n) => set({ ttsMax: n })} />
             </Field>
             {d.ttsProvider && <Muted>⚠ The text of answers that are read aloud is sent to <strong>{where(d.ttsProvider)}</strong>.</Muted>}
           </>

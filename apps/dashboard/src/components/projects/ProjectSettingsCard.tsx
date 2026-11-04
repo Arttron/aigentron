@@ -5,6 +5,7 @@ import { api, type AgentInfo, type ChannelInfo, type DeleteProjectOptions, type 
 import { ISOLATION_HELP, apiMessage } from '@/lib/projects';
 import { Button, Card, CheckboxGroup, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
 import styles from './projects.module.css';
+import { IntInput } from '@/components/IntInput';
 
 /** Name, checks, default agent, notifications and mode; plus archive / delete. */
 export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDeleted }: { project: Project & { counts?: ProjectLibraryCounts }; defaultIsolation: ProjectIsolation; onSaved: (p: Project) => void; onDeleted: () => void }) {
@@ -91,7 +92,7 @@ export function ProjectSettingsCard({ project, defaultIsolation, onSaved, onDele
               <textarea value={verify} onChange={(e) => setVerify(e.target.value)} rows={3} placeholder={'pnpm install\npnpm lint\npnpm test'} />
             </Field>
             <Field label="Max auto-fix attempts on failure (0 = fail without fixing)">
-              <input className={styles.narrow} type="number" min={0} max={10} value={attempts} onChange={(e) => setAttempts(Number(e.target.value))} />
+              <IntInput className={styles.narrow} min={0} max={10} value={attempts} onCommit={(n) => setAttempts(n)} />
             </Field>
           </>
         )}

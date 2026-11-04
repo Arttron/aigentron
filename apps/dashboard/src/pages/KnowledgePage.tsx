@@ -7,6 +7,7 @@ import { AddToSelect, ScopeBadge, ScopeBar, ScopeField } from '@/components/Scop
 import { useScope } from '@/lib/use-scope';
 import { filterByScope, scopeHelp, targetProject } from '@/lib/scope';
 import styles from './KnowledgePage.module.css';
+import { IntInput } from '@/components/IntInput';
 
 const kb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 const DEFAULT_CHUNKING: KbChunking = { strategy: 'section', maxChars: 3000, overlap: 200, minChars: 200 };
@@ -421,13 +422,13 @@ export function KnowledgePage() {
               </select>
             </Field>
             <Field label="Max size (characters)">
-              <input type="number" min={300} max={12000} value={draft.chunking.maxChars} onChange={(e) => setDraft({ ...draft, chunking: { ...draft.chunking, maxChars: num(e.target.value, 3000) } })} />
+              <IntInput min={300} max={12000} value={draft.chunking.maxChars} onCommit={(n) => setDraft({ ...draft, chunking: { ...draft.chunking, maxChars: n } })} />
             </Field>
             <Field label="Overlap">
-              <input type="number" min={0} max={2000} value={draft.chunking.overlap} onChange={(e) => setDraft({ ...draft, chunking: { ...draft.chunking, overlap: num(e.target.value, 0) } })} />
+              <IntInput min={0} max={2000} value={draft.chunking.overlap} onCommit={(n) => setDraft({ ...draft, chunking: { ...draft.chunking, overlap: n } })} />
             </Field>
             <Field label="Merge pieces shorter than">
-              <input type="number" min={0} max={2000} value={draft.chunking.minChars} onChange={(e) => setDraft({ ...draft, chunking: { ...draft.chunking, minChars: num(e.target.value, 0) } })} />
+              <IntInput min={0} max={2000} value={draft.chunking.minChars} onCommit={(n) => setDraft({ ...draft, chunking: { ...draft.chunking, minChars: n } })} />
             </Field>
           </div>
           <Field label="Try it: paste a sample text to see the passages">

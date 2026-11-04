@@ -3,6 +3,7 @@ import { COMPRESSION_RULE_LABELS, DEFAULT_COMPRESSION, compressText, normalizeCo
 import { useAction } from '@/lib/use-settings-resource';
 import { api } from '@/lib/api';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
+import { IntInput } from '@/components/IntInput';
 
 const NF = new Intl.NumberFormat();
 const SAMPLE = `Please check the build.\n\n\n\n\nOn Mon, 3 Nov 2026 at 10:00, Bob <bob@example.com> wrote:\n> old quoted text\n> more old text\n\n2026-11-02 10:00:01 INFO step 1\n${'2026-11-02 10:00:02 INFO retrying the request\n'.repeat(60)}`;
@@ -76,16 +77,16 @@ export function CompressionSettings() {
       ))}
       <Row wrap>
         <Field label="Log lines kept at the start">
-          <input type="number" min={3} max={1000} value={cfg.logKeepHead} onChange={(e) => set('logKeepHead', Number(e.target.value))} style={{ maxWidth: 110 }} />
+          <IntInput min={3} max={1000} value={cfg.logKeepHead} onCommit={(n) => set('logKeepHead', n)} style={{ maxWidth: 110 }} />
         </Field>
         <Field label="…and at the end">
-          <input type="number" min={3} max={1000} value={cfg.logKeepTail} onChange={(e) => set('logKeepTail', Number(e.target.value))} style={{ maxWidth: 110 }} />
+          <IntInput min={3} max={1000} value={cfg.logKeepTail} onCommit={(n) => set('logKeepTail', n)} style={{ maxWidth: 110 }} />
         </Field>
         <Field label="Leave texts shorter than (characters)">
-          <input type="number" min={0} max={100000} value={cfg.minChars} onChange={(e) => set('minChars', Number(e.target.value))} style={{ maxWidth: 130 }} />
+          <IntInput min={0} max={100000} value={cfg.minChars} onCommit={(n) => set('minChars', n)} style={{ maxWidth: 130 }} />
         </Field>
         <Field label="Cut one text to (characters, 0 = no limit)">
-          <input type="number" min={0} value={cfg.maxChars} onChange={(e) => set('maxChars', Number(e.target.value))} style={{ maxWidth: 150 }} />
+          <IntInput min={0} max={100000000} value={cfg.maxChars} onCommit={(n) => set('maxChars', n)} style={{ maxWidth: 150 }} />
         </Field>
       </Row>
       <Muted>The cut keeps the beginning and the end and says how much was left out. Use it with care: it can remove something the agent needs.</Muted>

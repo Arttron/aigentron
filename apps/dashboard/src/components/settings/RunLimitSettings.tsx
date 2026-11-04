@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAction } from '@/lib/use-settings-resource';
 import { api, type RunLimits } from '@/lib/api';
 import { Button, Card, ErrorText, Field, Muted, Row, SectionTitle } from '@/components/ui';
+import { IntInput } from '@/components/IntInput';
 
 const FIELDS: { key: 'timeoutMin' | 'maxMin' | 'graceSec' | 'idleMin' | 'maxTurns' | 'extraMin'; label: string; min: number; max: number; hint: string }[] = [
   { key: 'timeoutMin', label: 'Run time — first window (minutes)', min: 1, max: 240, hint: 'Active time only: the clock stops while a person is asked something.' },
@@ -56,7 +57,7 @@ export function RunLimitSettings() {
       </Muted>
       {FIELDS.map((f) => (
         <Field key={f.key} label={f.label}>
-          <input type="number" min={f.min} max={f.max} value={cfg[f.key]} onChange={(e) => setCfg({ ...cfg, [f.key]: Number(e.target.value) })} style={{ maxWidth: 140 }} />
+          <IntInput min={f.min} max={f.max} value={cfg[f.key]} onCommit={(n) => setCfg({ ...cfg, [f.key]: n })} style={{ maxWidth: 140 }} />
           <Muted>
             {f.hint}
             {defaults ? ` Server default: ${defaults[f.key]}.` : ''}

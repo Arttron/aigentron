@@ -351,3 +351,10 @@ textarea {
 :where([data-ui='text'] + form) {
   margin-top: 14px;
 }
+
+/* A checkbox / radio label is only as wide as what it shows: a tap in the empty space beside the text must not flip the box (on a phone that space is under the thumb). */
+label:has(> input[type='checkbox']),
+label:has(> input[type='radio']) {
+  width: fit-content;
+  max-width: 100%;
+}

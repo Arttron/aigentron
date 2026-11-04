@@ -5,6 +5,7 @@ import { api, errMsg, type AgentInfo, type ChannelInfo, type ScheduleInfo } from
 import { DEFAULT_FORM, buildCron, parseCron, type Preset, type ScheduleFormState } from '@/lib/schedule-form';
 import { Button, Card, ErrorText, Field, Modal, Muted, Row, SectionTitle } from '@/components/ui';
 import styles from './SchedulesManager.module.css';
+import { IntInput } from '@/components/IntInput';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PRESETS: { id: Preset; label: string }[] = [
@@ -352,10 +353,10 @@ export function SchedulesManager() {
           {d.when.preset === 'hours' && (
             <Row>
               <Field label="Every (hours)">
-                <input type="number" min={1} max={23} value={d.when.everyHours} onChange={(e) => setWhen({ everyHours: Number(e.target.value) || 1 })} />
+                <IntInput min={1} max={23} value={d.when.everyHours} onCommit={(n) => setWhen({ everyHours: n })} />
               </Field>
               <Field label="At minute">
-                <input type="number" min={0} max={59} value={Number(d.when.time.split(':')[1] ?? 0)} onChange={(e) => setWhen({ time: `00:${String(Math.min(59, Math.max(0, Number(e.target.value) || 0))).padStart(2, '0')}` })} />
+                <IntInput min={0} max={59} value={Number(d.when.time.split(':')[1] ?? 0)} onCommit={(n) => setWhen({ time: `00:${String(n).padStart(2, '0')}` })} />
               </Field>
             </Row>
           )}
