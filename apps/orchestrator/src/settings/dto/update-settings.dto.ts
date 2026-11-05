@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 /** PUT /api/settings body. All fields optional; only present ones are changed. */
 export class UpdateSettingsDto {
@@ -46,6 +46,16 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsBoolean()
   approvalChatNobodyAtOnce?: boolean;
+
+  @IsOptional()
+  @IsIn(['off', 'merged', 'merged_or_done'])
+  cleanupMode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  cleanupDoneDays?: number;
 
   @IsOptional()
   @IsBoolean()

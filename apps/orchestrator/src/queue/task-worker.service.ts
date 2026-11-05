@@ -418,7 +418,8 @@ export class TaskWorkerService implements OnModuleInit {
       return { worktreePath: dir, branch: '' };
     }
     if (shared) return this.worktrees.useSharedRepo(project);
-    if (task.worktreePath && task.branch) return { worktreePath: task.worktreePath, branch: task.branch };
+    // A task whose checkout was cleared after it finished (or whose folder is gone) gets it back before the agent starts in it
+    if (task.worktreePath && task.branch) return this.worktrees.restoreForTask(project, { id: task.id, title: task.title, worktreePath: task.worktreePath, branch: task.branch });
     return this.worktrees.createForTask(project, task.id, task.title);
   }
 

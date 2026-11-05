@@ -27,6 +27,12 @@ export class ListTasksDto {
   @MaxLength(40)
   project?: string;
 
+  /** `active` (default): tasks being worked on first, then the rest, each newest first; `created`: newest first, whatever their state. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  sort?: string;
+
   /** 1-based page number. */
   @IsOptional()
   @Type(() => Number)

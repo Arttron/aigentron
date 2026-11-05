@@ -299,6 +299,19 @@ export class MaintenanceService implements OnApplicationBootstrap, OnModuleDestr
    * Registered worktrees under worktreesRoot (of every project's checkout), plus their task ids and whether they are stale.
    * Both layouts are understood: `<root>/<taskId>` (before projects) and `<root>/<slug>/<taskId>`.
    */
+  /** The registered per-task worktrees (their task ids and main repositories), for the sweep of finished work. */
+  listWorktrees(): Promise<{ path: string; id: string; repo: string; stale: boolean; orphan: boolean }[]> {
+    return this.worktreeState(0);
+  }
+
+  bytesOf(path: string): Promise<number> {
+    return this.dirBytes(path);
+  }
+
+  gitIn(repo: string, args: string[]): Promise<string> {
+    return this.git(repo, args);
+  }
+
   private async worktreeState(days: number): Promise<{ path: string; id: string; repo: string; stale: boolean; orphan: boolean }[]> {
     const root = this.config.worktreesRoot.replace(/\/$/, '');
     const known: { path: string; repo: string }[] = [];

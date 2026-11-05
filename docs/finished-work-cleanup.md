@@ -1,0 +1,19 @@
+# Clearing the checkouts of finished work
+
+Every code task works in its own **git worktree** (a copy of the project's repository under `WORKTREES_ROOT`). They are large (dependencies, builds) and used to stay until the task was deleted or an age rule (`CLEANUP_WORKTREES`, 30 days by folder age) caught them. Now they are cleared **by what the work is**, not by its age.
+
+## The rule (`maintenance/finished-work.ts`, pure and tested)
+A checkout is cleared when **nothing would be lost** and:
+- **its work is in the base branch** — everything on the task's branch is already in `origin/<base>` (or `<base>`), or the same changes are in it as other commits (`git cherry`, a rebase merge), or its **pull request was merged** (GitHub API, read-only, needs the API token; this is the only way to see a *squash* merge) → the checkout **and** the branch go (`agent/*` branches only). A merged pull request counts only for the commits up to the tip it had when it was merged (GitHub's `head.sha`, checked with `git merge-base --is-ancestor`): commits made after the merge (a later message to the task) are not covered; or
+- *(mode `merged_or_done`)* the task is **done or cancelled**, `cleanupDoneDays` (default 3) have passed, and its commits are **on a remote** → the checkout goes, the branch stays (its commits are not in the base branch).
+
+Never cleared: a checkout whose **HEAD holds commits that are not in the base branch** (a detached HEAD, or a folder moved to another branch: the work is judged by what the FOLDER holds *and* by the task's branch, whichever has commits); **ignored files that are not build output** (a `.env`, local notes — `node_modules`, `dist`, `build`, caches are build output and do not count); a task that is queued / running / waiting for an approval, or a lead waiting for its subtasks; a checkout with **uncommitted or untracked files**; commits that exist **only here** (not merged, not pushed); anything git could not be asked about (unknown is "keep"). Failed / stalled / blocked / waiting-for-review tasks keep their checkout unless merged (a person may continue them). Each checkout is asked about again right before it goes — **inside the task's lock** (`TaskLocks`), the same lock the worker takes when it brings a checkout back, so a message that starts the task meanwhile either finds it running (the folder stays) or waits and finds it cleared (and it is restored). "Done N days ago" counts from the end of the task's last run, not from any later change of its row.
+
+## Settings → General → *Finished work — task checkouts*
+`cleanupMode` (`merged_or_done` default · `merged` · `off`) and `cleanupDoneDays`. **Show what would be cleared** lists every checkout with the decision and the reason in words and the size; **Clear now** does what the 6-hourly sweep does; **Cleared lately** is the log (`<agentDir>/cleanup-log.jsonl`, the last 300 entries). API: `GET /api/maintenance/finished-work`, `POST …/run`, `GET …/log`. The admin may change the two settings.
+
+## A cleared task keeps working
+`TaskWorker.checkoutFor` no longer trusts `task.worktreePath`: `WorktreeService.restoreForTask` makes the folder again from the task's branch (`git worktree prune` + `add`; a folder that exists but is not a checkout, or a branch that is checked out elsewhere, is refused with a clear message instead of starting the agent in it), or — when the branch was deleted with its merged checkout — a fresh checkout from the base branch. (Before this, a task whose folder was gone ran its agent in a folder that did not exist.)
+
+## Not covered
+Project clones (the main checkout of each project) are never cleared; run folders, caches and attachments keep their own rules (Disk & cleanup). A squash merge is seen only through the pull-request address (`prUrl`) and a GitHub token; without them such work is cleared by the `done + N days` rule only if its commits are on the remote. The remote-tracking refs are as fresh as the last fetch.

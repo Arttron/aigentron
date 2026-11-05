@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { Roles } from '../identity/roles.decorator';
 import { RolesGuard } from '../identity/roles.guard';
 import { DiskMonitorService } from './disk-monitor.service';
+import { FinishedWorkService } from './finished-work.service';
 import { MaintenanceService, type CleanupRequest, type CleanupResult, type MaintenanceReport } from './maintenance.service';
 
 @Controller('maintenance')
@@ -11,6 +12,7 @@ export class MaintenanceController {
   constructor(
     private readonly maintenance: MaintenanceService,
     private readonly disk: DiskMonitorService,
+    private readonly finished: FinishedWorkService,
   ) {}
 
   /** Free space of the data disk and its level (ok / warn / critical). */
@@ -23,6 +25,24 @@ export class MaintenanceController {
   @Post('relieve')
   relieve() {
     return this.maintenance.relieve();
+  }
+
+  /** The checkouts of tasks and what the cleanup policy would do with each (nothing is touched). */
+  @Get('finished-work')
+  finishedWork() {
+    return this.finished.plan();
+  }
+
+  /** Clear the checkouts the policy allows now (the same thing the 6-hourly sweep does). */
+  @Post('finished-work/run')
+  runFinishedWork() {
+    return this.finished.sweep();
+  }
+
+  /** What was cleared lately. */
+  @Get('finished-work/log')
+  finishedWorkLog() {
+    return this.finished.log();
   }
 
   @Get('report')

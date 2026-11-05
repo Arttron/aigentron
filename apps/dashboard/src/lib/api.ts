@@ -492,6 +492,9 @@ export interface Settings {
   /** when a request that waits for a person reaches the chats: seconds (0 = at once, -1 = never) and whether an unattended dashboard sends it at once */
   approvalChatDelay?: number;
   approvalChatNobodyAtOnce?: boolean;
+  /** clearing the checkouts of finished work: off | merged | merged_or_done, and the days to wait after a task is done */
+  cleanupMode?: 'off' | 'merged' | 'merged_or_done';
+  cleanupDoneDays?: number;
   commandPipeline?: boolean;
   debugMode: boolean;
   /** Text compression / filtering (Settings → Work → Compression). */
@@ -523,6 +526,8 @@ export type SettingsUpdate = Partial<{
   commandPipeline: boolean;
   approvalChatDelay: number;
   approvalChatNobodyAtOnce: boolean;
+  cleanupMode: 'off' | 'merged' | 'merged_or_done';
+  cleanupDoneDays: number;
   debugMode: boolean;
   compression: CompressionConfig;
   askModel: string;
@@ -894,6 +899,9 @@ export const api = {
   questionImageUrl: (id: string) => `${API_BASE}/questions/${e(id)}/image`,
   diskStatus: () => request<DiskStatus | null>('GET', '/maintenance/disk'),
   maintenanceReport: () => request<MaintenanceReport>('GET', '/maintenance/report'),
+  finishedWork: () => request<FinishedWorkPlan>('GET', '/maintenance/finished-work'),
+  runFinishedWork: () => request<{ removed: number; freed: number; entries: FinishedWorkLogEntry[] }>('POST', '/maintenance/finished-work/run'),
+  finishedWorkLog: () => request<FinishedWorkLogEntry[]>('GET', '/maintenance/finished-work/log'),
   relieveDisk: () => request<{ digests: number; research: number; runs: number; bytes: number }>('POST', '/maintenance/relieve'),
   getApprovalMode: () => request<{ mode: 'ask' | 'off' }>('GET', '/approvals/mode'),
   setApprovalMode: (mode: 'ask' | 'off') => request<{ mode: 'ask' | 'off' }>('PUT', '/approvals/mode', { body: { mode } }),
@@ -941,3 +949,21 @@ export const api = {
   /** The browser add-on's noVNC page, proxied behind the sign-in; `path` tells noVNC where its WebSocket is (host-relative, same proxy). */
   addonBrowserViewUrl: () => `${API_BASE}/addons/browser/view/vnc.html?autoconnect=1&resize=scale&show_dot=1&reconnect=0&path=api/addons/browser/view/websockify`,
 };
+
+/** The checkouts of tasks and what the cleanup policy would do with each (GET /maintenance/finished-work). */
+export interface FinishedWorkPlan {
+  policy: { mode: 'off' | 'merged' | 'merged_or_done'; doneDays: number };
+  items: { taskId: string; title: string; status: string; path: string; branch: string | null; base: string; bytes: number | null; decision: { remove: boolean; deleteBranch: boolean; reason: string } }[];
+  willRemove: number;
+  willFree: number;
+}
+
+export interface FinishedWorkLogEntry {
+  at: string;
+  taskId: string;
+  title: string;
+  path: string;
+  reason: string;
+  bytes: number;
+  branchDeleted: boolean;
+}

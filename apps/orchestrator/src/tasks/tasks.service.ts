@@ -868,7 +868,7 @@ export class TasksService {
     return out;
   }
 
-  async list(params: { q?: string; type?: string; status?: string; project?: string; page?: number; pageSize?: number } = {}) {
+  async list(params: { q?: string; type?: string; status?: string; project?: string; sort?: string; page?: number; pageSize?: number } = {}) {
     const page = Math.max(1, params.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 25));
     const q = params.q?.trim();
@@ -904,16 +904,28 @@ export class TasksService {
     const shape = flat ? (parts.length === 1 ? parts[0] : { AND: parts }) : { AND: [{ parentId: null }, ...(byStatus ? [byStatus] : [])] };
     const where = (byProject ? { AND: [shape, byProject] } : shape) as never;
 
-    const [top, total] = await this.prisma.$transaction([
-      this.prisma.task.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include,
-      }),
-      this.prisma.task.count({ where }),
-    ]);
+    const skip = (page - 1) * pageSize;
+    let top: Awaited<ReturnType<typeof this.prisma.task.findMany<{ where: never; include: typeof include }>>>;
+    let total: number;
+    if (params.sort === 'created') {
+      [top, total] = await this.prisma.$transaction([
+        this.prisma.task.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: pageSize, include }),
+        this.prisma.task.count({ where }),
+      ]);
+    } else {
+      // Tasks being worked on come first (running, queued, waiting for an approval — and a lead whose subtasks are), then the rest; each group newest
+      // first. Done as two windows over one ordering so the pages stay consistent: the active ones fill the first pages, the others follow.
+      const live = statusesOf('active');
+      const isActive = flat ? { status: { in: live } } : { OR: [{ status: { in: live } }, { subtasks: { some: { status: { in: live } } } }] };
+      const activeWhere = { AND: [where, isActive] } as never;
+      const restWhere = { AND: [where, { NOT: isActive }] } as never;
+      const [nActive, all] = await this.prisma.$transaction([this.prisma.task.count({ where: activeWhere }), this.prisma.task.count({ where })]);
+      total = all;
+      const fromActive = skip < nActive ? await this.prisma.task.findMany({ where: activeWhere, orderBy: { createdAt: 'desc' }, skip, take: Math.min(pageSize, nActive - skip), include }) : [];
+      const left = pageSize - fromActive.length;
+      const fromRest = left > 0 ? await this.prisma.task.findMany({ where: restWhere, orderBy: { createdAt: 'desc' }, skip: Math.max(0, skip - nActive), take: left, include }) : [];
+      top = [...fromActive, ...fromRest];
+    }
 
     // The list shows the tasks themselves, never their subtasks: each task carries how many it has and in which states
     // (a row says "5 subtasks · 3 done · 1 stalled"; the subtasks are on the task's own page).

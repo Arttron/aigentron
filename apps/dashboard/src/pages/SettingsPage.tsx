@@ -22,6 +22,7 @@ import { RunLimitSettings } from '@/components/settings/RunLimitSettings';
 import { AskModelSettings } from '@/components/settings/AskModelSettings';
 import { CompressionSettings } from '@/components/settings/CompressionSettings';
 import { VisionSettings } from '@/components/settings/VisionSettings';
+import { FinishedWorkSettings } from '@/components/settings/FinishedWorkSettings';
 import { VoiceSettings } from '@/components/settings/VoiceSettings';
 
 /**
@@ -59,6 +60,7 @@ export function SettingsPage() {
           <TranslateSettings />
           <TitleSettings />
           <DiskSettings />
+          <FinishedWorkSettings />
         </>
       )}
       {tab === 'work' && (

@@ -29,6 +29,8 @@ function serialize(s: SettingsRow) {
     heavySlots: s.heavySlots,
     approvalChatDelay: s.approvalChatDelay,
     approvalChatNobodyAtOnce: s.approvalChatNobodyAtOnce,
+    cleanupMode: s.cleanupMode,
+    cleanupDoneDays: s.cleanupDoneDays,
     heavySlotsEffective: s.heavySlots <= 0 ? machineHeavySlots() : s.heavySlots,
     commandPipeline: s.commandPipeline,
     approvalTimeoutSeconds: s.approvalTimeoutSeconds,
@@ -65,6 +67,8 @@ function toPatch(dto: UpdateSettingsDto): SettingsPatch {
   if (dto.heavySlots !== undefined) patch.heavySlots = dto.heavySlots;
   if (dto.approvalChatDelay !== undefined) patch.approvalChatDelay = dto.approvalChatDelay;
   if (dto.approvalChatNobodyAtOnce !== undefined) patch.approvalChatNobodyAtOnce = dto.approvalChatNobodyAtOnce;
+  if (dto.cleanupMode !== undefined) patch.cleanupMode = dto.cleanupMode;
+  if (dto.cleanupDoneDays !== undefined) patch.cleanupDoneDays = dto.cleanupDoneDays;
   if (dto.commandPipeline !== undefined) patch.commandPipeline = dto.commandPipeline;
   if (dto.debugMode !== undefined) patch.debugMode = dto.debugMode;
   if (dto.askModel !== undefined) {

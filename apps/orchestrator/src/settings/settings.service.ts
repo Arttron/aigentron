@@ -20,6 +20,8 @@ export interface SettingsPatch {
   heavySlots?: number;
   approvalChatDelay?: number;
   approvalChatNobodyAtOnce?: boolean;
+  cleanupMode?: string;
+  cleanupDoneDays?: number;
   commandPipeline?: boolean;
   debugMode?: boolean;
   compression?: string | null;
@@ -173,6 +175,13 @@ export class SettingsService {
   /** Whether heavy commands go through the pipeline (the switch in Settings). */
   async commandPipeline(): Promise<boolean> {
     return (await this.load()).commandPipeline;
+  }
+
+  /** How the checkouts of finished work are cleared (Settings → Maintenance): read each time the sweep runs. */
+  async cleanupPolicy(): Promise<{ mode: 'off' | 'merged' | 'merged_or_done'; doneDays: number }> {
+    const s = await this.load();
+    const mode = s.cleanupMode === 'off' || s.cleanupMode === 'merged' ? s.cleanupMode : 'merged_or_done';
+    return { mode, doneDays: Math.max(1, Math.min(365, s.cleanupDoneDays || 3)) };
   }
 
   /** Whether the number of parallel runs is chosen by the server (stored as 0). */

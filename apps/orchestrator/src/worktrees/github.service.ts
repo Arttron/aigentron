@@ -151,6 +151,30 @@ export class GitHubService {
     return { ok: true, message: want ? `Fetched origin/${want}${head ? ` — now at ${head}` : ''}. Your files and branches are unchanged: bring it in with \`git merge origin/${want}\` (or rebase).` : 'Fetched every branch of origin. Your files and branches are unchanged: bring what you need in with git merge / rebase.' };
   }
 
+  /**
+   * Was this pull request merged, and which commit was its tip then (`headSha`)? A merged request covers only the commits up to that tip: later commits on the
+   * same branch are not in it. Null when it cannot be told (not a GitHub pull-request address, no token for the API, the network).
+   * Read-only; used to clear the checkout of work that has been merged by squash (which git history alone cannot show).
+   */
+  async isPrMerged(project: PublishTarget, prUrl: string): Promise<{ merged: boolean; headSha: string | null } | null> {
+    const m = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)\/?$/.exec(prUrl.trim());
+    if (!m) return null;
+    const token = await this.apiToken(project).catch(() => null);
+    if (!token) return null;
+    try {
+      const res = await fetch(`https://api.github.com/repos/${m[1]}/${m[2]}/pulls/${m[3]}`, {
+        headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'local-dev-server' },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return null;
+      const j = (await res.json()) as { merged?: boolean; merged_at?: string | null; head?: { sha?: string } };
+      const sha = typeof j.head?.sha === 'string' && /^[0-9a-f]{7,64}$/i.test(j.head.sha) ? j.head.sha : null;
+      return { merged: j.merged === true || Boolean(j.merged_at), headSha: sha };
+    } catch {
+      return null;
+    }
+  }
+
   /** The project's HTTPS token for the GitHub API (the port), else the installation's legacy one. */
   private async apiToken(project: PublishTarget): Promise<string | null> {
     const own = await this.credentials.apiTokenFor?.(project.git).catch(() => null);

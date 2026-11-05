@@ -14,7 +14,7 @@ async function listWhere(params: Parameters<TasksService['list']>[0]) {
       task: { findMany, count: async () => 0, groupBy: async () => [] },
     },
   });
-  await svc.list(params);
+  await svc.list({ sort: 'created', ...params });
   return (findMany.mock.calls[0] as unknown as [{ where: Record<string, unknown> }])[0].where;
 }
 
@@ -64,5 +64,53 @@ describe('the numbers on the chips follow the list', () => {
   it('with a type: flat by status, inside the project', async () => {
     const { groupBy } = await counts('subtask', 'shop');
     expect(JSON.stringify(groupBy.mock.calls[0])).toContain('p-shop');
+  });
+});
+
+
+describe('the list puts the tasks being worked on first', () => {
+  /** nActive of `total` top-level tasks are being worked on; what windows of the database does one page read? */
+  async function windows(nActive: number, total: number, page: number, pageSize: number, params: Parameters<TasksService['list']>[0] = {}) {
+    // a window returns as many rows as it was asked for (the database has enough of them)
+    const findMany = vi.fn(async (a: { take: number }) => Array.from({ length: a.take }, (_, i) => ({ id: `t${i}` })));
+    // the count of the active window names the live statuses; the total does not
+    const count = vi.fn(async (a: { where: unknown }) => (JSON.stringify(a.where).includes('needs_approval') ? nActive : total));
+    const svc = Object.create(TasksService.prototype) as TasksService;
+    Object.assign(svc, {
+      config: { storageDriver: 'postgres' },
+      projects: { get: async () => null },
+      chatAgentNames: async () => [],
+      prisma: { $transaction: async (ops: Promise<unknown>[]) => Promise.all(ops), task: { findMany, count, groupBy: async () => [] } },
+    });
+    await svc.list({ page, pageSize, ...params });
+    return findMany.mock.calls.map((c) => {
+      const a = c as unknown as [{ where: unknown; skip: number; take: number; orderBy: unknown }];
+      return { part: JSON.stringify(a[0].where).includes('"NOT"') ? 'rest' : 'active', skip: a[0].skip, take: a[0].take, orderBy: a[0].orderBy };
+    });
+  }
+  const newest = { createdAt: 'desc' };
+
+  it('the first page: the active ones, then the others to fill it', async () => {
+    expect(await windows(3, 7, 1, 5)).toEqual([
+      { part: 'active', skip: 0, take: 3, orderBy: newest },
+      { part: 'rest', skip: 0, take: 2, orderBy: newest },
+    ]);
+  });
+  it('the next page continues the others where the first one stopped (no gap, no repeat)', async () => {
+    expect(await windows(3, 7, 2, 5)).toEqual([{ part: 'rest', skip: 2, take: 5, orderBy: newest }]);
+  });
+  it('more active ones than a page: the page is all active; the others start after the last active page', async () => {
+    expect(await windows(12, 20, 1, 5)).toEqual([{ part: 'active', skip: 0, take: 5, orderBy: newest }]);
+    expect(await windows(12, 20, 3, 5)).toEqual([
+      { part: 'active', skip: 10, take: 2, orderBy: newest },
+      { part: 'rest', skip: 0, take: 3, orderBy: newest },
+    ]);
+  });
+  it('nothing active: just the others, as before', async () => {
+    expect(await windows(0, 4, 1, 25)).toEqual([{ part: 'rest', skip: 0, take: 25, orderBy: newest }]); // (the page size is asked for; there are only 4)
+  });
+  it('`sort: created` is the old order: newest first, state ignored', async () => {
+    const w = await windows(3, 7, 1, 25, { sort: 'created' });
+    expect(w).toEqual([{ part: 'active', skip: 0, take: 25, orderBy: newest }]); // one plain window (no NOT clause)
   });
 });

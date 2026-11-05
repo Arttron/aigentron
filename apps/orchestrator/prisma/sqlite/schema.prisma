@@ -46,6 +46,11 @@ model AppSettings {
   // looking at the dashboard it goes at once unless `approvalChatNobodyAtOnce` is off.
   approvalChatDelay        Int     @default(10)
   approvalChatNobodyAtOnce Boolean @default(true)
+
+  // Clearing the checkouts (git worktrees) of finished work: off | merged | merged_or_done, and how many days after a task is done / cancelled
+  // (docs/finished-work-cleanup.md). Nothing is deleted that holds uncommitted files or commits that exist nowhere else.
+  cleanupMode     String @default("merged_or_done")
+  cleanupDoneDays Int    @default(3)
   commandPipeline Boolean @default(true)
 
   // when true the dashboard shows verbose 'assistant' transcript lines

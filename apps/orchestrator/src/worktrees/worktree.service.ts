@@ -1,5 +1,5 @@
 import { dirname, resolve, sep } from 'node:path';
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { GIT_CREDENTIALS, type GitCredentialsProvider } from '../projects/git-credentials.port';
@@ -7,6 +7,8 @@ import { runGit } from '../projects/git/git-runner';
 import { RepoSyncService } from '../projects/git/repo-sync.service';
 import { taskBranchFor, worktreePathFor, type ProjectContext } from '../projects/project-context';
 import { ProjectsService } from '../projects/projects.service';
+import { restoreWorktree } from './restore-core';
+import { TaskLocks } from './task-locks';
 
 export interface Worktree {
   branch: string;
@@ -76,6 +78,46 @@ export class WorktreeService {
     await this.git(repo, ['worktree', 'add', '-b', branch, worktreePath, baseRef], project);
     this.logger.log(`[${project.slug}] Created worktree ${worktreePath} on branch ${branch} (base ${baseRef})`);
     return { branch, worktreePath };
+  }
+
+  /**
+   * The checkout of a task that was cleared (finished work, maintenance/finished-work.ts) and now gets a message again: its folder is made from its branch,
+   * or — when that branch was deleted along with the checkout (its work was merged) — a fresh checkout is made from the base branch.
+   */
+  /** One thing at a time per task: the cleanup of finished work removes a checkout INSIDE this lock, the worker restores / checks one inside it. */
+  readonly locks = new TaskLocks();
+
+  withTaskLock<T>(taskId: string, fn: () => Promise<T>): Promise<T> {
+    return this.locks.run(taskId, fn);
+  }
+
+  async restoreForTask(project: CheckoutTarget, task: { id: string; title?: string | null; worktreePath: string; branch: string }): Promise<Worktree> {
+    return this.locks.run(task.id, () => this.restoreLocked(project, task));
+  }
+
+  private async restoreLocked(project: CheckoutTarget, task: { id: string; title?: string | null; worktreePath: string; branch: string }): Promise<Worktree> {
+    await this.provision(project);
+    const repo = project.repoPath;
+    const r = await restoreWorktree(
+      {
+        git: (args) => this.git(repo, args, project),
+        exists: (p) => stat(p).then(() => true, () => false),
+        // the top of the checkout git finds from the folder must BE the folder (a leftover folder inside the main repository would resolve to the repository)
+        isCheckout: async (p) => {
+          try {
+            const top = (await this.git(p, ['rev-parse', '--show-toplevel'], project)).trim();
+            return (await realpath(top)) === (await realpath(p));
+          } catch {
+            return false;
+          }
+        },
+      },
+      task.worktreePath,
+      task.branch,
+    );
+    if (r === 'branch-missing') return this.createForTask(project, task.id, task.title);
+    if (r === 'restored') this.logger.log(`[${project.slug}] Restored the checkout of task ${task.id} on branch ${task.branch}`);
+    return { branch: task.branch, worktreePath: task.worktreePath };
   }
 
   /**

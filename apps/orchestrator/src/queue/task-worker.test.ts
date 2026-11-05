@@ -122,7 +122,7 @@ function make(o: Opts = {}) {
     preview: { stop: () => void calls.push('preview.stop') },
     verification: { verify: async () => o.verify ?? { ran: false, ok: true, output: '' } },
     github: { publishResult: async () => null, pushSharedWorkspace: async () => null },
-    worktrees: { createForTask: async () => ({ worktreePath: '/wt', branch: 'b' }), useSharedRepo: async () => ({ worktreePath: '/wt', branch: 'b' }) },
+    worktrees: { createForTask: async () => ({ worktreePath: '/wt', branch: 'b' }), restoreForTask: async (_p: unknown, t: { worktreePath: string; branch: string }) => ({ worktreePath: t.worktreePath, branch: t.branch }), useSharedRepo: async () => ({ worktreePath: '/wt', branch: 'b' }) },
     approvals: {
       continuationCount: async () => o.priorContinuations ?? 0,
       requestContinuation: async () => void calls.push('requestContinuation'),
@@ -285,6 +285,7 @@ function makeMulti(projectsById: Record<string, ProjectContext>, tasks: Record<s
     github: { publishResult: async () => null, pushSharedWorkspace: async () => null },
     worktrees: {
       createForTask: async (p: ProjectContext, id: string) => ({ worktreePath: `/wt/${p.slug}/${id}`, branch: `agent/task-${id}` }),
+      restoreForTask: async (_p: ProjectContext, t: { worktreePath: string; branch: string }) => ({ worktreePath: t.worktreePath, branch: t.branch }),
       useSharedRepo: async (p: ProjectContext) => ({ worktreePath: p.repoPath, branch: 'main' }),
     },
     approvals: { continuationCount: async () => 0, requestContinuation: async () => undefined },
