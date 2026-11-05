@@ -64,3 +64,13 @@ describe('markdown blocks (the safe renderer builds nodes from these)', () => {
     expect(blocks('1. one\n2) two')).toEqual([{ type: 'list', items: ['one', 'two'] }]);
   });
 });
+
+describe('the same message told twice', () => {
+  it('has the same content key whatever ids the socket and the transcript give it (the panel shows it once)', () => {
+    const live = toMessages([{ id: 'live:prompt:7', kind: 'prompt', seq: 7, text: 'Please also add a test' }]);
+    const stored = toMessages([{ id: 'cmw2abcdef', kind: 'prompt', seq: 7, text: 'Please also add a test' }]);
+    expect(live[0].id).not.toBe(stored[0].id);
+    expect(live[0].ck).toBe(stored[0].ck);
+  });
+});
+

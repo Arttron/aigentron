@@ -319,6 +319,18 @@ export function AdminChat() {
         await api.followUp(taskId, body);
       }
       if (override === undefined) setText('');
+      // the server has it: shown from its queue / the conversation; the local "sending…" copy must not come back after a removal from the queue
+      const at = taskId ?? readId();
+      if (at) {
+        const drop = () => setPending((p) => p.filter((x) => x.id !== mine.id));
+        void api
+          .listPendingFollowUps(at)
+          .then((q) => {
+            setQueued(q);
+            drop();
+          })
+          .catch(() => void window.setTimeout(drop, 5000)); // the queue could not be read: the local copy stays a few seconds
+      }
     } catch (e) {
       setPending((p) => p.filter((x) => x.id !== mine.id)); // it was not sent after all
       setError((e as Error).message);

@@ -274,6 +274,18 @@ function TaskDetailView({ id }: { id: string }) {
       throw e;
     }
     refreshTask();
+    // The server has the message now: it is in its queue, starting, or in the conversation — shown from there. The local "sending…" copy has done its job
+    // (kept, it would come back as "sending…" if the person took the message out of the queue).
+    if (mine) {
+      const drop = () => setPending((p) => p.filter((x) => x.id !== mine.id));
+      void api
+        .listPendingFollowUps(id)
+        .then((q) => {
+          setQueued(q);
+          drop();
+        })
+        .catch(() => void window.setTimeout(drop, 5000)); // the queue could not be read: the local copy stays a few seconds (the live queue event may still bring it)
+    }
   };
 
   const resumable = ['blocked', 'stalled', 'failed'].includes(task?.status ?? '');

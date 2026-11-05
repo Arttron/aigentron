@@ -1,17 +1,30 @@
 // A small, SAFE Markdown renderer for agent messages in the side panel: it builds DOM nodes with textContent only (no innerHTML), so nothing an agent
-// writes can become markup. Supports paragraphs, fenced code, lists, headings (as bold lines), **bold**, `code` and [text](http(s) links).
+// writes can become markup. Supports paragraphs, fenced code, lists, quotes (`> …`), headings (as bold lines), **bold**, *italic*, ~~strike~~, `code` and [text](http(s) links).
 
-const LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)\[]+)\)/g;
 
-/** Inline: **bold**, `code`, [text](url) → an array of nodes. */
+/** A mark hugs its text: no space just inside it, and no letter or digit just outside. */
+function hugs(src, at, tok, mark) {
+  const inner = tok.slice(mark, tok.length - mark);
+  if (!inner || /^\s|\s$/.test(inner)) return false;
+  const prev = src[at - 1];
+  const next = src[at + tok.length];
+  return !(prev && /[\p{L}\p{N}]/u.test(prev)) && !(next && /[\p{L}\p{N}]/u.test(next));
+}
+
+/** Inline: **bold**, *italic*, ~~strike~~, `code`, [text](url) → an array of nodes. */
 export function inline(text) {
   const out = [];
-  const re = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g;
+  const re = /(\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\s][^*\n]*\*|`[^`]+`|\[[^\[\]]+\]\(https?:\/\/[^\s)\[]+\))/g;
   let last = 0;
   for (const m of text.matchAll(re)) {
-    if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)));
     const t = m[0];
+    // a mark counts only when it hugs its text (`*.ts files, 5 * 3` and `snake_case` stay as typed)
+    if (/^(\*\*|~~|\*)/.test(t) && !hugs(text, m.index, t, t.startsWith('*') && !t.startsWith('**') ? 1 : 2)) continue;
+    if (m.index > last) out.push(document.createTextNode(text.slice(last, m.index)));
     if (t.startsWith('**')) out.push(Object.assign(document.createElement('strong'), { textContent: t.slice(2, -2) }));
+    else if (t.startsWith('~~')) out.push(Object.assign(document.createElement('del'), { textContent: t.slice(2, -2) }));
+    else if (t.startsWith('*')) out.push(Object.assign(document.createElement('em'), { textContent: t.slice(1, -1) }));
     else if (t.startsWith('`')) out.push(Object.assign(document.createElement('code'), { textContent: t.slice(1, -1) }));
     else {
       LINK.lastIndex = 0;
@@ -38,6 +51,10 @@ export function blocks(src) {
       while (i < lines.length && !/^```/.test(lines[i])) code.push(lines[i++]);
       i++;
       out.push({ type: 'code', text: code.join('\n') });
+    } else if (/^\s*>\s?/.test(line)) {
+      const q = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/, ''));
+      out.push({ type: 'quote', text: q.join('\n') });
     } else if (/^\s*([-*]|\d+[.)])\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^\s*([-*]|\d+[.)])\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*([-*]|\d+[.)])\s+/, ''));
@@ -48,7 +65,7 @@ export function blocks(src) {
     } else if (!line.trim()) i++;
     else {
       const para = [];
-      while (i < lines.length && lines[i].trim() && !/^```/.test(lines[i]) && !/^\s*([-*]|\d+[.)])\s+/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i])) para.push(lines[i++]);
+      while (i < lines.length && lines[i].trim() && !/^```/.test(lines[i]) && !/^\s*>\s?/.test(lines[i]) && !/^\s*([-*]|\d+[.)])\s+/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i])) para.push(lines[i++]);
       out.push({ type: 'p', text: para.join('\n') });
     }
   }
@@ -67,6 +84,10 @@ export function render(src) {
         ul.append(li);
       }
       root.append(ul);
+    } else if (b.type === 'quote') {
+      const q = document.createElement('blockquote');
+      q.append(...inline(b.text));
+      root.append(q);
     } else if (b.type === 'heading') {
       const s = document.createElement('strong');
       s.append(...inline(b.text));

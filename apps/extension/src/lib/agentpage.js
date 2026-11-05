@@ -3,6 +3,20 @@
 
 /** A text outline of the page: headings, links (with addresses), buttons, fields (never their values), images with a description — numbered so they can be referred to. */
 export function snapshotPage() {
+  // watching for the person's own hands starts here, on every new page, before the first action
+  if (!window.__aigentronUserListener) {
+    window.__aigentronUserListener = true;
+    window.__aigentronListenerAt = Date.now();
+    for (const t of ['pointerdown', 'keydown', 'beforeinput', 'compositionupdate', 'pointermove']) {
+      window.addEventListener(t, (e) => {
+        if (!e.isTrusted || window.__aigentronActing) return; // (the agent's own typing makes trusted input events too)
+        if (e.type === 'pointermove' && !e.buttons) return; // a drag counts, a pointer that merely passes does not
+        const n = e.target;
+        if (n && n.closest && n.closest('[data-aigentron-ui]')) return; // the extension's own cards and frame: pressing Approve is not "using the page"
+        window.__aigentronUserAt = Date.now();
+      }, true);
+    }
+  }
   const MAX_NODES = 400;
   const MAX_CHARS = 20000;
   const out = [];
@@ -87,13 +101,24 @@ export function agentFrame(on) {
     window[ID] = null;
   }
   if (!on) return true;
-  // the person's own hands: a real click / key / wheel in this tab pauses the agent for a few seconds (see actInPage)
+  // the person's own hands: a real click, key press, typing or drag in this tab pauses the agent for a moment (see actInPage). Scrolling does NOT count: a
+  // trackpad keeps sending wheel events for seconds after the fingers have left it, and reading the page is not in the agent's way.
   if (!window.__aigentronUserListener) {
     window.__aigentronUserListener = true;
-    for (const t of ['pointerdown', 'keydown', 'wheel']) window.addEventListener(t, (e) => { if (e.isTrusted) window.__aigentronUserAt = Date.now(); }, true);
+    window.__aigentronListenerAt = Date.now();
+    for (const t of ['pointerdown', 'keydown', 'beforeinput', 'compositionupdate', 'pointermove']) {
+      window.addEventListener(t, (e) => {
+        if (!e.isTrusted || window.__aigentronActing) return; // (the agent's own typing makes trusted input events too)
+        if (e.type === 'pointermove' && !e.buttons) return; // a drag counts, a pointer that merely passes does not
+        const n = e.target;
+        if (n && n.closest && n.closest('[data-aigentron-ui]')) return; // the extension's own cards and frame: pressing Approve is not "using the page"
+        window.__aigentronUserAt = Date.now();
+      }, true);
+    }
   }
   const host = document.createElement('div');
   host.style.cssText = 'all: initial; position: fixed; inset: 0; z-index: 2147483646; pointer-events: none;';
+  host.setAttribute('data-aigentron-ui', '1');
   const root = host.attachShadow({ mode: 'closed' });
   const frame = document.createElement('div');
   frame.style.cssText = 'position: fixed; inset: 0; border: 3px solid #4e78ff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.5); pointer-events: none;';
@@ -122,7 +147,23 @@ export function agentFrame(on) {
  * (the button, the site, the form's values; sensitive ones masked); pauses while the person is using the tab; outlines what it touched.
  */
 export function actInPage(a) {
-  if (Date.now() - (window.__aigentronUserAt || 0) < 3000) return { ok: false, error: 'The person is using this tab right now — wait a few seconds, then take a new browser_snapshot.' };
+  if (!window.__aigentronUserListener) {
+    window.__aigentronUserListener = true;
+    window.__aigentronListenerAt = Date.now();
+    for (const t of ['pointerdown', 'keydown', 'beforeinput', 'compositionupdate', 'pointermove']) {
+      window.addEventListener(t, (e) => {
+        if (!e.isTrusted || window.__aigentronActing) return; // (the agent's own typing makes trusted input events too)
+        if (e.type === 'pointermove' && !e.buttons) return; // a drag counts, a pointer that merely passes does not
+        const n = e.target;
+        if (n && n.closest && n.closest('[data-aigentron-ui]')) return; // the extension's own cards and frame: pressing Approve is not "using the page"
+        window.__aigentronUserAt = Date.now();
+      }, true);
+    }
+  }
+  // `busy`: the extension waits and tries again by itself (a moment of the person's own click / typing); the agent only hears of it when the person keeps at it.
+  // Not for an action the person has JUST approved (their click on the approval card is the reason for the recent activity, and the approval is their own
+  // instruction to do exactly this), and a page watched for less than a moment is looked at first (a click made before the watch began would be unseen).
+  if (!a.confirmed && (Date.now() - (window.__aigentronUserAt || 0) < 1500 || Date.now() - (window.__aigentronListenerAt || 0) < 600)) return { ok: false, busy: true, error: 'The person is using this tab right now — wait a few seconds, then take a new browser_snapshot.' };
   const clean = (s, k = 120) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, k);
   const el = a.ref ? window.__aigentronRefs?.get(a.ref) : null;
   if (a.ref && (!el || !el.isConnected)) return { ok: false, error: `The element ${a.ref} is not on the page any more — take a new browser_snapshot and use the new reference.` };
@@ -201,7 +242,12 @@ export function actInPage(a) {
       const text = String(a.text ?? '');
       if (editable) {
         if (a.clear) el.textContent = '';
-        document.execCommand('insertText', false, text);
+        window.__aigentronActing = true; // the trusted input events this makes are the agent's, not the person's
+        try {
+          document.execCommand('insertText', false, text);
+        } finally {
+          window.__aigentronActing = false;
+        }
       } else {
         const proto = el.localName === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
         const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;

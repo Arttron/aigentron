@@ -7,6 +7,7 @@ import { Button, Card, ErrorText, Field, Modal, Muted, Row } from '@/components/
 import { Qr } from '@/components/QrCode';
 import { UpdatingBanner } from '@/components/UpdatingBanner';
 import { ExtensionBanner } from '@/components/ExtensionBanner';
+import { StaleTabBanner } from '@/components/StaleTabBanner';
 import styles from './AuthGate.module.css';
 
 /** Reconnect the live-updates socket so it carries the (new or cleared) session cookie. */
@@ -289,6 +290,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       {/* the strips above the page start where the sidebar ends: the fixed sidebar would hide their beginning */}
       <div className={styles.top}>
         <UpdatingBanner />
+        <StaleTabBanner />
         <ExtensionBanner />
         {!status.configured && !dismissed && (
           <div className={status.publicUrl ? styles.bannerWarn : styles.banner} role="status">

@@ -82,6 +82,16 @@ describe.skipIf(!BIN)('the generated extension in a real Chromium', () => {
         if (url === '/api/questions?status=pending') return void res.end('[]');
         if (url.startsWith('/api/tasks?')) return void res.end(JSON.stringify({ items: [{ id: 't1', title: 'Fix the login button', status: 'review', agentName: 'pm', updatedAt: new Date().toISOString() }, { id: 't2', title: 'Old chore', status: 'done', agentName: 'coder', updatedAt: '2025-01-01T00:00:00Z' }], total: 2, page: 1, pageSize: 30 }));
         if (url === '/api/tasks/t1/transcript') return void res.end(JSON.stringify(panelTranscript));
+        // a busy task: a message that starts with QUEUE: waits in the server's queue instead of reaching the transcript
+        if (url === '/api/tasks/t1/pending-follow-ups') return void res.end(JSON.stringify(panelQueue));
+        if (/^\/api\/tasks\/t1\/pending-follow-ups\/[\w-]+$/.test(url) && req.method === 'DELETE') {
+          panelQueue = panelQueue.filter((q) => q.id !== url.split('/').pop());
+          return void res.end(JSON.stringify(panelQueue));
+        }
+        if (url === '/api/tasks/t1/follow-up' && (JSON.parse(body) as { prompt: string }).prompt.startsWith('QUEUE:')) {
+          panelQueue.push({ id: `q${panelQueue.length + 1}`, taskId: 't1', text: (JSON.parse(body) as { prompt: string }).prompt, attachments: [], references: [], createdAt: new Date().toISOString() });
+          return void res.end('{"ok":true,"queued":true}');
+        }
         if (url === '/api/tasks/t1/follow-up') {
           panelTranscript.push({ id: 'e3', taskId: 't1', seq: 3, kind: 'prompt', text: (JSON.parse(body) as { prompt: string }).prompt, createdAt: new Date().toISOString() });
           return void res.end('{"ok":true}');
@@ -93,6 +103,7 @@ describe.skipIf(!BIN)('the generated extension in a real Chromium', () => {
         res.writeHead(404).end('{}');
       });
     });
+    let panelQueue: { id: string; taskId: string; text: string; attachments: string[]; references: string[]; createdAt: string }[] = [];
     const sio = new MockSio(server, 'tok-123');
     const panelTranscript: object[] = [
       { id: 'e1', taskId: 't1', seq: 1, kind: 'prompt', text: 'Fix the login button', createdAt: '2026-01-01T10:00:00Z' },
@@ -342,6 +353,23 @@ describe.skipIf(!BIN)('the generated extension in a real Chromium', () => {
       // a live message from the agent arrives over the socket
       sio.push('agent:log', { taskId: 't1', agentSessionId: 's', kind: 'assistant', text: 'Working on the test now', seq: 10, ts: new Date().toISOString() });
       await waitFor(panel, "document.getElementById('conv').textContent.includes('Working on the test now')", 'the live message');
+      // what was sent does not stay as "sending…": the conversation has it now
+      expect(await panel.eval<number>("document.querySelectorAll('#convTail .msg.waiting').length")).toBe(0);
+      // a message sent while the task is busy is SHOWN, as queued (it is in the server's queue, not yet in the transcript)
+      await panel.eval("(() => { const t = document.getElementById('convInput'); t.value = 'QUEUE: add a changelog entry'; })()");
+      await panel.eval("document.querySelector('.composer .primary').click()");
+      await waitFor(panel, "[...document.querySelectorAll('#convTail .msg.waiting')].some((n) => n.textContent.includes('add a changelog entry') && n.textContent.includes('queued'))", 'the queued message');
+      // a message queued from elsewhere (a channel, the dashboard) arrives over the socket and is listed
+      sio.push('task:followup-queue', { taskId: 't1', queue: [...panelQueue, { id: 'q9', taskId: 't1', text: 'from the dashboard', attachments: [], references: [], createdAt: new Date().toISOString() }] });
+      await waitFor(panel, "document.getElementById('convTail').textContent.includes('from the dashboard')", 'the queue event');
+      // ✕ takes a message out of the queue (the server is asked, the answer is the queue now)
+      await panel.eval("[...document.querySelectorAll('#convTail .msg.waiting')].find((n) => n.textContent.includes('add a changelog entry')).querySelector('.qact[title^=Remove]').click()");
+      await until(() => events.some((e) => e.path === 'DELETE /api/tasks/t1/pending-follow-ups/q1'), 15_000, 'the removal');
+      await waitFor(panel, "!document.getElementById('convTail').textContent.includes('add a changelog entry')", 'the queued message to go');
+      // quoting: the icon of a message puts it into the box as a quote, ready for the reply
+      await panel.eval("(() => { const t = document.getElementById('convInput'); t.value = ''; t.dispatchEvent(new Event('input')); })()");
+      await panel.eval("document.querySelector('#conv .msg.result .qbtn').click()");
+      await waitFor(panel, "document.getElementById('convInput').value.startsWith('> ') && document.getElementById('convInput').value.endsWith('\\n\\n')", 'the quote in the box');
     } finally {
       panel.close();
     }
@@ -661,17 +689,46 @@ describe.skipIf(!BIN)('the generated extension in a real Chromium', () => {
     } finally {
       fp.close();
     }
-    // the person's own hands pause the agent: a real click in that tab, and the next action waits
+    // the person's own hands pause the agent — but only a click or a key press, and only for a moment: the extension waits and tries again by itself
     const again = await command('open', { url: formUrl, allowHosts: [lh], allow: full, ownOrigins: own });
     const tab2 = again.data!.tabId as number;
     const ref2 = refOf(String(again.data!.text), /label="Your name"/);
+    const typeX = (text: string) => command('type', { tabId: tab2, ref: ref2, text, allowHosts: [lh], allow: full, ownOrigins: own });
+    const click = async (page: typeof fp) => {
+      await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 5, y: 5, button: 'left', clickCount: 1 });
+      await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 5, y: 5, button: 'left', clickCount: 1 });
+    };
     fp = await agentForm(formUrl);
     try {
-      await fp.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 5, y: 5, button: 'left', clickCount: 1 });
-      await fp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 5, y: 5, button: 'left', clickCount: 1 });
-      expect((await command('type', { tabId: tab2, ref: ref2, text: 'x', allowHosts: [lh], allow: full, ownOrigins: own })).error).toContain('using this tab right now');
-      await new Promise((r) => setTimeout(r, 3300));
-      expect((await command('type', { tabId: tab2, ref: ref2, text: 'ok', allowHosts: [lh], allow: full, ownOrigins: own })).ok).toBe(true);
+      // scrolling (a trackpad keeps sending wheel events after the fingers have left it) is not "using the tab": no waiting at all
+      // (the time an action takes anyway is measured first: a refusal-and-retry would add more than a second to it)
+      const base0 = Date.now();
+      expect((await typeX('b')).ok).toBe(true);
+      const baseline = Date.now() - base0;
+      await fp.call('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 5, y: 5, deltaX: 0, deltaY: 40 });
+      const t0 = Date.now();
+      expect((await typeX('s')).ok).toBe(true);
+      expect(Date.now() - t0).toBeLessThan(baseline + 1000);
+      // a click a moment ago: the extension waits it out and the action succeeds, the agent never hears of it
+      await click(fp);
+      const t1 = Date.now();
+      const waited = await typeX('ok');
+      expect(waited.ok).toBe(true);
+      expect(Date.now() - t1).toBeGreaterThan(900);
+      // a person who keeps clicking in that very tab for the whole wait does get the refusal
+      let keep = true;
+      const clicker = (async () => {
+        while (keep) {
+          await click(fp);
+          await new Promise((r) => setTimeout(r, 400));
+        }
+      })();
+      const refused = await typeX('x');
+      keep = false;
+      await clicker;
+      expect(refused.error).toContain('using this tab right now');
+      await new Promise((r) => setTimeout(r, 1800));
+      expect((await typeX('ok again')).ok).toBe(true);
     } finally {
       fp.close();
     }

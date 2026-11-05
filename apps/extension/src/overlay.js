@@ -13,6 +13,7 @@
 
   const host = document.createElement('div');
   host.style.cssText = 'all: initial; position: fixed; z-index: 2147483647;';
+  host.setAttribute('data-aigentron-ui', '1');
   const root = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
   style.textContent = `

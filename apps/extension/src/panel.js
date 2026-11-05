@@ -4,6 +4,9 @@ import { render as markdown } from './lib/md.js';
 import { micButton } from './lib/mic.js';
 import { SioClient, socketUrl } from './lib/sio.js';
 import { getConfig, getConnection } from './lib/store.js';
+import { newPending, reconcilePending, waiting } from './lib/chat-state.js';
+import { applyFormat, continueList, diffRange, insertQuote, pasteLinkOverSelection, shortcutAction } from './lib/md-edit.js';
+import { quoteText } from './lib/quote.js';
 import { ago, sortTasks, statusChip, toMessages } from './lib/transcript.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,6 +35,10 @@ async function connect() {
     onEvent: (name, args) => {
       const p = args[0] ?? {};
       if (name === 'agent:log' && S.conv && p.taskId === S.conv.id) addLive(p);
+      else if (name === 'task:followup-queue' && S.conv && p.taskId === S.conv.id) {
+        S.conv.queue = Array.isArray(p.queue) ? p.queue : [];
+        paintTail();
+      }
       else if (name === 'task:status' && S.conv && p.taskId === S.conv.id) {
         S.conv.status = p.status;
         paintStatus();
@@ -96,49 +103,205 @@ function paintStatus() {
   const chip = statusChip(S.conv?.status);
   const slot = document.getElementById('convStatus');
   if (slot) slot.replaceChildren(el('span', { className: `chip ${chip.tone}`, textContent: chip.label }));
+  paintTail(); // what waits depends on whether the task is waiting to start
 }
 
-function addMessage(m) {
+/** Where a quote goes: the message box of the open conversation. */
+function quoteInto(text) {
+  const input = document.getElementById('convInput');
+  const quote = quoteText(text);
+  if (!input || !quote) return;
+  const at = document.activeElement === input ? { text: input.value, start: input.selectionStart, end: input.selectionEnd } : { text: input.value, start: input.value.length, end: input.value.length };
+  commitEdit(input, insertQuote(at, quote));
+  input.focus();
+  input.scrollTop = input.scrollHeight;
+}
+
+/** A change to the box made with the browser's own editing command (Ctrl+Z undoes it); falls back to setting the value. */
+function commitEdit(input, next) {
+  input.focus();
+  const d = diffRange(input.value, next.text);
+  let done = false;
+  try {
+    input.setSelectionRange(d.from, d.to);
+    done = d.insert ? document.execCommand('insertText', false, d.insert) : d.from === d.to ? true : document.execCommand('delete');
+  } catch {
+    done = false;
+  }
+  if (!(done && input.value === next.text)) {
+    input.value = next.text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  input.setSelectionRange(next.start, next.end);
+}
+
+function addMessage(m, { live = false, settle = false } = {}) {
   const box = document.getElementById('conv');
-  if (!box || box.querySelector(`[data-key="${CSS.escape(m.id)}"]`)) return;
+  if (!box || box.querySelector(`[data-key="${CSS.escape(m.id)}"]`) || (m.ck && box.querySelector(`[data-ck="${CSS.escape(m.ck)}"]`))) return false;
   const node = el('div', { className: `msg ${m.role}` });
   node.dataset.key = m.id;
+  if (m.ck) node.dataset.ck = m.ck;
   if (m.role !== 'you') node.append(el('div', { className: 'who', textContent: m.speaker ?? (m.role === 'result' ? 'answer' : 'agent') }));
   node.append(markdown(m.text));
+  node.append(el('button', { type: 'button', className: 'qbtn', textContent: '❝', title: 'Quote this message', 'aria-label': 'Quote this message', onclick: () => quoteInto(m.text) }));
   const atBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 80;
   box.append(node);
+  // a message of the person's own that arrives while the panel is open settles its "sending…" / "starting" copy
+  if ((live || settle) && m.role === 'you' && S.conv) {
+    S.conv.echoed.push(m.text);
+    S.conv.echoed = S.conv.echoed.slice(-30);
+    S.conv.pending = reconcilePending(S.conv.pending, S.conv.echoed);
+    paintTail();
+  }
   if (atBottom) main.scrollTop = main.scrollHeight;
+  return true;
 }
 
 function addLive(p) {
   const msgs = toMessages([{ ...p, id: `live:${p.kind}:${p.seq}` }]);
-  for (const m of msgs) addMessage(m);
+  for (const m of msgs) addMessage(m, { live: true });
 }
+
+/** What waits under the conversation: messages in the server's queue (with ✎ / ✕), the one whose run is starting, and the one being sent right now. */
+function paintTail() {
+  const tail = document.getElementById('convTail');
+  const c = S.conv;
+  if (!tail || !c) return;
+  const items = waiting({ queue: c.queue, pending: c.pending, status: c.status, echoedTexts: c.echoed.slice(-5) });
+  const atBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 80;
+  tail.replaceChildren(
+    ...items.map((i) => {
+      const note = i.kind === 'queued' ? 'queued — sent when the run ends' : i.kind === 'starting' ? 'starting — waiting for the server' : 'sending…';
+      const node = el('div', { className: 'msg you waiting' }, markdown(i.text), el('div', { className: 'note' }, el('span', { textContent: note })));
+      if (i.kind === 'queued') {
+        const row = node.querySelector('.note');
+        row.append(
+          el('button', { type: 'button', className: 'qact', textContent: '✎', title: 'Edit: take it back into the message box', onclick: () => void editQueued(i) }),
+          el('button', { type: 'button', className: 'qact', textContent: '✕', title: 'Remove from the queue', onclick: () => void removeQueued(i) }),
+        );
+      }
+      return node;
+    }),
+  );
+  if (items.length && atBottom) main.scrollTop = main.scrollHeight;
+}
+
+async function refreshQueue() {
+  const c = S.conv;
+  if (!c) return;
+  const q = await apiFetch(`/api/tasks/${encodeURIComponent(c.id)}/pending-follow-ups`).catch(() => null);
+  if (Array.isArray(q) && S.conv === c) {
+    c.queue = q;
+    paintTail();
+  }
+}
+
+async function removeQueued(item) {
+  const c = S.conv;
+  if (!c) return null;
+  const q = await apiFetch(`/api/tasks/${encodeURIComponent(c.id)}/pending-follow-ups/${encodeURIComponent(item.id)}`, { method: 'DELETE' }).catch(() => null);
+  if (Array.isArray(q) && S.conv === c) {
+    c.queue = q;
+    paintTail();
+  }
+  return Array.isArray(q) ? q : null;
+}
+
+/** Edit a queued message: it leaves the queue and its text comes back into the box, ahead of what is typed there. */
+async function editQueued(item) {
+  const left = await removeQueued(item);
+  // only when it is really out of the queue: if the removal failed, or the run has already taken it, its text must not ALSO come back into the box (it would be sent twice)
+  if (!left || left.some((q) => q.id === item.id)) return;
+  const input = document.getElementById('convInput');
+  if (input) {
+    commitEdit(input, { text: item.text + (input.value ? `\n\n${input.value}` : ''), start: item.text.length, end: item.text.length });
+    input.focus();
+  }
+}
+
+/** A part of a message selected with the mouse or the finger: a "Quote" button over the selection puts exactly that text into the box. */
+let selectionPop = null;
+function watchSelection() {
+  const hide = () => {
+    selectionPop?.remove();
+    selectionPop = null;
+  };
+  const check = () => {
+    const sel = window.getSelection();
+    const box = document.getElementById('conv');
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !box) return hide();
+    const range = sel.getRangeAt(0);
+    const a = range.commonAncestorContainer;
+    const node = a.nodeType === 1 ? a : a.parentElement;
+    if (!node || !box.contains(node) || node.closest('textarea, input, button')) return hide();
+    const text = sel.toString().trim();
+    const r = range.getBoundingClientRect();
+    if (!text || (!r.width && !r.height)) return hide();
+    hide();
+    selectionPop = el('button', { type: 'button', className: 'quote-pop', textContent: '❝ Quote' });
+    selectionPop.style.left = `${Math.min(Math.max(r.left + r.width / 2, 50), window.innerWidth - 50)}px`;
+    selectionPop.style.top = `${r.top < 40 ? r.bottom + 6 : r.top - 36}px`;
+    selectionPop.onmousedown = (e) => e.preventDefault(); // the selection must survive the press
+    selectionPop.onclick = () => {
+      quoteInto(text);
+      window.getSelection()?.removeAllRanges();
+      hide();
+    };
+    document.body.append(selectionPop);
+  };
+  let timer;
+  document.addEventListener('selectionchange', () => {
+    clearTimeout(timer);
+    timer = setTimeout(check, 180);
+  });
+  document.addEventListener('mouseup', () => setTimeout(check, 0));
+  main.addEventListener('scroll', hide, { passive: true });
+}
+watchSelection();
 
 async function openConversation(id, known) {
   S.tab = 'conv';
-  S.conv = { id, status: known?.status ?? '' };
+  S.conv = { id, status: known?.status ?? '', queue: [], pending: [], echoed: [] };
   S.client?.emit('subscribe:task', id);
   await guard(async () => {
     const [task, events] = await Promise.all([apiFetch(`/api/tasks/${encodeURIComponent(id)}`), apiFetch(`/api/tasks/${encodeURIComponent(id)}/transcript`)]);
     S.conv.status = task.status;
     const conn = await getConnection();
-    const input = el('textarea', { rows: 3, placeholder: 'Write to the agent…' });
+    const input = el('textarea', { rows: 3, id: 'convInput', placeholder: 'Write to the agent…  (Enter sends, Shift+Enter adds a line; ⌘/Ctrl+B bold, I italic, K link)' });
     const sendBtn = el('button', { className: 'primary', textContent: 'Send' });
     const err = el('div', { className: 'bad' });
     const post = async () => {
       const text = input.value.trim();
-      if (!text) return;
-      sendBtn.disabled = true;
+      if (!text || sendBtn.disabled) return; // (Enter while the last message is still going out)
+      const conv = S.conv;
+      // the message is shown AT ONCE ("sending…"): a task that is busy puts it in the queue, and the transcript has it only when its run starts
+      const mine = newPending(text);
+      conv.pending.push(mine);
+      input.value = '';
       err.textContent = '';
+      sendBtn.disabled = true;
+      paintTail();
+      main.scrollTop = main.scrollHeight;
       try {
         await apiFetch(`/api/tasks/${encodeURIComponent(id)}/follow-up`, { method: 'POST', body: JSON.stringify({ prompt: text }) });
-        input.value = '';
-        // the server writes the message into the transcript; show it from there (live events may bring it too — duplicates are ignored)
-        const fresh = await apiFetch(`/api/tasks/${encodeURIComponent(id)}/transcript`);
-        for (const m of toMessages(fresh)) addMessage(m);
+        if (S.conv !== conv) return; // the person went to another conversation meanwhile: this one's rows must not be written into that one
+        await refreshQueue();
+        if (S.conv !== conv) return;
+        // the server writes the message into the transcript when the run starts; live events bring it too — duplicates are ignored
+        const fresh = await apiFetch(`/api/tasks/${encodeURIComponent(id)}/transcript`).catch(() => []);
+        if (S.conv !== conv) return;
+        for (const m of toMessages(fresh)) addMessage(m, { settle: true });
+        // the server has it now: it is in the queue, starting, or in the conversation — shown from there. The local "sending…" copy has done its job
+        // (kept, it would come back as "sending…" if the person took the message out of the queue)
+        conv.pending = conv.pending.filter((x) => x.id !== mine.id);
+        paintTail();
       } catch (e) {
-        err.textContent = e.message;
+        conv.pending = conv.pending.filter((x) => x.id !== mine.id); // it was not sent after all: the text comes back
+        if (S.conv === conv) {
+          commitEdit(input, { text: text + (input.value ? `\n\n${input.value}` : ''), start: text.length, end: text.length });
+          err.textContent = e.message;
+          paintTail();
+        }
       } finally {
         sendBtn.disabled = false;
       }
@@ -151,16 +314,46 @@ async function openConversation(id, known) {
       const r = await send({ type: 'compose-start', kind: 'screenshot', task: id }).catch((e) => ({ ok: false, error: e.message }));
       if (!r?.ok) err.textContent = r?.error || 'Could not capture this page — open a web page first.';
     };
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void post(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.isComposing) return;
+      const action = shortcutAction(e);
+      if (action) {
+        e.preventDefault();
+        commitEdit(input, applyFormat({ text: input.value, start: input.selectionStart, end: input.selectionEnd }, action));
+        return;
+      }
+      if (e.key === 'Enter' && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        const next = continueList({ text: input.value, start: input.selectionStart, end: input.selectionEnd });
+        if (next) {
+          e.preventDefault();
+          commitEdit(input, next);
+        }
+        return;
+      }
+      // Enter sends (as in the dashboard); Shift+Enter is a new line
+      if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        void post();
+      }
+    });
+    input.addEventListener('paste', (e) => {
+      const next = pasteLinkOverSelection({ text: input.value, start: input.selectionStart, end: input.selectionEnd }, e.clipboardData?.getData('text/plain') ?? '');
+      if (next) {
+        e.preventDefault();
+        commitEdit(input, next);
+      }
+    });
     main.replaceChildren(
       el('div', { className: 'row' }, el('button', { textContent: '‹ Back', onclick: () => setTab('tasks') }), el('span', { id: 'convStatus' }), el('span', { className: 'spacer' }), el('button', { textContent: 'Open in dashboard', onclick: () => send({ type: 'open', path: `/tasks/${id}` }) })),
       el('div', { className: 'muted', textContent: task.title ?? '' }),
       el('div', { className: 'conv', id: 'conv' }),
-      el('div', { className: 'composer' }, input, el('div', { className: 'row' }, sendBtn, shotBtn, el('span', { id: 'micSlot' }), el('span', { className: 'muted', textContent: 'Ctrl/⌘ + Enter sends' })), err),
+      el('div', { className: 'conv', id: 'convTail' }),
+      el('div', { className: 'composer' }, input, el('div', { className: 'row' }, sendBtn, shotBtn, el('span', { id: 'micSlot' }), el('span', { className: 'muted', textContent: 'Enter sends · Shift+Enter new line' })), err),
     );
     void micButton(input, { onNeedPermission: () => void send({ type: 'open-mic' }) }).then((m) => m && document.getElementById('micSlot')?.replaceWith(m));
-    paintStatus();
     for (const m of toMessages(events)) addMessage(m);
+    paintStatus();
+    await refreshQueue(); // messages that wait for the run to end are listed (and kept up to date by the live queue event)
     main.scrollTop = main.scrollHeight;
     void conn;
   });

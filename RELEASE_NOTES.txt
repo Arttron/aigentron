@@ -1,13 +1,15 @@
-Aigentron v0.1.120
+Aigentron v0.1.121
 
-For people who are not programmers: finished work no longer piles up on the disk, task titles are generated again, and active tasks come first in the list.
+For people who are not programmers: the browser extension's chat now works like the main one, the extension stops refusing to work when you are not really using the page, and an old open tab tells you to reload.
 
 New
-- Clearing finished work. Every task works in its own copy of the repository, and these copies are large. Now a copy is cleared when its work has been merged into the main branch (including rebase merges and merged pull requests), or three days after the task is done if its commits are saved on the remote. It is NEVER cleared while it holds uncommitted files, ignored files that are not build output (like a .env), commits that exist nowhere else (including on a detached HEAD), or while the task is running. A merged pull request only counts for the commits it contained. A message to a cleared task brings its copy back from its branch. Settings → General → "Finished work — task checkouts" lets you choose the mode (merged or done / only merged / never) and the days, shows what would be cleared and why, clears on demand, and keeps a log. It is checked every 6 hours.
-- The task list shows tasks that are being worked on first (running, queued, waiting for approval, and leads whose subtasks are working), newest first within each group.
+- The extension's side-panel chat shows what you send at once ("sending…"), lists the server's queue (with edit and remove), sends on Enter, and formats and quotes like the dashboard.
+- The dashboard notices when the server was updated while the tab was open and shows "Aigentron was updated — reload this page" with a Reload button. (A tab left open across an update keeps running the old code, so a fixed bug can look not fixed.)
 
 Fixed
-- Task titles were not generated when the default model was unavailable (a local model not running, a revoked key) or when it was a "reasoning" model that answered with nothing. Now every available model is tried in turn, a broken one is skipped for a few minutes, and the log tells you when no model could name a task (Settings → Task titles → Try it shows the details).
-- A task whose working folder had gone missing was started in that missing folder; it is now restored from its branch first.
+- The extension refused to act "because you are using this tab" when you had only scrolled. Now scrolling does not count, only a click or a key press for 1.5 s, and the extension waits and retries by itself before the agent hears of it.
+- Pressing Approve on the in-page card counted as "using the tab", so the agent's next click was refused and the task became blocked. Clicks on the extension's own cards no longer count, and an action you have just approved is never refused for that reason.
+- Editing a queued message in the extension no longer sends it twice when its removal failed; a slow send no longer writes into another conversation; a message is shown once; long unfinished links no longer slow the panel.
+- In the dashboard, a message taken out of the queue no longer comes back as "sending…".
 
-Update note: the database gets two new columns (added automatically on start). New installations and updates have the cleanup ON with the safe rules above; set "Never" in Settings to keep every copy.
+Update note: update the extension too (its icon → "Update the extension").

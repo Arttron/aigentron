@@ -133,6 +133,22 @@ async function jpeg(dataUrl) {
   return btoa(bin);
 }
 
+/**
+ * The person's own click or key press in the tab pauses an action for a moment (the page reports `busy`). Rather than send the agent away with an error, wait a
+ * little and try again — up to about eight seconds; only a person who keeps working in that very tab gets the agent's refusal.
+ */
+export async function quietly(run, { tries = 6, waitMs = 1400, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), before = async () => null } = {}) {
+  let r = await run();
+  for (let i = 1; i < tries && r?.busy; i++) {
+    await sleep(waitMs);
+    // while waiting the person may have pressed Stop (or closed the tab): that wins over the retry — nothing is done after Stop
+    const stop = await before();
+    if (stop) return stop;
+    r = await run();
+  }
+  return r;
+}
+
 /** An action on the page → the page afterwards. Checked first (never-allowed, granted for `interact`), done in the page, then the new page is checked again (a click may have navigated). */
 async function act(kind, args) {
   const tab = await usableTab(args);
@@ -140,7 +156,8 @@ async function act(kind, args) {
   if (need) return { ok: false, needsGrant: need.needsGrant, needsUrl: need.needsUrl, level: 'interact', error: 'clicking and typing on this site is not allowed yet', data: { tabId: tab.id } };
   frame(tab.id);
   if (isScriptBlocked(tab.url)) return { ok: false, error: 'Chrome does not let an extension run scripts on this page (its own pages, the Web Store): you can only READ it (browser_read / browser_snapshot give the text of its source), not click or type.', data: { tabId: tab.id } };
-  let r = await inTab(tab.id, actInPage, [{ kind, ...args }]);
+  const stopCheck = async () => ((await isStopped()) ? { ok: false, error: 'The person pressed Stop.' } : null);
+  let r = await quietly(() => inTab(tab.id, actInPage, [{ kind, ...args }]), { before: stopCheck });
   if (r?.goesTo) {
     // a link / form that leaves this site: the destination is judged BEFORE the click, like an address given to `navigate`
     const w = webUrl(r.goesTo);
@@ -149,7 +166,7 @@ async function act(kind, args) {
     if (bad) throw new Error(`Not allowed: ${bad}.`);
     const allow = args.allow ?? { read: args.allowHosts ?? [], interact: [] };
     if (!(allow.read ?? []).includes(w.key)) return { ok: false, needsGrant: w.key, needsUrl: w.url.toString(), level: 'read', error: 'the link leads to a site that is not allowed yet', data: { tabId: tab.id } };
-    r = await inTab(tab.id, actInPage, [{ kind, ...args, checked: true }]);
+    r = await quietly(() => inTab(tab.id, actInPage, [{ kind, ...args, checked: true }]), { before: stopCheck });
   }
   if (!r?.ok) return r?.needsSubmit ? { ok: false, needsSubmit: r.needsSubmit, error: 'the person has to approve this', data: { tabId: tab.id } } : { ok: false, error: r?.error ?? 'The page did not answer.' };
   await new Promise((res) => setTimeout(res, 600));

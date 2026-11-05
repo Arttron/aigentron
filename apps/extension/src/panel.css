@@ -37,3 +37,15 @@ textarea { resize: vertical; }
 .msg .who { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 .composer { position: sticky; bottom: 0; background: var(--bg); padding-top: 6px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 label.chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+/* messages waiting under the conversation: sending / queued / starting */
+.msg.waiting { opacity: .8; border: 1px dashed var(--line); }
+.msg .note { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--muted); }
+.msg .note .qact { padding: 0 6px; border: 0; background: transparent; color: inherit; cursor: pointer; opacity: .7; font-size: 12px; }
+.msg .note .qact:hover { opacity: 1; }
+.msg { position: relative; }
+.msg .qbtn { position: absolute; right: 6px; bottom: 4px; padding: 0 6px; border: 0; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; font-size: 13px; }
+.msg:hover .qbtn, .msg .qbtn:focus-visible { opacity: .8; }
+.msg blockquote { margin: 4px 0; padding-left: 8px; border-left: 3px solid var(--line); color: var(--muted); white-space: pre-wrap; }
+.msg del { opacity: .75; }
+.quote-pop { position: fixed; z-index: 50; transform: translateX(-50%); padding: 5px 11px; border: 0; border-radius: 999px; background: var(--accent); color: #fff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 3px 12px rgba(0, 0, 0, .3); white-space: nowrap; }
+@media (hover: none) { .msg .qbtn { opacity: .6; } }

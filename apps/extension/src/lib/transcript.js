@@ -18,7 +18,8 @@ export function toMessages(events) {
     const key = `${e.kind}:${e.seq ?? ''}:${text.length}:${text.slice(0, 40)}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    msgs.push({ id: e.id ?? key, role: roleOf(e.kind), speaker: e.speaker ?? null, text, at: e.createdAt ?? e.ts ?? '' });
+    // `ck`: the same message told twice (over the socket and by the transcript) has the same content key, whatever ids the two carry
+    msgs.push({ id: e.id ?? key, ck: key, role: roleOf(e.kind), speaker: e.speaker ?? null, text, at: e.createdAt ?? e.ts ?? '' });
   }
   return msgs.filter((m, i) => {
     if (m.role !== 'agent' || m.text.length < 400) return true;

@@ -120,6 +120,7 @@ export function pickElement() {
   return new Promise((resolve) => {
     const host = document.createElement('div');
     host.style.cssText = 'all: initial; position: fixed; inset: 0; z-index: 2147483647; cursor: crosshair;';
+    host.setAttribute('data-aigentron-ui', '1');
     const root = host.attachShadow({ mode: 'closed' });
     const box = document.createElement('div');
     box.style.cssText = 'position: fixed; pointer-events: none; border: 2px solid #ff2d2d; background: rgba(255,45,45,.12); border-radius: 2px;';
