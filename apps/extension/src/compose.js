@@ -1,11 +1,11 @@
-import { agentsFor, buildClip, fitSize, normRect, pickProject, siteKey } from './lib/compose-core.js';
+import { agentsFor, buildClip, filterTasks, fitSize, normRect, pickProject, siteKey, statusLabel } from './lib/compose-core.js';
 import { micButton } from './lib/mic.js';
 
 const $ = (id) => document.getElementById(id);
 const send = (msg) => chrome.runtime.sendMessage(msg);
 const params = new URLSearchParams(location.search);
 
-const state = { draft: null, projects: [], agents: [], kbs: [], mode: 'task', project: '', agentName: '', kb: '', prompt: '', includeText: false, includeSelection: false, includeShot: false, includeBug: false, screenshot: null, marks: [] };
+const state = { draft: null, tasks: [], taskId: '', taskFilter: '', projects: [], agents: [], kbs: [], mode: 'task', project: '', agentName: '', kb: '', prompt: '', includeText: false, includeSelection: false, includeShot: false, includeBug: false, screenshot: null, marks: [] };
 let image = null; // the screenshot as an <img>
 let memory = { site: {}, last: '' };
 
@@ -119,15 +119,53 @@ function screenshotBase64() {
 
 // ---- the form ----------------------------------------------------------------------------------------------------------------------
 function refresh() {
-  const task = state.mode === 'task';
-  $('agentWrap').hidden = !task;
-  $('kbWrap').hidden = task;
-  $('shotCard').hidden = !(task && state.includeShot && image);
-  $('promptHint').textContent = task ? '(optional if you include something)' : '(the title of the note, optional)';
-  const hasContent = task
+  const mode = state.mode;
+  const toTask = mode === 'task' || mode === 'followup';
+  $('projectWrap').hidden = mode === 'followup'; // a task already has its project
+  $('agentWrap').hidden = mode !== 'task';
+  $('kbWrap').hidden = mode !== 'kb';
+  $('taskWrap').hidden = mode !== 'followup';
+  $('shotCard').hidden = !(toTask && state.includeShot && image);
+  $('promptHint').textContent = mode === 'task' ? '(optional if you include something)' : mode === 'followup' ? '(optional if you include something — it goes into the chat of the task)' : '(the title of the note, optional)';
+  $('prompt').placeholder = mode === 'followup' ? 'For example: this is how it looks now — the button is still cut off…' : 'For example: summarise it, check the claims, turn it into a task list…';
+  const hasContent = toTask
     ? state.prompt.trim() || (state.includeText && state.draft.text) || (state.includeSelection && state.draft.selection) || state.includeShot || (state.includeBug && state.draft.bug)
     : (state.includeText && state.draft.text) || (state.includeSelection && state.draft.selection);
-  $('send').disabled = !state.project || !hasContent || (!task && !state.kb);
+  $('send').disabled = !hasContent || (mode === 'followup' ? !state.taskId : !state.project) || (mode === 'kb' && !state.kb);
+  $('send').textContent = mode === 'followup' ? 'Send to the task' : mode === 'kb' ? 'Save the note' : 'Create the task';
+}
+
+// ---- the task a message goes to ------------------------------------------------------------------------------------------------------------
+function renderTasks() {
+  const list = $('taskList');
+  const shown = filterTasks(state.tasks, state.taskFilter);
+  if (!shown.length) {
+    list.replaceChildren(el('div', { className: 'muted emptyList', textContent: state.tasks.length ? 'No task matches.' : 'No tasks yet.' }));
+    return;
+  }
+  list.replaceChildren(
+    ...shown.map((t) => {
+      const [label, tone] = statusLabel(t.status);
+      const item = el('button', { type: 'button', className: 'taskItem', role: 'option', title: t.title }, el('span', { className: 't', textContent: t.title || '(untitled)' }), el('span', { className: `chip ${tone}`, textContent: label }), el('span', { className: 'm', textContent: t.projectSlug ?? '' }));
+      item.setAttribute('aria-selected', String(t.id === state.taskId));
+      item.onclick = () => { state.taskId = t.id; renderTasks(); refresh(); };
+      return item;
+    }),
+  );
+  list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+}
+
+async function loadTasks() {
+  if (state.tasksLoaded) return;
+  state.tasksLoaded = true;
+  const r = await send({ type: 'tasks', include: state.taskId || undefined });
+  if (!r?.tasks) {
+    $('taskList').replaceChildren(el('div', { className: 'bad emptyList', textContent: r?.error || 'Could not load the tasks.' }));
+    state.tasksLoaded = false;
+    return;
+  }
+  state.tasks = r.tasks;
+  renderTasks();
 }
 
 async function loadKbs() {
@@ -174,27 +212,40 @@ async function init() {
   state.project = pickProject(state.projects, memory, d.url);
   $('project').value = state.project;
 
-  $('mode').onchange = () => { state.mode = $('mode').value; refresh(); };
+  $('mode').onchange = () => {
+    state.mode = $('mode').value;
+    if (state.mode === 'followup') void loadTasks().then(refresh);
+    refresh();
+  };
+  $('taskFilter').oninput = () => { state.taskFilter = $('taskFilter').value; renderTasks(); };
   $('project').onchange = () => { state.project = $('project').value; projectChanged(); };
   $('agent').onchange = () => { state.agentName = $('agent').value; };
   $('kb').onchange = () => { state.kb = $('kb').value; refresh(); };
   $('prompt').oninput = () => { state.prompt = $('prompt').value; refresh(); };
   $('send').onclick = submit;
+  // opened from a conversation in the side panel: the message goes to that task
+  const wanted = params.get('task');
+  if (wanted && /^[\w-]{1,64}$/.test(wanted)) {
+    state.taskId = wanted;
+    state.mode = 'followup';
+    $('mode').value = 'followup';
+    void loadTasks().then(refresh);
+  }
   projectChanged();
   if (d.kind === 'bug') {
     $('prompt').placeholder = 'What went wrong? What did you expect to happen?';
     if (state.agents.some((a) => a.name === 'frontend')) { $('agent').value = 'frontend'; state.agentName = 'frontend'; }
   }
   const mic = await micButton($('prompt'), { onNeedPermission: () => void send({ type: 'open-mic' }) });
-  if (mic) $('promptHint').after(mic);
+  if (mic) $('micSlot').append(mic);
   $('prompt').focus();
 }
 
 async function submit() {
   $('send').disabled = true;
   status('Sending…');
-  const body = buildClip({ ...state, screenshot: state.includeShot && image ? screenshotBase64() : null });
-  const r = await send({ type: 'clip', body, remember: { site: siteKey(state.draft.url), project: state.project } });
+  const body = buildClip({ ...state, screenshot: state.includeShot && image && state.mode !== 'kb' ? screenshotBase64() : null });
+  const r = await send({ type: 'clip', body, remember: state.mode === 'followup' ? undefined : { site: siteKey(state.draft.url), project: state.project } });
   if (!r?.ok && r?.error) {
     status(r.error, 'bad');
     refresh();
@@ -203,11 +254,12 @@ async function submit() {
   status('');
   const done = $('done');
   done.hidden = false;
+  const kind = r.result.kind;
   done.replaceChildren(
-    el('strong', { className: 'ok', textContent: r.result.kind === 'task' ? 'Task created' : 'Saved to the knowledge base' }),
-    r.result.kind === 'task'
-      ? el('button', { type: 'button', textContent: 'Open the task', onclick: () => send({ type: 'open', path: r.result.path }) })
-      : el('span', { className: 'muted', textContent: `“${r.result.kb}” — it is being indexed.` }),
+    el('strong', { className: 'ok', textContent: kind === 'task' ? 'Task created' : kind === 'followup' ? `Sent to “${r.result.title || 'the task'}”` : 'Saved to the knowledge base' }),
+    kind === 'kb'
+      ? el('span', { className: 'muted', textContent: `“${r.result.kb}” — it is being indexed.` })
+      : el('button', { type: 'button', textContent: 'Open the task', onclick: () => send({ type: 'open', path: r.result.path }) }),
     el('button', { type: 'button', textContent: 'Close', onclick: () => window.close() }),
   );
   $('send').hidden = true;

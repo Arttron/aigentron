@@ -7,6 +7,10 @@ import { useTaskStream, type StreamEntry } from '@/lib/use-task-stream';
 import { Markdown, MediaTaskContext } from './Markdown';
 import { UserText } from './UserText';
 import { useSmartPaste } from './SmartPaste';
+import { FormatBar, useFormatting } from './FormatBar';
+import { useLiveFormat } from './LiveFormat';
+import { QuoteButton, SelectionQuote } from './QuoteButton';
+import { onQuote } from '@/lib/quote';
 import { newPending, reconcilePending, visibleStarting, type PendingMessage } from '@/lib/pending-messages';
 import type { StateName } from '@/lib/mascot';
 import {
@@ -130,7 +134,15 @@ export function AdminChat() {
   // a "starting" message (its run waits for the machine) stays until the chat echoes it
   const shownQueue = visibleStarting(queued, status, echoed.slice(-5));
   const [text, setText] = useState('');
-  const { onPaste, notice: pasteNotice } = useSmartPaste(setText);
+  const { onPaste: smartPaste, notice: pasteNotice } = useSmartPaste(setText);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const fmt = useFormatting(taRef, setText);
+  const live = useLiveFormat(taRef, text);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => onQuote('admin-chat', fmt.insertQuote), [fmt.insertQuote]);
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!fmt.onPaste(e)) smartPaste(e);
+  };
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [providerIssue, setProviderIssue] = useState<string | null>(null);
@@ -376,7 +388,8 @@ export function AdminChat() {
             </button>
           </div>
 
-          <div className={styles.body}>
+          <div className={styles.body} ref={bodyRef}>
+            <SelectionQuote scope="admin-chat" container={bodyRef} />
             {msgs.length === 0 && (
               <div className={styles.hint}>
                 Hi! I can help you set up agents — describe what you want to get done and I&rsquo;ll
@@ -408,6 +421,7 @@ export function AdminChat() {
                     text={m.text}
                     label={m.from === 'me' ? 'Copy your message' : 'Copy message'}
                   />
+                  <QuoteButton scope="admin-chat" text={m.text} label={m.from === 'me' ? 'Quote your message' : 'Quote this message'} />
                 </div>
               </div>
             ))}
@@ -461,23 +475,27 @@ export function AdminChat() {
                   onVoiceMode={() => setVoiceOnly(true)}
                 />
                 {pasteNotice}
+                <FormatBar fmt={fmt} />
                 <div className={styles.composer}>
                   <textarea
                     dir="auto"
-                    className={styles.input}
+                    ref={taRef}
+                    className={`${styles.input} ${live.className}`}
                     rows={2}
                     value={text}
                     placeholder="Write a message…"
                     onChange={(e) => setText(e.target.value)}
                     onPaste={onPaste}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      if (fmt.onKeyDown(e)) return;
+                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                         e.preventDefault();
                         void send();
                       }
                     }}
                     disabled={sending}
                   />
+                  {live.overlay}
                   <MicButton
                     className={styles.adminMic}
                     onText={(t) => setText((x) => (x.trim() ? `${x.trimEnd()} ${t}` : t))}

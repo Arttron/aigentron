@@ -144,12 +144,19 @@ async function openConversation(id, known) {
       }
     };
     sendBtn.onclick = post;
+    // a screenshot of the page the person is on goes into THIS task: the edit page opens with the task already chosen
+    const shotBtn = el('button', { textContent: '📷 Screenshot', title: 'Take a screenshot of the page you are on, mark it, and send it to this task' });
+    shotBtn.onclick = async () => {
+      err.textContent = '';
+      const r = await send({ type: 'compose-start', kind: 'screenshot', task: id }).catch((e) => ({ ok: false, error: e.message }));
+      if (!r?.ok) err.textContent = r?.error || 'Could not capture this page — open a web page first.';
+    };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void post(); });
     main.replaceChildren(
       el('div', { className: 'row' }, el('button', { textContent: '‹ Back', onclick: () => setTab('tasks') }), el('span', { id: 'convStatus' }), el('span', { className: 'spacer' }), el('button', { textContent: 'Open in dashboard', onclick: () => send({ type: 'open', path: `/tasks/${id}` }) })),
       el('div', { className: 'muted', textContent: task.title ?? '' }),
       el('div', { className: 'conv', id: 'conv' }),
-      el('div', { className: 'composer' }, input, el('div', { className: 'row' }, sendBtn, el('span', { id: 'micSlot' }), el('span', { className: 'muted', textContent: 'Ctrl/⌘ + Enter sends' })), err),
+      el('div', { className: 'composer' }, input, el('div', { className: 'row' }, sendBtn, shotBtn, el('span', { id: 'micSlot' }), el('span', { className: 'muted', textContent: 'Ctrl/⌘ + Enter sends' })), err),
     );
     void micButton(input, { onNeedPermission: () => void send({ type: 'open-mic' }) }).then((m) => m && document.getElementById('micSlot')?.replaceWith(m));
     paintStatus();

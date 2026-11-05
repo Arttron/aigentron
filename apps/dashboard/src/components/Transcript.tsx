@@ -14,6 +14,7 @@ import { RevealMarkdown } from './Reveal';
 import { UserText } from './UserText';
 import { SpeakButton } from './SpeakButton';
 import { CopyButton } from './CopyButton';
+import { QuoteButton, SelectionQuote } from './QuoteButton';
 import { Collapsible } from './Collapsible';
 import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
 import { buildItems, type Item, type LogLine } from '@/lib/transcript-items';
@@ -313,6 +314,7 @@ export function Transcript({
         {hidden > 0 && <span className={styles.hiddenNote}>{hidden} step(s) hidden</span>}
       </div>
 
+      <SelectionQuote scope={`task:${taskId}`} container={ref} />
       <div
         className={styles.transcript}
         ref={ref}
@@ -333,6 +335,7 @@ export function Transcript({
                 {it.line.id.startsWith('pending-') && <span style={{ opacity: 0.6, fontSize: 11, marginLeft: 6 }}>sending…</span>}
                 {thumbs(it.line.attachments)}
                 {it.line.text && <CopyButton text={it.line.text} label="Copy your message" />}
+                {it.line.text && <QuoteButton scope={`task:${taskId}`} text={it.line.text} label="Quote your message" />}
               </div>
             );
           }
@@ -375,6 +378,7 @@ export function Transcript({
                   {thumbs(it.line.attachments, true)}
                   <div>
                     <CopyButton text={it.line.text} />
+                    <QuoteButton scope={`task:${taskId}`} text={it.line.text} />
                   </div>
                 </div>
               </div>

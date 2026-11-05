@@ -17,6 +17,9 @@
   gap: 12px;
   margin-top: 14px;
 }
+.top {
+  padding-left: var(--nav-w);
+}
 .banner,
 .bannerWarn {
   display: flex;

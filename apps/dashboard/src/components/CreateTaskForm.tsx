@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ATTACH_ACCEPT, hasLiveCamera, prepareFile } from '@/lib/capture';
 import { AttachMenu, type AttachKind } from '@/components/AttachMenu';
 import { useSmartPaste } from '@/components/SmartPaste';
+import { FormatBar, useFormatting } from '@/components/FormatBar';
+import { useLiveFormat } from '@/components/LiveFormat';
 import { CameraCapture } from '@/components/CameraCapture';
 import { uploadSizeError } from '@/lib/upload-limits';
 import type { Project } from '@lds/shared';
@@ -15,7 +17,13 @@ import styles from './CreateTaskForm.module.css';
 
 export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }: { onCreated?: () => void; projects?: Project[]; /** the project the page is set to ('' = all): a new task goes there and the form does not ask */ contextProject?: string }) {
   const [prompt, setPrompt] = useState('');
-  const { onPaste, notice: pasteNotice } = useSmartPaste(setPrompt);
+  const { onPaste: smartPaste, notice: pasteNotice } = useSmartPaste(setPrompt);
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  const fmt = useFormatting(taRef, setPrompt);
+  const live = useLiveFormat(taRef, prompt);
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!fmt.onPaste(e)) smartPaste(e);
+  };
   const [agentName, setAgentName] = useState('');
   /** a question: a light, cheap run (no worktree, no checks, no status report) */
   const [question, setQuestion] = useState(false);
@@ -136,7 +144,8 @@ export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }
     }
   };
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (fmt.onKeyDown(e)) return;
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       void submit();
@@ -166,13 +175,17 @@ export function CreateTaskForm({ onCreated, projects = [], contextProject = '' }
   return (
     <Card as="form" onSubmit={submit}>
       <SectionTitle>New task</SectionTitle>
+      <FormatBar fmt={fmt} />
       <textarea dir="auto"
+        ref={taRef}
+        className={live.className}
         placeholder="Describe the task… (⌘/Ctrl+Enter to create) — attach references with 📎"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         onPaste={onPaste}
         onKeyDown={onKeyDown}
       />
+      {live.overlay}
       {pasteNotice}
 
       {staged.length > 0 && (

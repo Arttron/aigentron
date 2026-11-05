@@ -109,3 +109,27 @@ describe('a bug report from the browser', () => {
     expect(kb.ok && kb.value.bug).toBeUndefined();
   });
 });
+
+describe('parseClip: a message in an existing task (followup)', () => {
+  const fu = { mode: 'followup', taskId: 'cmw2abc123', prompt: 'See the layout bug', page: { url: 'https://example.com/a', title: 'A page' }, screenshot: 'QUJD' };
+  it('needs the task, not a project', () => {
+    const r = parseClip(fu);
+    expect(r.ok && r.value).toMatchObject({ mode: 'followup', taskId: 'cmw2abc123', screenshot: 'QUJD' });
+    expect(parseClip({ ...fu, taskId: '' }).ok).toBe(false);
+    expect(parseClip({ ...fu, taskId: '../etc' }).ok).toBe(false);
+    expect(parseClip({ ...fu, taskId: undefined }).ok).toBe(false);
+  });
+  it('needs something to say: words, the page text / a selection, a screenshot or bug data', () => {
+    expect(parseClip({ mode: 'followup', taskId: 't1', prompt: '', page: { url: 'https://a.io', title: '' } }).ok).toBe(false);
+    expect(parseClip({ mode: 'followup', taskId: 't1', prompt: 'just words' }).ok).toBe(true); // a plain message
+    expect(parseClip({ mode: 'followup', taskId: 't1', prompt: '', page: { url: 'https://a.io', title: '' }, screenshot: 'QUJD' }).ok).toBe(true);
+  });
+  it('the message the agent gets names the source and the screenshot, with the person\'s words first', () => {
+    const r = parseClip(fu);
+    const text = taskPrompt(r.ok ? r.value : (null as never));
+    expect(text.startsWith('See the layout bug')).toBe(true);
+    expect(text).toContain('Source page: A page — https://example.com/a');
+    expect(text).toContain('screenshot of the page is attached');
+  });
+});
+

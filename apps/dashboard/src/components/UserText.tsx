@@ -1,19 +1,27 @@
 import { memo, useMemo } from 'react';
 import { hasFence, splitFences } from '@/lib/user-text';
-import { CodeBlock } from './Markdown';
+import { userBlocks } from '@/lib/user-markdown';
+import { CodeBlock, UserBlocks } from './Markdown';
 
 /**
- * What the person wrote, shown as they wrote it — except fenced blocks (pasted terminal output / code), which become terminal-style code
- * blocks with a copy button. A message without a fence renders as plain text, exactly as before.
+ * What the person wrote. Fenced blocks (pasted terminal output / code) become terminal-style code blocks with a copy button; text the composer's formatting
+ * made (bold, italic, strike, code, links, lists, quotes) is shown formatted. A message with no formatting is shown exactly as typed.
  */
 export const UserText = memo(function UserText({ text, className }: { text: string; className?: string }) {
-  const segments = useMemo(() => (hasFence(text) ? splitFences(text) : null), [text]);
-  if (!segments) return <span className={className} dir="auto">{text}</span>;
+  const parts = useMemo(() => {
+    const segments = hasFence(text) ? splitFences(text) : [{ t: 'text' as const, v: text }];
+    const out = segments.map((s) => (s.t === 'code' ? s : { t: 'text' as const, v: s.v, blocks: userBlocks(s.v) }));
+    return out;
+  }, [text]);
+  // nothing formatted anywhere: as before
+  if (parts.length === 1 && parts[0]!.t === 'text' && !('blocks' in parts[0]! && parts[0]!.blocks)) return <span className={className} dir="auto">{text}</span>;
   return (
     <div className={className} dir="auto" style={{ display: 'block', minWidth: 0 }}>
-      {segments.map((s, i) =>
+      {parts.map((s, i) =>
         s.t === 'code' ? (
           <CodeBlock key={i} lang={s.lang || 'text'} code={s.v} />
+        ) : s.blocks ? (
+          <UserBlocks key={i} blocks={s.blocks} />
         ) : (
           <div key={i} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
             {s.v}

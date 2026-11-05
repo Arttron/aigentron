@@ -16,9 +16,12 @@ export interface BugData {
 }
 
 export interface ClipInput {
-  mode: 'task' | 'kb';
-  /** project slug */
+  /** `followup`: a message (with the page, a selection, a screenshot) in a task that already exists */
+  mode: 'task' | 'kb' | 'followup';
+  /** project slug (not needed for a follow-up: the task has its own) */
   project: string;
+  /** the existing task (mode followup) */
+  taskId?: string;
   agentName?: string;
   /** the knowledge base (mode kb) */
   kb?: string;
@@ -117,22 +120,25 @@ export function cleanUrl(raw: unknown): string | null {
 
 export function parseClip(raw: unknown): { ok: true; value: ClipInput } | { ok: false; error: string } {
   const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-  const mode = b.mode === 'kb' ? 'kb' : b.mode === 'task' ? 'task' : null;
-  if (!mode) return { ok: false, error: 'mode must be "task" or "kb"' };
+  const mode = b.mode === 'kb' ? 'kb' : b.mode === 'task' ? 'task' : b.mode === 'followup' ? 'followup' : null;
+  if (!mode) return { ok: false, error: 'mode must be "task", "followup" or "kb"' };
   const project = s(b.project, 80).trim();
-  if (!project) return { ok: false, error: 'choose a project' };
+  const taskId = s(b.taskId, 64).trim();
+  if (mode === 'followup') {
+    if (!/^[\w-]{1,64}$/.test(taskId)) return { ok: false, error: 'choose the task to send to' };
+  } else if (!project) return { ok: false, error: 'choose a project' };
   const page = (b.page && typeof b.page === 'object' ? b.page : {}) as Record<string, unknown>;
   const prompt = s(b.prompt, MAX_PROMPT).trim();
   const bug = parseBug(b.bug);
   const hasPage = page.url !== undefined && page.url !== null && page.url !== '';
   const url = hasPage ? cleanUrl(page.url) : null;
   if (hasPage && !url) return { ok: false, error: 'the page address must be http(s)' };
-  if (!hasPage && !(mode === 'task' && (prompt || bug))) return { ok: false, error: 'nothing was captured: send a page, or write a message' };
+  if (!hasPage && !(mode !== 'kb' && (prompt || bug))) return { ok: false, error: 'nothing was captured: send a page, or write a message' };
   const text = s(page.text, MAX_PAGE_TEXT).trim();
   const selection = s(page.selection, MAX_SELECTION).trim();
   const screenshot = typeof b.screenshot === 'string' && b.screenshot ? b.screenshot : undefined;
   if (screenshot && (screenshot.length > MAX_SCREENSHOT_B64 || !/^[A-Za-z0-9+/=]+$/.test(screenshot))) return { ok: false, error: 'the screenshot is too large or not valid' };
-  if (mode === 'task' && hasPage && !prompt && !text && !selection && !screenshot && !bug) return { ok: false, error: 'write what the agent should do, or include the page text, a selection or a screenshot' };
+  if (mode !== 'kb' && hasPage && !prompt && !text && !selection && !screenshot && !bug) return { ok: false, error: 'write what the agent should do, or include the page text, a selection or a screenshot' };
   if (mode === 'kb' && !text && !selection) return { ok: false, error: 'nothing to save: include the page text or a selection' };
   if (mode === 'kb' && !s(b.kb, 120).trim()) return { ok: false, error: 'choose a knowledge base' };
   return {
@@ -140,12 +146,13 @@ export function parseClip(raw: unknown): { ok: true; value: ClipInput } | { ok: 
     value: {
       mode,
       project,
+      ...(mode === 'followup' ? { taskId } : {}),
       agentName: s(b.agentName, 100).trim() || undefined,
       kb: s(b.kb, 120).trim() || undefined,
       prompt,
       ...(url ? { page: { url, title: s(page.title, 300).trim(), ...(text ? { text } : {}), ...(selection ? { selection } : {}) } } : {}),
       ...(screenshot ? { screenshot } : {}),
-      ...(bug && mode === 'task' ? { bug } : {}),
+      ...(bug && mode !== 'kb' ? { bug } : {}),
     },
   };
 }

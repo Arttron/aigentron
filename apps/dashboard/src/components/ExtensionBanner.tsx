@@ -18,13 +18,36 @@ export function ExtensionBanner() {
   });
   const [shipped, setShipped] = useState<string | undefined>();
   useEffect(() => {
-    if (ext.detected && ext.connected) void api.extensionInfo().then((i) => setShipped(i.extensionVersion)).catch(() => undefined);
+    if (ext.detected && ext.connected)
+      void api
+        .extensionInfo()
+        .then((i) => setShipped(i.extensionVersion))
+        .catch(() => undefined);
   }, [ext.detected, ext.connected]);
   if (ext.detected && ext.connected && !hidden && extensionOutdated(ext.version, shipped)) {
     return (
-      <div className={styles.banner} role="status">
-        <span>A newer Aigentron extension is available ({ext.version} → {shipped}): click its icon → <strong>Update the extension</strong>.</span>
-        <button type="button" className={styles.close} onClick={() => { setHidden(true); try { sessionStorage.setItem(KEY, '1'); } catch { /* not persisted */ } }} aria-label="Dismiss">×</button>
+      <div className={styles.wrap}>
+        <div className={styles.banner} role="status">
+          <span>
+            A newer Aigentron extension is available ({ext.version} → {shipped}): click its icon →{' '}
+            <strong>Update the extension</strong>.
+          </span>
+          <button
+            type="button"
+            className={styles.close}
+            onClick={() => {
+              setHidden(true);
+              try {
+                sessionStorage.setItem(KEY, '1');
+              } catch {
+                /* not persisted */
+              }
+            }}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
       </div>
     );
   }
@@ -38,15 +61,26 @@ export function ExtensionBanner() {
     }
   };
   return (
-    <div className={styles.banner} role="status">
-      <span>{ext.needsReconnect ? 'The Aigentron browser extension was signed out. ' : 'The Aigentron browser extension is installed. '}</span>
-      <Button size="sm" variant="primary" disabled={ext.busy} onClick={() => void connectExtension()}>
-        {ext.busy ? 'Connecting…' : ext.needsReconnect ? 'Reconnect' : 'Connect'}
-      </Button>
-      <button type="button" className={styles.close} onClick={dismiss} aria-label="Dismiss">
-        ×
-      </button>
-      {ext.error && <span className={styles.error}> {ext.error}</span>}
+    <div className={styles.wrap}>
+      <div className={styles.banner} role="status">
+        <span>
+          {ext.needsReconnect
+            ? 'The Aigentron browser extension was signed out. '
+            : 'The Aigentron browser extension is installed. '}
+        </span>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={ext.busy}
+          onClick={() => void connectExtension()}
+        >
+          {ext.busy ? 'Connecting…' : ext.needsReconnect ? 'Reconnect' : 'Connect'}
+        </Button>
+        <button type="button" className={styles.close} onClick={dismiss} aria-label="Dismiss">
+          ×
+        </button>
+        {ext.error && <span className={styles.error}> {ext.error}</span>}
+      </div>
     </div>
   );
 }

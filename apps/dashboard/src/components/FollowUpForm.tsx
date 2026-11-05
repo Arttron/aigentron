@@ -23,6 +23,9 @@ import { VoiceToggles } from './VoiceToggles';
 import { VoiceMode, type VoiceReply } from './VoiceMode';
 import { TaskReferencePicker } from './TaskReferencePicker';
 import { useSmartPaste } from './SmartPaste';
+import { FormatBar, FormatToggle, useFormatting } from './FormatBar';
+import { useLiveFormat } from './LiveFormat';
+import { onQuote } from '@/lib/quote';
 import styles from './FollowUpForm.module.css';
 
 interface Staged {
@@ -82,7 +85,15 @@ export function FollowUpForm({
   const [sheet, setSheet] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
-  const { onPaste, notice: pasteNotice } = useSmartPaste(setText);
+  const { onPaste: smartPaste, notice: pasteNotice } = useSmartPaste(setText);
+  const fmt = useFormatting(taRef, setText);
+  const live = useLiveFormat(taRef, text);
+  // "Quote" in the conversation of this task puts a quote into this box
+  useEffect(() => onQuote(`task:${taskId}`, fmt.insertQuote), [taskId, fmt.insertQuote]);
+  // an address pasted over a selected word becomes a link; anything else goes the way it always did
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!fmt.onPaste(e)) smartPaste(e);
+  };
   const [staged, setStaged] = useState<Staged[]>([]);
   const [references, setReferences] = useState<string[]>([]);
   const [showRefs, setShowRefs] = useState(false);
@@ -220,7 +231,8 @@ export function FollowUpForm({
     }
   };
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (fmt.onKeyDown(e)) return; // a formatting shortcut, or Shift+Enter in a list
     // Enter sends, Shift+Enter makes a new line (⌘/Ctrl+Enter also sends). Not while an IME is composing.
     // On a touch keyboard Enter is a new line (the ➤ button sends); ⌘/Ctrl+Enter still sends.
     if (
@@ -418,12 +430,14 @@ export function FollowUpForm({
         )}
         {queueEl}
         {pasteNotice}
+        {fmt.open && <FormatBar fmt={fmt} toggle={false} />}
         <div className={styles.dockRow}>
           <AttachMenu compact onPick={onAttachKind} busy={uploading} />
+          <FormatToggle fmt={fmt} />
           <textarea
             dir="auto"
             ref={taRef}
-            className={styles.dockInput}
+            className={cn(styles.dockInput, live.className)}
             aria-label="Message"
             placeholder={terminal ? 'Message…' : 'Message (queued until the run ends)…'}
             value={text}
@@ -432,6 +446,7 @@ export function FollowUpForm({
             onKeyDown={onKeyDown}
             rows={sheet ? 8 : 1}
           />
+          {live.overlay}
           {micEl}
           {sendBtn}
         </div>
@@ -458,6 +473,7 @@ export function FollowUpForm({
         {editingId ? 'Edit queued message' : 'Message'}
       </SectionTitle>
       {voiceBar}
+      <FormatBar fmt={fmt} />
       <div className={cn(styles.composer, look === 'terminal' && styles.term)}>
         {look === 'terminal' && (
           <span className={styles.promptMark} aria-hidden>
@@ -466,7 +482,8 @@ export function FollowUpForm({
         )}
         <textarea
           dir="auto"
-          className={styles.input}
+          ref={taRef}
+          className={cn(styles.input, live.className)}
           aria-label="Message"
           placeholder="Type a message — Enter sends, Shift+Enter adds a line. Attach images/PDFs with 📎"
           value={text}
@@ -475,6 +492,7 @@ export function FollowUpForm({
           onKeyDown={onKeyDown}
           rows={3}
         />
+        {live.overlay}
         {pasteNotice}
       </div>
 

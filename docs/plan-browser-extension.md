@@ -58,7 +58,7 @@ A developer-mode extension is never updated by the browser. What exists: the ext
 
 | # | Feature | Notes |
 |---|---|---|
-| 1 | **Send to Aigentron** | page / selection / link / screenshot (visible area, element, marked rectangle) → a **task** in the chosen project for the chosen agent, or → the project's **knowledge base** (clean text + URL). Context menu, toolbar popup, hotkey. |
+| 1 | **Send to Aigentron** | page / selection / link / screenshot (visible area, element, marked rectangle) → a **task** in the chosen project for the chosen agent, or → **a message in an existing task** (pick it in the list, or open the page from the side panel's conversation with «📷 Screenshot»: the picture, marks included, is saved among that task's files and the message names it), or → the project's **knowledge base** (clean text + URL). Context menu, toolbar popup, hotkey. |
 | 2 | **Approvals and questions on the current page** | a card over the page the person is on (see §4), badge count, notification fallback, sound, `ask_user` buttons. Counts as "someone is in front of the dashboard" for the 10 s rule. |
 | 3 | **Side panel** | chat with the admin / PM / any agent (the page text can ride along as context), task list with statuses, open a task. |
 | 4 | **Bug report** | screenshot + URL + console errors + failed requests + viewport + the picked element (selector, computed styles) → one task for a frontend agent. |

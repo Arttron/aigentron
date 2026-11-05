@@ -9,7 +9,7 @@ Tell the user EXACTLY where to click, with the real labels below. Never invent m
 
 - **Main page (`/`)** header: user switcher, connection indicator, links **🧑‍💻 Agents**, **📚 Resources**, **🧠 Knowledge**, **📁 Workspace**, **📁 Projects**, **🧩 Add-ons**, **📊 Stats**, **⚙ Settings**. Then the **New task** form (prompt, agent picker — first option = default lead, 📎 attachments incl. **📷 Camera**, references to earlier tasks, **💬 Discuss**) and the task list (search, pages, filters).
 - Bottom-left: theme toggle. Bottom-right: the mascot — click to open this chat; approval cards and agent questions appear next to it on every page.
-- **Task page (`/tasks/<id>`)**: transcript, pending approvals, follow-up box, Cancel/Delete, attachments, PR/branch links, subtasks, **✅ Mark as done**, **💬 Discuss** (finished tasks).
+- **Task page (`/tasks/<id>`)**: transcript, pending approvals, follow-up box (Slack-like formatting: **Aa** opens the toolbar, it also floats over selected text; ⌘/Ctrl+B/I/K, ⇧X strike, ⇧C code, ⇧7/8/9 lists/quote; Shift+Enter continues a list; typing ``` + Enter opens a code block, Enter inside it is a new line, ⌘/Ctrl+Enter sends; text is Markdown, shown formatted in the chat; the quote icon under a message, or **❝ Quote** over selected text, puts it into the box as a `>` quote), Cancel/Delete, attachments, PR/branch links, subtasks, **✅ Mark as done**, **💬 Discuss** (finished tasks).
 
 ## Task list
 

@@ -44,10 +44,12 @@ export function normRect(x1, y1, x2, y2, min = 4) {
 
 /** The body of POST /api/extension/clip from the state of the page. */
 export function buildClip(s) {
+  const toTask = s.mode === 'task' || s.mode === 'followup';
   return {
     mode: s.mode,
-    project: s.project,
-    ...(s.agentName ? { agentName: s.agentName } : {}),
+    // a message in an existing task needs the task, not a project (the task has its own)
+    ...(s.mode === 'followup' ? { taskId: s.taskId } : { project: s.project }),
+    ...(s.mode === 'task' && s.agentName ? { agentName: s.agentName } : {}),
     ...(s.mode === 'kb' ? { kb: s.kb } : {}),
     prompt: s.prompt.trim(),
     page: {
@@ -56,7 +58,21 @@ export function buildClip(s) {
       ...(s.includeText && s.draft.text ? { text: s.draft.text } : {}),
       ...(s.includeSelection && s.draft.selection ? { selection: s.draft.selection } : {}),
     },
-    ...(s.mode === 'task' && s.screenshot ? { screenshot: s.screenshot } : {}),
-    ...(s.mode === 'task' && s.includeBug && s.draft.bug ? { bug: s.draft.bug } : {}),
+    ...(toTask && s.screenshot ? { screenshot: s.screenshot } : {}),
+    ...(toTask && s.includeBug && s.draft.bug ? { bug: s.draft.bug } : {}),
   };
+}
+
+/** The tasks to offer in "a message in an existing task": newest first; a filter matches the title, the project and the status. */
+export function filterTasks(tasks, query) {
+  const q = String(query ?? '').trim().toLowerCase();
+  const sorted = [...tasks].sort((a, b) => String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')));
+  if (!q) return sorted;
+  return sorted.filter((t) => [t.title, t.projectSlug ?? t.project?.slug ?? '', t.status, t.agentName ?? ''].join(' ').toLowerCase().includes(q));
+}
+
+const STATUS = { running: ['running', 'blue'], queued: ['queued', 'blue'], needs_approval: ['needs you', 'amber'], review: ['ready', 'green'], blocked: ['blocked', 'amber'], stalled: ['stalled', 'amber'], failed: ['failed', 'red'], done: ['done', 'green'], cancelled: ['cancelled', 'grey'] };
+/** [label, tone] of a task's status for the list. */
+export function statusLabel(status) {
+  return STATUS[status] ?? [String(status ?? ''), 'grey'];
 }

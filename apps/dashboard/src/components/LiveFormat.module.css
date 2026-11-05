@@ -1,0 +1,68 @@
+/* The real text is made see-through once the formatted copy is in place; the caret keeps the text colour. */
+.live {
+  -webkit-text-fill-color: transparent;
+}
+.live::placeholder {
+  -webkit-text-fill-color: currentColor;
+  opacity: 0.55;
+}
+.overlay {
+  position: absolute;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+  /* the see-through box underneath keeps its own look; this layer only draws text and tints */
+  background: transparent;
+}
+.inner {
+  min-width: 0;
+}
+.line,
+.block {
+  white-space: inherit;
+  overflow-wrap: inherit;
+  word-break: inherit;
+  /* the box decides the direction of each paragraph on its own (unicode-bidi: plaintext); so does the copy */
+  unicode-bidi: plaintext;
+}
+.block {
+  background: color-mix(in srgb, currentColor 9%, transparent);
+}
+.mark {
+  opacity: 0.42;
+}
+/* only styles that keep every letter the same width, so the copy never drifts off the caret */
+.bold {
+  text-shadow: 0.45px 0 currentColor, -0.2px 0 currentColor;
+}
+.italic {
+  color: color-mix(in srgb, var(--accent, currentColor) 65%, currentColor);
+}
+.strike {
+  text-decoration: line-through;
+}
+.code {
+  background: color-mix(in srgb, currentColor 11%, transparent);
+  border-radius: 3px;
+}
+.block .code {
+  background: none;
+}
+.link,
+.url {
+  color: var(--accent, currentColor);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.url {
+  opacity: 0.85;
+}
+.bullet,
+.quote {
+  color: var(--accent, currentColor);
+  font-weight: inherit;
+}
+.lang {
+  color: var(--accent, currentColor);
+  opacity: 0.8;
+}

@@ -1,0 +1,24 @@
+.pop {
+  position: fixed;
+  z-index: 2000;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent, #2f6f62);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.pop:hover {
+  filter: brightness(1.08);
+}
+.pop:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

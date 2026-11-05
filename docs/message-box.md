@@ -1,0 +1,15 @@
+# The message box (formatting)
+
+The box stays a plain `<textarea>`; the text is Markdown (what agents read, and what the conversation shows formatted). Used in the task chat (both layouts), the admin chat and "New task".
+
+- **Toolbar** (`FormatBar`): bold, italic, strike, link, bulleted / numbered list, quote, code, code block. Folded by default; **Aa** opens it for good (remembered in `localStorage` `lds.fmtbar`); it also **floats over the box whenever text is selected**. Buttons never take focus, so the selection stays.
+- **Shortcuts** (`md-edit.ts` `shortcutAction`): ⌘/Ctrl+B, I, K (link), ⇧X (strike), ⇧C (code), ⌥⇧C (code block), ⇧7 / ⇧8 / ⇧9 (numbered, bulleted, quote). Enter sends (as before; on a touch keyboard it is a new line); Shift+Enter inside a list or quote continues it (an empty item ends the list); pasting an address over a selected word makes the word its link text.
+- **Code blocks**: typing ``` and Enter opens the block and closes it for you; Enter inside a block is a plain new line (send with ⌘/Ctrl+Enter); pasting terminal output / code / logs still wraps them by itself (`SmartPaste`, with "paste as plain text").
+- **Live formatting** (`LiveFormat`, `md-highlight.ts`): a copy of the text is drawn over the box, exactly aligned, with the Markdown marks dimmed and bold / strike / code / links / list markers / code blocks styled; the real text is see-through (`-webkit-text-fill-color`), so caret, selection, paste, voice and undo are the browser's own. Only styles that keep every letter the same width are used (bold is a thin text-shadow), so the copy cannot drift off the caret. Edits made by the toolbar go through `document.execCommand('insertText')`, so Ctrl+Z undoes them.
+- **In the conversation** (`UserText` → `user-markdown.ts`): a message that holds formatting is shown formatted; one with none is shown exactly as typed. Only what the toolbar makes is interpreted (no headings, tables, colour chips or file references; marks must hug their text, so `*.ts files, 5 * 3` and `snake_case` stay as typed). Never raw HTML.
+
+## Quoting
+- **Whole message**: the quote icon next to the copy icon of every message (the task chat and the admin chat) puts the message's raw text into the box as a Markdown quote (`> …` on every line; cut at 6000 characters at a paragraph, with a note).
+- **A part**: select text in a message (mouse or finger) and the **❝ Quote** button appears over the selection (`SelectionQuote`); a click quotes exactly the selected text and clears the selection. Only a selection inside the conversation counts.
+- **Where it goes** (`insertQuote` in `md-edit.ts`): at the caret when the box has focus, else at the end; on its own paragraph, with a blank line after it and the caret there, ready for the reply. The box of the same conversation takes it (`quote.ts`: a small event bus keyed `task:<id>` / `admin-chat`).
+- **Shown** as a block quote in the conversation (the person's message is formatted when it holds a quote); agents read it as quoted text.

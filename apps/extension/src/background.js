@@ -90,7 +90,7 @@ const WEB = /^https?:\/\//i;
  * Captures what is on a tab (the title, the selection, the readable text, a screenshot) into a draft kept in session storage, and opens the compose page.
  * Runs on a person's action (toolbar button, menu, shortcut): that is what grants access to the tab (`activeTab`).
  */
-async function startCompose({ tab, kind, info, open = true }) {
+async function startCompose({ tab, kind, info, open = true, task }) {
   if (!tab?.id) throw new ApiError(0, 'There is no page to send');
   const draft = { id: crypto.randomUUID(), kind, tabId: tab.id, linkUrl: info?.linkUrl ?? '', screenshot: null, createdAt: Date.now(), ...(await capturePage(tab, info?.selectionText)) };
   try {
@@ -99,7 +99,8 @@ async function startCompose({ tab, kind, info, open = true }) {
     /* no screenshot (a page that does not allow it, or no permission) — the rest still works */
   }
   await chrome.storage.session.set({ [`draft:${draft.id}`]: draft });
-  if (open) await chrome.tabs.create({ url: chrome.runtime.getURL(`compose.html?draft=${draft.id}`) });
+  // `task`: opened from a conversation in the side panel — the page offers that task as the place to send to
+  if (open) await chrome.tabs.create({ url: chrome.runtime.getURL(`compose.html?draft=${draft.id}${task ? `&task=${encodeURIComponent(task)}` : ''}`) });
   return { ok: true, id: draft.id };
 }
 
@@ -200,9 +201,20 @@ const handlers = {
     let tab;
     if (typeof msg.find === 'string') [tab] = (await chrome.tabs.query({ url: msg.find })).filter((t) => !t.url?.startsWith('chrome-extension://'));
     else tab = await activeTab();
-    return startCompose({ tab, kind: ['page', 'selection', 'link', 'screenshot'].includes(msg.kind) ? msg.kind : 'page', open: msg.open !== false });
+    return startCompose({ tab, kind: ['page', 'selection', 'link', 'screenshot'].includes(msg.kind) ? msg.kind : 'page', open: msg.open !== false, task: typeof msg.task === 'string' && /^[\w-]{1,64}$/.test(msg.task) ? msg.task : undefined });
   },
   agents: async () => ({ agents: await apiFetch('/api/agents') }),
+  // the tasks a message can be sent to (newest first); `include` = a task the page was opened for, kept in the list even when it is not among the latest
+  tasks: async (msg) => {
+    const page = await apiFetch('/api/tasks?pageSize=40');
+    const tasks = Array.isArray(page) ? page : page?.items ?? [];
+    const id = typeof msg.include === 'string' ? msg.include : '';
+    if (id && !tasks.some((t) => t.id === id)) {
+      const one = await apiFetch(`/api/tasks/${encodeURIComponent(id)}`).catch(() => null);
+      if (one) tasks.push(one);
+    }
+    return { tasks: tasks.map((t) => ({ id: t.id, title: t.title ?? '', status: t.status, updatedAt: t.updatedAt, agentName: t.agentName ?? null, projectSlug: t.project?.slug ?? null })) };
+  },
   'agent-status': async () => {
     const tab = await activeTab();
     return { ok: true, ...(await agentStatus(tab?.id)), activeTabId: tab?.id ?? null, activeUrl: tab?.url ?? '' };

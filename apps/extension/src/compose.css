@@ -1,6 +1,8 @@
-:root { color-scheme: light dark; --bg: #f6f7f9; --card: #fff; --fg: #1b1f24; --muted: #6b7280; --line: #e5e7eb; --accent: #4e78ff; --bad: #d33; --ok: #1a8f4c; }
-@media (prefers-color-scheme: dark) { :root { --bg: #14171a; --card: #1b1f24; --fg: #e6e8eb; --muted: #9aa3ad; --line: #2f353d; } }
+:root { color-scheme: light dark; --bg: #f6f7f9; --card: #fff; --fg: #1b1f24; --muted: #6b7280; --line: #e5e7eb; --accent: #4e78ff; --accent-soft: #e8efff; --bad: #d33; --ok: #1a8f4c; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14171a; --card: #1b1f24; --fg: #e6e8eb; --muted: #9aa3ad; --line: #2f353d; --accent-soft: #26345c; } }
 * { box-sizing: border-box; }
+/* an author rule such as `.card { display: flex }` must not bring back what is hidden */
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
 main { max-width: 820px; margin: 0 auto; padding: 20px 16px 60px; display: flex; flex-direction: column; gap: 14px; }
 header { display: flex; align-items: center; gap: 10px; }
@@ -8,20 +10,56 @@ header h1 { font-size: 18px; margin: 0; }
 header img { width: 26px; height: 26px; }
 .muted { color: var(--muted); }
 .spacer { flex: 1; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
-.row label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 160px; }
-.checks label { flex-direction: row; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); min-width: 0; }
-select, textarea, input[type="text"] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; }
-label > textarea { margin-top: 2px; }
-textarea { resize: vertical; }
-button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+
+/* the choices: one even row (they wrap on a narrow window), the same height for every field */
+.selects { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 260px)); gap: 12px; }
+.selects label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+select, textarea, input[type="text"] { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; min-width: 0; }
+select { height: 36px; }
+select:focus-visible, textarea:focus-visible, input[type="text"]:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* the words to send, with the microphone inside the box (a corner button, like in a chat) */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.fieldLabel { font-size: 13px; }
+.promptBox { position: relative; }
+.promptBox textarea { resize: vertical; min-height: 96px; padding-right: 48px; display: block; }
+.micSlot { position: absolute; right: 8px; bottom: 10px; display: flex; }
+.micSlot:empty { display: none; }
+.micSlot button { width: 32px; height: 32px; padding: 0; border-radius: 50%; display: grid; place-items: center; font-size: 15px; line-height: 1; background: var(--card); }
+.micSlot button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+
+.checks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.checks label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); }
+
+/* the tasks a message can go to */
+.taskPick { display: flex; flex-direction: column; gap: 8px; }
+.taskList { display: flex; flex-direction: column; gap: 6px; max-height: 232px; overflow: auto; padding: 2px; }
+.taskItem { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+.taskItem:hover { border-color: var(--accent); }
+.taskItem[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.taskItem:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.taskItem .t { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskItem .m { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11px; background: var(--line); white-space: nowrap; }
+.chip.blue { background: #dbe6ff; color: #1b3f9e; } .chip.green { background: #d9f2e3; color: #14663a; } .chip.amber { background: #fdebc8; color: #8a5a00; } .chip.red { background: #fbd9d9; color: #9e1b1b; }
+@media (prefers-color-scheme: dark) { .chip.blue { background: #26345c; color: #b7c9ff; } .chip.green { background: #1d3a2a; color: #9be3b8; } .chip.amber { background: #46361a; color: #f2cd85; } .chip.red { background: #4a2323; color: #f3a9a9; } }
+.emptyList { padding: 10px; text-align: center; }
+
+button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; cursor: pointer; }
+button.small { padding: 5px 12px; font-size: 13px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 button:disabled { opacity: .5; cursor: default; }
-.canvasWrap { overflow: auto; max-height: 70vh; }
-canvas { max-width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; }
+
+/* the screenshot: the title and its buttons on one centred line */
+.shotHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.canvasWrap { overflow: auto; max-height: 70vh; border-radius: 8px; }
+canvas { display: block; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: crosshair; touch-action: none; }
+
+.sendRow { display: flex; align-items: center; gap: 12px; }
 .bad { color: var(--bad); }
 .ok { color: var(--ok); }
+#done { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
 #source .title { font-weight: 600; }
 #source a { color: var(--accent); word-break: break-all; }
 pre.excerpt { margin: 0; max-height: 120px; overflow: auto; white-space: pre-wrap; font: 12px/1.4 ui-monospace, monospace; color: var(--muted); }

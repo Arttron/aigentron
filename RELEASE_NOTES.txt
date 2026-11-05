@@ -1,9 +1,15 @@
-Aigentron v0.1.117
+Aigentron v0.1.119
 
-For people who are not programmers: the number settings can be edited again, and taps on a phone no longer land on things you did not touch.
+For people who are not programmers: the message box formats text like Slack, chat messages can be quoted, and the browser extension can send a screenshot into a task you already have. (This release also carries everything planned for 0.1.118, which never went out.)
+
+New
+- Formatting in the message box (task chat, admin chat, "New task"). The "Aa" button opens a toolbar (bold, italic, strikethrough, link, lists, quote, code, code block); it also pops up over any text you select. Keyboard shortcuts work too (⌘/Ctrl+B, I, K and others), Shift+Enter continues a list, and pasting an address over a selected word makes a link. Typing ``` and Enter starts a code block and closes it for you; inside it Enter is a new line (⌘/Ctrl+Enter sends). The text is formatted as you type, and a message with formatting is shown formatted in the chat; plain messages look exactly as before.
+- Quoting in the chat. The quote icon next to the copy icon of any message puts the whole message into the box as a quote; select a part of a message and a "Quote" button appears over it. The cursor waits below the quote for your reply.
+- Browser extension: send a page or a screenshot (with your marks) as a message in an EXISTING task. On the "Send to Aigentron" page choose "a message in an existing task" and pick the task from the list; in the side panel, open a task's conversation and press "📷 Screenshot". The picture is saved among the task's files.
 
 Fixed
-- Settings → Task queue: the numbers (Concurrency, Chat slots, commands at once, pauses) could not be changed — erasing a digit switched the field to "automatic" and locked it. All number fields in the dashboard (schedules, voice, compression, run limits, verification attempts, knowledge chunking) now behave like normal text while you type and apply only a valid number.
-- On a phone, the floating assistant no longer takes taps meant for the page under its empty corners (only the round mascot and its hide button react), and a tap next to the text of a checkbox no longer flips it.
+- The extension's "Send to Aigentron" page: the microphone is now a small round button inside the text box (it was a large button pushing the box down), and fields that should be hidden no longer show (the knowledge-base field and an empty card).
+- The bars at the top of the dashboard (update notice, "newer extension available", password reminder) no longer start under the side menu.
+- The live formatting in the message box stays aligned with the text when the box moves or appears later, a long line of brackets can no longer slow it, and a few editing edge cases behave properly.
 
-Update note: no database changes.
+Update note: update the extension (its icon → "Update the extension"). No database changes.

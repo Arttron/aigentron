@@ -10,6 +10,7 @@ export type Inline =
   | { t: 'code'; v: string }
   | { t: 'bold'; c: Inline[] }
   | { t: 'italic'; c: Inline[] }
+  | { t: 'strike'; c: Inline[] }
   | { t: 'link'; href: string; v: string }
   /** A file of the task shown inline, loaded by its name from the task's attachments (nothing is copied into the message). */
   | { t: 'media'; name: string; alt: string; /** a file of ANOTHER task (a lead showing its subtask's file) */ taskId?: string }
@@ -102,9 +103,29 @@ function mediaOrFileName(raw: string): string | null {
   return name && name !== '..' && !name.startsWith('.') ? name : null;
 }
 
-const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^\]\n]*\]\((?:(?:task|attachments?):[^)\n]+|[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)/g;
+const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^\[\]\n]*\]\((?:(?:task|attachments?):[^)\n]+|[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)|(~~[^~\n]+~~)/g;
 
-export function parseInline(src: string, depth = 0): Inline[] {
+/**
+ * `user`: what a PERSON typed in the composer. Only what the composer's toolbar makes is interpreted (bold, italic, strike, code, links, lists, quotes,
+ * code blocks): no headings (`# comment` in a pasted script is not a title), no tables, no colour chips, and no file references (those are for agents).
+ */
+export interface ParseOptions {
+  user?: boolean;
+}
+
+/**
+ * For a person's own text a mark only counts when it hugs what it marks: nothing but a letter-less edge outside, no space just inside
+ * (`*.ts files, 5 *` is a glob and a product, not italic; `snake_case`, `2*3*4` stay as typed).
+ */
+export function hugs(src: string, at: number, tok: string, mark: number): boolean {
+  const inner = tok.slice(mark, tok.length - mark);
+  if (!inner || /^\s|\s$/.test(inner)) return false;
+  const prev = src[at - 1];
+  const next = src[at + tok.length];
+  return !(prev && /[\p{L}\p{N}]/u.test(prev)) && !(next && /[\p{L}\p{N}]/u.test(next));
+}
+
+export function parseInline(src: string, depth = 0, opts: ParseOptions = {}): Inline[] {
   const out: Inline[] = [];
   let last = 0;
   for (const m of src.matchAll(INLINE_RE)) {
@@ -112,10 +133,11 @@ export function parseInline(src: string, depth = 0): Inline[] {
     if (i > last) out.push({ t: 'text', v: src.slice(last, i) });
     const [tok] = m;
     if (m[1]) out.push({ t: 'code', v: tok.slice(1, -1) });
-    else if (m[2]) out.push(depth < 2 ? { t: 'bold', c: parseInline(tok.slice(2, -2), depth + 1) } : { t: 'text', v: tok });
+    else if ((m[2] || m[5] || m[6]) && opts.user && !hugs(src, i, tok, m[5] ? 1 : 2)) out.push({ t: 'text', v: tok });
+    else if (m[2]) out.push(depth < 2 ? { t: 'bold', c: parseInline(tok.slice(2, -2), depth + 1, opts) } : { t: 'text', v: tok });
     else if (m[3]) {
       const mm = /^!?\[([^\]]*)\]\(([^)]+)\)$/.exec(tok);
-      const ref = mm ? parseFileRef(mm[2]!) : null;
+      const ref = mm && !opts.user ? parseFileRef(mm[2]!) : null;
       const href = mm && !ref ? safeHref(mm[2]!) : null;
       if (mm && ref) {
         out.push(
@@ -130,11 +152,12 @@ export function parseInline(src: string, depth = 0): Inline[] {
       const href = safeHref(trimmed);
       out.push(href ? { t: 'link', href, v: trimmed } : { t: 'text', v: trimmed });
       if (trimmed.length < tok.length) out.push({ t: 'text', v: tok.slice(trimmed.length) });
-    } else if (m[5]) out.push(depth < 2 ? { t: 'italic', c: parseInline(tok.slice(1, -1), depth + 1) } : { t: 'text', v: tok });
+    } else if (m[5]) out.push(depth < 2 ? { t: 'italic', c: parseInline(tok.slice(1, -1), depth + 1, opts) } : { t: 'text', v: tok });
+    else if (m[6]) out.push(depth < 2 ? { t: 'strike', c: parseInline(tok.slice(2, -2), depth + 1, opts) } : { t: 'text', v: tok });
     last = i + tok.length;
   }
   if (last < src.length) out.push({ t: 'text', v: src.slice(last) });
-  return expandColors(out);
+  return opts.user ? out : expandColors(out);
 }
 
 function chip(text: string, c: NonNullable<ReturnType<typeof parseColor>>): Inline {
@@ -196,12 +219,12 @@ export function isNumericColumn(cells: readonly string[]): boolean {
   return body.length > 0 && body.every((c) => /^[~≈<>+-]?\s*[$€£]?\s*\d[\d\s.,']*\s*[%$€£]?$/.test(c.replace(/\*\*/g, '').trim()));
 }
 
-export function parseMarkdown(src: string): Block[] {
+export function parseMarkdown(src: string, opts: ParseOptions = {}): Block[] {
   const lines = src.replace(/\r\n?/g, '\n').split('\n');
   const blocks: Block[] = [];
   let para: string[] = [];
   const flush = () => {
-    if (para.length) blocks.push({ t: 'p', c: parseInline(para.join('\n')) });
+    if (para.length) blocks.push({ t: 'p', c: parseInline(para.join('\n'), 0, opts) });
     para = [];
   };
   for (let i = 0; i < lines.length; i++) {
@@ -215,7 +238,7 @@ export function parseMarkdown(src: string): Block[] {
       blocks.push({ t: 'code', lang: fence[1] ?? '', v: body.join('\n') }); // an unclosed fence runs to the end (streaming)
       continue;
     }
-    const h = /^(#{1,6})\s+(.*)$/.exec(line);
+    const h = opts.user ? null : /^(#{1,6})\s+(.*)$/.exec(line);
     if (h) {
       flush();
       blocks.push({ t: 'h', level: h[1]!.length, c: parseInline(h[2]!) });
@@ -224,7 +247,7 @@ export function parseMarkdown(src: string): Block[] {
     if (/^\s*[-*]\s+/.test(line)) {
       flush();
       const items: Inline[][] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]!)) items.push(parseInline(lines[i++]!.replace(/^\s*[-*]\s+/, '')));
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i]!)) items.push(parseInline(lines[i++]!.replace(/^\s*[-*]\s+/, ''), 0, opts));
       i--;
       blocks.push({ t: 'ul', items });
       continue;
@@ -232,13 +255,13 @@ export function parseMarkdown(src: string): Block[] {
     if (/^\s*\d+[.)]\s+/.test(line)) {
       flush();
       const items: Inline[][] = [];
-      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i]!)) items.push(parseInline(lines[i++]!.replace(/^\s*\d+[.)]\s+/, '')));
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i]!)) items.push(parseInline(lines[i++]!.replace(/^\s*\d+[.)]\s+/, ''), 0, opts));
       i--;
       blocks.push({ t: 'ol', items });
       continue;
     }
     // A table: a header row with pipes, then a |---| separator line, then rows until a line without pipes.
-    if (line.includes('|') && i + 1 < lines.length) {
+    if (!opts.user && line.includes('|') && i + 1 < lines.length) {
       const sep = parseSeparator(lines[i + 1]!);
       const head = splitRow(line);
       if (sep && head.length >= 2 && sep.length === head.length) {
@@ -262,7 +285,7 @@ export function parseMarkdown(src: string): Block[] {
       const q: string[] = [];
       while (i < lines.length && /^\s*>\s?/.test(lines[i]!)) q.push(lines[i++]!.replace(/^\s*>\s?/, ''));
       i--;
-      blocks.push({ t: 'quote', c: parseInline(q.join('\n')) });
+      blocks.push({ t: 'quote', c: parseInline(q.join('\n'), 0, opts) });
       continue;
     }
     if (!line.trim()) flush();

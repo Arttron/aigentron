@@ -286,31 +286,34 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ status, refresh }}>
-      <UpdatingBanner />
-      <ExtensionBanner />
-      {!status.configured && !dismissed && (
-        <div className={status.publicUrl ? styles.bannerWarn : styles.banner} role="status">
-          <span>
-            {status.publicUrl
-              ? 'This dashboard is reachable from the internet and has NO password. '
-              : 'No password is set — anyone who can open this page controls the platform. '}
-          </span>
-          <Button size="sm" variant="primary" onClick={() => setSetting(true)}>
-            Set password
-          </Button>
-          {!status.publicUrl && (
-            <button
-              type="button"
-              className={styles.dismiss}
-              onClick={() => setDismissed(true)}
-              aria-label="Dismiss"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      )}
-      <DiskBanner />
+      {/* the strips above the page start where the sidebar ends: the fixed sidebar would hide their beginning */}
+      <div className={styles.top}>
+        <UpdatingBanner />
+        <ExtensionBanner />
+        {!status.configured && !dismissed && (
+          <div className={status.publicUrl ? styles.bannerWarn : styles.banner} role="status">
+            <span>
+              {status.publicUrl
+                ? 'This dashboard is reachable from the internet and has NO password. '
+                : 'No password is set — anyone who can open this page controls the platform. '}
+            </span>
+            <Button size="sm" variant="primary" onClick={() => setSetting(true)}>
+              Set password
+            </Button>
+            {!status.publicUrl && (
+              <button
+                type="button"
+                className={styles.dismiss}
+                onClick={() => setDismissed(true)}
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+        <DiskBanner />
+      </div>
       {setting && (
         <Modal title="Set a password" onClose={() => setSetting(false)}>
           <Muted>

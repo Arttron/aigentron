@@ -1,0 +1,82 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.buttons {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.buttons::-webkit-scrollbar {
+  display: none;
+}
+.btn,
+.toggle {
+  flex: none;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim, inherit);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.btn:hover,
+.toggle:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: var(--text, inherit);
+}
+.btn:focus-visible,
+.toggle:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: -2px;
+}
+.toggle[aria-pressed='true'] {
+  color: var(--accent, inherit);
+  font-weight: 700;
+}
+.end {
+  margin-left: auto;
+}
+.b {
+  font-weight: 800;
+}
+.i {
+  font-style: italic;
+  font-family: serif;
+}
+.s {
+  text-decoration: line-through;
+}
+@media (max-width: 699px) {
+  .btn,
+  .toggle {
+    min-width: 36px;
+    height: 34px;
+  }
+}
+
+/* folded: the buttons float above the box while text is selected */
+.anchor {
+  position: relative;
+  height: 0;
+  z-index: 30;
+}
+.popover {
+  position: absolute;
+  left: 0;
+  bottom: 6px;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--bg-elev, #fff);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22), 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent);
+}

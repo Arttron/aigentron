@@ -2,7 +2,7 @@ import { createContext, memo, useContext, useMemo, useState, type ReactNode } fr
 import { api } from '@/lib/api';
 import { docKind } from '@/lib/doc-kinds';
 import { DocViewer } from './DocViewer';
-import { parseInline, parseMarkdown, type Inline } from '@/lib/markdown-parse';
+import { parseInline, parseMarkdown, type Block, type Inline } from '@/lib/markdown-parse';
 import styles from './Markdown.module.css';
 
 /** The task whose attachments `![caption](file.png)` in a message refers to (set by the transcript). */
@@ -56,7 +56,7 @@ function FileLink({ name, label, from }: { name: string; label: string; from?: s
   );
 }
 
-function renderInline(tokens: Inline[]): ReactNode[] {
+export function renderInline(tokens: Inline[]): ReactNode[] {
   return tokens.map((t, i) => {
     switch (t.t) {
       case 'code':
@@ -65,6 +65,8 @@ function renderInline(tokens: Inline[]): ReactNode[] {
         return <strong key={i}>{renderInline(t.c)}</strong>;
       case 'italic':
         return <em key={i}>{renderInline(t.c)}</em>;
+      case 'strike':
+        return <del key={i}>{renderInline(t.c)}</del>;
       case 'color':
         return (
           <span key={i} className={styles.colorChip} style={{ background: t.bg, color: t.fg }} title={t.v}>
@@ -111,9 +113,7 @@ export function CodeBlock({ lang, code }: { lang: string; code: string }) {
   );
 }
 
-/** Renders chat text as React elements (never raw HTML). */
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
-  const blocks = useMemo(() => parseMarkdown(text), [text]);
+function renderBlocks(blocks: Block[]): ReactNode {
   return (
     <div className={styles.md} dir="auto">
       {blocks.map((b, i) => {
@@ -159,6 +159,17 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
       })}
     </div>
   );
+}
+
+/** Renders chat text as React elements (never raw HTML). */
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
+  return renderBlocks(blocks);
 });
+
+/** The formatted blocks of what a person typed (see `userBlocks`): the same look as the agents' replies. */
+export function UserBlocks({ blocks }: { blocks: Block[] }) {
+  return renderBlocks(blocks);
+}
 
 export { parseInline };

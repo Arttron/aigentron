@@ -435,11 +435,11 @@ describe.skipIf(!BIN)('the generated extension in a real Chromium', () => {
     const voicePage = await open(`chrome-extension://${extensionId}/compose.html?find=${encodeURIComponent(`${origin}/article*`)}&kind=page`);
     try {
       await waitFor(voicePage, formReady, 'the form (voice)');
-      await waitFor(voicePage, "document.getElementById('promptHint').nextElementSibling?.tagName === 'BUTTON'", 'the microphone button');
-      await voicePage.eval("document.getElementById('promptHint').nextElementSibling.click()");
-      await waitFor(voicePage, "document.getElementById('promptHint').nextElementSibling.textContent === '⏹'", 'the recording to start');
+      await waitFor(voicePage, "!!document.querySelector('#micSlot button')", 'the microphone button');
+      await voicePage.eval("document.querySelector('#micSlot button').click()");
+      await waitFor(voicePage, "document.querySelector('#micSlot button').textContent === '⏹'", 'the recording to start');
       await new Promise((r) => setTimeout(r, 1500));
-      await voicePage.eval("document.getElementById('promptHint').nextElementSibling.click()");
+      await voicePage.eval("document.querySelector('#micSlot button').click()");
       await waitFor(voicePage, "document.getElementById('prompt').value.includes('hello voice')", 'the recognised text');
     } finally {
       voicePage.close();
@@ -448,6 +448,45 @@ describe.skipIf(!BIN)('the generated extension in a real Chromium', () => {
     expect(dictated.auth).toBe('Bearer tok-123');
     expect(dictated.ctype).toContain('audio/webm');
     expect(dictated.bytes).toBeGreaterThan(500);
+
+    // 13b. a screenshot to an EXISTING task (as the side panel's "📷 Screenshot" opens it): the task is chosen already, the message goes to it, no project is sent
+    const seed2 = await open(`chrome-extension://${extensionId}/popup.html`);
+    let draft2: string;
+    try {
+      await waitFor(seed2, "location.protocol === 'chrome-extension:' && !!window.chrome?.storage?.session && document.readyState === 'complete'", 'the extension page (2)');
+      draft2 = await seed2.eval<string>(`(async () => {
+        const c = document.createElement('canvas'); c.width = 200; c.height = 120;
+        const g = c.getContext('2d'); g.fillStyle = '#eeeeee'; g.fillRect(0, 0, 200, 120);
+        const id = 'seed-' + Math.random().toString(36).slice(2);
+        await chrome.storage.session.set({ ['draft:' + id]: { id, kind: 'screenshot', tabId: 1, url: '${origin}/article', title: 'Test article', selection: '', text: '', linkUrl: '', screenshot: c.toDataURL('image/png') } });
+        return id;
+      })()`);
+    } finally {
+      seed2.close();
+    }
+    // (DevTools' /json/new cuts a URL at its first `&`: the second parameter is added from inside the tab)
+    const toTask = await open(`chrome-extension://${extensionId}/compose.html?draft=${draft2}`);
+    try {
+      await waitFor(toTask, "document.readyState === 'complete' && !!document.getElementById('mode')", 'the page to load');
+      await toTask.eval(`location.search = '?draft=${draft2}&task=t1'`);
+      await new Promise((r) => setTimeout(r, 800));
+      await waitFor(toTask, formReady, 'the form (to a task)');
+      await waitFor(toTask, "document.getElementById('mode').value === 'followup' && !!document.querySelector('.taskItem[aria-selected=\"true\"]')", 'the task to be chosen');
+      expect(await toTask.eval<string>("document.querySelector('.taskItem[aria-selected=\"true\"] .t').textContent")).toBe('Fix the login button');
+      expect(await toTask.eval<boolean>("document.getElementById('projectWrap').hidden && document.getElementById('agentWrap').hidden && document.getElementById('kbWrap').hidden")).toBe(true);
+      expect(await toTask.eval<number>("document.querySelectorAll('.taskItem').length")).toBe(2);
+      await toTask.eval("(() => { const t = document.getElementById('prompt'); t.value = 'The layout is still off'; t.dispatchEvent(new Event('input')); })()");
+      await waitFor(toTask, "!document.getElementById('send').disabled", 'the Send button (to a task)');
+      await toTask.eval("document.getElementById('send').click()");
+      await waitFor(toTask, "!document.getElementById('done').hidden", 'the confirmation (to a task)');
+    } finally {
+      toTask.close();
+    }
+    const clipT = events.filter((e) => e.path === 'POST /api/extension/clip').pop()!;
+    const bodyT = clipT.body as { mode: string; taskId: string; project?: string; prompt: string; screenshot?: string };
+    expect(bodyT).toMatchObject({ mode: 'followup', taskId: 't1', prompt: 'The layout is still off' });
+    expect(bodyT.project).toBeUndefined();
+    expect(typeof bodyT.screenshot).toBe('string');
 
     // 14. updating: the server offers a newer extension version; the popup says so, and the update page offers it (the folder picker itself needs a person)
     const upd = await open(`chrome-extension://${extensionId}/popup.html`);

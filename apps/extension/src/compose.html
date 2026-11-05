@@ -13,27 +13,45 @@
       <section id="source" class="card"></section>
 
       <section class="card">
-        <div class="row">
+        <div class="selects">
           <label>Send as
-            <select id="mode"><option value="task">a task for an agent</option><option value="kb">a note in a knowledge base</option></select>
+            <select id="mode">
+              <option value="task">a new task for an agent</option>
+              <option value="followup">a message in an existing task</option>
+              <option value="kb">a note in a knowledge base</option>
+            </select>
           </label>
-          <label>Project <select id="project"></select></label>
+          <label id="projectWrap">Project <select id="project"></select></label>
           <label id="agentWrap">Agent <select id="agent"></select></label>
           <label id="kbWrap" hidden>Knowledge base <select id="kb"></select></label>
         </div>
-        <label>What should be done? <span class="muted" id="promptHint">(optional)</span>
-          <textarea id="prompt" rows="4" placeholder="For example: summarise it, check the claims, turn it into a task list…"></textarea>
-        </label>
-        <div id="includes" class="row checks"></div>
+
+        <div id="taskWrap" class="taskPick" hidden>
+          <input id="taskFilter" type="text" placeholder="Find a task — by its title, project or status" aria-label="Find a task" autocomplete="off" />
+          <div id="taskList" class="taskList" role="listbox" aria-label="Tasks"></div>
+        </div>
+
+        <div class="field">
+          <label for="prompt" class="fieldLabel">What should be done? <span class="muted" id="promptHint">(optional)</span></label>
+          <div class="promptBox">
+            <textarea id="prompt" rows="4" placeholder="For example: summarise it, check the claims, turn it into a task list…"></textarea>
+            <span id="micSlot" class="micSlot"></span>
+          </div>
+        </div>
+        <div id="includes" class="checks"></div>
       </section>
 
       <section id="shotCard" class="card" hidden>
-        <div class="row"><strong>Screenshot</strong><span class="muted">drag to mark what you mean</span>
-          <span class="spacer"></span><button id="undo" type="button">Undo mark</button><button id="clear" type="button">Clear marks</button></div>
+        <div class="shotHead">
+          <strong>Screenshot</strong><span class="muted">drag on the picture to mark what you mean</span>
+          <span class="spacer"></span>
+          <button id="undo" type="button" class="small">Undo mark</button>
+          <button id="clear" type="button" class="small">Clear marks</button>
+        </div>
         <div class="canvasWrap"><canvas id="canvas"></canvas></div>
       </section>
 
-      <section class="row">
+      <section class="sendRow">
         <button id="send" class="primary" type="button" disabled>Send</button>
         <span id="status" class="muted"></span>
       </section>
