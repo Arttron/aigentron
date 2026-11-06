@@ -67,9 +67,11 @@ export function useFormatting(ref: RefObject<HTMLTextAreaElement | null>, setVal
       setSelected(Boolean(ta && document.activeElement === ta && ta.selectionStart !== ta.selectionEnd));
     };
     document.addEventListener('selectionchange', check);
-    // text boxes report a selection on the box itself in some browsers: listen there too
+    // text boxes report a selection on the box itself in some browsers: listen there too.
+    // NOT 'input': a state change from a native listener on the box re-renders (and rewrites the box's value) BEFORE React's own onChange sees the edit, so
+    // React finds nothing changed and the edit is thrown away — deleting or typing over a selection did nothing. 'selectionchange' follows every edit anyway.
     const ta = ref.current;
-    const events = ['select', 'keyup', 'mouseup', 'touchend', 'input', 'blur'];
+    const events = ['select', 'keyup', 'mouseup', 'touchend', 'blur'];
     for (const n of events) ta?.addEventListener(n, check);
     return () => {
       document.removeEventListener('selectionchange', check);

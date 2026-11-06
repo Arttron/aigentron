@@ -1,15 +1,7 @@
-Aigentron v0.1.121
+Aigentron v0.1.122
 
-For people who are not programmers: the browser extension's chat now works like the main one, the extension stops refusing to work when you are not really using the page, and an old open tab tells you to reload.
-
-New
-- The extension's side-panel chat shows what you send at once ("sending…"), lists the server's queue (with edit and remove), sends on Enter, and formats and quotes like the dashboard.
-- The dashboard notices when the server was updated while the tab was open and shows "Aigentron was updated — reload this page" with a Reload button. (A tab left open across an update keeps running the old code, so a fixed bug can look not fixed.)
+For people who are not programmers: two fixes to everyday chat use.
 
 Fixed
-- The extension refused to act "because you are using this tab" when you had only scrolled. Now scrolling does not count, only a click or a key press for 1.5 s, and the extension waits and retries by itself before the agent hears of it.
-- Pressing Approve on the in-page card counted as "using the tab", so the agent's next click was refused and the task became blocked. Clicks on the extension's own cards no longer count, and an action you have just approved is never refused for that reason.
-- Editing a queued message in the extension no longer sends it twice when its removal failed; a slow send no longer writes into another conversation; a message is shown once; long unfinished links no longer slow the panel.
-- In the dashboard, a message taken out of the queue no longer comes back as "sending…".
-
-Update note: update the extension too (its icon → "Update the extension").
+- In the message box, selecting text and pressing Backspace or Delete (or typing over the selection) did nothing — "select all, Backspace" could not clear the box. It works again in every message box (task follow-up, new task, admin chat).
+- In a task's conversation, an agent that only answered a question was recorded as "blocked" ("I need your answers") after every reply, so the task looked failed. A reply that is just conversation is now recorded as done; "blocked" stays for work that really cannot go on without your decision. (This relies on the agent following the instruction, so a model may still occasionally say "blocked".)

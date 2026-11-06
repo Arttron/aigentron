@@ -106,8 +106,12 @@ const REPORTING_RESUME_PROMPT =
   'files you changed in `files` (mention the branch/commit you pushed in the summary).\n' +
   '- If you were blocked, or ran out of steps mid-work: status "blocked" (or "failed") ' +
   'with the remaining work in `handoff`.\n' +
-  '- If you were waiting for an answer or asked a question you need decided before you ' +
-  'can continue: status "blocked", and put the EXACT question (with any options/context) ' +
+  '- If this turn was a conversation — you answered a question, explained, advised, or ' +
+  'asked the person what they think, and there is no work that is stuck: status "done", ' +
+  '`summary` = one line on what you answered. Your message is already in the conversation; ' +
+  'the person replies there. This is NOT "blocked".\n' +
+  '- If you cannot go on with WORK without a decision (a choice, a missing fact or access): ' +
+  'status "blocked", and put the EXACT question (with any options/context) ' +
   'in `handoff` — that question is routed to whoever can answer (the lead that created ' +
   'this task, or the user). Do not just wait; a question left in prose is lost.\n' +
   'Do not do any further work — just report your status accurately.';
