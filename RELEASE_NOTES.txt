@@ -1,7 +1,10 @@
-Aigentron v0.1.122
+Aigentron v0.1.123
 
-For people who are not programmers: two fixes to everyday chat use.
+For people who are not programmers: the admin assistant can set up scripts that run on a schedule, and the message box and the floating assistant behave better on a phone.
+
+New
+- The admin assistant can propose a schedule that runs a shell script on the server (no model, free). Nothing runs until you approve: the card in the dashboard shows the whole script (the chat only shows its start and says that the dashboard has the rest). Other agents and packs still cannot create such schedules.
 
 Fixed
-- In the message box, selecting text and pressing Backspace or Delete (or typing over the selection) did nothing — "select all, Backspace" could not clear the box. It works again in every message box (task follow-up, new task, admin chat).
-- In a task's conversation, an agent that only answered a question was recorded as "blocked" ("I need your answers") after every reply, so the task looked failed. A reply that is just conversation is now recorded as done; "blocked" stays for work that really cannot go on without your decision. (This relies on the agent following the instruction, so a model may still occasionally say "blocked".)
+- Message box on a phone: it takes the whole width (the buttons are a row under it) instead of a third of it; the caret no longer shows a line below the text (the formatted copy of the text could wrap a line differently from the box at the edge); the floating assistant no longer covers the Send button.
+- The floating assistant stayed orange ("waiting for approval") or "thinking" after everything was finished, because it counted events and missed one. It now reads the real numbers from the server (on start, on reconnect, when you come back to the tab, every minute).

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { browserPageAfter, approvalNeedsItsOwnAnswer, BROWSER_GRANT_TOOL, BROWSER_SUBMIT_TOOL, ACCESS_STATUS_TOOL, CREATE_TASK_TOOL, EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, classifyToolCall, approvalNeedsDashboard, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
+import { browserPageAfter, approvalNeedsItsOwnAnswer, BROWSER_GRANT_TOOL, BROWSER_SUBMIT_TOOL, ACCESS_STATUS_TOOL, CREATE_TASK_TOOL, EXTEND_RUN_TOOL, PUSH_BRANCH_TOOL, classifyToolCall, approvalNeedsDashboard, forbiddenBrowserNavigation, PROPOSE_ALLOWED_DOMAINS_TOOL, PROPOSE_BATCH_TOOL, PROPOSE_CLOUDFLARE_ACCESS_TOOL, PROPOSE_SCHEDULE_TOOL, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, REPORT_STATUS_TOOL } from './classify';
 
 const bash = (command: string) => classifyToolCall('Bash', { command });
 
@@ -524,5 +524,29 @@ describe('shared project knowledge is never written by hand (protectedPaths)', (
   });
   it('nothing is protected when no paths are given (callers that do not know them)', () => {
     expect(classifyToolCall('Write', { file_path: '/ws/proj/memory/status.md', content: 'x' }, { workspaceRoot: '/work/task1', extraWriteRoots: ['/ws/proj'] }).dangerous).toBe(false);
+  });
+});
+
+describe('classifyToolCall — a schedule that runs a script', () => {
+  const script = 'set -e\nmkdir -p "$LDS_OUTPUT_DIR"\ncurl -s https://example.com/data | head -c 100 > "$LDS_OUTPUT_DIR/x.txt"\n' + '# padding line\n'.repeat(20);
+  it('shows the start of the script (not a 140-character glimpse), says how long it is and that it runs on the server', () => {
+    const v = classifyToolCall(PROPOSE_SCHEDULE_TOOL, { action: 'create', name: 'nightly', cron: '0 3 * * *', kind: 'script', text: script, reason: 'r' });
+    expect(v.dangerous).toBe(true);
+    expect(v.reason).toContain('set -e');
+    expect(v.reason).toContain('x.txt');
+    expect(v.reason).toContain('RUNS THIS SHELL SCRIPT ON THE SERVER');
+    expect(v.reason.length).toBeGreaterThan(300);
+    const long = classifyToolCall(PROPOSE_SCHEDULE_TOOL, { action: 'create', name: 'n', kind: 'script', text: 'echo hi\n'.repeat(1000), reason: 'r' });
+    expect(long.reason.length).toBeLessThan(1200);
+    expect(long.reason).toContain('8000 characters in all');
+  });
+  it('an update without a kind (it may be a script) is shown whole too; a message stays short', () => {
+    expect(classifyToolCall(PROPOSE_SCHEDULE_TOOL, { action: 'update', name: 'n', text: script, reason: 'r' }).reason).toContain('x.txt');
+    expect(classifyToolCall(PROPOSE_SCHEDULE_TOOL, { action: 'create', name: 'n', kind: 'message', text: 'x'.repeat(1000), reason: 'r' }).reason.length).toBeLessThan(500);
+  });
+  it('a different script is a different request (its hash changes)', () => {
+    const a = classifyToolCall(PROPOSE_SCHEDULE_TOOL, { action: 'create', name: 'n', kind: 'script', text: 'echo a', reason: 'r' }).summary;
+    const b = classifyToolCall(PROPOSE_SCHEDULE_TOOL, { action: 'create', name: 'n', kind: 'script', text: 'echo b', reason: 'r' }).summary;
+    expect(a).not.toBe(b);
   });
 });

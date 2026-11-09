@@ -222,23 +222,27 @@ export function AdminChat() {
   taskIdRef.current = taskId;
 
   // Watch every task + approval platform-wide: with the chat closed the mascot reflects the whole fleet.
+  // The counts are READ from the server (on start, on every approval event, when the socket reconnects, when the tab comes back, every minute) — they used to be
+  // counted from events alone, and one missed event (a reconnect, an approval that expired or was cancelled with its task) left the mascot orange / busy for good.
   useEffect(() => {
     let live = true;
-    api
-      .listTasks({ pageSize: 100 })
-      .then((p) => {
-        if (!live) return;
-        setActiveTasks(
-          new Set(
-            p.items.filter((t) => t.status === 'running' || t.status === 'queued').map((t) => t.id),
-          ),
-        );
-      })
-      .catch(() => undefined);
-    api
-      .listApprovals('pending')
-      .then((a) => live && setPendingApprovals(a.length))
-      .catch(() => undefined);
+    const refresh = () => {
+      api
+        .listTasks({ pageSize: 100 })
+        .then((p) => {
+          if (!live) return;
+          setActiveTasks(new Set(p.items.filter((t) => t.status === 'running' || t.status === 'queued').map((t) => t.id)));
+        })
+        .catch(() => undefined);
+      api
+        .listApprovals('pending')
+        .then((a) => live && setPendingApprovals(a.length))
+        .catch(() => undefined);
+    };
+    refresh();
+    const every = window.setInterval(refresh, 60_000);
+    const onVisible = () => document.visibilityState === 'visible' && refresh();
+    document.addEventListener('visibilitychange', onVisible);
 
     const socket = getSocket();
     const react = (kind: 'success' | 'error') => {
@@ -260,12 +264,19 @@ export function AdminChat() {
       else if (relevant && (e.status === 'failed' || e.status === 'stalled')) react('error');
     };
     const onApprovalCreated = () => setPendingApprovals((n) => n + 1);
-    const onApprovalResolved = () => setPendingApprovals((n) => Math.max(0, n - 1));
+    const onApprovalResolved = () => {
+      setPendingApprovals((n) => Math.max(0, n - 1));
+      refresh(); // the event says one went; the server says how many are left
+    };
+    socket.on('connect', refresh);
     socket.on(SERVER_EVENT.taskStatus, onStatus);
     socket.on(SERVER_EVENT.approvalCreated, onApprovalCreated);
     socket.on(SERVER_EVENT.approvalResolved, onApprovalResolved);
     return () => {
       live = false;
+      window.clearInterval(every);
+      document.removeEventListener('visibilitychange', onVisible);
+      socket.off('connect', refresh);
       window.clearTimeout(flashTimer.current);
       socket.off(SERVER_EVENT.taskStatus, onStatus);
       socket.off(SERVER_EVENT.approvalCreated, onApprovalCreated);

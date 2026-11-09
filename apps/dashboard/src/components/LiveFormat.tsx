@@ -40,18 +40,21 @@ const COPY: (keyof CSSStyleDeclaration)[] = [
 
 function measure(ta: HTMLTextAreaElement): Metrics {
   const cs = window.getComputedStyle(ta);
+  // The box's size with its fraction (offsetWidth is rounded): a copy that is a fraction of a pixel wider fits one more letter on a line at the very edge, wraps
+  // differently from the box, and the caret shows a line below the text — seen on a narrow phone-width box, where lines are short and edges are met often.
+  const rect = ta.getBoundingClientRect();
   const box: Record<string, string | number> = {
     left: ta.offsetLeft,
     top: ta.offsetTop,
-    width: ta.offsetWidth,
-    height: ta.offsetHeight,
+    width: rect.width,
+    height: rect.height,
     boxSizing: 'border-box',
     borderStyle: 'solid',
     borderColor: 'transparent',
   };
   for (const k of COPY) box[k as string] = cs[k] as string;
   // a vertical scrollbar takes width from the text area: the copy loses the same width
-  const bars = ta.offsetWidth - ta.clientWidth - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0);
+  const bars = Math.round(ta.offsetWidth - ta.clientWidth - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0));
   if (bars > 0) box.paddingRight = `${(parseFloat(cs.paddingRight) || 0) + bars}px`;
   return { box: box as CSSProperties };
 }

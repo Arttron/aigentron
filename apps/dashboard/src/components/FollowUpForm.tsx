@@ -84,6 +84,7 @@ export function FollowUpForm({
   const short = useIsShort();
   const [sheet, setSheet] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
   const [text, setText] = useState('');
   const { onPaste: smartPaste, notice: pasteNotice } = useSmartPaste(setText);
   const fmt = useFormatting(taRef, setText);
@@ -140,6 +141,20 @@ export function FollowUpForm({
       delete document.documentElement.dataset.sheet;
     };
   }, [sheet]);
+
+  // The floating assistant sits above the small dock whatever its height (the box grows with the text): the dock tells its height to the page (CSS var).
+  useEffect(() => {
+    const el = dockRef.current;
+    if (!compact || !el || typeof ResizeObserver === 'undefined') return;
+    const set = () => document.documentElement.style.setProperty('--dock-h', `${Math.ceil(el.getBoundingClientRect().height)}px`);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty('--dock-h');
+    };
+  }, [compact, sheet, short]);
 
   // Grow the compact box with its content (up to ~5 lines); shrink back after sending.
   useEffect(() => {
@@ -416,7 +431,7 @@ export function FollowUpForm({
       );
     }
     return (
-      <div className={sheet ? styles.sheet : styles.dock}>
+      <div ref={sheet ? undefined : dockRef} className={sheet ? styles.sheet : styles.dock}>
         {sheet && (
           <div className={styles.sheetHead}>
             <b>{editingId ? 'Edit queued message' : 'Message'}</b>

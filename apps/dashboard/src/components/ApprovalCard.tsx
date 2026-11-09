@@ -220,6 +220,8 @@ function SchedulePreview({ approval }: { approval: ApprovalRequest }) {
     timezone?: string;
     kind?: string;
     text?: string;
+    timeoutSec?: number;
+    notifyOn?: string;
     agentName?: string;
     channel?: string;
     chatId?: string;
@@ -244,10 +246,11 @@ function SchedulePreview({ approval }: { approval: ApprovalRequest }) {
             i.cron ? `when:     ${describeSchedule(i.cron, i.timezone || 'UTC')}   [${i.cron}]` : '',
             i.kind === 'task' ? `does:     starts a TASK for agent "${i.agentName}" each time (uses model budget)` : '',
             i.kind === 'message' ? 'does:     posts a message (no model, free)' : '',
+            i.kind === 'script' ? `does:     RUNS THIS SCRIPT ON THE SERVER each time (no model, free)${i.timeoutSec ? `, at most ${i.timeoutSec} s` : ''}${i.notifyOn === 'failure' ? ', tells the chat only when it fails' : ''}` : '',
             i.channel ? `where:    ${i.channel}${i.chatId ? `, chat ${i.chatId}` : ''}` : '',
             i.quietStart ? `quiet:    ${i.quietStart}–${i.quietEnd} (runs inside are skipped)` : '',
             i.enabled === false ? 'enabled:  no (created switched off)' : '',
-            i.text ? `${i.kind === 'task' ? 'prompt' : 'message'}:\n${i.text}` : '',
+            i.text ? `${i.kind === 'task' ? 'prompt' : i.kind === 'script' ? 'script' : 'message'}:\n${i.text}` : '',
           ]
             .filter(Boolean)
             .join('\n')}

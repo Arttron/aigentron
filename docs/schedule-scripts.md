@@ -1,6 +1,6 @@
 # Scheduled scripts
 
-Schedules (main menu, after Tasks) can run a **script** instead of posting a message or starting an agent: a shell script on the server, no model, no cost. Only an operator / admin can create or change one (the admin assistant and packs cannot).
+Schedules (main menu, after Tasks) can run a **script** instead of posting a message or starting an agent: a shell script on the server, no model, no cost. An operator creates or changes one in Schedules; the admin assistant can propose one (`propose_schedule`, kind `script`): the approval card in the dashboard shows the WHOLE script (admin proposals are decided in the dashboard; a chat shows only the start of it and a note) and nothing runs until a person approves. An ordinary agent and a pack cannot.
 
 ## When to use a script
 Whenever the steps are the same on every run — fetch data, calculate, draw a chart, post it — use a script, not a task for an agent: it costs no model tokens, cannot get lost in a multi-step plan, and its history and files are handled by the server. Keep an agent task for work that needs judgement. An agent started by a schedule is told this and will suggest the move (and may save a draft script into the workspace); the admin assistant recommends it when you set up a schedule.

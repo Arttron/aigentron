@@ -117,8 +117,13 @@ export interface ScheduleProposal {
   taskMode?: 'same' | 'new';
   cron?: string;
   timezone?: string;
-  kind?: 'message' | 'task';
+  kind?: 'message' | 'task' | 'script';
+  /** message / task prompt / the shell script itself (script kind: the dashboard approval card shows ALL of it) */
   text?: string;
+  /** script kind: seconds it may run (default 600) */
+  timeoutSec?: number;
+  /** script kind: post the result to the chat `always` (default) or only on `failure` */
+  notifyOn?: 'always' | 'failure';
   agentName?: string;
   channel?: string;
   chatId?: string;
@@ -849,6 +854,8 @@ export class PlatformAdminService {
       timezone: p.timezone,
       kind: p.kind,
       text: p.text,
+      timeoutSec: p.timeoutSec,
+      notifyOn: p.notifyOn,
       agentName: p.agentName,
       taskMode: p.taskMode,
       quietStart: p.quietStart,
@@ -878,7 +885,7 @@ export class PlatformAdminService {
     if (p.action === 'create' && existing) return `a schedule named "${name}" already exists — use action update.`;
     const { input, error } = await this.scheduleInput(p);
     if (error) return error;
-    return (await this.schedulesSvc()).validate(input, existing ?? undefined);
+    return (await this.schedulesSvc()).validate(input, existing ?? undefined, { allowScript: true });
   }
 
   async proposeSchedule(currentTaskId: string, sessionId: string, input: ScheduleProposal): Promise<ProposalResult> {
@@ -897,6 +904,8 @@ export class PlatformAdminService {
         (i.timezone ?? '') === (input.timezone ?? '') &&
         (i.kind ?? '') === (input.kind ?? '') &&
         String(i.text ?? '') === String(input.text ?? '') &&
+        Number(i.timeoutSec ?? 0) === Number(input.timeoutSec ?? 0) &&
+        (i.notifyOn ?? '') === (input.notifyOn ?? '') &&
         (i.agentName ?? '') === (input.agentName ?? '') &&
         (i.channel ?? '') === (input.channel ?? '') &&
         (i.chatId ?? '') === (input.chatId ?? ''),
@@ -911,13 +920,13 @@ export class PlatformAdminService {
     }
     const { input: data } = await this.scheduleInput(input);
     const svc = await this.schedulesSvc();
-    const row = input.action === 'create' ? await svc.create(data, 'admin agent') : await svc.update(existing!.id, data);
+    const row = input.action === 'create' ? await svc.create(data, 'admin agent', { allowScript: true }) : await svc.update(existing!.id, data, { allowScript: true });
     const when = describeSchedule(row.cron, row.timezone);
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_schedule', summary: `${input.action === 'create' ? 'Created' : 'Updated'} schedule "${name}": ${when}` });
     this.logger.log(`Admin ${input.action} schedule "${name}" (${when})`);
     return {
       ok: true,
-      message: `Schedule "${name}" ${input.action === 'create' ? 'created' : 'updated'}: ${when}. Next run: ${row.nextRunAt?.toISOString().slice(0, 16).replace('T', ' ')} UTC.${row.kind === 'message' ? '' : ' Each run starts a task and uses model budget.'}`,
+      message: `Schedule "${name}" ${input.action === 'create' ? 'created' : 'updated'}: ${when}. Next run: ${row.nextRunAt?.toISOString().slice(0, 16).replace('T', ' ')} UTC.${row.kind === 'message' ? '' : row.kind === 'script' ? ' Each run executes the script on the server (no model, free); "Run now" in Schedules tries it.' : ' Each run starts a task and uses model budget.'}`,
     };
   }
 

@@ -325,7 +325,8 @@
 
 /* On the pinned phone task screen the assistant moves up so it never covers the message box. */
 :global(html[data-pinned]) .float {
-  bottom: 92px;
+  /* above the message box, whatever its height (the box tells it: --dock-h) */
+  bottom: calc(var(--nav-h, 0px) + var(--dock-h, 70px) + 16px);
   /* 52 px turned the animation into a speck — "thinking" must still be readable on a phone */
   width: 68px;
   height: 68px;

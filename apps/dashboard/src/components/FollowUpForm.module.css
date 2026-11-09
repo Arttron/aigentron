@@ -193,6 +193,17 @@
   align-items: flex-end;
   gap: 8px;
 }
+/* In the small dock the box gets the whole width and the buttons (attach, Aa, mic, send) sit in a row under it: beside them the box was a third of a phone's width. */
+.dock > .dockRow {
+  flex-wrap: wrap;
+}
+.dock > .dockRow > .dockInput {
+  order: -1;
+  flex: 1 1 100%;
+}
+.dock > .dockRow > :last-child {
+  margin-left: auto;
+}
 .dockInput {
   flex: 1;
   min-width: 0;

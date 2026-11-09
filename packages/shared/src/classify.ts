@@ -855,14 +855,17 @@ export function classifyToolCall(
   if (name === PROPOSE_SCHEDULE_TOOL.toLowerCase()) {
     const s = (k: string) => (typeof toolInput[k] === 'string' ? (toolInput[k] as string) : '');
     const action = s('action') || '?';
-    const text = s('text').replace(/\s+/g, ' ').slice(0, 140);
+    // a script is shown in more detail than a message (the dashboard card, where an admin proposal is decided, shows all of it)
+    const isScript = s('kind') === 'script' || (!s('kind') && action === 'update'); // an update without a kind may be a script's
+    const full = s('text');
+    const text = isScript ? `${full.slice(0, 500)}${full.length > 500 ? `… (${full.length} characters in all — the card in the dashboard shows the whole script)` : ''}` : full.replace(/\s+/g, ' ').slice(0, 140);
     return {
       dangerous: true,
-      summary: `propose_schedule ${action} "${s('name') || '?'}" #${shortHash(JSON.stringify([toolInput.action, toolInput.name, toolInput.cron, toolInput.timezone, toolInput.kind, toolInput.text, toolInput.agentName, toolInput.taskMode, toolInput.channel, toolInput.chatId, toolInput.quietStart, toolInput.quietEnd, toolInput.enabled]))}`,
+      summary: `propose_schedule ${action} "${s('name') || '?'}" #${shortHash(JSON.stringify([toolInput.action, toolInput.name, toolInput.cron, toolInput.timezone, toolInput.kind, toolInput.text, toolInput.timeoutSec, toolInput.notifyOn, toolInput.agentName, toolInput.taskMode, toolInput.channel, toolInput.chatId, toolInput.quietStart, toolInput.quietEnd, toolInput.enabled]))}`,
       reason:
         action === 'delete'
           ? `admin agent proposing to DELETE the schedule "${s('name')}"`
-          : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the schedule "${s('name')}": ${s('cron') || '(same time)'} ${s('timezone')} — ${s('kind') || '(same kind)'}${text ? `: ${text}` : ''}${s('kind') === 'task' ? ` — it runs a task with agent "${s('agentName')}" each time (${s('taskMode') === 'new' ? 'a new task per run' : 'the same task, continued'}) and uses model budget` : ''}`,
+          : `admin agent proposing to ${action === 'create' ? 'create' : 'change'} the schedule "${s('name')}": ${s('cron') || '(same time)'} ${s('timezone')} — ${s('kind') || '(same kind)'}${text ? `: ${text}` : ''}${s('kind') === 'script' ? ' — it RUNS THIS SHELL SCRIPT ON THE SERVER at every time (no model)' : ''}${s('kind') === 'task' ? ` — it runs a task with agent "${s('agentName')}" each time (${s('taskMode') === 'new' ? 'a new task per run' : 'the same task, continued'}) and uses model budget` : ''}`,
     };
   }
   if (name === PROPOSE_UPDATE_TOOL.toLowerCase()) {

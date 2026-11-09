@@ -89,7 +89,7 @@ export function serializeSchedule(r: ScheduleRow) {
 
 /**
  * Recurring jobs. Three kinds: `message` posts text to a chat (no model, free), `task` starts a task for an agent (its updates flow to the chat) and
- * `script` runs a shell script on the server (no model, free; only an operator / admin may create one, never an agent). The next run time lives in the database, so a restart loses nothing; a run missed
+ * `script` runs a shell script on the server (no model, free; only an operator / admin may create one, or the admin assistant through an approval card, never another agent). The next run time lives in the database, so a restart loses nothing; a run missed
  * while the server was off is skipped instead of fired hours late.
  */
 @Injectable()
@@ -137,7 +137,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     const bad = validateCron(v.cron, v.timezone || 'UTC');
     if (bad) return bad;
     if (v.kind !== 'message' && v.kind !== 'task' && v.kind !== 'script') return 'kind must be "message" (post text to a chat), "task" (start a task for an agent) or "script" (run a shell script).';
-    if (v.kind === 'script' && !opts.allowScript) return 'a script schedule can only be created or changed in the dashboard (Schedules) by an operator — not by an agent or a pack.';
+    if (v.kind === 'script' && !opts.allowScript) return 'a script schedule can only be created or changed in the dashboard (Schedules) by an operator, or by the admin assistant with an approval — not by another agent or a pack.';
     if (!v.text?.trim()) return v.kind === 'message' ? 'give the message text.' : v.kind === 'script' ? 'give the script.' : 'give the task prompt.';
     if (v.text.length > (v.kind === 'script' ? 20000 : 4000)) return `text is too long (max ${v.kind === 'script' ? 20000 : 4000} characters).`;
     if (v.kind === 'script') {
