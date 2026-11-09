@@ -260,8 +260,10 @@ export interface AdminToolsWiring {
     name: string;
     cron?: string;
     timezone?: string;
-    kind?: 'message' | 'task';
+    kind?: 'message' | 'task' | 'script';
     text?: string;
+    timeoutSec?: number;
+    notifyOn?: 'always' | 'failure';
     agentName?: string;
     taskMode?: 'same' | 'new';
     channel?: string;

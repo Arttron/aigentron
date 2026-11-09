@@ -1,10 +1,9 @@
-Aigentron v0.1.123
+Aigentron v0.1.124
 
-For people who are not programmers: the admin assistant can set up scripts that run on a schedule, and the message box and the floating assistant behave better on a phone.
-
-New
-- The admin assistant can propose a schedule that runs a shell script on the server (no model, free). Nothing runs until you approve: the card in the dashboard shows the whole script (the chat only shows its start and says that the dashboard has the rest). Other agents and packs still cannot create such schedules.
+For people who are not programmers: this is 0.1.123 again, but installable. Version 0.1.123 could not be built (an update to it stops by itself and the previous version keeps running) — use this one.
 
 Fixed
-- Message box on a phone: it takes the whole width (the buttons are a row under it) instead of a third of it; the caret no longer shows a line below the text (the formatted copy of the text could wrap a line differently from the box at the edge); the floating assistant no longer covers the Send button.
-- The floating assistant stayed orange ("waiting for approval") or "thinking" after everything was finished, because it counted events and missed one. It now reads the real numbers from the server (on start, on reconnect, when you come back to the tab, every minute).
+- The update to 0.1.123 failed while building a package; fixed. Everything announced for 0.1.123 is here:
+  - The admin assistant can propose a schedule that runs a shell script on the server (no model, free). Nothing runs until you approve: the card in the dashboard shows the whole script.
+  - Message box on a phone: full width, the caret no longer shows a line below the text, the floating assistant no longer covers Send.
+  - The floating assistant no longer stays orange / "thinking" after everything is finished.
