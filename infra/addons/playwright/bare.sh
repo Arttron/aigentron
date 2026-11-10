@@ -243,7 +243,7 @@ Environment=NODE_ENV=production
 WorkingDirectory=$SVC_HOME
 # --no-sandbox: Chromium's own sandbox needs user namespaces, which Ubuntu 24.04 and hardened kernels refuse to an ordinary user; the boundary here
 # is this unit (own user, read-only system, loopback only, memory cap) and --isolated (no profile is kept: every session starts clean).
-ExecStart=$node_bin $(mcp_cli) --headless --browser chromium --no-sandbox --isolated --host 127.0.0.1 --port $PORT --allowed-hosts localhost:$PORT,127.0.0.1:$PORT $(gateway_flags)
+ExecStart=$node_bin $(mcp_cli) --headless --browser chromium --no-sandbox --isolated --host 127.0.0.1 --port $PORT --allowed-hosts localhost:$PORT,127.0.0.1:$PORT --output-dir $SVC_HOME/output $(gateway_flags)
 Restart=always
 RestartSec=3
 KillMode=mixed

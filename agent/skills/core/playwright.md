@@ -54,6 +54,7 @@ blocked or the task needs that egress IP — it is slower and the proxy may be m
 - Which browser: local/dev URLs and anything that works directly → `playwright`. A public site that is blocked,
   rate-limited by IP or region-locked → `playwright-proxy`. Don't use the proxy browser for the project's own
   preview URLs (`preview_worktree`, `project-dev`) — the proxy cannot reach the internal network.
+- **Showing the person a screenshot.** The picture you get back from `browser_take_screenshot` is for YOU. To put it in the chat, take it with a `filename` (e.g. `page.png`) and call `mcp__lds_internal__show_images` with that name as the tool reported it (`page.png`, or `output/page.png`) — the file is in the browser's output folder and `show_images` finds it there (on a bare-metal server: `/var/lib/aigentron-playwright/output`). Say «sent» only after `show_images` answered «Shown»; if it fails, say so and what the page showed.
 - Rules are the same: capture tools run freely, and so do clicks and typing on local pages; navigating to a non-local URL, and clicking/typing once the browser is on one, go through the
   approval gate. Each browser keeps its own tabs and cookies; don't expect a login made in one to exist in the other.
 - If the tools are missing or the first navigation fails with a proxy / connection error, report it in your status

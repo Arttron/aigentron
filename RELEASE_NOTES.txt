@@ -1,8 +1,9 @@
-Aigentron v0.1.127
+Aigentron v0.1.128
 
-For people who are not programmers: the proxy chosen for the agents' browser is now really used on a server where the Playwright add-on is installed without Docker.
+For people who are not programmers: `aigentron addon enable` works again on a server without Docker, and an agent can show you a screenshot from the server's Playwright browser in the chat.
 
 Fixed
-- On a bare-metal server the Playwright add-on's service started the browser without any proxy option, so the proxy chosen in Add-ons → Playwright → Browser proxy (or by an agent) was ignored: pages showed the server's own address. The add-on's installer now points the browser at the server's proxy gateway (port 8940, or PROXY_GATEWAY_PORT of the server; none when the gateway is switched off).
+- `sudo aigentron addon enable <name>` failed on every server installed without Docker with «DATA_DIR=/opt/aigentron/data: not found», so no add-on (Browser, Playwright, Voice) could be enabled or re-enabled from the command line. Fixed. (On 0.1.127 you can still run the installer directly: `sudo env DATA_DIR=/opt/aigentron/data bash /opt/aigentron/current/infra/addons/playwright/bare.sh install`.)
+- A screenshot taken with the server's Playwright browser could not be put into the chat: the browser saves it in its own folder, out of the agent's reach, and the agent said "sent" anyway. The Playwright add-on now saves screenshots in /var/lib/aigentron-playwright/output, the agent can show them with show_images, and its instructions say to report "sent" only after the picture was really shown.
 
-Update note: after updating, run `sudo aigentron addon enable playwright` once on such a server — it rewrites the service and restarts it. (Without waiting for the update you can do it by hand: docs/browser-proxy.md, "bare-metal Playwright add-on".) Then ask an agent to open a page that shows the IP address: with a proxy chosen it must show the proxy's address, not the server's.
+Update note: after updating, run `sudo aigentron addon enable playwright` once on a server without Docker — it rewrites the Playwright service (the screenshot folder, and the proxy gateway if the 0.1.127 step was not done yet) and restarts it. A Docker install is unchanged: there the agent can still only look at a screenshot, not show it.

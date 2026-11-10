@@ -452,7 +452,9 @@ addon_enable() {
     [ "$dry" = 1 ] && extra="--dry-run"
     say "${B}Enabling add-on $name${N} on this server (bare-metal)…"
     # shellcheck disable=SC2086
-    BROWSER="$browser" AGENT_CDP="$cdp" VOICE_STT="$stt" ${stt_model:+WHISPER_MODEL="$stt_model"} DATA_DIR="$DATA_DIR" bash "$dir/bare.sh" install $extra || die "the add-on install failed (see above)"
+    # `env`: a variable assignment is only recognised at the very start of a command — an empty ${stt_model:+…} in the middle of the list made `DATA_DIR=…` a command name
+    # («DATA_DIR=/opt/aigentron/data: not found»): no add-on could be enabled on a bare-metal server
+    env BROWSER="$browser" AGENT_CDP="$cdp" VOICE_STT="$stt" ${stt_model:+WHISPER_MODEL="$stt_model"} DATA_DIR="$DATA_DIR" bash "$dir/bare.sh" install $extra || die "the add-on install failed (see above)"
     [ "$dry" = 1 ] || say "${G}✔${N} $name enabled — aigentron addon status $name"
     return 0
   fi

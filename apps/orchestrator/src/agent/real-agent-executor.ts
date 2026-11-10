@@ -55,6 +55,7 @@ import { AnswerTracker, isQuietTool, noToolsNote, resumeTurnEvent } from './fina
 import { eventSearchText } from '../chat-search/search-core';
 import { escalationNote, lostSessionNote, standingInstructions } from './session-continuity';
 import { ProxyGatewayService } from '../proxies/proxy-gateway.service';
+import { playwrightOutputCandidate } from './playwright-output';
 import { isPdf, isTextLike } from '../files/file-types';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
@@ -624,14 +625,21 @@ export class RealAgentExecutor extends AgentExecutor {
   /** A full path stays as it is; a bare name is one of the task's attachments (what the prompt lists), resolved to its file. */
   private async attachmentOrPath(taskId: string, p: string, admin = false): Promise<string> {
     const v = String(p ?? '').trim();
-    if (!v || v.startsWith('/') || v.includes('/')) return v;
+    if (!v || v.startsWith('/')) return v;
+    // a picture the Playwright tool saved, named as the tool reported it («output/x.png», «x.png»): the file in the browser's output folder, when there is one
+    const shot = playwrightOutputCandidate(v, this.config.playwrightOutputDir);
+    const inOutput = async (): Promise<string | null> => (shot && (await stat(shot).then((s) => s.isFile(), () => false)) ? shot : null);
+    if (v.includes('/')) return (await inOutput()) ?? v;
     // The admin is asked about "this screenshot" from a task page: that task's file first, then the admin chat's own.
     const page = admin ? this.platformAdmin.pageTaskId(taskId) : null;
     if (page) {
       const there = await this.attachments.filePath(page, v).catch(() => null);
       if (there) return there.path;
     }
-    return (await this.attachments.filePath(taskId, v)).path;
+    // the task's own attachment first; else a screenshot of the browser; else the usual «not found»
+    const own = await this.attachments.filePath(taskId, v).catch(() => null);
+    if (own) return own.path;
+    return (await inOutput()) ?? (await this.attachments.filePath(taskId, v)).path;
   }
 
   /** `push_branch`: validate, get a person's approval (fail-closed), then push the local branch with the project's credentials. */
@@ -986,7 +994,8 @@ export class RealAgentExecutor extends AgentExecutor {
     // (never another project's), and (Codex) the pictures it generated.
     const generatedDir = codexImagesDir(this.config.agentDir, ctx.taskId);
     // A chat agent's "worktree" is the whole agent dir (it holds runs/*/codex-home with sign-in tokens): never an allowed root for it.
-    const mediaRoots = opts.chat ? [generatedDir, opts.project.workspaceRoot] : [ctx.worktreePath, generatedDir, opts.project.workspaceRoot];
+    // + the Playwright browser's output folder: a screenshot it saved can be shown to the person (show_images) or looked at
+    const mediaRoots = opts.chat ? [generatedDir, opts.project.workspaceRoot, this.config.playwrightOutputDir] : [ctx.worktreePath, generatedDir, opts.project.workspaceRoot, this.config.playwrightOutputDir];
     const kbScope = { projectId: opts.project.id };
     const isAdminChat = Boolean(opts.chat && agentDef?.name === 'admin');
     const adminScope = agentDef?.name === 'admin' && !ctx.discussion ? await this.adminScopeFor(opts.project) : null;

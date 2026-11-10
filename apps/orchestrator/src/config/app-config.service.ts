@@ -38,6 +38,8 @@ export class AppConfigService {
    */
   readonly secretsDir: string;
   /** The browser gateway (proxies/gateway.ts): the port (0 = off) and the address it listens on (loopback; the Docker stack sets 0.0.0.0 for its internal network). */
+  /** Where the Playwright browser saves what it writes (screenshots with a `filename`): readable to show a picture to the person. `/var/lib/aigentron-playwright/output` on a bare-metal add-on. */
+  readonly playwrightOutputDir: string;
   readonly proxyGatewayPort: number;
   readonly proxyGatewayBind: string;
   /** The currently-running release's OWN copy of `agent/` (read-only reference) —
@@ -209,6 +211,7 @@ export class AppConfigService {
     this.agentDir = process.env.AGENT_DIR ?? '/workspace/agent';
     this.secretsDir = process.env.SECRETS_DIR ?? join(this.agentDir, '..', 'secrets');
     this.proxyGatewayPort = Number.isInteger(Number(process.env.PROXY_GATEWAY_PORT)) && process.env.PROXY_GATEWAY_PORT !== undefined && process.env.PROXY_GATEWAY_PORT !== '' ? Number(process.env.PROXY_GATEWAY_PORT) : 8940;
+    this.playwrightOutputDir = process.env.PLAYWRIGHT_OUTPUT_DIR?.trim() || '/var/lib/aigentron-playwright/output';
     this.proxyGatewayBind = process.env.PROXY_GATEWAY_BIND?.trim() || '127.0.0.1';
     this.shippedAgentDir = process.env.SHIPPED_AGENT_DIR ?? defaultShippedAgentDir();
     this.extensionDir = process.env.EXTENSION_DIR ?? join(__dirname, '..', '..', '..', '..', 'apps', 'extension', 'dist');

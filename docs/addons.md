@@ -40,6 +40,7 @@ this one is a throw-away headless browser — `--isolated`, no profile is kept b
   to an ordinary user; the boundary is the unit.
 - **Orchestrator**: reads `<data>/addons/playwright/state.json`; while the add-on is enabled the `playwright` MCP server entry points at `http://127.0.0.1:8931/sse` (disabled → back
   to the compose address; an address a person typed is never changed), and `preview_worktree` hands out `localhost` URLs (`PREVIEW_PUBLIC_HOST` overrides).
+- **Screenshots for the person**: the unit saves what the browser writes (a screenshot taken with a `filename`) in `/var/lib/aigentron-playwright/output` (`--output-dir`); the orchestrator reads that folder, so an agent can put the picture in the chat with `show_images` (name as the tool reported it). `PLAYWRIGHT_OUTPUT_DIR` overrides the folder. The files belong to the add-on's user (mode 0600): the orchestrator must run as root, as on a bare-metal install. A Docker `playwright-mcp` container keeps its output inside itself — there the agent can only look at the picture, not show it. Re-run `sudo aigentron addon enable playwright` after updating to get the folder.
 - **Memory**: a page open in Chromium takes 0.5–1.5 GB. On a 4 GB machine add a swap file first (`docs/small-servers.md`) and run one browser task at a time.
 - `aigentron addon status|logs|disable [--purge] playwright` work as for the browser.
 

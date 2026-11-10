@@ -32,6 +32,6 @@ describe('the Playwright unit goes through the gateway', () => {
     expect(flags({}, 'PROXY_GATEWAY_PORT=0\n')).toBe('');
   });
   it('the unit line carries the flags', () => {
-    expect(script).toMatch(/--allowed-hosts localhost:\$PORT,127\.0\.0\.1:\$PORT \$\(gateway_flags\)/);
+    expect(script).toMatch(/--allowed-hosts localhost:\$PORT,127\.0\.0\.1:\$PORT --output-dir \$SVC_HOME\/output \$\(gateway_flags\)/);
   });
 });
