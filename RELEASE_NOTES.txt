@@ -1,16 +1,15 @@
-Aigentron v0.1.125
+Aigentron v0.1.126
 
-For people who are not programmers: you can search all your conversations, the browser's proxy is chosen in the dashboard, and scheduled tasks remember what you asked for in their chat.
-
-New
-- Search in chats (main menu → Search, or Ctrl/Cmd+K from anywhere): finds words in the conversations of all tasks, in any language («Литве» finds «Литва»). Several words must all be present, "quotes" make an exact phrase, -word leaves a word out. Filters: whose messages, project, agent, status, date; best match or newest. A result opens the task at that message, which flashes once. Inside a task, "🔎 find" searches that conversation. The task list's search box shows "Also in conversations". The admin assistant can search too ("find the chat where we talked about X"). A ".* Pattern" mode takes a regular expression (dates, links, any form of a word); it reads the latest 20 000 messages and is stopped if it is too slow. Old messages are indexed in the background after the update (a bar shows progress, a few minutes, once).
-- Every search box has a clear (×) button.
-- Proxy connections for the agents' browser (Add-ons → Playwright → Browser proxy): paste the line your proxy seller gave (res.proxy-seller.com;10000;user;pass, user:pass@host:port, …), name it, Test, and choose it — or Direct. It applies at once, no restart; the login stays on the server and is never shown again or given to agents. The browser goes through a small gateway in the server; the project's own preview pages stay direct. HTTP / HTTPS proxies only. A proxy can also be set in .env as PLAYWRIGHT_PROXY / PLAYWRIGHT_BROWSER_PROXY in the same formats.
-- The admin assistant can propose a schedule that runs a script (the whole script is on the approval card in the dashboard).
+For people who are not programmers: agents on the Codex runtime get the Playwright browser again, agents can pick the browser's proxy, add-ons can be stopped and restarted from the dashboard, and a subtask sees the files attached to its main task.
 
 Fixed
-- In a scheduled task, what you asked in its chat for the next runs («add this parameter») is repeated with every run, so a switch of the model or a long history no longer brings the old parameters back. (To make a change permanent, edit the schedule's text.)
-- A model that takes over a conversation is told that a later message overrides the first request.
-- Select-all + Backspace in the message box, the message box on a phone, the floating assistant stuck orange — fixed in earlier releases; included for completeness of the update.
+- An agent running on Codex had no Playwright tools ("only browser_ext is available"): Codex does not speak the older SSE protocol that the Playwright server was registered with, so the server was skipped. Codex now gets the server's streamable HTTP address instead. Other providers were never affected.
+- A subtask could not find a file attached to its main task (each task has its own attachments folder). The subtask now gets the lead task's files, read-only, listed in its first message.
+- A tool (MCP) server that did not connect at the start of a run, and the tools the model really received from each server, are now written into the conversation («⚠ MCP server not connected…», «ℹ MCP tools in this run — playwright: 23»), so "the agent says a tool is missing" can be explained afterwards.
+- A model that takes over a conversation without its memory is told that a later message overrides the original request (and, in a scheduled task, that the person's own messages adjust all later runs).
 
-Update note: the database gets a new column and a search index (added automatically on start). On a Docker install, recreate the browser so that it goes through the gateway: docker compose --profile mcp up -d --force-recreate playwright-mcp. Update the extension too only if the icon asks you to.
+New
+- Agents can choose the proxy of the server's browser: two tools, browser_proxy_list and browser_proxy_use, work with the proxies saved in Add-ons → Playwright → Browser proxy (names only, never a login). The choice is shared by the whole browser; the page shows who made it, and a checkbox forbids it. Every switch drops the open connections so the browser really goes through the new proxy.
+- Add-ons → Playwright and Voice: Restart and Stop / Start buttons (operators; the server must run with root rights and systemd — otherwise the page says why).
+
+Update note: a bare-metal Playwright add-on is not routed through the proxy gateway until its systemd unit gets `--proxy-server http://127.0.0.1:8940 --proxy-bypass localhost,127.0.0.1` (docs/browser-proxy.md); the proxy choice in the dashboard has no effect on it before that.

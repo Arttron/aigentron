@@ -146,6 +146,9 @@ export const REQUEST_SECRET_TOOL = `${INTERNAL_TOOL_PREFIX}request_secret`;
 export const MAINTENANCE_REPORT_TOOL = `${INTERNAL_TOOL_PREFIX}maintenance_report`;
 export const PROPOSE_CLEANUP_TOOL = `${INTERNAL_TOOL_PREFIX}propose_cleanup`;
 /** Recurring jobs (reminders / periodic tasks): listing is free; create/change/delete is a gated proposal. */
+/** The server browser's proxy: listing the saved ones, and choosing one (never shows a login). */
+export const BROWSER_PROXY_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}browser_proxy_list`;
+export const BROWSER_PROXY_USE_TOOL = `${INTERNAL_TOOL_PREFIX}browser_proxy_use`;
 /** Search in the conversations of all tasks: read-only. */
 export const CHATS_SEARCH_TOOL = `${INTERNAL_TOOL_PREFIX}chats_search`;
 export const SCHEDULES_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}schedules_list`;

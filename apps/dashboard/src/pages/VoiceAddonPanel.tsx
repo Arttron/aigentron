@@ -4,6 +4,7 @@ import { api, errMsg, type AddonInfo } from '@/lib/api';
 import { usePolling } from '@/lib/use-polling';
 import { Badge, Card, ErrorText, Muted, Row, SectionTitle } from '@/components/ui';
 import { Command, STATUS, mb } from './BrowserPage';
+import { AddonControls } from '@/components/AddonControls';
 import styles from './BrowserPage.module.css';
 
 /** The local voice add-on's panel (docs/addons.md): speech recognition + synthesis on this server. The panel says whether it runs and what to type on the server. */
@@ -77,6 +78,7 @@ export function VoiceAddonPanel() {
               <Command text={info.commands.logs} />
             </>
           )}
+          {(status === 'enabled-healthy' || status === 'enabled-unreachable') && <AddonControls info={info} onDone={load} />}
           {status !== 'not-installed' && (
             <Muted className={styles.fine}>
               On the server: <code>{info.commands.logs}</code> · <code>{info.commands.disable}</code>

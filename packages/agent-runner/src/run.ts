@@ -61,6 +61,8 @@ type SdkMessage = {
   /** Set on messages a subagent produced (its tool_use id in the lead's loop). */
   parent_tool_use_id?: string | null;
   mcp_servers?: { name: string; status?: string }[];
+  /** the names of every tool the model has in this run (`mcp__<server>__<tool>` for tool servers) */
+  tools?: string[];
   message?: { id?: string; usage?: SdkUsage; content?: SdkContentBlock[] | string };
 };
 
@@ -387,6 +389,12 @@ export async function runAgent(
           model: msg.model ?? params.modelLabel,
           text: `agent started — provider=${params.providerLabel} model=${msg.model ?? params.modelLabel}${mcp}`,
         });
+        // a server the agent was given that did not connect has NO tools in this run: say so where the person reads, not only in the one-line status above
+        const down = mcpNotConnected(msg.mcp_servers);
+        if (down) onEvent({ kind: 'stderr', text: down });
+        // and what the model really has: tools per server, kept in the conversation — «the agent says a tool is missing» is answered by this line
+        const summary = mcpToolSummary(msg.tools, params.mcpServers ? Object.keys(params.mcpServers) : []);
+        if (summary) onEvent({ kind: 'stderr', text: summary });
       } else if (msg.type === 'assistant') {
         const id = msg.message?.id;
         const u = msg.message?.usage;
@@ -444,4 +452,28 @@ export async function runAgent(
   }
 
   return result;
+}
+
+/** A warning for the MCP servers that did not connect at the start of a run (their tools are missing), or null when all did. */
+export function mcpNotConnected(servers: { name: string; status?: string }[] | undefined): string | null {
+  const bad = (servers ?? []).filter((s) => s.status && s.status !== 'connected');
+  if (!bad.length) return null;
+  return `⚠ MCP server${bad.length > 1 ? 's' : ''} not connected at the start of this run — ${bad.map((s) => `"${s.name}" (${s.status})`).join(', ')}: ${bad.length > 1 ? 'their tools are' : 'its tools are'} not available to the agent. Check that the service is running (Settings → MCP servers; docker compose logs) and send the task a message to try again.`;
+}
+
+/**
+ * One line for the conversation: how many tools the model has from each tool server it was given (`mcp__<server>__<tool>`), and a warning for a server that is
+ * connected but gave it none (a whitelist that leaves its tools out, a server that lists nothing). null when no tool server was given.
+ */
+export function mcpToolSummary(tools: string[] | undefined, given: string[]): string | null {
+  const servers = given.filter((n) => n !== 'lds_internal');
+  if (!servers.length) return null;
+  const count = new Map<string, number>();
+  for (const t of tools ?? []) {
+    const m = /^mcp__([^_](?:[^_]|_(?!_))*)__/.exec(t);
+    if (m) count.set(m[1]!, (count.get(m[1]!) ?? 0) + 1);
+  }
+  const parts = servers.map((n) => `${n}: ${count.get(n) ?? 0}`);
+  const none = servers.filter((n) => !count.get(n));
+  return `ℹ MCP tools in this run — ${parts.join(', ')}.${none.length ? ` ⚠ No tools from ${none.map((n) => `"${n}"`).join(', ')}: the agent cannot use ${none.length > 1 ? 'them' : 'it'} (check the agent's allowed tools, and that the server is connected).` : ''}`;
 }

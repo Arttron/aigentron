@@ -178,6 +178,8 @@ export interface RunAgentParams {
   /** Ask the human a question (answer buttons in the dashboard / channels) and wait; resolves with the answer text for the model. */
   /** The current date/time (optionally in an IANA timezone) as text for the model. */
   onCurrentTime?: (input: { timezone?: string }) => string;
+  /** The browser's proxy: the saved connections by name (never a login), and choosing one — shared by every task that uses the server's browser. */
+  browserProxy?: { list: () => string; use: (name: string) => string };
   /** Our own text filter for what a bulky tool returns to the model (documents, knowledge base, workspace, image / video answers): returns the text to send instead. */
   onCompressResult?: (tool: string, text: string) => string;
   /** Knowledge bases (the orchestrator answers; agents never see credentials or other bases). */

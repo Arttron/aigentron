@@ -33,6 +33,7 @@ export type InternalToolHandlers = Pick<
   | 'onReadDocument'
   | 'onShowImages'
   | 'onCurrentTime'
+  | 'browserProxy'
   | 'onCompressResult'
   | 'onAskUser'
   | 'onLookAt'
@@ -307,6 +308,23 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         "The current date and time — you have no clock of your own, so call this whenever the answer depends on \"now\" (today's date, the day of the week, how long ago something was, a deadline, a schedule). `timezone` (optional): an IANA name such as \"Europe/Kyiv\" or \"America/New_York\"; by default the server's timezone, which may not be where the user is — if it matters, ask the user or use what you know about them.",
       shape: { timezone: z.string().optional() },
       handler: async (args) => params.onCurrentTime!({ timezone: typeof args.timezone === 'string' && args.timezone.trim() ? args.timezone.trim() : undefined }),
+    });
+  }
+
+  if (params.browserProxy) {
+    const bp = params.browserProxy;
+    specs.push({
+      name: 'browser_proxy_list',
+      description: "The proxies the operator saved for the server's browser (the `playwright` tools), by name — never their logins — and which one the browser goes through now. Read-only. Use it before choosing one.",
+      shape: {},
+      handler: async () => bp.list(),
+    });
+    specs.push({
+      name: 'browser_proxy_use',
+      description:
+        "Make the server's browser (`playwright`, not the person's own browser) go through the saved proxy `name`, or `direct` for none. Use it when a page needs another country's / another address, as the task says. The choice is SHARED by every task using the browser: open connections are closed (navigate again afterwards), and when you are done put it back to what you found unless the person asked otherwise. You never see or ask for a proxy's login. Refused when the operator switched it off.",
+      shape: { name: z.string() },
+      handler: async (args) => bp.use(String(args.name ?? '')),
     });
   }
 

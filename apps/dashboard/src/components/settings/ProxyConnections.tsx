@@ -107,6 +107,22 @@ export function ProxyConnections() {
         {data && items.length === 0 && <Muted>No proxies saved yet.</Muted>}
       </div>
 
+      {data && (
+        <>
+          {active && data.activeBy && data.activeBy.by !== 'you' && (
+            <Muted>
+              In use because {data.activeBy.by} chose it at {new Date(data.activeBy.at).toLocaleTimeString()}.
+            </Muted>
+          )}
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0 12px' }}>
+            <input type="checkbox" checked={data.agentsCanSwitch} disabled={busy} onChange={(e) => void guard(() => api.setProxyAgents(e.target.checked))} />
+            <span>
+              Let agents choose a proxy for the browser by name (they see names only, never a login; the choice is shared by every task).
+            </span>
+          </label>
+        </>
+      )}
+
       <strong>Add a proxy</strong>
       <Row wrap>
         <Field label="Name">

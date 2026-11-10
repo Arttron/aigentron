@@ -103,7 +103,12 @@ export function tunnelThrough(up: Pick<ProxyItem, 'server' | 'username' | 'passw
   });
 }
 
-export function createGateway(opts: GatewayOptions): http.Server {
+export type Gateway = http.Server & {
+  /** drop every open connection (the browser reconnects through whatever is chosen now): called when the choice changes, because a kept-alive tunnel would go on through the old proxy */
+  flush(): void;
+};
+
+export function createGateway(opts: GatewayOptions): Gateway {
   const lookup = opts.lookup ?? defaultLookup;
   const allowed =
     opts.clientAllowed ??
@@ -133,7 +138,16 @@ export function createGateway(opts: GatewayOptions): http.Server {
     });
   };
 
-  const server = http.createServer();
+  const server = http.createServer() as Gateway;
+  const open = new Set<net.Socket>();
+  server.on('connection', (s: net.Socket) => {
+    open.add(s);
+    s.on('close', () => open.delete(s));
+  });
+  server.flush = () => {
+    for (const s of open) s.destroy();
+    open.clear();
+  };
 
   // HTTPS (and any other tunnelled traffic): CONNECT host:port
   server.on('connect', (req, client: net.Socket, head: Buffer) => {

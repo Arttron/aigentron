@@ -17,6 +17,10 @@ export interface ProxyFile {
   items: ProxyItem[];
   /** the connection the browser's traffic goes through; null = direct */
   active: string | null;
+  /** who set it last and when: «you» (the dashboard) or «agent <task id>» — shown, so a switch by an agent is never a surprise */
+  activeBy?: { by: string; at: string } | null;
+  /** may agents choose among the saved proxies (the browser_proxy_use tool) */
+  agentsCanSwitch: boolean;
 }
 
 /** What the dashboard sees: no password. */
@@ -49,7 +53,8 @@ export function parseProxyFile(raw: unknown): ProxyFile {
     ];
   });
   const active = typeof o.active === 'string' && items.some((i) => i.id === o.active) ? o.active : null;
-  return { items, active };
+  const by = o.activeBy && typeof o.activeBy === 'object' ? (o.activeBy as Record<string, unknown>) : null;
+  return { items, active, activeBy: by && typeof by.by === 'string' && typeof by.at === 'string' ? { by: by.by, at: by.at } : null, agentsCanSwitch: o.agentsCanSwitch !== false };
 }
 
 export const toView = (i: ProxyItem, active: string | null): ProxyView => ({
@@ -67,7 +72,7 @@ export class ProxyStore {
   private readonly file: SecretJsonFile<ProxyFile>;
 
   constructor(path: string) {
-    this.file = new SecretJsonFile<ProxyFile>(path, { parse: parseProxyFile, missing: { items: [], active: null }, ttlMs: 1000, pretty: true });
+    this.file = new SecretJsonFile<ProxyFile>(path, { parse: parseProxyFile, missing: { items: [], active: null, activeBy: null, agentsCanSwitch: true }, ttlMs: 1000, pretty: true });
   }
 
   list(): ProxyView[] {
@@ -95,22 +100,40 @@ export class ProxyStore {
     if (f.items.some((i) => i.name.toLowerCase() === n.toLowerCase())) throw new Error(`a proxy named "${n}" already exists.`);
     if (f.items.length >= 50) throw new Error('too many saved proxies (50).');
     const item: ProxyItem = { id: randomBytes(5).toString('hex'), name: n, server: p.server, ...(p.username ? { username: p.username } : {}), ...(p.password ? { password: p.password } : {}), createdAt: new Date().toISOString() };
-    this.file.write({ items: [...f.items, item], active: f.active });
+    this.file.write({ ...f, items: [...f.items, item] });
     return toView(item, f.active);
   }
 
   remove(id: string): boolean {
     const f = this.file.read();
     if (!f.items.some((i) => i.id === id)) return false;
-    this.file.write({ items: f.items.filter((i) => i.id !== id), active: f.active === id ? null : f.active });
+    this.file.write({ ...f, items: f.items.filter((i) => i.id !== id), active: f.active === id ? null : f.active, activeBy: f.active === id ? null : f.activeBy });
     return true;
   }
 
-  /** null = direct. False when there is no such connection. */
-  setActive(id: string | null): boolean {
+  /** null = direct. False when there is no such connection. `by`: who chose it («you», «agent <task id>»). */
+  setActive(id: string | null, by = 'you'): boolean {
     const f = this.file.read();
     if (id !== null && !f.items.some((i) => i.id === id)) return false;
-    this.file.write({ items: f.items, active: id });
+    this.file.write({ ...f, active: id, activeBy: { by, at: new Date().toISOString() } });
     return true;
+  }
+
+  agentsCanSwitch(): boolean {
+    return this.file.read().agentsCanSwitch;
+  }
+
+  setAgentsCanSwitch(on: boolean): void {
+    this.file.write({ ...this.file.read(), agentsCanSwitch: on });
+  }
+
+  activeBy(): { by: string; at: string } | null {
+    return this.file.read().activeBy ?? null;
+  }
+
+  /** A saved proxy by its name (any case). */
+  byName(name: string): ProxyItem | null {
+    const n = name.trim().toLowerCase();
+    return this.file.read().items.find((i) => i.name.toLowerCase() === n) ?? null;
   }
 }

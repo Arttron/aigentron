@@ -38,6 +38,7 @@ describe('internal tool registry', () => {
     onAskUser: noop, onLookAt: noop, onVideoDigest: noop, onStartPreview: noop, onStopPreview: noop, onProposeLearnedSkill: noop,
     workspace: { info: noop, files: noop, note: noop, save: noop },
     kb: { list: noop, search: noop, read: noop, add: noop },
+    browserProxy: { list: noop, use: noop },
     admin: new Proxy({}, { get: () => noop }),
   } as unknown as Parameters<typeof buildInternalToolSpecs>[0];
 

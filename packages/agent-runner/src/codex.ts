@@ -14,16 +14,36 @@ export const INTERNAL_MCP_TOKEN_ENV = 'LDS_INTERNAL_MCP_TOKEN';
 const cap = (s: string) => (s.length > OUTPUT_CAP ? `${s.slice(0, OUTPUT_CAP)}…` : s);
 const tomlStr = (s: string) => JSON.stringify(s); // JSON string literals are valid TOML basic strings
 
+/** The streamable-HTTP twin of an SSE address (`…/sse` → `…/mcp`), or null when the address does not look like one. */
+export function streamableOf(url: string): string | null {
+  try {
+    const u = new URL(url);
+    if (!/\/sse\/?$/.test(u.pathname)) return null;
+    u.pathname = u.pathname.replace(/\/sse\/?$/, '/mcp');
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Render the agent's SDK-style MCP server configs (+ the internal one) as Codex config.toml tables. */
 export function renderCodexConfig(params: RunAgentParams, model: string | undefined, warn: (m: string) => void): string {
   const lines: string[] = [];
   if (model) lines.push(`model = ${tomlStr(model)}`);
   lines.push('');
   for (const [name, raw] of Object.entries(params.mcpServers ?? {})) {
-    const cfg = raw as { type?: string; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> };
+    const cfg = { ...(raw as { type?: string; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> }) };
     if (cfg.type === 'sse') {
-      warn(`MCP server "${name}" uses SSE, which Codex does not support — skipped`);
-      continue;
+      // Codex speaks streamable HTTP, not the older SSE. The Playwright MCP server (and others built on the same SDK) serves both: `<base>/sse` is the SSE
+      // endpoint and `<base>/mcp` the streamable one, so a registered `…/sse` address is tried as `…/mcp` instead of leaving the agent without the tools.
+      const streamable = cfg.url ? streamableOf(cfg.url) : null;
+      if (!streamable) {
+        warn(`MCP server "${name}" uses SSE, which Codex does not support — skipped`);
+        continue;
+      }
+      warn(`MCP server "${name}" is registered as SSE; Codex gets its streamable HTTP address ${streamable} instead`);
+      cfg.url = streamable;
+      cfg.type = 'http';
     }
     lines.push(`[mcp_servers.${tomlStr(name)}]`);
     if (cfg.command) {
@@ -169,7 +189,8 @@ export async function runCodex(params: RunAgentParams, onEvent: AgentEventHandle
     maxTurnsExceeded: false,
     usage: emptyUsage(),
   };
-  const warn = (text: string) => onEvent({ kind: 'stderr', text });
+  // a tool server that was skipped or changed is kept in the conversation (the executor persists lines that start with «⚠ MCP server»)
+  const warn = (text: string) => onEvent({ kind: 'stderr', text: text.startsWith('MCP server') ? `⚠ ${text}` : text });
 
   await mkdir(opts.home, { recursive: true, mode: 0o700 });
   await chmod(opts.home, 0o700).catch(() => undefined);

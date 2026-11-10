@@ -54,6 +54,7 @@ import { isImageName, isVideoName } from '../media/media-core';
 import { AnswerTracker, isQuietTool, noToolsNote, resumeTurnEvent } from './final-answer';
 import { eventSearchText } from '../chat-search/search-core';
 import { escalationNote, lostSessionNote, standingInstructions } from './session-continuity';
+import { ProxyGatewayService } from '../proxies/proxy-gateway.service';
 import { isPdf, isTextLike } from '../files/file-types';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
@@ -184,6 +185,11 @@ export class RealAgentExecutor extends AgentExecutor {
     super();
   }
 
+  /** The saved browser proxies and the gateway (looked up when needed: the module is not a dependency of this one). */
+  private get proxyGateway(): ProxyGatewayService {
+    return this.moduleRef.get(ProxyGatewayService, { strict: false });
+  }
+
   async run(ctx: TaskRunContext): Promise<AgentRunOutcome> {
     const task = await getTaskLiteOrThrow(this.prisma, ctx.taskId);
     // The task's project decides where the agent works, which folder its workspace tools use, what it may write to.
@@ -209,15 +215,20 @@ export class RealAgentExecutor extends AgentExecutor {
     // The browser-control server names the task by the run's bearer (it must know whose approvals to ask).
     const browserCfg = mcpServers['browser-ext'] as { url?: string; headers?: Record<string, string> } | undefined;
     if (browserCfg?.url) browserCfg.headers = { ...(browserCfg.headers ?? {}), Authorization: `Bearer ${this.browserMcp.register(ctx.taskId).token}` };
-    const attachmentPaths = await this.attachments.paths(ctx.taskId).catch(() => []);
-    const attachmentOriginals = await this.attachments.originalNames(ctx.taskId).catch(() => ({}) as Record<string, string>);
+    const ownAttachmentPaths = await this.attachments.paths(ctx.taskId).catch(() => [] as string[]);
+    const ownOriginals = await this.attachments.originalNames(ctx.taskId).catch(() => ({}) as Record<string, string>);
+    // A subtask is sent to do part of the lead's job, and the files the person attached live with the LEAD (each task has its own folder): list them too
+    // (read-only), or the subtask «cannot find» the file it was told about.
+    const lead = ctx.discussion ? { paths: [] as string[], originals: {} as Record<string, string> } : await this.leadAttachments(ctx.taskId).catch(() => ({ paths: [] as string[], originals: {} as Record<string, string> }));
+    const attachmentPaths = [...ownAttachmentPaths, ...lead.paths.filter((p) => !ownAttachmentPaths.includes(p))];
+    const attachmentOriginals = { ...lead.originals, ...ownOriginals };
     // Which attachments belong to THIS message (inline thumbnails): the ones
     // explicitly sent, else — on the first run — all (uploaded with the opener).
     const messageAttachments = ctx.attachments?.length
       ? ctx.attachments
       : ctx.followUpPrompt
         ? []
-        : attachmentPaths.map((p) => basename(p));
+        : ownAttachmentPaths.map((p) => basename(p));
     // Agent cwd: the worktree root, or the configured subdir within it. The
     // worktree root stays the write boundary (passed separately to the runner).
     const chat = agentDef?.mode === 'chat' || task.kind === 'ask' || Boolean(ctx.discussion);
@@ -362,6 +373,7 @@ export class RealAgentExecutor extends AgentExecutor {
       scheduled: Boolean(task.createdByChannel?.startsWith('schedule:')),
       attachmentPaths,
       attachmentOriginals,
+      leadPaths: lead.paths,
       messageAttachments,
       isolation,
     };
@@ -456,6 +468,23 @@ export class RealAgentExecutor extends AgentExecutor {
       this.logger.warn(`Task ${ctx.taskId}: ${note}`);
     }
     return last;
+  }
+
+  /** The files attached to the lead task(s) of a subtask (parent, grandparent … up to three levels, at most 12 files): their paths and the names they were uploaded as. */
+  private async leadAttachments(taskId: string): Promise<{ paths: string[]; originals: Record<string, string> }> {
+    const paths: string[] = [];
+    const originals: Record<string, string> = {};
+    let id: string | null = taskId;
+    for (let depth = 0; depth < 3 && id && paths.length < 12; depth++) {
+      const row: { parentId: string | null } | null = await this.prisma.task.findUnique({ where: { id }, select: { parentId: true } });
+      id = row?.parentId ?? null;
+      if (!id) break;
+      const ps = await this.attachments.paths(id).catch(() => [] as string[]);
+      const names = await this.attachments.originalNames(id).catch(() => ({}) as Record<string, string>);
+      for (const p of ps) if (paths.length < 12 && !paths.includes(p)) paths.push(p);
+      Object.assign(originals, names);
+    }
+    return { paths, originals };
   }
 
   /** The limits of the admin in the chat of a project that is not the default one (null = the platform admin, nothing narrowed). */
@@ -682,6 +711,8 @@ export class RealAgentExecutor extends AgentExecutor {
     isolation: AgentIsolation | null;
     /** Every file of the task (chat agents read some of them inline). */
     attachmentPaths: string[];
+    /** the files of the lead task(s) of a subtask (listed read-only) */
+    leadPaths: string[];
     /** stored name → the name the person gave the file (shown to the agent next to the stored path) */
     attachmentOriginals: Record<string, string>;
     /** The ones the prompt lists for a working agent: all on a fresh run, only this message's on a resume (E-06). */
@@ -770,7 +801,8 @@ export class RealAgentExecutor extends AgentExecutor {
     // survives a page reload) is always kept; the intermediate process trace (thinking/tool calls/system
     // chatter) is only worth the DB weight when someone's actually debugging —
     // it still streams live either way, just isn't replayed on the next page load.
-    const alwaysPersist = (event: AgentEvent) => event.kind === 'prompt' || event.kind === 'result' || event.kind === 'discussion' || event.kind === 'subtask_report' || (event.kind === 'assistant' && (Boolean(event.attachments?.length) || Boolean(event.text.trim())));
+    // a tool server that did not connect is kept in the conversation: it explains why an agent says a tool is missing, also after a reload
+    const alwaysPersist = (event: AgentEvent) => (event.kind === 'stderr' && (event.text.startsWith('⚠ MCP server') || event.text.startsWith('ℹ MCP tools'))) || event.kind === 'prompt' || event.kind === 'result' || event.kind === 'discussion' || event.kind === 'subtask_report' || (event.kind === 'assistant' && (Boolean(event.attachments?.length) || Boolean(event.text.trim())));
 
     let lastEventAt = Date.now();
     let lastEventKind = 'system';
@@ -1039,6 +1071,7 @@ export class RealAgentExecutor extends AgentExecutor {
             }
           : undefined,
       onCurrentTime: (input) => describeNow(new Date(), input.timezone),
+      browserProxy: ctx.discussion ? undefined : { list: () => this.proxyGateway.agentList(), use: (name) => this.proxyGateway.agentUse(name, ctx.taskId) },
       onCompressResult: (tool, text) => compressor.tool(tool, text),
       onShowImages: async (input) => {
         const paths = [...new Set(input.paths)].slice(0, 10);
@@ -1359,8 +1392,8 @@ export class RealAgentExecutor extends AgentExecutor {
     return describeModel(model, { prices, local: provider.kind === 'ollama' }).tier;
   }
 
-  private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; attachmentOriginals: Record<string, string>; listedAttachments: string[]; messageAttachments: string[] }): Promise<string> {
-    if (!opts.chat) return withAttachments(prompt, opts.listedAttachments, opts.attachmentOriginals);
+  private async promptWithAttachments(prompt: string, opts: { chat?: boolean; attachmentPaths: string[]; attachmentOriginals: Record<string, string>; listedAttachments: string[]; messageAttachments: string[]; leadPaths?: string[] }): Promise<string> {
+    if (!opts.chat) return withAttachments(prompt, opts.listedAttachments, opts.attachmentOriginals, new Set(opts.leadPaths ?? []));
     const mine = new Set(opts.messageAttachments);
     const files = await readInlineFiles(opts.attachmentPaths.filter((p) => mine.has(basename(p))));
     const others = opts.attachmentPaths.filter((p) => mine.has(basename(p)) && !files.some((f) => f.name === basename(p)));
@@ -2031,11 +2064,11 @@ function firstProseLine(raw: string): string | null {
 /** Append attachment paths to the prompt so the agent views them via Read. */
 const READ_DOCUMENT_CHARS = 12_000;
 
-function withAttachments(prompt: string, paths: string[], originals: Record<string, string> = {}): string {
+export function withAttachments(prompt: string, paths: string[], originals: Record<string, string> = {}, fromLead: ReadonlySet<string> = new Set()): string {
   if (!paths.length) return prompt;
   const isVideo = (p: string) => isVideoName(p);
   const list = paths
-    .map((p) => `- ${p}${originals[basename(p)] ? `  (uploaded as «${originals[basename(p)]}»)` : ''}${isVideo(p) ? '  (video — use video_digest, then look_at if you need to see it)' : ''}`)
+    .map((p) => `- ${p}${originals[basename(p)] ? `  (uploaded as «${originals[basename(p)]}»)` : ''}${fromLead.has(p) ? '  (attached to the lead task — read only)' : ''}${isVideo(p) ? '  (video — use video_digest, then look_at if you need to see it)' : ''}`)
     .join('\n');
   const lead = prompt.trim() ? prompt : 'Review the attached file(s).';
   const hasVideo = paths.some(isVideo);

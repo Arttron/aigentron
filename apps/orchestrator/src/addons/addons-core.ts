@@ -352,3 +352,25 @@ export function formatDuration(ms: number): string {
   if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`;
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
 }
+
+// ---- stop / start / restart from the dashboard ----
+
+/** The systemd units of the add-ons that can be controlled from the dashboard (a single service each; the browser add-on has several that depend on each other and stays on the command line). */
+export const ADDON_UNITS: Readonly<Record<string, readonly string[]>> = {
+  playwright: ['aigentron-playwright.service'],
+  voice: ['aigentron-voice.service'],
+};
+
+export const CONTROL_ACTIONS = ['start', 'stop', 'restart'] as const;
+export type ControlAction = (typeof CONTROL_ACTIONS)[number];
+export const isControlAction = (v: unknown): v is ControlAction => (CONTROL_ACTIONS as readonly unknown[]).includes(v);
+
+/** What a control request may do (pure): the units to act on, or why not. Only an ENABLED add-on installed on the host (systemd) is controlled; nothing the caller names reaches a command line. */
+export function controlPlan(name: string, action: unknown, state: Pick<AddonState, 'enabled' | 'backend'> | null): { ok: true; action: ControlAction; units: string[] } | { ok: false; error: string } {
+  if (!isControlAction(action)) return { ok: false, error: 'the action is start, stop or restart' };
+  const units = ADDON_UNITS[name];
+  if (!units) return { ok: false, error: `the add-on "${name}" is not controlled from the dashboard — use ${`\`sudo aigentron addon enable|disable ${name}\``} on the server` };
+  if (!state?.enabled) return { ok: false, error: `the add-on "${name}" is not installed (or is disabled): run ${addonCommands(name).enable} first` };
+  if (state.backend !== 'bare') return { ok: false, error: `the add-on "${name}" runs as a Docker container: control it with docker compose` };
+  return { ok: true, action, units: [...units] };
+}

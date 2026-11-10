@@ -170,3 +170,18 @@ describe('fetchThrough (the Test button)', () => {
     await expect(fetchThrough({ server: `http://127.0.0.1:${up.port}`, username: 'user', password: 'bad' }, 'http://api.ipify.org/')).rejects.toThrow(/407/);
   });
 });
+
+describe('flush', () => {
+  it('closes the open connections, so a kept-alive tunnel does not go on through the old choice', async () => {
+    const t = await target();
+    const gw = await listen(createGateway({ upstream: () => null, allowPrivate: true }));
+    const s = net.connect(gw.port, '127.0.0.1');
+    await new Promise<void>((r) => s.once('connect', () => r()));
+    s.write(`CONNECT 127.0.0.1:${t.port} HTTP/1.1\r\nHost: x\r\n\r\n`);
+    await new Promise<void>((r) => s.once('data', () => r()));
+    const closed = new Promise<void>((r) => s.once('close', () => r()));
+    gw.flush();
+    await closed;
+    expect(s.destroyed).toBe(true);
+  });
+});

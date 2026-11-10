@@ -1,13 +1,15 @@
-import { All, Controller, Get, NotFoundException, Param, Req, Res, UseGuards } from '@nestjs/common';
+import { All, Controller, Get, HttpCode, NotFoundException, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Roles } from '../identity/roles.decorator';
+import { CurrentUser } from '../identity/current-user.decorator';
+import type { UserRow } from '../users/users.service';
 import { RolesGuard } from '../identity/roles.guard';
 import { AddonsService } from './addons.service';
 import { AddonsViewProxyService } from './addons-view-proxy.service';
 
 /**
- * Add-ons are read-only from here: any signed-in person may see what is installed and the command to run on the server;
- * nothing is enabled or disabled through the API. The browser VIEW (the page under `browser/view/`) is operator/admin only
+ * Installing and removing an add-on stays on the server (`aigentron addon enable|disable`): any signed-in person may see what is installed and the
+ * command to run. An operator can STOP, START or RESTART an installed single-service add-on (Playwright, voice) — `control`. The browser VIEW (the page under `browser/view/`) is operator/admin only
  * — whoever watches can type into the shared browser. Its WebSocket is handled on the server's `upgrade` event with the
  * same checks (view-proxy.ts), since Express never sees upgrades.
  */
@@ -28,6 +30,15 @@ export class AddonsController {
   @Get()
   list() {
     return this.addons.list();
+  }
+
+  /** Stop / start / restart an installed add-on's service (Playwright, voice) — what the dashboard's buttons call. */
+  @Post(':name/control/:action')
+  @HttpCode(200)
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  control(@Param('name') name: string, @Param('action') action: string, @CurrentUser() user: UserRow | undefined) {
+    return this.addons.control(name, action, user?.displayName);
   }
 
   @Get(':name')

@@ -87,6 +87,10 @@ export interface ProxyConnection {
 export interface ProxyList {
   items: ProxyConnection[];
   gateway: { port: number; listening: boolean };
+  /** may agents choose among the saved proxies */
+  agentsCanSwitch: boolean;
+  /** who chose the one in use, and when («you», «agent (task …)») */
+  activeBy: { by: string; at: string } | null;
 }
 
 /** Search in chats (docs/chat-search.md). */
@@ -741,7 +745,9 @@ export interface AddonInfo {
   /** Why a present state file was ignored (the add-on then counts as not installed). */
   stateError: string | null;
   health: { ok: boolean; checkedAt: string; error: string | null } | null;
-  /** The exact commands to run on the server (the dashboard never runs them). */
+  /** Stop / start / restart from the dashboard: possible here, or why not. */
+  control: { available: boolean; reason: string | null };
+  /** The exact commands to run on the server (install / remove stay there). */
   commands: { enable: string; enableDocker: string; disable: string; logs: string };
   /** The dashboard-side proxy of the add-on's page, with the viewing limits (browser add-on only). */
   view: { path: string; maxSessions: number; sessionMinutes: number; active: number } | null;
@@ -1011,11 +1017,13 @@ export const api = {
   addProxy: (body: { name: string; line: string }) => request<ProxyConnection>('POST', '/proxies', { body }),
   removeProxy: (id: string) => request<{ id: string; deleted: boolean }>('DELETE', `/proxies/${e(id)}`),
   setActiveProxy: (id: string | null) => request<ProxyList>('PUT', '/proxies/active', { body: { id } }),
+  setProxyAgents: (allowed: boolean) => request<ProxyList>('PUT', '/proxies/agents', { body: { allowed } }),
   testProxy: (id: string) => request<{ ok: boolean; ip?: string; ms?: number; error?: string }>('POST', `/proxies/${e(id)}/test`),
   extensionRemoveDevice: (id: string) => request<{ ok: boolean }>('DELETE', `/extension/devices/${e(id)}`),
   extensionPair: () => request<{ code: string; expiresInSec: number }>('POST', '/extension/pair'),
   listAddons: () => request<AddonInfo[]>('GET', '/addons'),
   getAddon: (name: string) => request<AddonInfo>('GET', `/addons/${e(name)}`),
+  controlAddon: (name: string, action: 'start' | 'stop' | 'restart') => request<{ ok: boolean; message: string; info: AddonInfo | null }>('POST', `/addons/${e(name)}/control/${action}`),
   /** The browser add-on's noVNC page, proxied behind the sign-in; `path` tells noVNC where its WebSocket is (host-relative, same proxy). */
   addonBrowserViewUrl: () => `${API_BASE}/addons/browser/view/vnc.html?autoconnect=1&resize=scale&show_dot=1&reconnect=0&path=api/addons/browser/view/websockify`,
 };

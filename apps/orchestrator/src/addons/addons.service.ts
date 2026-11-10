@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Injectable, Logger } from '@nestjs/common';
@@ -6,6 +8,8 @@ import {
   BUILTIN_DESCRIPTORS,
   VIEW_PREFIX,
   addonCommands,
+  controlPlan,
+  type ControlAction,
   addonStatus,
   parseDescriptor,
   parseEndpoint,
@@ -30,6 +34,8 @@ export interface AddonInfo extends AddonDescriptor {
   stateError: string | null;
   health: AddonHealth | null;
   commands: ReturnType<typeof addonCommands>;
+  /** Stop / start / restart from the dashboard: possible, or why not (then the command to type on the server is in `commands`). */
+  control: { available: boolean; reason: string | null };
   /** The dashboard-side path of the view proxy (when this add-on has one), and the viewing limits. */
   view: { path: string; maxSessions: number; sessionMinutes: number; active: number } | null;
 }
@@ -164,6 +170,59 @@ export class AddonsService {
     return Promise.all((await this.descriptors()).map((d) => this.describe(d)));
   }
 
+  /** Can the dashboard stop / start / restart this add-on here? The orchestrator needs systemd and root rights (it does on a bare-metal install). */
+  controlAvailability(name: string, state: AddonState | null): { available: boolean; reason: string | null } {
+    const plan = controlPlan(name, 'restart', state);
+    if (!plan.ok) return { available: false, reason: plan.error };
+    if (!this.hasSystemd()) return { available: false, reason: 'this server has no systemd (control the service yourself)' };
+    if (!this.isRoot()) return { available: false, reason: 'the server does not run with root rights: use sudo systemctl on the server' };
+    return { available: true, reason: null };
+  }
+
+  protected hasSystemd(): boolean {
+    return existsSync('/run/systemd/system');
+  }
+
+  protected isRoot(): boolean {
+    return typeof process.getuid === 'function' && process.getuid() === 0;
+  }
+
+  /** `systemctl <action> <units>` — the argument vector is built here from a fixed list, never from the request. */
+  protected systemctl(action: ControlAction, units: string[]): Promise<{ ok: boolean; output: string }> {
+    return new Promise((resolve) => {
+      execFile('systemctl', [action, ...units], { timeout: 45_000, maxBuffer: 1 << 20 }, (err, stdout, stderr) => {
+        const output = `${stdout ?? ''}${stderr ?? ''}`.trim().slice(0, 800);
+        resolve({ ok: !err, output: output || (err ? err.message : '') });
+      });
+    });
+  }
+
+  /**
+   * Stop, start or restart an installed add-on's service from the dashboard. Returns what happened and the add-on's state a moment later (after a start /
+   * restart it waits up to ~10 s for the endpoint to answer, so the page can say "running" rather than "starting").
+   */
+  async control(name: string, action: unknown, by?: string): Promise<{ ok: boolean; message: string; info: AddonInfo | null }> {
+    const { state } = await this.readState(name);
+    const plan = controlPlan(name, action, state);
+    if (!plan.ok) return { ok: false, message: plan.error, info: await this.info(name) };
+    const avail = this.controlAvailability(name, state);
+    if (!avail.available) return { ok: false, message: avail.reason ?? 'not available here', info: await this.info(name) };
+    this.logger.warn(`Add-on "${name}": ${plan.action}${by ? ` (requested by ${by})` : ''}`);
+    const r = await this.systemctl(plan.action, plan.units);
+    this.probes.clear();
+    if (!r.ok) return { ok: false, message: `systemctl ${plan.action} failed: ${r.output || 'no details'}`, info: await this.info(name) };
+    let info = await this.info(name);
+    if (plan.action !== 'stop') {
+      for (let i = 0; i < 20 && info && info.status !== 'enabled-healthy'; i++) {
+        await new Promise((res) => setTimeout(res, 500));
+        this.probes.clear();
+        info = await this.info(name);
+      }
+    }
+    const done = { start: 'started', stop: 'stopped', restart: 'restarted' }[plan.action];
+    return { ok: true, message: `${name} ${done}${plan.action !== 'stop' && info?.status !== 'enabled-healthy' ? ' — it has not answered yet; give it a few seconds' : ''}.`, info };
+  }
+
   private async describe(d: AddonDescriptor): Promise<AddonInfo> {
     const { state, error } = await this.readState(d.name);
     // the endpoint to look at: the browser add-on's view, else the MCP / API server of an add-on without a view
@@ -177,6 +236,7 @@ export class AddonsService {
       stateError: error,
       health,
       commands: addonCommands(d.name),
+      control: this.controlAvailability(d.name, state),
       view: hasView
         ? { path: VIEW_PREFIX, maxSessions: this.config.addonViewMaxSessions, sessionMinutes: this.config.addonViewSessionMinutes, active: this.activeViewers() }
         : null,

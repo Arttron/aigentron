@@ -3,6 +3,7 @@ import { api, errMsg, type AddonInfo } from '@/lib/api';
 import { usePolling } from '@/lib/use-polling';
 import { Badge, Card, ErrorText, Muted, Row, SectionTitle } from '@/components/ui';
 import { Command, STATUS, mb } from './BrowserPage';
+import { AddonControls } from '@/components/AddonControls';
 import styles from './BrowserPage.module.css';
 
 /**
@@ -89,6 +90,7 @@ export function PlaywrightAddonPanel() {
               ) : null}
             </>
           )}
+          {(status === 'enabled-healthy' || status === 'enabled-unreachable' || status === 'disabled') && <AddonControls info={info} onDone={load} />}
           {info.state && (
             <Muted className={styles.fine}>
               {info.state.backend === 'docker' ? 'Docker' : 'Bare'} install{info.state.version ? ` · ${info.state.version}` : ''}

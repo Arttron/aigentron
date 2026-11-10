@@ -42,8 +42,19 @@ describe('ProxyStore', () => {
     expect(store.remove(a.id)).toBe(false);
     expect(store.setActive(null)).toBe(true);
   });
+  it('remembers who chose, whether agents may switch, and finds a proxy by name (any case)', () => {
+    const { store } = make();
+    const a = store.add('Lt-1', 'h.example;80;u;p');
+    expect(store.agentsCanSwitch()).toBe(true);
+    store.setActive(a.id, 'agent (task t1)');
+    expect(store.activeBy()).toMatchObject({ by: 'agent (task t1)' });
+    expect(store.byName('lt-1')?.id).toBe(a.id);
+    expect(store.byName('nope')).toBeNull();
+    store.setAgentsCanSwitch(false);
+    expect(store.agentsCanSwitch()).toBe(false);
+  });
   it('a damaged file reads as empty; an active id that is gone is dropped', () => {
-    expect(parseProxyFile('x')).toEqual({ items: [], active: null });
+    expect(parseProxyFile('x')).toEqual({ items: [], active: null, activeBy: null, agentsCanSwitch: true });
     expect(parseProxyFile({ items: [{ id: 'a', name: 'n', server: 'http://h:1' }], active: 'zzz' }).active).toBeNull();
   });
 });

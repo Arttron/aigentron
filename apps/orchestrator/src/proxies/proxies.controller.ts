@@ -39,7 +39,16 @@ export class ProxiesController {
   @Roles('operator', 'admin')
   setActive(@Body() body: { id?: string | null }) {
     const id = typeof body?.id === 'string' && body.id ? body.id : null;
-    if (!this.proxies.store.setActive(id)) throw new NotFoundException('no such proxy');
+    if (!this.proxies.choose(id)) throw new NotFoundException('no such proxy');
+    return this.proxies.list();
+  }
+
+  /** May agents choose among the saved proxies (the `browser_proxy_use` tool)? */
+  @Put('agents')
+  @UseGuards(RolesGuard)
+  @Roles('operator', 'admin')
+  setAgents(@Body() body: { allowed?: boolean }) {
+    this.proxies.store.setAgentsCanSwitch(body?.allowed !== false);
     return this.proxies.list();
   }
 

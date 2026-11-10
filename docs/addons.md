@@ -18,6 +18,8 @@ aigentron addon list                         # what this release ships, and what
 loopback. Both paths run the **same installer script** (`infra/addons/<name>/bare.sh`): the Docker image is built by executing it inside
 `debian:12`, so there is one code path to maintain and test.
 
+**Stop / start / restart from the dashboard.** On a bare-metal server an operator can stop, start or restart the **Playwright** and **voice** add-ons with the buttons on their Add-ons tab (`POST /api/addons/<name>/control/<start|stop|restart>`): the orchestrator runs `systemctl <action> aigentron-<name>.service` — the unit is looked up from a fixed list, nothing from the request reaches the command line — and then waits up to ~10 s for the service to answer. It needs systemd and root rights (a bare-metal install has them; otherwise the tab says why and shows nothing to click). Installing and removing stay on the command line. The **browser** add-on (several services that depend on each other) and Docker-run add-ons are not controlled from here (`docker compose restart …`).
+
 The first (and in stage 1 the only) add-on is the **browser**: a real Chromium on a virtual display that a person watches and operates from
 the dashboard (`🌐 Browser`) and that agents drive over the Chrome DevTools Protocol. There is no general desktop — only the browser window.
 
