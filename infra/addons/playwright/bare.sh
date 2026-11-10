@@ -214,6 +214,17 @@ selftest() {
 }
 
 # ---- systemd -----------------------------------------------------------------------------------------------------------
+# The browser goes through the orchestrator's gateway (docs/browser-proxy.md): that is what lets the dashboard choose a proxy for it, and agents switch it,
+# without restarting anything. The port is PROXY_GATEWAY_PORT of the orchestrator (its .env beside the data dir; 8940 when unset); 0 = the gateway is
+# off, the browser then goes direct. Local addresses (the previews) are reached directly.
+gateway_flags() {
+  port="${PROXY_GATEWAY_PORT:-}"
+  if [ -z "$port" ] && [ -r "$DATA_DIR/../.env" ]; then port=$(sed -n 's/^PROXY_GATEWAY_PORT=[ "]*\([0-9]*\).*/\1/p' "$DATA_DIR/../.env" | tail -n 1); fi
+  case "$port" in ''|*[!0-9]*) port=8940 ;; esac
+  [ "$port" = 0 ] && return 0
+  printf -- '--proxy-server http://127.0.0.1:%s --proxy-bypass localhost,127.0.0.1' "$port"
+}
+
 unit_text() {
   node_bin=$(node_path)
   cat <<UNITEOF
@@ -232,7 +243,7 @@ Environment=NODE_ENV=production
 WorkingDirectory=$SVC_HOME
 # --no-sandbox: Chromium's own sandbox needs user namespaces, which Ubuntu 24.04 and hardened kernels refuse to an ordinary user; the boundary here
 # is this unit (own user, read-only system, loopback only, memory cap) and --isolated (no profile is kept: every session starts clean).
-ExecStart=$node_bin $(mcp_cli) --headless --browser chromium --no-sandbox --isolated --host 127.0.0.1 --port $PORT --allowed-hosts localhost:$PORT,127.0.0.1:$PORT
+ExecStart=$node_bin $(mcp_cli) --headless --browser chromium --no-sandbox --isolated --host 127.0.0.1 --port $PORT --allowed-hosts localhost:$PORT,127.0.0.1:$PORT $(gateway_flags)
 Restart=always
 RestartSec=3
 KillMode=mixed

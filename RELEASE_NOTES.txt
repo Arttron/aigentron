@@ -1,15 +1,8 @@
-Aigentron v0.1.126
+Aigentron v0.1.127
 
-For people who are not programmers: agents on the Codex runtime get the Playwright browser again, agents can pick the browser's proxy, add-ons can be stopped and restarted from the dashboard, and a subtask sees the files attached to its main task.
+For people who are not programmers: the proxy chosen for the agents' browser is now really used on a server where the Playwright add-on is installed without Docker.
 
 Fixed
-- An agent running on Codex had no Playwright tools ("only browser_ext is available"): Codex does not speak the older SSE protocol that the Playwright server was registered with, so the server was skipped. Codex now gets the server's streamable HTTP address instead. Other providers were never affected.
-- A subtask could not find a file attached to its main task (each task has its own attachments folder). The subtask now gets the lead task's files, read-only, listed in its first message.
-- A tool (MCP) server that did not connect at the start of a run, and the tools the model really received from each server, are now written into the conversation («⚠ MCP server not connected…», «ℹ MCP tools in this run — playwright: 23»), so "the agent says a tool is missing" can be explained afterwards.
-- A model that takes over a conversation without its memory is told that a later message overrides the original request (and, in a scheduled task, that the person's own messages adjust all later runs).
+- On a bare-metal server the Playwright add-on's service started the browser without any proxy option, so the proxy chosen in Add-ons → Playwright → Browser proxy (or by an agent) was ignored: pages showed the server's own address. The add-on's installer now points the browser at the server's proxy gateway (port 8940, or PROXY_GATEWAY_PORT of the server; none when the gateway is switched off).
 
-New
-- Agents can choose the proxy of the server's browser: two tools, browser_proxy_list and browser_proxy_use, work with the proxies saved in Add-ons → Playwright → Browser proxy (names only, never a login). The choice is shared by the whole browser; the page shows who made it, and a checkbox forbids it. Every switch drops the open connections so the browser really goes through the new proxy.
-- Add-ons → Playwright and Voice: Restart and Stop / Start buttons (operators; the server must run with root rights and systemd — otherwise the page says why).
-
-Update note: a bare-metal Playwright add-on is not routed through the proxy gateway until its systemd unit gets `--proxy-server http://127.0.0.1:8940 --proxy-bypass localhost,127.0.0.1` (docs/browser-proxy.md); the proxy choice in the dashboard has no effect on it before that.
+Update note: after updating, run `sudo aigentron addon enable playwright` once on such a server — it rewrites the service and restarts it. (Without waiting for the update you can do it by hand: docs/browser-proxy.md, "bare-metal Playwright add-on".) Then ask an agent to open a page that shows the IP address: with a proxy chosen it must show the proxy's address, not the server's.
