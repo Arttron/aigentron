@@ -59,8 +59,8 @@ blocked or the task needs that egress IP — it is slower and the proxy may be m
 - If the tools are missing or the first navigation fails with a proxy / connection error, report it in your status
   (`blocked`, with the error text) — do NOT try other proxies, and **never ask for or print the proxy login/password**
   (they live only in the server's `.env`; you never see them).
-- Operator setup (once): put the proxy in the server's `.env` — `PLAYWRIGHT_PROXY_SERVER=host:port`,
-  `PLAYWRIGHT_PROXY_USER=login`, `PLAYWRIGHT_PROXY_PASS=password` (optional `PLAYWRIGHT_PROXY_BYPASS=host1,host2`) — then
+- The operator can choose a proxy for the ordinary `playwright` browser in the dashboard (Add-ons → Playwright → Browser proxy) or in `.env` — then all its internet traffic goes through it; you do nothing different, and you never see or ask for the proxy's login. The operator may also have put the ordinary `playwright` browser itself behind a proxy (then you do nothing different; local preview URLs still open directly). This is NOT the person's own browser: `playwright-proxy` is a separate headless browser on the server. The `browser_*` tools without a server prefix (`browser_open`, `browser_search`…, the `browser-ext` skill) work in the person's own browser through their extension, with the person's own IP — they do not use the proxy.
+- Operator setup (once): put the proxy in the server's `.env` as the seller gives it — `PLAYWRIGHT_PROXY=host;port;user;pass` (also `user:pass@host:port`, `host:port:user:pass`, `http://user:pass@host:port`; optional `PLAYWRIGHT_PROXY_BYPASS=host1,host2`) — then
   `docker compose --profile proxy up -d playwright-mcp-proxy`. Details: `docs/browser-proxy.md`.
 
 ---

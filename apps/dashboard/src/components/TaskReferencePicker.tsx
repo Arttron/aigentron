@@ -1,3 +1,4 @@
+import { SearchInput } from '@/components/ui';
 import { useEffect, useState } from 'react';
 import { api, type TaskListItem } from '@/lib/api';
 import styles from './TaskReferencePicker.module.css';
@@ -74,12 +75,13 @@ export function TaskReferencePicker({
       )}
 
       <div className={styles.box}>
-        <input
-          type="search"
+        <SearchInput
           className={styles.input}
+          wrapStyle={{ display: 'flex', width: '100%' }}
           placeholder="🔗 Reference a task…"
+          aria-label="Reference a task"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onValue={setQ}
           onFocus={() => setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
         />

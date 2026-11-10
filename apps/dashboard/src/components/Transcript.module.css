@@ -567,3 +567,25 @@
   box-shadow: var(--raised-xs);
   font-size: 13px;
 }
+
+/* a search result opened at its message: the message flashes once */
+.flashMsg {
+  animation: flashMsg 2.4s ease-out 1;
+  scroll-margin: 40px;
+}
+@keyframes flashMsg {
+  0%,
+  35% {
+    box-shadow: 0 0 0 3px var(--amber);
+    background-color: var(--amber-soft);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flashMsg {
+    animation: none;
+    box-shadow: 0 0 0 3px var(--amber);
+  }
+}

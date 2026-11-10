@@ -29,7 +29,10 @@ const SYSTEM: Item[] = [
   { to: '/stats', icon: '📊', label: 'Stats' },
   { to: '/settings', icon: '⚙', label: 'Settings' },
 ];
-const MORE = [...LIBRARY, ...SYSTEM];
+const SEARCH: Item = { to: '/search', icon: '🔎', label: 'Search' }; // Ctrl/Cmd+K opens the quick search from anywhere
+// the sidebar lists Search right after Tasks; the phone's bottom bar has no room for it, so it is in "More"
+const SIDE: Item[] = [WORK[0]!, SEARCH, ...WORK.slice(1)];
+const MORE = [SEARCH, ...LIBRARY, ...SYSTEM];
 
 const isOn = (pathname: string, it: Item): boolean =>
   it.to === '/' ? pathname === '/' || pathname.startsWith('/tasks') : pathname === it.to || pathname.startsWith(`${it.to}/`) || Boolean(it.also && pathname.startsWith(it.also));
@@ -70,7 +73,7 @@ export function AppNav() {
     <>
       <aside className={styles.side} aria-label="Main navigation">
         <div className={styles.brand}>🤖 Agent Fleet</div>
-        {WORK.map((it) => link(it, it.to === '/' ? pending : 0))}
+        {SIDE.map((it) => link(it, it.to === '/' ? pending : 0))}
         <div className={styles.group}>Library</div>
         {LIBRARY.map((it) => link(it))}
         <div className={styles.group}>System</div>

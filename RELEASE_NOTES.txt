@@ -1,9 +1,16 @@
-Aigentron v0.1.124
+Aigentron v0.1.125
 
-For people who are not programmers: this is 0.1.123 again, but installable. Version 0.1.123 could not be built (an update to it stops by itself and the previous version keeps running) — use this one.
+For people who are not programmers: you can search all your conversations, the browser's proxy is chosen in the dashboard, and scheduled tasks remember what you asked for in their chat.
+
+New
+- Search in chats (main menu → Search, or Ctrl/Cmd+K from anywhere): finds words in the conversations of all tasks, in any language («Литве» finds «Литва»). Several words must all be present, "quotes" make an exact phrase, -word leaves a word out. Filters: whose messages, project, agent, status, date; best match or newest. A result opens the task at that message, which flashes once. Inside a task, "🔎 find" searches that conversation. The task list's search box shows "Also in conversations". The admin assistant can search too ("find the chat where we talked about X"). A ".* Pattern" mode takes a regular expression (dates, links, any form of a word); it reads the latest 20 000 messages and is stopped if it is too slow. Old messages are indexed in the background after the update (a bar shows progress, a few minutes, once).
+- Every search box has a clear (×) button.
+- Proxy connections for the agents' browser (Add-ons → Playwright → Browser proxy): paste the line your proxy seller gave (res.proxy-seller.com;10000;user;pass, user:pass@host:port, …), name it, Test, and choose it — or Direct. It applies at once, no restart; the login stays on the server and is never shown again or given to agents. The browser goes through a small gateway in the server; the project's own preview pages stay direct. HTTP / HTTPS proxies only. A proxy can also be set in .env as PLAYWRIGHT_PROXY / PLAYWRIGHT_BROWSER_PROXY in the same formats.
+- The admin assistant can propose a schedule that runs a script (the whole script is on the approval card in the dashboard).
 
 Fixed
-- The update to 0.1.123 failed while building a package; fixed. Everything announced for 0.1.123 is here:
-  - The admin assistant can propose a schedule that runs a shell script on the server (no model, free). Nothing runs until you approve: the card in the dashboard shows the whole script.
-  - Message box on a phone: full width, the caret no longer shows a line below the text, the floating assistant no longer covers Send.
-  - The floating assistant no longer stays orange / "thinking" after everything is finished.
+- In a scheduled task, what you asked in its chat for the next runs («add this parameter») is repeated with every run, so a switch of the model or a long history no longer brings the old parameters back. (To make a change permanent, edit the schedule's text.)
+- A model that takes over a conversation is told that a later message overrides the first request.
+- Select-all + Backspace in the message box, the message box on a phone, the floating assistant stuck orange — fixed in earlier releases; included for completeness of the update.
+
+Update note: the database gets a new column and a search index (added automatically on start). On a Docker install, recreate the browser so that it goes through the gateway: docker compose --profile mcp up -d --force-recreate playwright-mcp. Update the extension too only if the icon asks you to.

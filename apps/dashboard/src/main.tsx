@@ -27,6 +27,7 @@ const router = createBrowserRouter([
       { path: '/resources', lazy: async () => ({ Component: (await import('./pages/ResourcesPage')).ResourcesPage }) },
       { path: '/knowledge', lazy: async () => ({ Component: (await import('./pages/KnowledgePage')).KnowledgePage }) },
       { path: '/workspace', lazy: async () => ({ Component: (await import('./pages/WorkspacePage')).WorkspacePage }) },
+      { path: '/search', lazy: async () => ({ Component: (await import('./pages/SearchPage')).SearchPage }) },
       { path: '/schedules', lazy: async () => ({ Component: (await import('./pages/SchedulesPage')).SchedulesPage }) },
       { path: '/projects', lazy: async () => ({ Component: (await import('./pages/ProjectsPage')).ProjectsPage }) },
       { path: '/projects/:slug', lazy: async () => ({ Component: (await import('./pages/ProjectPage')).ProjectPage }) },

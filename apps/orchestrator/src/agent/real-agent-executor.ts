@@ -52,6 +52,8 @@ import { QuestionsService } from '../questions/questions.service';
 import { MediaService } from '../media/media.service';
 import { isImageName, isVideoName } from '../media/media-core';
 import { AnswerTracker, isQuietTool, noToolsNote, resumeTurnEvent } from './final-answer';
+import { eventSearchText } from '../chat-search/search-core';
+import { escalationNote, lostSessionNote, standingInstructions } from './session-continuity';
 import { isPdf, isTextLike } from '../files/file-types';
 import { AgentProposalsService } from '../agent-registry/agent-proposals.service';
 import { PlatformAdminService } from '../agent-registry/platform-admin.service';
@@ -377,7 +379,7 @@ export class RealAgentExecutor extends AgentExecutor {
       const { provider: sp, model: sm } = chain[startIndex]!;
       note = `↑ verification failed on the earlier model — fixing on "${sp.name}/${sm}" (a step of the escalation ladder)`;
       pendingEscalation = { reason: 'verification failed', from: resumedWith ? `${resumedWith.provider}/${resumedWith.model}` : `${chain[0]!.provider.name}/${chain[0]!.model}` };
-      handoff = `An earlier attempt on a cheaper model already made the changes now in the working tree. The original request of this task:\n${task.prompt.slice(0, 3000)}`;
+      handoff = escalationNote(task.prompt);
       this.logger.warn(`Task ${ctx.taskId}: ${note}`);
     }
     for (let i = startIndex; i < chain.length; i++) {
@@ -424,7 +426,7 @@ export class RealAgentExecutor extends AgentExecutor {
           .map((e) => `${e.kind === 'prompt' ? 'Person' : e.kind === 'subtask_report' ? `Subtask (${e.speaker ?? 'agent'})` : 'You'}: ${e.text.replace(/\s+/g, ' ').slice(0, 700)}`)
           .join('\n')
           .slice(-6000);
-        const lost = `(The earlier session of this task could not be resumed. Its original request: ${task.prompt.slice(0, 1500)}\nThe conversation so far, oldest first:\n${history}\nContinue from here with the person's new message below.)\n`;
+        const lost = lostSessionNote(task.prompt, history, common.scheduled);
         r = await run(undefined, `${fresh ? `${fresh}\n` : ''}${lost}`);
       }
       last = r.outcome;
@@ -522,6 +524,7 @@ export class RealAgentExecutor extends AgentExecutor {
       proposeResource: (input) => this.platformAdmin.proposeResource(taskId, sessionId, input),
       channelsList: () => this.platformAdmin.channelsList(),
       proposeChannel: (input) => this.platformAdmin.proposeChannel(taskId, sessionId, input),
+      chatsSearch: (input) => this.platformAdmin.chatsSearch(input),
       schedulesList: () => this.platformAdmin.schedulesList(),
       proposeSchedule: (input) => this.platformAdmin.proposeSchedule(taskId, sessionId, input),
       accessStatus: () => this.platformAdmin.accessStatus(),
@@ -701,7 +704,15 @@ export class RealAgentExecutor extends AgentExecutor {
     // Only the person's own text is filtered (never the orchestrator's reference context); the transcript keeps the original (`shownPrompt`).
     const shownPrompt = opts.refContext ? `${opts.refContext}\n${rawPrompt}` : rawPrompt;
     const body = opts.refContext ? `${opts.refContext}\n${compressor.message(rawPrompt)}` : compressor.message(rawPrompt);
-    const prompt = opts.handoff ? `${opts.handoff}\n\n---\n\n${body}` : body;
+    // A scheduled task: what the person asked in the conversation for the next runs («add this parameter») is repeated with every run, so that it survives a
+    // switch of the model, a fresh session or a long history — the schedule's text alone would bring the old parameters back.
+    let standing = '';
+    if (opts.scheduled && ctx.followUpPrompt) {
+      const said = await this.prisma.agentEvent.findMany({ where: { taskId: ctx.taskId, kind: 'prompt' }, orderBy: [{ createdAt: 'asc' }, { seq: 'asc' }], take: 500, select: { text: true } }).catch(() => []);
+      standing = standingInstructions(said.map((e) => e.text), ctx.followUpPrompt);
+    }
+    const withStanding = standing ? `${body}\n\n---\n\n${standing}` : body;
+    const prompt = opts.handoff ? `${opts.handoff}\n\n---\n\n${withStanding}` : withStanding;
     const isCodex = provider.kind === 'codex';
     // Session ids are runtime-specific; only resume a session this runtime created.
     const resumeSessionId = untagSessionId(opts.resumeSessionId, isCodex);
@@ -839,6 +850,7 @@ export class RealAgentExecutor extends AgentExecutor {
               seq: current,
               kind: event.kind,
               text: event.text,
+              searchText: eventSearchText(event.kind, event.text),
               // Widened to `string` on sqlite (see agent-event-attachments.ts);
               // the app is compiled against the postgres-typed client (the
               // canonical, narrower shape — same tradeoff as PrismaModule's cast).
@@ -1872,6 +1884,7 @@ const SCHEDULED_RUN_HINT = [
   'In that case do the job now, then say in your final summary that it should become a script schedule (Schedules → Run a script: it runs with `sh`, keeps a history in `$LDS_DATA_DIR`,',
   'and files it leaves in `$LDS_OUTPUT_DIR` are sent to the chat and deleted — see docs/schedule-scripts.md), and, if you can, save the script into the workspace (`workspace_save`) so the person only has to paste it.',
   'Keep work that needs judgement (reading, deciding, explaining) for yourself.',
+  "The schedule's text arrives with every run. The person can adjust the next runs by writing in this conversation (a new parameter, a changed filter, something to skip): those messages stay in force for ALL later runs, win over the schedule's text where they conflict, and are repeated to you under «Standing instructions» — apply them every time. If the person edited the schedule's text instead, the newest text replaces the older one.",
   'Finish every step INSIDE this run: no background processes, no "I will report later" — nobody continues after this run ends. Take numbers only from what you fetched or read in this run, never from an example in your instructions.',
 ].join('\n');
 

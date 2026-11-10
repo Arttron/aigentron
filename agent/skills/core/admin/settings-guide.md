@@ -65,7 +65,7 @@ Dashboard text is English; the person's text, names, knowledge bases, voice (50 
 
 ## Browser through a proxy
 
-MCP server `playwright-proxy` sends ALL traffic through the operator's proxy (server-only: `PLAYWRIGHT_PROXY_SERVER` host:port, `_USER`, `_PASS` in `.env`, then `docker compose --profile proxy up -d playwright-mcp-proxy`; add it to the agent's MCP list). `docs/browser-proxy.md`.
+The ordinary `playwright` browser can use a proxy chosen in the dashboard: **Add-ons → Playwright → Browser proxy** (paste the seller's line `host;port;user;pass`, name it, Test, pick it or Direct; applies at once, the login is never shown). MCP server `playwright-proxy` sends ALL traffic through the operator's proxy (server-only: `PLAYWRIGHT_PROXY=res.proxy-seller.com;10000;user;pass` in `.env` — also `user:pass@host:port`, `host:port:user:pass`, `http://user:pass@host:port`; or the older `PLAYWRIGHT_PROXY_SERVER`/`_USER`/`_PASS`; then `docker compose --profile proxy up -d playwright-mcp-proxy`; add it to the agent's MCP list). `docs/browser-proxy.md`.
 
 ## Moving to another server
 

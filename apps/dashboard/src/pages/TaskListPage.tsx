@@ -1,3 +1,4 @@
+import { ChatHitsHint } from '@/components/ChatHitsHint';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SERVER_EVENT } from '@lds/shared';
 import { useProjects } from '@/lib/use-projects';
@@ -7,7 +8,7 @@ import { getSocket } from '@/lib/socket';
 import { readFilterParam, withFilterParam } from '@/lib/url-filter';
 import { CreateTaskForm } from '@/components/CreateTaskForm';
 import { TaskList } from '@/components/TaskList';
-import { AppHeader, Button, Card, SectionTitle, ConnStatus, ErrorText, Muted } from '@/components/ui';
+import { AppHeader, Button, Card, SectionTitle, ConnStatus, ErrorText, Muted, SearchInput } from '@/components/ui';
 import { BULK_LABEL, listStatus, planBulk, rangeIds, runBulk, type BulkAction } from '@/lib/bulk-actions';
 
 const PAGE_SIZE = 25;
@@ -355,14 +356,9 @@ export function TaskListPage() {
           <SectionTitle>
             Tasks {q ? `(${total} match${total === 1 ? '' : 'es'})` : `(${total})`}
           </SectionTitle>
-          <input
-            type="search"
-            placeholder="🔎 Search tasks…"
-            value={q}
-            onChange={(e) => onSearch(e.target.value)}
-            style={{ maxWidth: '18rem', marginLeft: 'auto' }}
-          />
+          <SearchInput placeholder="🔎 Search tasks…" aria-label="Search tasks" value={q} onValue={onSearch} wrapStyle={{ maxWidth: '18rem', marginLeft: 'auto', flex: 1 }} />
         </div>
+        <ChatHitsHint q={q} project={project || undefined} />
         {/* The actions are always on screen (disabled until something is ticked), so ticking a row never moves the page. */}
         <div role="toolbar" aria-label="Actions on the selected tasks" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 10, minHeight: 32 }}>
           <input

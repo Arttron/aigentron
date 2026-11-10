@@ -5,6 +5,7 @@ import { AdminChat } from '@/components/AdminChat';
 import { AuthGate } from '@/components/AuthGate';
 import { ScrollTopButton } from '@/components/ScrollTopButton';
 import { AppNav } from '@/components/AppNav';
+import { QuickSearch } from '@/components/QuickSearch';
 
 export function App() {
   return (
@@ -17,6 +18,7 @@ export function App() {
       </div>
       <ApprovalDock />
       <AdminChat />
+      <QuickSearch />
       <ThemeToggle />
       <ScrollTopButton />
     </AuthGate>

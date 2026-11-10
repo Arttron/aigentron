@@ -358,3 +358,21 @@ label:has(> input[type='radio']) {
   width: fit-content;
   max-width: 100%;
 }
+
+/* Find in a conversation (FindBar): the browser's highlight registry paints the matches without touching the page's markup. */
+::highlight(find-all) {
+  background-color: rgba(217, 164, 65, 0.4);
+  color: inherit;
+}
+::highlight(find-current) {
+  background-color: #2f6f68;
+  color: #ffffff;
+}
+
+/* Search boxes have their own clear (×) button (ui/SearchInput): the browser's would be a second one, and looks different in every browser. */
+input[type='search']::-webkit-search-cancel-button,
+input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}

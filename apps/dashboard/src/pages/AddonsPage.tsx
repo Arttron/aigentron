@@ -7,6 +7,7 @@ import { BrowserAddonPanel } from './BrowserPage';
 import { PlaywrightAddonPanel } from './PlaywrightAddonPanel';
 import { VoiceAddonPanel } from './VoiceAddonPanel';
 import { ExtensionSettings } from '@/components/settings/ExtensionSettings';
+import { ProxyConnections } from '@/components/settings/ProxyConnections';
 
 const TABS = [
   { id: 'browser', label: '🌐 Browser' },
@@ -38,6 +39,7 @@ export function AddonsPage() {
       <Tabs tabs={tabs} active={tab} onChange={(id) => setParams({ tab: id }, { replace: true })} />
       {tab === 'browser' && <BrowserAddonPanel />}
       {tab === 'playwright' && <PlaywrightAddonPanel />}
+      {tab === 'playwright' && <ProxyConnections />}
       {tab === 'voice' && <VoiceAddonPanel />}
       {tab === 'extension' && <ExtensionSettings />}
     </>

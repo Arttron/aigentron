@@ -94,18 +94,32 @@ services:
     # (DNS-rebinding guard). Allow the compose service name so the orchestrator
     # can reach it as http://playwright-mcp:8931/mcp.
     command:
-      - "--headless"
       - "--host"
       - "0.0.0.0"
       - "--port"
       - "8931"
       - "--allowed-hosts"
       - "playwright-mcp:8931,localhost:8931"
+    # Optional: send this browser's traffic through a proxy too (.env: PLAYWRIGHT_BROWSER_PROXY=host;port;user;pass — any shape of infra/proxy-parse.cjs).
+    # The project's own preview servers and this stack's services skip the proxy (PLAYWRIGHT_BROWSER_PROXY_BYPASS). Not set = a direct browser, as before.
+    # (The entrypoint is the image's own, `node /app/cli.js --headless --browser chromium --no-sandbox`, with the proxy config added when there is one.)
+    environment:
+      # default: through the orchestrator's gateway (which forwards to the proxy chosen in Add-ons → Playwright, or goes direct); put an address here to use a proxy directly instead
+      PLAYWRIGHT_BROWSER_PROXY: ${PLAYWRIGHT_BROWSER_PROXY:-http://orchestrator:8940}
+      PLAYWRIGHT_BROWSER_PROXY_BYPASS: ${PLAYWRIGHT_BROWSER_PROXY_BYPASS:-localhost,127.0.0.1,orchestrator,project-dev,host.docker.internal,playwright-mcp,dashboard,postgres}
+    volumes:
+      - ./infra/playwright-proxy-config.cjs:/proxy/config.cjs:ro
+      - ./infra/proxy-parse.cjs:/proxy/proxy-parse.cjs:ro
+    entrypoint:
+      - "sh"
+      - "-c"
+      - "CFG=; if [ -n \"$$PLAYWRIGHT_BROWSER_PROXY\" ]; then PLAYWRIGHT_PROXY=\"$$PLAYWRIGHT_BROWSER_PROXY\" PLAYWRIGHT_PROXY_BYPASS=\"$$PLAYWRIGHT_BROWSER_PROXY_BYPASS\" node /proxy/config.cjs /tmp/pw-browser.json || exit 2; CFG='--config /tmp/pw-browser.json'; fi; unset PLAYWRIGHT_BROWSER_PROXY PLAYWRIGHT_BROWSER_PROXY_BYPASS; exec node /app/cli.js --headless --browser chromium --no-sandbox \"$$@\" $$CFG"
+      - "sh"
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8931:8931"
 
   # The same browser, but ALL its traffic goes through a proxy (egress IP of another country, an IP the target site allows, …).
-  # Credentials come from .env: PLAYWRIGHT_PROXY_SERVER (host:port), PLAYWRIGHT_PROXY_USER, PLAYWRIGHT_PROXY_PASS
+  # The proxy comes from .env: PLAYWRIGHT_PROXY (the whole proxy in the seller's form, e.g. host;port;user;pass) or the older PLAYWRIGHT_PROXY_SERVER (host:port), PLAYWRIGHT_PROXY_USER, PLAYWRIGHT_PROXY_PASS
   # (optional PLAYWRIGHT_PROXY_BYPASS). Start it with `docker compose --profile proxy up -d playwright-mcp-proxy`; agents reach it
   # as the `playwright-proxy` MCP server (tools mcp__playwright-proxy__*) — see agent/skills/core/playwright.md.
   playwright-mcp-proxy:
@@ -113,16 +127,18 @@ services:
     image: mcr.microsoft.com/playwright/mcp:latest
     profiles: ["proxy"]
     environment:
+      PLAYWRIGHT_PROXY: ${PLAYWRIGHT_PROXY:-}
       PLAYWRIGHT_PROXY_SERVER: ${PLAYWRIGHT_PROXY_SERVER:-}
       PLAYWRIGHT_PROXY_USER: ${PLAYWRIGHT_PROXY_USER:-}
       PLAYWRIGHT_PROXY_PASS: ${PLAYWRIGHT_PROXY_PASS:-}
       PLAYWRIGHT_PROXY_BYPASS: ${PLAYWRIGHT_PROXY_BYPASS:-}
     volumes:
       - ./infra/playwright-proxy-config.cjs:/proxy/config.cjs:ro
+      - ./infra/proxy-parse.cjs:/proxy/proxy-parse.cjs:ro
     entrypoint:
       - "sh"
       - "-c"
-      - "node /proxy/config.cjs /tmp/pw-proxy.json && unset PLAYWRIGHT_PROXY_USER PLAYWRIGHT_PROXY_PASS PLAYWRIGHT_PROXY_SERVER PLAYWRIGHT_PROXY_BYPASS && exec node /app/cli.js --headless --browser chromium --no-sandbox --host 0.0.0.0 --port 8932 --allowed-hosts playwright-mcp-proxy:8932,localhost:8932 --config /tmp/pw-proxy.json"
+      - "node /proxy/config.cjs /tmp/pw-proxy.json && unset PLAYWRIGHT_PROXY PLAYWRIGHT_PROXY_USER PLAYWRIGHT_PROXY_PASS PLAYWRIGHT_PROXY_SERVER PLAYWRIGHT_PROXY_BYPASS && exec node /app/cli.js --headless --browser chromium --no-sandbox --host 0.0.0.0 --port 8932 --allowed-hosts playwright-mcp-proxy:8932,localhost:8932 --config /tmp/pw-proxy.json"
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8932:8932"
 
@@ -196,6 +212,9 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/orchestrator?schema=public
       REDIS_URL: redis://redis:6379
       ORCHESTRATOR_PORT: "3001"
+      # The browser gateway (docs/browser-proxy.md): the Playwright browser goes through it, and Add-ons → Playwright chooses the proxy it forwards to.
+      # Listens on the stack's internal network only (no port is published on the host); private addresses are refused as clients.
+      PROXY_GATEWAY_BIND: 0.0.0.0
       # Shared secret the PreToolUse hook must present to the approval gate
       # (x-lds-hook-secret). Pinned so it survives restarts; override in .env.
       LDS_HOOK_SECRET: ${LDS_HOOK_SECRET:-dev-hook-secret-change-me}

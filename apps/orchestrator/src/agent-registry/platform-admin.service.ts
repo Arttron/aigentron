@@ -1,3 +1,4 @@
+import { ChatSearchService } from '../chat-search/chat-search.service';
 import { ProjectsService } from '../projects/projects.service';
 import { copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
@@ -831,6 +832,19 @@ export class PlatformAdminService {
     await this.audit.record({ taskId: currentTaskId, tool: 'propose_cloudflare_access', summary: `Cloudflare Access ${r.config.enabled ? 'ON' : 'off'} (team ${r.config.teamDomain}) — ${input.reason.slice(0, 80)}` });
     this.logger.log(`Admin set Cloudflare Access ${r.config.enabled ? 'on' : 'off'} (${r.config.teamDomain})`);
     return { ok: true, message: r.config.enabled ? `Cloudflare Access is now required on public domain names (team ${r.config.teamDomain}). localhost / IPs / the local network are unaffected.` : 'Cloudflare Access is switched off.' };
+  }
+
+  /** Search in the conversations of all tasks, as text for the admin (task ids so that it can read one). */
+  async chatsSearch(input: { q: string; scope?: 'all' | 'mine' | 'agents' | 'results'; limit?: number }): Promise<string> {
+    const search = this.moduleRef.get(ChatSearchService, { strict: false });
+    const limit = Math.min(10, Math.max(1, input.limit ?? 5));
+    const r = await search.search({ q: input.q, scope: input.scope, pageSize: limit }, null);
+    if (!r.tasks.length) return `Nothing found for "${input.q}".${r.indexed < 1 ? ` (older messages are still being indexed: ${Math.round(r.indexed * 100)} % — try again in a few minutes)` : ''}`;
+    const lines = r.tasks.map((t) => {
+      const hits = t.hits.slice(0, 2).map((h) => `  - ${h.kind === 'prompt' ? 'you' : (h.speaker ?? h.kind)} ${h.at.toISOString().slice(0, 16).replace('T', ' ')}: ${h.snippet.text.replace(/\s+/g, ' ').slice(0, 220)}`);
+      return [`${t.title} [${t.status}] task id ${t.taskId}${t.project ? ` · project ${t.project.slug}` : ''}`, ...hits].join('\n');
+    });
+    return [`${r.messages} message(s) in ${r.total} task(s); showing ${r.tasks.length}:`, ...lines, r.total > r.tasks.length ? 'More exist: narrow the words or use a phrase.' : ''].filter(Boolean).join('\n');
   }
 
   async schedulesList(): Promise<string> {

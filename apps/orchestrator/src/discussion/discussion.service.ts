@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { encodeAttachments } from '../prisma/agent-event-attachments';
 import { isBuiltinAgent } from '../agent-registry/agent-registry.service';
+import { eventSearchText } from '../chat-search/search-core';
 import { AGREED_MARK, allAgreed, buildSummaryPrompt, buildTurnPrompt, cleanLanguage, cleanParticipants, cleanRounds, stripMark, type DiscussionLanguage, type Turn } from './discussion-core';
 
 interface Active {
@@ -128,7 +129,7 @@ export class DiscussionService {
     if (session) {
       const seq = a.seq++;
       await this.prisma.agentEvent
-        .create({ data: { agentSessionId: session.id, taskId, seq, kind: 'prompt', text: t, attachments: encodeAttachments(this.config, []) as string[] } })
+        .create({ data: { agentSessionId: session.id, taskId, seq, kind: 'prompt', text: t, searchText: eventSearchText('prompt', t), attachments: encodeAttachments(this.config, []) as string[] } })
         .catch((e) => this.logger.warn(`Could not store the message in ${taskId}: ${(e as Error).message}`));
       this.bus.publish({ type: 'agent-log', payload: { taskId, agentSessionId: session.id, kind: 'prompt', text: t, seq, ts: new Date().toISOString() } });
     }
@@ -244,7 +245,7 @@ export class DiscussionService {
     if (!session) return;
     const seq = a.seq++;
     await this.prisma.agentEvent
-      .create({ data: { agentSessionId: session.id, taskId: a.taskId, seq, kind: 'discussion', speaker: 'system', text, attachments: encodeAttachments(this.config, []) as string[] } })
+      .create({ data: { agentSessionId: session.id, taskId: a.taskId, seq, kind: 'discussion', speaker: 'system', text, searchText: eventSearchText('discussion', text), attachments: encodeAttachments(this.config, []) as string[] } })
       .catch((e) => this.logger.warn(`Could not store a note in ${a.taskId}: ${(e as Error).message}`));
     this.bus.publish({ type: 'agent-log', payload: { taskId: a.taskId, agentSessionId: session.id, kind: 'discussion', speaker: 'system', text, seq, ts: new Date().toISOString() } });
   }

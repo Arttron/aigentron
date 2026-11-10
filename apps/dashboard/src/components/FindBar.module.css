@@ -1,0 +1,38 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  box-shadow: var(--raised-sm);
+}
+.input {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  font-size: 14px;
+}
+.count {
+  min-width: 64px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.btn {
+  border: none;
+  cursor: pointer;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: var(--raised-xs);
+  font-size: 16px;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

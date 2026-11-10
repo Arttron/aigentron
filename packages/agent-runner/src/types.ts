@@ -253,6 +253,8 @@ export interface AdminToolsWiring {
     makeDefault?: boolean;
     reason: string;
   }) => Promise<{ ok: boolean; message: string }>;
+  /** Search in the conversations of all tasks (read-only): matching messages grouped by task. */
+  chatsSearch: (input: { q: string; scope?: 'all' | 'mine' | 'agents' | 'results'; limit?: number }) => Promise<string>;
   /** Recurring jobs: read-only listing, and create/change/delete — human-approved. */
   schedulesList: () => Promise<string>;
   proposeSchedule: (input: {

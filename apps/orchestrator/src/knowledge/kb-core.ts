@@ -12,7 +12,7 @@ const STOP = new Set(['the', 'a', 'an', 'of', 'to', 'in', 'on', 'and', 'or', 'is
 /** Scripts written without spaces between words: indexed as character pairs. */
 const CJK = /([\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u0e00-\u0e7f\u0e80-\u0eff\u1000-\u109f\u1780-\u17ff]+)/u;
 
-export function tokenize(text: string): string[] {
+export function tokenize(text: string, stemmer: (w: string) => string = stem): string[] {
   const out: string[] = [];
   // combining marks (Hindi / Thai vowel signs, Arabic harakat, accents) belong to their word — they are not separators
   for (const piece of text.toLowerCase().normalize('NFKC').replace(/[\u0610-\u061a\u064b-\u065f\u0670]/g, '').split(/[^\p{L}\p{N}\p{M}]+/u)) {
@@ -26,7 +26,7 @@ export function tokenize(text: string): string[] {
         continue;
       }
       if (raw.length < 2 || STOP.has(raw)) continue;
-      out.push(stem(raw));
+      out.push(stemmer(raw));
     }
   }
   return out;

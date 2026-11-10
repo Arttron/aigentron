@@ -74,6 +74,64 @@ export type TaskStatusFilter = 'queued' | 'running' | 'needs_approval' | 'review
 
 export type TaskTypeFilter = 'task' | 'subtask' | 'chat' | 'scheduled' | 'channel' | 'discussion' | 'ask';
 
+/** A saved proxy connection for the browser (never carries the password). */
+export interface ProxyConnection {
+  id: string;
+  name: string;
+  server: string;
+  username: string | null;
+  hasPassword: boolean;
+  active: boolean;
+  createdAt: string;
+}
+export interface ProxyList {
+  items: ProxyConnection[];
+  gateway: { port: number; listening: boolean };
+}
+
+/** Search in chats (docs/chat-search.md). */
+export interface ChatSearchParams {
+  q: string;
+  scope?: 'all' | 'mine' | 'agents' | 'results';
+  project?: string;
+  agent?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+  sort?: 'best' | 'new';
+  /** `pattern`: `q` is a regular expression */
+  mode?: 'words' | 'pattern';
+  page?: number;
+  pageSize?: number;
+}
+export interface ChatSearchHit {
+  eventId: string;
+  /** the conversation line's key, for the deep link */
+  line: string;
+  kind: string;
+  speaker: string | null;
+  at: string;
+  snippet: { text: string; marks: [number, number][] };
+}
+export interface ChatSearchTask {
+  taskId: string;
+  title: string;
+  status: TaskStatus;
+  project: { slug: string; name: string } | null;
+  agent: string | null;
+  updatedAt: string;
+  hits: ChatSearchHit[];
+}
+export interface ChatSearchResult {
+  tasks: ChatSearchTask[];
+  total: number;
+  messages: number;
+  /** 0..1: how much of the history is indexed */
+  indexed: number;
+  /** a pattern search: how many messages were read, and why the answer may be incomplete */
+  pattern?: { scanned: number; truncated: boolean; timedOut: boolean };
+}
+
 export interface ListTasksParams {
   q?: string;
   type?: TaskTypeFilter;
@@ -734,6 +792,13 @@ export const api = {
       signal,
     }).then((data): TaskPage => (Array.isArray(data) ? { items: data, total: data.length, page: 1, pageSize: data.length || 1 } : data)),
 
+  searchChats: (params: ChatSearchParams, signal?: AbortSignal) =>
+    request<ChatSearchResult>('GET', '/search/chats', {
+      query: { q: params.q, scope: params.scope && params.scope !== 'all' ? params.scope : undefined, project: params.project || undefined, agent: params.agent || undefined, status: params.status || undefined, from: params.from || undefined, to: params.to || undefined, sort: params.sort && params.sort !== 'best' ? params.sort : undefined, mode: params.mode === 'pattern' ? 'pattern' : undefined, page: params.page && params.page > 1 ? params.page : undefined, pageSize: params.pageSize || undefined },
+      signal,
+    }),
+  chatSearchStatus: () => request<{ indexed: number; pending: number; total: number }>('GET', '/search/chats/status'),
+
   taskStatusCounts: (type?: TaskTypeFilter, signal?: AbortSignal, project?: string) => request<Record<TaskStatusFilter, number>>('GET', '/tasks/status-counts', { query: { type: type || undefined, project: project || undefined }, signal }),
   taskTypeCounts: (signal?: AbortSignal, project?: string) => request<Record<TaskTypeFilter | 'all', number>>('GET', '/tasks/type-counts', { query: { project: project || undefined }, signal }),
 
@@ -942,6 +1007,11 @@ export const api = {
 
   extensionInfo: () => request<{ available: boolean; signInOn: boolean; version: string; extensionVersion?: string; extensionId: string; origins: string[]; devices: { id: string; label: string; user: string; createdAt: string; lastSeenAt: string; /** the extension's own version as it last reported it (null: an older build that does not report) */ version: string | null; /** Chrome has given the extension access to websites (false: agents cannot use this browser yet) */ allSites: boolean | null; outdated: boolean }[]; agentsBrowser?: boolean }>('GET', '/extension/info'),
   extensionSetAgentsBrowser: (on: boolean) => request<{ agentsBrowser: boolean }>('PUT', '/extension/settings', { body: { agentsBrowser: on } }),
+  listProxies: () => request<ProxyList>('GET', '/proxies'),
+  addProxy: (body: { name: string; line: string }) => request<ProxyConnection>('POST', '/proxies', { body }),
+  removeProxy: (id: string) => request<{ id: string; deleted: boolean }>('DELETE', `/proxies/${e(id)}`),
+  setActiveProxy: (id: string | null) => request<ProxyList>('PUT', '/proxies/active', { body: { id } }),
+  testProxy: (id: string) => request<{ ok: boolean; ip?: string; ms?: number; error?: string }>('POST', `/proxies/${e(id)}/test`),
   extensionRemoveDevice: (id: string) => request<{ ok: boolean }>('DELETE', `/extension/devices/${e(id)}`),
   extensionPair: () => request<{ code: string; expiresInSec: number }>('POST', '/extension/pair'),
   listAddons: () => request<AddonInfo[]>('GET', '/addons'),

@@ -18,6 +18,7 @@ import { QuoteButton, SelectionQuote } from './QuoteButton';
 import { Collapsible } from './Collapsible';
 import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
 import { buildItems, type Item, type LogLine } from '@/lib/transcript-items';
+import { FindBar } from './FindBar';
 import styles from './Transcript.module.css';
 
 export type { LogLine, Item };
@@ -109,6 +110,7 @@ export function Transcript({
   onAsk,
   activityAt,
   localModel = false,
+  focusLine,
 }: {
   taskId: string;
   /** Timestamp (ms) of the last event from the agent. */
@@ -122,6 +124,8 @@ export function Transcript({
   terminal: boolean;
   /** Fill the height of the parent (phone layout) instead of a fixed maximum. */
   fill?: boolean;
+  /** A message to scroll to and flash once (a search result opened at its message): the line's key. */
+  focusLine?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState<{ name: string; names?: string[] } | null>(null);
@@ -147,6 +151,21 @@ export function Transcript({
     }
     return rising.current.has(id) ? styles.rise : undefined;
   };
+  const [finding, setFinding] = useState(false);
+  // a search result opens the conversation at its message: scroll it into view and flash it once (when it is on the page — the lines may arrive a moment later)
+  const flashed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!focusLine || flashed.current === focusLine) return;
+    const root = ref.current;
+    const el = root?.querySelector<HTMLElement>(`[data-line="${CSS.escape(focusLine)}"]`);
+    if (!el) return;
+    flashed.current = focusLine;
+    stick.current = false;
+    setAway(true);
+    el.scrollIntoView({ block: 'center' });
+    el.classList.add(styles.flashMsg!);
+    window.setTimeout(() => el.classList.remove(styles.flashMsg!), 2400);
+  });
   const [look, setLook] = useLook();
   const [show, setShow] = useShow();
   // Follow new output unless the user has scrolled up. Captured from the user's
@@ -312,7 +331,11 @@ export function Transcript({
           ))}
         </span>
         {hidden > 0 && <span className={styles.hiddenNote}>{hidden} step(s) hidden</span>}
+        <button type="button" className={cn(styles.segBtn, finding && styles.segOn)} aria-pressed={finding} title="Find in this conversation" onClick={() => setFinding((v) => !v)}>
+          🔎 find
+        </button>
       </div>
+      {finding && <FindBar root={ref} refreshKey={items.length} onClose={() => setFinding(false)} />}
 
       <SelectionQuote scope={`task:${taskId}`} container={ref} />
       <div
@@ -326,7 +349,7 @@ export function Transcript({
         {items.map((it, n) => {
           if (it.type === 'user') {
             return (
-              <div key={it.line.id} className={cn(styles.userMsg, rise(it.line.id))}>
+              <div key={it.line.id} data-line={it.line.id} className={cn(styles.userMsg, rise(it.line.id))}>
                 <span className={styles.prompt} aria-label="you">
                   you&gt;
                 </span>
@@ -341,7 +364,7 @@ export function Transcript({
           }
           if (it.type === 'agent') {
             return (
-              <div key={it.line.id} className={cn(styles.agentMsg, it.final && styles.final, rise(it.line.id))}>
+              <div key={it.line.id} data-line={it.line.id} className={cn(styles.agentMsg, it.final && styles.final, rise(it.line.id))}>
                 <span className={styles.prompt} aria-label={it.line.speaker ?? 'agent'} style={it.line.speaker ? { color: speakerColor(it.line.speaker) } : undefined}>
                   {it.line.speaker ? `${it.line.speaker}>` : it.final ? 'result>' : 'agent>'}
                 </span>

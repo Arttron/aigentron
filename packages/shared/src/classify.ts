@@ -146,6 +146,8 @@ export const REQUEST_SECRET_TOOL = `${INTERNAL_TOOL_PREFIX}request_secret`;
 export const MAINTENANCE_REPORT_TOOL = `${INTERNAL_TOOL_PREFIX}maintenance_report`;
 export const PROPOSE_CLEANUP_TOOL = `${INTERNAL_TOOL_PREFIX}propose_cleanup`;
 /** Recurring jobs (reminders / periodic tasks): listing is free; create/change/delete is a gated proposal. */
+/** Search in the conversations of all tasks: read-only. */
+export const CHATS_SEARCH_TOOL = `${INTERNAL_TOOL_PREFIX}chats_search`;
 export const SCHEDULES_LIST_TOOL = `${INTERNAL_TOOL_PREFIX}schedules_list`;
 export const PROPOSE_SCHEDULE_TOOL = `${INTERNAL_TOOL_PREFIX}propose_schedule`;
 /** Where the server answers: reading the status is free; changing the allowed domains / Cloudflare Access is a gated proposal. */

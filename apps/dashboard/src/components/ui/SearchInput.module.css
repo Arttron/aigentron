@@ -1,0 +1,30 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.input {
+  width: 100%;
+  padding-right: 34px;
+}
+.clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.clear:hover,
+.clear:focus-visible {
+  color: var(--text);
+  background: var(--accent-soft);
+}

@@ -4,7 +4,7 @@ import { usePolling } from '@/lib/use-polling';
 import { useDetailsDismiss } from '@/lib/use-details-dismiss';
 import { ApprovalModePicker } from '@/components/ApprovalModePicker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { SERVER_EVENT, isTerminalStatus, type TaskStatus, type PendingFollowUp } from '@lds/shared';
 import { api, type TaskDetail } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
@@ -79,6 +79,9 @@ export function TaskDetailPage() {
 const toLogLine = (e: StreamEntry): LogLine => e;
 
 function TaskDetailView({ id }: { id: string }) {
+  // a search result opens the task at one of its messages (?ev=<the line's key>)
+  const [urlParams] = useSearchParams();
+  const focusLine = urlParams.get('ev') ?? undefined;
   const navigate = useNavigate();
 
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -510,6 +513,7 @@ function TaskDetailView({ id }: { id: string }) {
               activityAt={activityAt}
               localModel={localModel}
               fill
+              focusLine={focusLine}
               onAsk={(p, a) => sendFollowUp(p, a, [])}
             />
           )}
@@ -671,6 +675,7 @@ function TaskDetailView({ id }: { id: string }) {
                   activityAt={activityAt}
                   localModel={localModel}
                   fill={fullChat}
+                  focusLine={focusLine}
                   onAsk={(p, a) => sendFollowUp(p, a, [])}
                 />
                 <FullToggle full={fullChat} onToggle={() => setFullChat((v) => !v)} />

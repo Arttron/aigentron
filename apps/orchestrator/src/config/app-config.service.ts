@@ -37,6 +37,9 @@ export class AppConfigService {
    * Sibling of the agent dir by default: `/workspace/secrets` (compose), `/data/secrets` (minimal/bare).
    */
   readonly secretsDir: string;
+  /** The browser gateway (proxies/gateway.ts): the port (0 = off) and the address it listens on (loopback; the Docker stack sets 0.0.0.0 for its internal network). */
+  readonly proxyGatewayPort: number;
+  readonly proxyGatewayBind: string;
   /** The currently-running release's OWN copy of `agent/` (read-only reference) —
    *  distinct from `agentDir` above, which is the live/persistent copy a human may
    *  have hand-edited. Used by AgentFilesSyncService to bring platform-maintained
@@ -205,6 +208,8 @@ export class AppConfigService {
     this.worktreesRoot = process.env.WORKTREES_ROOT ?? '/workspace/.worktrees';
     this.agentDir = process.env.AGENT_DIR ?? '/workspace/agent';
     this.secretsDir = process.env.SECRETS_DIR ?? join(this.agentDir, '..', 'secrets');
+    this.proxyGatewayPort = Number.isInteger(Number(process.env.PROXY_GATEWAY_PORT)) && process.env.PROXY_GATEWAY_PORT !== undefined && process.env.PROXY_GATEWAY_PORT !== '' ? Number(process.env.PROXY_GATEWAY_PORT) : 8940;
+    this.proxyGatewayBind = process.env.PROXY_GATEWAY_BIND?.trim() || '127.0.0.1';
     this.shippedAgentDir = process.env.SHIPPED_AGENT_DIR ?? defaultShippedAgentDir();
     this.extensionDir = process.env.EXTENSION_DIR ?? join(__dirname, '..', '..', '..', '..', 'apps', 'extension', 'dist');
     this.agentMaxTurns = parseInt(process.env.AGENT_MAX_TURNS ?? '40', 10);

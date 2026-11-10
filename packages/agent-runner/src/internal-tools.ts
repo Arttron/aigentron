@@ -605,6 +605,14 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         },
       },
       {
+        name: 'chats_search',
+        description:
+          'Search the conversations of ALL tasks (what was asked and answered, in any language): returns the matching tasks (id, title, status) with the matching messages. Several words must all be present; \"quotes\" = an exact phrase; -word leaves a word out. `scope`: all (default) | mine (messages people wrote) | agents | results (final answers). Use it for \"what did we decide about X\" / \"find the chat where we talked about Y\", then tell the person which task (id, /tasks/<id>) and what was said. Read-only.',
+        shape: { q: z.string(), scope: z.enum(['all', 'mine', 'agents', 'results']).optional(), limit: z.number().int().min(1).max(10).optional() },
+        handler: async (args) =>
+          admin.chatsSearch({ q: String(args.q ?? ''), scope: args.scope as 'all' | 'mine' | 'agents' | 'results' | undefined, limit: typeof args.limit === 'number' ? args.limit : undefined }),
+      },
+      {
         name: 'schedules_list',
         description:
           'List the recurring jobs (reminders and periodic tasks): name, when it runs (in words), kind, target chat/agent, next run, last result. Read-only.',

@@ -40,6 +40,8 @@ import { WebServerModule } from './web/web-server.module';
 import { UpdateModule } from './update/update.module';
 import { MediaModule } from './media/media.module';
 import { SchedulesModule } from './schedules/schedules.module';
+import { ChatSearchModule } from './chat-search/chat-search.module';
+import { ProxiesModule } from './proxies/proxies.module';
 import { ResourcesModule } from './resources/resources.module';
 import { WorkspaceModule } from './workspace/workspace.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -71,6 +73,8 @@ import { HealthController } from './health/health.controller';
     UpdateModule,
     MediaModule,
     SchedulesModule,
+    ChatSearchModule,
+    ProxiesModule,
     ResourcesModule,
     WorkspaceModule,
     ProjectsModule,
