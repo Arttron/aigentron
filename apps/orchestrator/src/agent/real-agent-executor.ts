@@ -82,6 +82,7 @@ import { extraWriteRootsFor, protectedPathsFor, resolveWorkDir, type ProjectCont
 import { parsePushRefs } from '../projects/push-core';
 import { GitHubService } from '../worktrees/github.service';
 import { splitSubtaskReport } from '../tasks/subtask-report';
+import { parseMessageLink } from '../tasks/message-link';
 import { scopeAdminTools, scopePrompt, type AdminScope } from './admin-scope';
 import { parsePinnedAgents } from '../projects/project-core';
 import { projectFacts } from './project-orientation';
@@ -1080,6 +1081,7 @@ export class RealAgentExecutor extends AgentExecutor {
             }
           : undefined,
       onCurrentTime: (input) => describeNow(new Date(), input.timezone),
+      onReadMessage: ctx.discussion ? undefined : (input) => this.readMessage(ctx.taskId, input),
       browserProxy: ctx.discussion ? undefined : { list: () => this.proxyGateway.agentList(), use: (name) => this.proxyGateway.agentUse(name, ctx.taskId) },
       onCompressResult: (tool, text) => compressor.tool(tool, text),
       onShowImages: async (input) => {
@@ -1522,6 +1524,29 @@ export class RealAgentExecutor extends AgentExecutor {
    *  - Providers already pointing at litellm (e.g. ollama-local) must present
    *    the master key too, since litellm enforces it on every request.
    */
+  /**
+   * `read_message`: the stored text of one chat message, by its link (`/tasks/<id>?ev=<session>:<seq>`). The whole text comes from the database, in
+   * pieces of READ_MESSAGE_CHARS (`from` continues). Only a message of a task of the SAME project can be read: a link in a prompt proves nothing.
+   */
+  private async readMessage(fromTaskId: string, input: { link: string; from?: number }): Promise<string> {
+    const ref = parseMessageLink(input.link);
+    if (!ref) return 'That is not a message link. A link looks like /tasks/<task id>?ev=<session id>:<number> (the "copy link" button under a message in the chat).';
+    const tasks = await this.prisma.task.findMany({ where: { id: { in: [fromTaskId, ref.taskId] } }, select: { id: true, projectId: true } });
+    const mine = tasks.find((t) => t.id === fromTaskId);
+    const theirs = tasks.find((t) => t.id === ref.taskId);
+    if (!theirs) return 'No such chat (it may have been deleted).';
+    if (!mine || mine.projectId !== theirs.projectId) return 'That message belongs to another project: it cannot be read from here.';
+    const e = await this.prisma.agentEvent.findFirst({ where: { taskId: ref.taskId, agentSessionId: ref.sessionId, seq: ref.seq }, select: { kind: true, speaker: true, text: true } });
+    if (!e) return 'No such message (the link may be old, or the chat was cleaned up).';
+    const text = e.text;
+    const start = Math.max(0, Math.floor(input.from ?? 0));
+    const part = text.slice(start, start + READ_MESSAGE_CHARS);
+    if (!part && start > 0) return `(end of the message — it has ${text.length} characters)`;
+    const rest = text.length - start - part.length;
+    const who = e.kind === 'prompt' ? 'the person' : e.speaker || (e.kind === 'result' ? 'the final answer' : 'the agent');
+    return `${start === 0 ? `Message of ${who} (${text.length} characters):\n\n` : ''}${part}${rest > 0 ? `\n\n[… ${rest} more characters — call read_message again with the same link and from=${start + part.length}]` : ''}`;
+  }
+
   /** Is `taskId` a subtask (at any depth) of `ancestorId`? A lead may show what ITS subtasks produced, nothing else of other tasks. */
   private async isDescendantTask(taskId: string, ancestorId: string): Promise<boolean> {
     let cur: string | null = taskId;
@@ -2072,6 +2097,8 @@ function firstProseLine(raw: string): string | null {
 
 /** Append attachment paths to the prompt so the agent views them via Read. */
 const READ_DOCUMENT_CHARS = 12_000;
+/** How much of a stored message one read_message call returns (`from` continues). */
+const READ_MESSAGE_CHARS = 30_000;
 
 export function withAttachments(prompt: string, paths: string[], originals: Record<string, string> = {}, fromLead: ReadonlySet<string> = new Set()): string {
   if (!paths.length) return prompt;

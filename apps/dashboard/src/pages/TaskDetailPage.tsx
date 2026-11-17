@@ -80,8 +80,18 @@ const toLogLine = (e: StreamEntry): LogLine => e;
 
 function TaskDetailView({ id }: { id: string }) {
   // a search result opens the task at one of its messages (?ev=<the line's key>)
-  const [urlParams] = useSearchParams();
+  const [urlParams, setUrlParams] = useSearchParams();
   const focusLine = urlParams.get('ev') ?? undefined;
+  // once the message is shown the address drops `?ev=`: a reload (or going back to the chat) does not highlight it again
+  const focusShown = () =>
+    setUrlParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        n.delete('ev');
+        return n;
+      },
+      { replace: true },
+    );
   const navigate = useNavigate();
 
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -514,6 +524,7 @@ function TaskDetailView({ id }: { id: string }) {
               localModel={localModel}
               fill
               focusLine={focusLine}
+              onFocusShown={focusShown}
               onAsk={(p, a) => sendFollowUp(p, a, [])}
             />
           )}
@@ -676,6 +687,7 @@ function TaskDetailView({ id }: { id: string }) {
                   localModel={localModel}
                   fill={fullChat}
                   focusLine={focusLine}
+              onFocusShown={focusShown}
                   onAsk={(p, a) => sendFollowUp(p, a, [])}
                 />
                 <FullToggle full={fullChat} onToggle={() => setFullChat((v) => !v)} />

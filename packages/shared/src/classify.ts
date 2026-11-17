@@ -47,6 +47,8 @@ export const PUSH_BRANCH_TOOL = `${INTERNAL_TOOL_PREFIX}push_branch`;
 export const FETCH_REMOTE_TOOL = `${INTERNAL_TOOL_PREFIX}fetch_remote`;
 export const COMPLETE_SUBTASK_TOOL = `${INTERNAL_TOOL_PREFIX}complete_subtask`;
 export const CHECK_SUBTASKS_TOOL = `${INTERNAL_TOOL_PREFIX}check_subtasks`;
+/** Read one stored chat message by its link (`/tasks/<id>?ev=…`): a subtask's whole answer, a message a person pointed at. Read-only, limited to the same project. */
+export const READ_MESSAGE_TOOL = `${INTERNAL_TOOL_PREFIX}read_message`;
 /**
  * Raised by the orchestrator itself (not a tool an agent can call, hence no tool prefix) when a run that is still working reaches the ceiling of active time: a person decides
  * whether it may go on. Gated like the other internal tools that cost something; the approval card carries the time used and the extra asked for.

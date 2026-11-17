@@ -1,4 +1,5 @@
 import { ESCALATION_TAIL_MARK, FAN_IN_TAIL_MARK, subtaskBlock } from './subtask-report';
+import { messageLink } from './message-link';
 import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { TERMINAL_TASK_STATUSES, isTerminalStatus, type PendingFollowUp, type Task, type TaskStatus } from '@lds/shared';
 import { AppConfigService } from '../config/app-config.service';
@@ -531,18 +532,19 @@ export class TasksService {
     await this.followUp(parentId, prompt);
   }
 
-  /** A one-line result for a task: latest final answer, else reported summary, else title+status. */
+  /** The result of a task for its lead: the latest final answer (the first SUBTASK_RESULT_CHARS of it, then a link to the rest), else the reported summary, else "(no result)". */
   private async summarizeTask(id: string): Promise<string> {
     const result = await this.prisma.agentEvent.findFirst({
       where: { taskId: id, kind: 'result' },
       orderBy: [{ createdAt: 'desc' }, { seq: 'desc' }],
-      select: { text: true },
+      select: { text: true, agentSessionId: true, seq: true },
     });
     if (result?.text?.trim()) {
-      // A lead builds on what its subtasks found (a designer's whole report, a review's findings), so this is generous; a cut is marked, never silent.
+      // A longer answer is cut, never silently: the cut is marked and carries the message's link, so the lead reads the whole answer from the database with
+      // read_message when it needs it (and keeps its own context small when it does not).
       const full = result.text.trim();
       return full.length > SUBTASK_RESULT_CHARS
-        ? `${full.slice(0, SUBTASK_RESULT_CHARS)}\n[… cut: ${full.length - SUBTASK_RESULT_CHARS} more characters in the subtask's own transcript; ask its agent to put the rest in a file or a shorter report]`
+        ? `${full.slice(0, SUBTASK_RESULT_CHARS)}\n[… cut: ${full.length - SUBTASK_RESULT_CHARS} more characters — read the rest with read_message(link="${messageLink(id, result.agentSessionId, result.seq)}", from=${SUBTASK_RESULT_CHARS})]`
         : full;
     }
     const session = await this.prisma.agentSession.findFirst({
@@ -1190,7 +1192,7 @@ export class TasksService {
   }
 }
 
-/** How much of a subtask's final answer its lead is handed (fan-in and check_subtasks). */
+/** How much of a subtask's final answer its lead is handed at once (fan-in and check_subtasks); the rest is read with read_message (the cut carries the link). */
 const SUBTASK_RESULT_CHARS = 4000;
 /** A subtask that ended like this satisfies an `after` (the others — failed, cancelled, blocked, stalled — do not). */
 const AFTER_OK: readonly string[] = ['done', 'review'];

@@ -1,9 +1,11 @@
-Aigentron v0.1.128
+Aigentron v0.1.129
 
-For people who are not programmers: `aigentron addon enable` works again on a server without Docker, and an agent can show you a screenshot from the server's Playwright browser in the chat.
+For people who are not programmers: every message in a chat has a link you can copy and hand to an agent, a lead agent can read a subtask's long answer in full, and the technical lines no longer clutter the chat.
 
-Fixed
-- `sudo aigentron addon enable <name>` failed on every server installed without Docker with «DATA_DIR=/opt/aigentron/data: not found», so no add-on (Browser, Playwright, Voice) could be enabled or re-enabled from the command line. Fixed. (On 0.1.127 you can still run the installer directly: `sudo env DATA_DIR=/opt/aigentron/data bash /opt/aigentron/current/infra/addons/playwright/bare.sh install`.)
-- A screenshot taken with the server's Playwright browser could not be put into the chat: the browser saves it in its own folder, out of the agent's reach, and the agent said "sent" anyway. The Playwright add-on now saves screenshots in /var/lib/aigentron-playwright/output, the agent can show them with show_images, and its instructions say to report "sent" only after the picture was really shown.
+New
+- Every message in a chat has a "copy link" button (next to copy and quote). Opening the link scrolls the chat to that message and highlights it until you click in the chat or reload the page. Paste the link to an agent and it reads the message from the server itself (new tool read_message; only messages of the same project).
+- When a subtask's answer is longer than 4000 characters, its lead agent now gets a link to the whole answer in the report and reads the rest itself, instead of being left with a cut text.
 
-Update note: after updating, run `sudo aigentron addon enable playwright` once on a server without Docker — it rewrites the Playwright service (the screenshot folder, and the proxy gateway if the 0.1.127 step was not done yet) and restarts it. A Docker install is unchanged: there the agent can still only look at a screenshot, not show it.
+Changed
+- The chat view "messages only" no longer shows the technical lines (a tool server that is not connected, the list of tools in a run); they are in "all steps".
+- A message opened from a search result stays highlighted until you click in the chat (before: a short flash).

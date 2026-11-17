@@ -27,7 +27,7 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /** A small "copy this message" icon; turns into a check mark for a moment. Fixed size, so nothing around it moves. */
-export function CopyButton({ text, label = 'Copy message' }: { text: string; label?: string }) {
+export function CopyButton({ text, label = 'Copy message', icon = 'copy' }: { text: string; label?: string; /** `link` = a chain icon (the button copies a link to the message) */ icon?: 'copy' | 'link' }) {
   const [state, setState] = useState<'idle' | 'done' | 'failed'>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -46,6 +46,10 @@ export function CopyButton({ text, label = 'Copy message' }: { text: string; lab
       ) : state === 'failed' ? (
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
           <path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      ) : icon === 'link' ? (
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
+          <path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.4-2.4a2.6 2.6 0 0 0-3.7-3.7l-.8.8M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.1 9.2a2.6 2.6 0 0 0 3.7 3.7l.8-.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       ) : (
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>

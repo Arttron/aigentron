@@ -33,6 +33,7 @@ export type InternalToolHandlers = Pick<
   | 'onReadDocument'
   | 'onShowImages'
   | 'onCurrentTime'
+  | 'onReadMessage'
   | 'browserProxy'
   | 'onCompressResult'
   | 'onAskUser'
@@ -308,6 +309,16 @@ export function buildInternalToolSpecs(params: InternalToolHandlers): InternalTo
         "The current date and time — you have no clock of your own, so call this whenever the answer depends on \"now\" (today's date, the day of the week, how long ago something was, a deadline, a schedule). `timezone` (optional): an IANA name such as \"Europe/Kyiv\" or \"America/New_York\"; by default the server's timezone, which may not be where the user is — if it matters, ask the user or use what you know about them.",
       shape: { timezone: z.string().optional() },
       handler: async (args) => params.onCurrentTime!({ timezone: typeof args.timezone === 'string' && args.timezone.trim() ? args.timezone.trim() : undefined }),
+    });
+  }
+
+  if (params.onReadMessage) {
+    specs.push({
+      name: 'read_message',
+      description:
+        "Read the WHOLE text of one chat message from the server's storage, by its link. Use it when a message you were given holds a link like `/tasks/<id>?ev=<session>:<n>` (a person pasted it, or a subtask's report was cut and gives one), or when a report says it was cut. `link`: the link as it is (a full URL or just the path); `from` (optional): the character to continue from when the answer says more follows. Only messages of this project can be read.",
+      shape: { link: z.string(), from: z.number().int().min(0).optional() },
+      handler: (args) => params.onReadMessage!({ link: String(args.link ?? ''), ...(typeof args.from === 'number' ? { from: args.from } : {}) }),
     });
   }
 

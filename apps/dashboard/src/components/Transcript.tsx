@@ -17,6 +17,7 @@ import { CopyButton } from './CopyButton';
 import { QuoteButton, SelectionQuote } from './QuoteButton';
 import { Collapsible } from './Collapsible';
 import { speakText, useAutoSpeak, useVoice, useVoiceOnly } from '@/lib/voice';
+import { taskAtMessage } from '@/lib/chat-search';
 import { buildItems, type Item, type LogLine } from '@/lib/transcript-items';
 import { FindBar } from './FindBar';
 import styles from './Transcript.module.css';
@@ -111,6 +112,7 @@ export function Transcript({
   activityAt,
   localModel = false,
   focusLine,
+  onFocusShown,
 }: {
   taskId: string;
   /** Timestamp (ms) of the last event from the agent. */
@@ -126,6 +128,8 @@ export function Transcript({
   fill?: boolean;
   /** A message to scroll to and flash once (a search result opened at its message): the line's key. */
   focusLine?: string;
+  /** Called once the message from the address is on screen: the page drops `?ev=` from the address, so a reload does not highlight it again. */
+  onFocusShown?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [viewing, setViewing] = useState<{ name: string; names?: string[] } | null>(null);
@@ -152,7 +156,9 @@ export function Transcript({
     return rising.current.has(id) ? styles.rise : undefined;
   };
   const [finding, setFinding] = useState(false);
-  // a search result opens the conversation at its message: scroll it into view and flash it once (when it is on the page — the lines may arrive a moment later)
+  // a link to a message (a search result, "copy link") opens the conversation at that message: it scrolls into view and stays highlighted until the person
+  // clicks in the chat (or reloads: the address loses `?ev=` once the message is shown). The lines may arrive a moment later, so it is tried on every render.
+  const [lit, setLit] = useState<string | null>(null);
   const flashed = useRef<string | null>(null);
   useEffect(() => {
     if (!focusLine || flashed.current === focusLine) return;
@@ -162,10 +168,12 @@ export function Transcript({
     flashed.current = focusLine;
     stick.current = false;
     setAway(true);
+    setLit(focusLine);
     el.scrollIntoView({ block: 'center' });
-    el.classList.add(styles.flashMsg!);
-    window.setTimeout(() => el.classList.remove(styles.flashMsg!), 2400);
+    onFocusShown?.();
   });
+  /** The address of a message, to paste into a chat with an agent or to share ('' for a message that is not stored yet). */
+  const linkTo = (lineId: string): string => (/^[\w-]+:\d+$/.test(lineId) ? `${window.location.origin}${taskAtMessage(taskId, lineId)}` : '');
   const [look, setLook] = useLook();
   const [show, setShow] = useShow();
   // Follow new output unless the user has scrolled up. Captured from the user's
@@ -297,7 +305,7 @@ export function Transcript({
 
   const items =
     show === 'messages'
-      ? all.filter((it) => it.type !== 'tool' && !(it.type === 'note' && it.line.kind === 'system'))
+      ? all.filter((it) => it.type !== 'tool' && !(it.type === 'note' && (it.line.kind === 'system' || it.line.kind === 'stderr')))
       : all;
   const hidden = all.length - items.length;
 
@@ -343,13 +351,14 @@ export function Transcript({
         ref={ref}
         onScroll={onScroll}
         role="log"
+        onClick={() => lit && setLit(null)}
         aria-relevant="additions"
         data-look={look}
       >
         {items.map((it, n) => {
           if (it.type === 'user') {
             return (
-              <div key={it.line.id} data-line={it.line.id} className={cn(styles.userMsg, rise(it.line.id))}>
+              <div key={it.line.id} data-line={it.line.id} className={cn(styles.userMsg, it.line.id === lit && styles.linked, rise(it.line.id))}>
                 <span className={styles.prompt} aria-label="you">
                   you&gt;
                 </span>
@@ -358,13 +367,14 @@ export function Transcript({
                 {it.line.id.startsWith('pending-') && <span style={{ opacity: 0.6, fontSize: 11, marginLeft: 6 }}>sending…</span>}
                 {thumbs(it.line.attachments)}
                 {it.line.text && <CopyButton text={it.line.text} label="Copy your message" />}
+                {it.line.text && linkTo(it.line.id) && <CopyButton text={linkTo(it.line.id)} label="Copy a link to this message" icon="link" />}
                 {it.line.text && <QuoteButton scope={`task:${taskId}`} text={it.line.text} label="Quote your message" />}
               </div>
             );
           }
           if (it.type === 'agent') {
             return (
-              <div key={it.line.id} data-line={it.line.id} className={cn(styles.agentMsg, it.final && styles.final, rise(it.line.id))}>
+              <div key={it.line.id} data-line={it.line.id} className={cn(styles.agentMsg, it.final && styles.final, it.line.id === lit && styles.linked, rise(it.line.id))}>
                 <span className={styles.prompt} aria-label={it.line.speaker ?? 'agent'} style={it.line.speaker ? { color: speakerColor(it.line.speaker) } : undefined}>
                   {it.line.speaker ? `${it.line.speaker}>` : it.final ? 'result>' : 'agent>'}
                 </span>
@@ -401,6 +411,7 @@ export function Transcript({
                   {thumbs(it.line.attachments, true)}
                   <div>
                     <CopyButton text={it.line.text} />
+                    {linkTo(it.line.id) && <CopyButton text={linkTo(it.line.id)} label="Copy a link to this message" icon="link" />}
                     <QuoteButton scope={`task:${taskId}`} text={it.line.text} />
                   </div>
                 </div>
