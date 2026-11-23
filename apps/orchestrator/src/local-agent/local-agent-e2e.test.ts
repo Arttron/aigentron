@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,8 @@ import { LocalRulesService } from './local-rules.service';
 import { LocalBindingsService } from './local-bindings.service';
 import { LocalOsMcpService } from './local-os-mcp.service';
 import { LocalLlmService } from './local-llm.service';
+import { LocalProjectsController } from './local-projects.controller';
+import type { ProjectsService } from '../projects/projects.service';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -51,6 +53,7 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
     const ctl = new LocalAgentController(auth, users, devices, bridge, {} as LocalAgentPackageService, rules, bindings);
 
     const mcp = new LocalOsMcpService(bridge, bindings);
+    const projectsCtl = new LocalProjectsController(devices, { list: async () => [{ id: 'p1', slug: 'shop', name: 'Shop', repoUrl: 'https://u:tok@github.com/acme/shop.git' }, { id: 'p3', slug: 'local', name: 'Local', repoUrl: '/srv/git/x' }] } as unknown as ProjectsService);
     const llm = new LocalLlmService({ secretsDir: secrets, approvalsApiUrl: 'http://x' } as AppConfigService, bridge, devices);
     // the controller's routes behind a thin router (the repo's tests do not start Nest)
     const handle = async (req: IncomingMessage, body: unknown): Promise<unknown> => {
@@ -75,6 +78,12 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
           send: (b: string) => (res.end(b), xres),
         });
         (req as unknown as { body: unknown }).body = raw ? JSON.parse(raw) : undefined;
+        if (req.url === '/api/local-agent/projects') {
+          void Promise.resolve()
+            .then(() => projectsCtl.list(req as never))
+            .then((b) => xres.json(b), () => xres.status(401).json({}));
+          return;
+        }
         if (req.url === '/api/local-os-mcp') {
           void mcp.handle(req as never, xres as never);
           return;
@@ -223,6 +232,31 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
     expect(await mcp.availableFor('p1')).toBe(false);
     await agent.close();
     await stranger.close();
+
+    // the server lives in this process: a command that talks to it must not block the event loop (execFileSync would)
+    const runAsync = (args: string[]) =>
+      new Promise<{ code: number; stdout: string }>((resolve) => {
+        execFile(BIN!, args, { env: fast, encoding: 'utf8' }, (err, stdout) => resolve({ code: err ? ((err as { code?: number }).code ?? 1) : 0, stdout }));
+      });
+    // open: the program asks the server for projects (with its own token), and recognises a copy that is already here
+    expect((await fetch(`${base}/api/local-agent/projects`)).status).toBe(401);
+    const listed = (await runAsync(['open'])).stdout;
+    expect(listed).toContain('shop');
+    expect(listed).toContain('https://github.com/acme/shop.git'); // the password in the stored address never reaches the computer
+    expect(listed).not.toContain('tok@');
+    expect(listed).not.toContain('/srv/git'); // a local path is not offered
+    const here = mkdtempSync(join(tmpdir(), 'lag-open-'));
+    sh(here, 'init', '-q', '-b', 'main');
+    sh(here, 'remote', 'add', 'origin', 'git@github.com:Acme/Shop.git'); // another spelling of the same repository
+    expect((await runAsync(['open', 'shop', '--dir', here, '--yes'])).stdout).toContain('Allowed:');
+    await vi_waitFor(() => (bridge.repos(id).length === 1 ? true : undefined), 15_000);
+    const other = mkdtempSync(join(tmpdir(), 'lag-open-'));
+    sh(other, 'init', '-q', '-b', 'main');
+    sh(other, 'remote', 'add', 'origin', 'https://github.com/someone/else.git');
+    writeFileSync(join(other, 'f'), 'x');
+    expect((await runAsync(['open', 'shop', '--dir', other, '--yes'])).code).not.toBe(0); // not this project's repository
+    expect((await runAsync(['open', 'nope'])).code).not.toBe(0);
+    execFileSync(BIN!, ['remove', here], { env: fast });
 
     // a model on the person's computer, shared with the server: a fake OpenAI-style server stands in for Ollama / LM Studio
     const seen: { stream?: unknown; model?: unknown }[] = [];

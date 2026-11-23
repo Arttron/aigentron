@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,7 @@ const usage = `aigentron %s
   add <path>                                                 allow a git repository (its top folder) — agents can then read it, never anything else
   remove <id|path>                                           stop allowing a repository
   roots                                                      list the allowed repositories
+  open [<project>] [--dir <folder>]                          work on a server project from any folder: use the copy that is here, or clone it (you confirm the address and folder)
   chat [--repo <id|path>] [--model <name>] [-p <prompt>]      work on a repository with a model that runs HERE (offline: no server, no internet); every change asks you first
   llm [add <name> <url> | allow <model> | deny <model> | remove <name> | parallel <n>]   share a model that runs here (Ollama, LM Studio, llama-server) with the server
   rules [--repo <path>]                                      show the rules that apply (global + the repository's .aigentron/local.yaml)
@@ -67,6 +69,8 @@ func main() {
 		err = cmdRemove(os.Args[2:])
 	case "roots":
 		err = cmdRoots()
+	case "open":
+		err = cmdOpen(os.Args[2:])
 	case "chat":
 		err = cmdChat(os.Args[2:])
 	case "llm":
@@ -205,6 +209,8 @@ func cmdRun() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// started inside a project's folder: that is how the person says "work here" (asked once, on a terminal)
+	offerCwdRoot(ctx, bufio.NewReader(os.Stdin))
 	rev, _, err := rules.LoadGlobal()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "warning:", err, "— using the defaults until the server syncs the rules")

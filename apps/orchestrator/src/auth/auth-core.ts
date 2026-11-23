@@ -109,7 +109,7 @@ export function isThisMachine(addr: string | undefined, ownAddresses: readonly s
 }
 
 /** The local agent's own open routes: the sign-in handshake (the codes are the credential), the installer script and the release archive. */
-const isLocalAgentPublic = (path: string): boolean => /^\/api\/local-agent\/(device\/start|device\/poll|token|install\.sh|package|package\.sha256)$/.test(path);
+const isLocalAgentPublic = (path: string): boolean => /^\/api\/local-agent\/(device\/start|device\/poll|token|install\.sh|package|package\.sha256|projects)$/.test(path);
 
 /** Open without a session: liveness and the sign-in endpoints themselves. */
 export function isPublicRoute(path: string): boolean {

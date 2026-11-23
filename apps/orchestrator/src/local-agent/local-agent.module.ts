@@ -8,12 +8,13 @@ import { LocalDevicesService } from './local-devices.service';
 import { LocalLlmAdminController } from './local-llm-admin.controller';
 import { LocalLlmController } from './local-llm.controller';
 import { LocalLlmService } from './local-llm.service';
+import { LocalProjectsController } from './local-projects.controller';
 import { LocalOsMcpController } from './local-os-mcp.controller';
 import { LocalOsMcpService } from './local-os-mcp.service';
 import { LocalRulesService } from './local-rules.service';
 
 @Module({
-  controllers: [LocalAgentController, LocalOsMcpController, LocalLlmController, LocalLlmAdminController],
+  controllers: [LocalAgentController, LocalOsMcpController, LocalLlmController, LocalLlmAdminController, LocalProjectsController],
   providers: [LocalDevicesService, LocalBridgeService, LocalAgentPackageService, LocalAgentGateway, LocalRulesService, LocalBindingsService, LocalOsMcpService, LocalLlmService],
   exports: [LocalBridgeService, LocalDevicesService, LocalOsMcpService, LocalLlmService],
 })

@@ -44,6 +44,9 @@ this one is a throw-away headless browser — `--isolated`, no profile is kept b
 - **Memory**: a page open in Chromium takes 0.5–1.5 GB. On a 4 GB machine add a swap file first (`docs/small-servers.md`) and run one browser task at a time.
 - `aigentron addon status|logs|disable [--purge] playwright` work as for the browser.
 
+**Where the agent works.** Two ways, both explicit on the computer: (1) start `aigentron chat` (or `run`) inside a project's folder — if it is a git repository that is not allowed yet, the program asks once whether to allow it; (2) from any folder run `aigentron open <project>` — it asks the server which projects have a repository (own token; credentials in the address are dropped, a local path / `file:` / `ext::` address is never offered), reuses a copy that is already there (its `origin` must be the project's repository) or clones it after you confirm the address and the folder, with the person's own git login and with hooks / `ext` / `file` transports switched off, then allows the folder. `aigentron open` without a name lists the projects. The server can name a project but cannot make the computer run anything or open a folder by itself.
+
+
 ## The voice add-on (speech on this server)
 
 `sudo aigentron addon enable voice [--no-stt] [--stt-model tiny|base|small|medium]` installs a small **OpenAI-compatible speech server** on loopback

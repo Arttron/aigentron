@@ -31,6 +31,10 @@ func cmdChat(args []string) error {
 		*prompt = strings.Join(fs.Args(), " ")
 	}
 
+	in0 := bufio.NewReader(os.Stdin)
+	if *repoArg == "" {
+		offerCwdRoot(context.Background(), in0)
+	}
 	root, err := pickRoot(*repoArg)
 	if err != nil {
 		return err
@@ -58,7 +62,7 @@ func cmdChat(args []string) error {
 	}
 
 	interactive := isTerminal(os.Stdin)
-	in := bufio.NewReader(os.Stdin)
+	in := in0
 	var approve func(string) bool
 	if interactive {
 		approve = func(summary string) bool {

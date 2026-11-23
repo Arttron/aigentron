@@ -27,3 +27,4 @@ The **Local agent** tab of **🧩 Add-ons** (`/addons?tab=local-agent`). A small
 - These rules are only configured so far: the engine that acts on them (snapshots, fetch, fast-forward, commits) comes in the next stage, so changing them has no visible effect yet. Say so if asked.
 
 Details: `docs/addons.md` («The local agent»), `docs/plan-local-agent.md`.
+- Where it works: start `aigentron chat` inside a project's folder (it asks once to allow a new git repository), or `aigentron open <project>` from any folder: it lists the server's projects that have a repository, reuses a copy already there (same origin) or clones it after the person confirms the address and folder (own git login, no hooks). A project without a repository address, or with a local path as address, cannot be opened this way — set it under Projects → Repository.

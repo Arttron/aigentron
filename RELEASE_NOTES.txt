@@ -1,7 +1,11 @@
-Aigentron v0.2.2
+Aigentron v0.2.3
 
-For people who are not programmers: the program for your own computer is now simply called "aigentron", and the installer says so if the server's own "aigentron" tool would get in the way.
+For people who are not programmers: the program on your computer can now fetch a project's code by itself, or work right in the folder you start it from.
 
-Changed
-- The local agent program is installed as "aigentron" (before: "aigentron-local", which stays as another name for the same program). Commands and hints on the Add-ons -> Local agent tab, in the program and in the administrator's reference use the new name. An existing pairing keeps working.
-- If another "aigentron" (the server's command-line tool) is found first in your PATH, the installer tells you and shows which one to call.
+Added
+- "aigentron open <project>": from any folder, picks one of the server's projects that has a repository, uses the copy that is already on your computer or downloads it (you confirm the address and the folder first) and allows the agent to work in it. "aigentron open" alone lists the projects.
+- Starting "aigentron chat" or "aigentron run" inside a git repository that is not allowed yet asks once whether to allow it.
+
+Safe by design
+- The server can only name a project. The program checks the address itself (no local paths, no passwords, no commands) and runs the download without any hooks of the repository.
+- The server needs this version too: older servers answer "too old to list projects".
