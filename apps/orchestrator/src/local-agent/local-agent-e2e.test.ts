@@ -49,7 +49,7 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
     const auth = { isConfigured: () => false, userById: async (id: string) => ({ id, displayName: 'Op', role: 'operator' }) } as unknown as AuthService;
     const users = { defaultOperator: async () => ({ id: 'op' }), list: async () => [] } as unknown as UsersService;
     const rules = new LocalRulesService({ secretsDir: secrets } as AppConfigService, bridge);
-    const bindings = new LocalBindingsService({ secretsDir: secrets } as AppConfigService, { project: { findUnique: async ({ where }: { where: { id: string } }) => ({ name: where.id, repoUrl: where.id === 'p1' ? 'https://github.com/acme/shop.git' : 'https://github.com/acme/other.git', archivedAt: null }) } } as unknown as PrismaService, bridge, devices);
+    const bindings = new LocalBindingsService({ secretsDir: secrets } as AppConfigService, { project: { findUnique: async ({ where }: { where: { id: string } }) => ({ name: where.id, repoUrl: where.id === 'p1' ? 'https://github.com/acme/shop.git' : where.id === 'p4' ? null : 'https://github.com/acme/other.git', archivedAt: null }) } } as unknown as PrismaService, bridge, devices);
     const ctl = new LocalAgentController(auth, users, devices, bridge, {} as LocalAgentPackageService, rules, bindings);
 
     const mcp = new LocalOsMcpService(bridge, bindings);
@@ -191,6 +191,12 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
     expect(bound.ok).toBe(true);
     expect(await mcp.availableFor('p1')).toBe(true);
     expect(await mcp.availableFor('p2')).toBe(false);
+    // a project WITHOUT a repository address has nothing to compare: the person's Share is the consent (the folder's name does not matter)
+    const free = await bindings.create({ projectId: 'p4', deviceId: id, repoId: reported.id }, 'op');
+    expect(free.ok).toBe(true);
+    expect(await mcp.availableFor('p4')).toBe(true);
+    if (free.ok) bindings.remove(free.binding.id);
+    expect(await mcp.availableFor('p4')).toBe(false);
 
     // an agent's run: the MCP server over HTTP, with the run's own bearer
     const mcpUrl = new URL(`${base}/api/local-os-mcp`);

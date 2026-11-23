@@ -1,6 +1,7 @@
-Aigentron v0.2.4
+Aigentron v0.2.5
 
-For people who are not programmers: the program on your computer can now keep running in the background and start by itself when you sign in.
+For people who are not programmers: a folder on your computer can now be shared with a project even when the project has no repository address, and the background service reports its state more clearly.
 
-Added
-- "aigentron service install" keeps the local agent running in the background and starts it at sign-in (macOS and Linux); "aigentron service status" shows whether it runs, "aigentron service uninstall" turns it off. Nothing is started in the background unless you ask for it.
+Changed
+- A project that has a repository address still needs the shared folder to be that repository. A project without an address no longer blocks sharing: your "Share" is the consent, and the folder's name does not matter. (Server-side change: update the server.)
+- "aigentron service status" shows one clear line (state and process number) instead of repeated ones.

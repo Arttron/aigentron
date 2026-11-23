@@ -125,12 +125,7 @@ func serviceDarwin(op, home, exe, cfgHome string) error {
 			fmt.Println("Installed but not running:", plist)
 			return nil
 		}
-		state := "loaded"
-		for _, l := range strings.Split(out, "\n") {
-			if t := strings.TrimSpace(l); strings.HasPrefix(t, "state =") || strings.HasPrefix(t, "pid =") {
-				state += ", " + t
-			}
-		}
+		state := launchdState(out)
 		fmt.Printf("Installed (%s). Log: %s\n", state, logPath)
 	}
 	return nil
@@ -173,4 +168,25 @@ func serviceLinux(op, home, exe, cfgHome string) error {
 		fmt.Printf("Installed, %s. Log: journalctl --user -u %s\n", out, name)
 	}
 	return nil
+}
+
+// launchdState picks the first "state =" and "pid =" of `launchctl print` (later ones belong to sub-parts of the job).
+func launchdState(out string) string {
+	state, pid := "", ""
+	for _, l := range strings.Split(out, "\n") {
+		t := strings.TrimSpace(l)
+		if state == "" && strings.HasPrefix(t, "state = ") {
+			state = strings.TrimPrefix(t, "state = ")
+		}
+		if pid == "" && strings.HasPrefix(t, "pid = ") {
+			pid = strings.TrimPrefix(t, "pid = ")
+		}
+	}
+	if state == "" {
+		state = "loaded"
+	}
+	if pid != "" {
+		return state + ", pid " + pid
+	}
+	return state
 }

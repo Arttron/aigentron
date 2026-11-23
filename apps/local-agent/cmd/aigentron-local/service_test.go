@@ -26,3 +26,13 @@ func TestRenderUnitQuotes(t *testing.T) {
 		t.Error("% and $ must be doubled")
 	}
 }
+
+func TestLaunchdState(t *testing.T) {
+	out := "gui/501/dev.aigentron = {\n\tstate = running\n\tpid = 81557\n\tsub = {\n\t\tstate = active\n\t\tpid = 9\n\t}\n}"
+	if got := launchdState(out); got != "running, pid 81557" {
+		t.Errorf("got %q", got)
+	}
+	if launchdState("nothing") != "loaded" {
+		t.Error("fallback")
+	}
+}

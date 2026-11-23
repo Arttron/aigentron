@@ -30,7 +30,7 @@ export function LocalAgentRepos({ devices, bindings, reload }: { devices: Device
       <strong>Repositories on your computers</strong>
       <Muted>
         A computer allows a repository with <code>aigentron add &lt;path&gt;</code> (its top folder). Here you share it with a project: from then on that project&apos;s agents can <em>read</em> it — status, diff, history, files — and nothing else. They cannot change
-        anything, and never see secret files (<code>.env</code>, keys, credentials, <code>.git</code>). It works only while the repository&apos;s <code>origin</code> is the project&apos;s repository.
+        anything, and never see secret files (<code>.env</code>, keys, credentials, <code>.git</code>). If the project has a repository address, it works only while the repository&apos;s <code>origin</code> is that address; a project without one needs no match (your Share is the consent).
       </Muted>
       {error && <ErrorText>{error}</ErrorText>}
       {withRepos.length === 0 && <Muted>No repository yet. On a connected computer run: <code>aigentron add ~/Code/my-project</code></Muted>}
