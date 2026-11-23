@@ -131,6 +131,23 @@ describe('LocalAgentGateway (a real WebSocket)', () => {
     });
   const next = (ws: WebSocket) => new Promise<string>((r) => ws.once('message', (d) => r(d.toString())));
 
+  it('also serves a second listener (the built-in 80/443 server), once per server', async () => {
+    const b = await boot();
+    const other: Server = createServer((_q, r) => r.end('http'));
+    await new Promise<void>((r) => other.listen(0, '127.0.0.1', r));
+    b.gw.attach(other);
+    b.gw.attach(other); // a second call must not double the handler
+    expect(other.listeners('upgrade')).toHaveLength(1);
+    const { ws, status } = await open(`ws://127.0.0.1:${(other.address() as AddressInfo).port}/api/local-agent/ws`, b.token);
+    expect(status).toBeUndefined();
+    const welcome = next(ws);
+    ws.send(hello());
+    expect(decodeFrame(await welcome)).toMatchObject({ type: 'welcome' });
+    ws.close();
+    other.close();
+    b.stop();
+  });
+
   it('a paired device handshakes, is online, answers a command', async () => {
     const b = await boot();
     const { ws } = await open(b.url, b.token);

@@ -75,3 +75,14 @@ describe('the device flow', () => {
     expect([...codes].some((c) => f.describe(c, 1))).toBe(true);
   });
 });
+
+describe('a development build is never "outdated"', () => {
+  it('compares released versions only', async () => {
+    const { localOutdated } = await import('./local-agent.controller');
+    expect(localOutdated('0.1.9', '0.2.0')).toBe(true);
+    expect(localOutdated('0.2.0', '0.2.0')).toBe(false);
+    expect(localOutdated('dev-abc1234', '0.2.0')).toBe(false);
+    expect(localOutdated('dev-abc1234-dirty', '0.2.0')).toBe(false);
+    expect(localOutdated(undefined, '0.2.0')).toBe(false);
+  });
+});

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync/atomic"
@@ -103,7 +104,7 @@ func cmdPair(args []string) error {
 	server := fs.String("server", "", "server address, e.g. https://dev.example.com")
 	code := fs.String("code", "", "one-use pairing code")
 	host, _ := os.Hostname()
-	name := fs.String("name", host, "device name shown in the dashboard")
+	name := fs.String("name", deviceName(host), "device name shown in the dashboard")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -119,7 +120,7 @@ func cmdPair(args []string) error {
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Paired with %s as %q. Start it with: aigentron-local run\n", cfg.Server, cfg.Device)
+	fmt.Printf("Paired with %s as %q. Start it with: %s run\n", cfg.Server, cfg.Device, progName())
 	return nil
 }
 
@@ -127,7 +128,7 @@ func cmdLogin(args []string) error {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	server := fs.String("server", "", "server address, e.g. https://dev.example.com")
 	host, _ := os.Hostname()
-	name := fs.String("name", host, "device name shown in the dashboard")
+	name := fs.String("name", deviceName(host), "device name shown in the dashboard")
 	noBrowser := fs.Bool("no-browser", false, "only print the link, do not open it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -150,7 +151,7 @@ func cmdLogin(args []string) error {
 	if err := config.Save(cfg); err != nil {
 		return err
 	}
-	fmt.Printf("Connected to %s as %q. Start it with: aigentron-local run\n", cfg.Server, cfg.Device)
+	fmt.Printf("Connected to %s as %q. Start it with: %s run\n", cfg.Server, cfg.Device, progName())
 	return nil
 }
 
@@ -386,3 +387,14 @@ func llmShared() bool {
 	c, err := llm.Load()
 	return err == nil && len(c.Backends) > 0 && len(c.Allow) > 0
 }
+
+// deviceName is the default name in the dashboard: the development build says so, so it is not mistaken for the installed program on the same computer.
+func deviceName(host string) string {
+	if config.Dev() {
+		return host + " [dev]"
+	}
+	return host
+}
+
+// progName is how the person called this program (aigentron-local, or aigentron-dev for the development build), for the hints we print.
+func progName() string { return filepath.Base(os.Args[0]) }

@@ -26,9 +26,17 @@ export class LocalAgentGateway implements OnApplicationBootstrap, OnApplicationS
     private readonly access: AccessService,
   ) {}
 
+  private readonly attached = new WeakSet<object>();
+
   onApplicationBootstrap(): void {
     const server = this.host.httpAdapter?.getHttpServer?.();
-    if (!server) return;
+    if (server) this.attach(server);
+  }
+
+  /** Serve the upgrade on a listener. The API port at bootstrap, and every 80/443 listener the built-in web server opens (web/web-server.service.ts) — a tunnel or a proxy usually reaches the app there. */
+  attach(server: { on: (e: 'upgrade', l: (req: IncomingMessage, socket: Duplex, head: Buffer) => void) => unknown }): void {
+    if (this.attached.has(server)) return;
+    this.attached.add(server);
     server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => this.onUpgrade(req, socket, head));
   }
 

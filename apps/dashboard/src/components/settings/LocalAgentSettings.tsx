@@ -14,6 +14,9 @@ type Lookup = Awaited<ReturnType<typeof api.localAgentLookup>>;
 const osName = (os: string | null) => (os === 'darwin' ? 'macOS' : os === 'linux' ? 'Linux' : os === 'windows' ? 'Windows' : (os ?? '?'));
 
 /** Add-ons → Local agent: a program on YOUR computer that server-side agents can work with, under approvals (docs/plan-local-agent.md). Nothing is installed on the server. */
+/** `0.2.0` → `v0.2.0`; a development build (`dev-2d689e4-dirty`) is shown as it is. */
+const versionLabel = (v?: string | null): string => (!v ? 'version unknown' : /^\d/.test(v) ? `v${v}` : v);
+
 export function LocalAgentSettings() {
   const [params, setParams] = useSearchParams();
   const code = params.get('code');
@@ -123,18 +126,25 @@ export function LocalAgentSettings() {
         {!info || info.devices.length === 0 ? (
           <Muted> — none yet</Muted>
         ) : (
-          <ul style={{ margin: '4px 0', paddingLeft: 18 }}>
+          <div style={{ display: 'grid', gap: 8, margin: '8px 0' }}>
             {info.devices.map((d) => (
-              <li key={d.id}>
-                {d.label} · {d.user} · {osName(d.os)} {d.arch ?? ''} · {d.version ? `v${d.version}` : 'version unknown'}{' '}
-                <Badge tone={d.online ? 'done' : 'neutral'}>{d.online ? 'online' : 'offline'}</Badge>{' '}
-                {d.outdated && <Badge tone="review">update available</Badge>} · last seen {new Date(d.lastSeenAt).toLocaleString()}{' '}
+              <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                <div style={{ flex: '1 1 280px', minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <strong style={{ overflowWrap: 'anywhere' }}>{d.label}</strong>
+                    <Badge tone={d.online ? 'done' : 'neutral'}>{d.online ? 'online' : 'offline'}</Badge>
+                    {d.outdated && <Badge tone="review">update available</Badge>}
+                  </div>
+                  <Muted>
+                    {d.user} · {osName(d.os)} {d.arch ?? ''} · {versionLabel(d.version)} · {d.online ? 'connected' : `last seen ${new Date(d.lastSeenAt).toLocaleString()}`}
+                  </Muted>
+                </div>
                 <Button size="sm" onClick={() => void api.localAgentRemoveDevice(d.id).then(load).catch((e: Error) => setError(e.message))}>
                   Disconnect
                 </Button>
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
         {info?.devices.some((d) => d.outdated) && <Muted>To update, run the install command above again (it replaces the program with this server&apos;s version).</Muted>}
       </div>

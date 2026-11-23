@@ -25,7 +25,7 @@ function requestOrigin(req: Request): string | null {
 }
 
 /** Is a daemon older than the server? Versions of the two move together (the daemon is released with the server). */
-export const localOutdated = (installed: string | undefined, server: string): boolean => Boolean(installed) && /^\d/.test(server) && installed !== server;
+export const localOutdated = (installed: string | undefined, server: string): boolean => Boolean(installed) && !/^dev/.test(installed!) && /^\d/.test(server) && installed !== server;
 
 @Controller('local-agent')
 export class LocalAgentController {

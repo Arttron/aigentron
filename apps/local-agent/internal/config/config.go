@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config is stored as JSON in the user's config dir, mode 0600 (the token is a credential).
@@ -18,6 +19,16 @@ type Config struct {
 // ErrNotPaired is returned when there is no saved pairing.
 var ErrNotPaired = errors.New("not paired: run `aigentron-local pair --server <url> --code <code>`")
 
+// Dev reports whether this binary is the development build (`aigentron-dev`, made by `make local-agent-dev`): it keeps its own folder, so it can be paired,
+// run and broken while the installed `aigentron-local` keeps working next to it.
+func Dev() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(filepath.Base(exe), "aigentron-dev")
+}
+
 // Dir is the folder of the daemon's files; AIGENTRON_LOCAL_HOME overrides it (tests, several profiles).
 func Dir() (string, error) {
 	if d := os.Getenv("AIGENTRON_LOCAL_HOME"); d != "" {
@@ -26,6 +37,9 @@ func Dir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
+	}
+	if Dev() {
+		return filepath.Join(base, "aigentron-dev"), nil
 	}
 	return filepath.Join(base, "aigentron-local"), nil
 }

@@ -1,19 +1,10 @@
-Aigentron v0.2.0
+Aigentron v0.2.1
 
-For people who are not programmers: there is now a small program for your own computer that lets the agents work with the code that lives there — and with an AI model that runs there — and it can also work on its own, with no server and no internet.
-
-New
-- Add-ons → "Local agent": install one program on your computer with a single command, approve it in the browser (a short code on both sides), and it stays connected. It lists your computers (online / offline, version) and you can disconnect one at any moment.
-- Repositories on your computer: allow a repository with "aigentron-local add", see its branch, how far it is behind or ahead and what changed, and share it with a project. That project's agents can then READ it (status, changes, history, files) — never change it, and never see secret files (.env, keys, credentials). It works only while the repository's address matches the project's repository.
-- Rules for the local agent: set them once on the dashboard (they reach every computer) and, if you like, a file ".aigentron/local.yaml" in a repository can narrow them. A repository can never give itself more power than you allowed.
-- Models on your computer: a model running in Ollama, LM Studio or llama-server can serve the agents of the server over the same connection — nothing is opened to the internet, and you choose on that computer which models are shared. Use it as a provider; when the computer is off, the run moves on to the agent's next provider by itself (and the other way round).
-- Local mode: "aigentron-local chat" is an agent in your terminal that works with a local model, with no server and no internet. It reads the repository freely and asks you "apply [y/N]" before every edit, new file and commit.
-- The administrator knows all of this (new reference "local-agent-guide").
-
-Changed
-- Providers that point to an OpenAI-compatible server which is not OpenAI (LM Studio, llama-server, a gateway) now work through LiteLLM; before, the agents' requests could end with "no route".
+For people who are not programmers: the local agent now connects through the address your server is normally opened at (the "520" error behind a tunnel or proxy is gone), and the list of connected computers is easier to read.
 
 Fixed
-- Several lint problems in the dashboard.
+- The local agent could not connect when the server is reached through its built-in web server (ports 80/443), for example behind a Cloudflare tunnel: the connection was dropped and the error 520 was shown. It connects there now.
 
-Note: the program for your computer is built in the release and downloaded from your own server; a development build of the server has nothing to hand out.
+Changed
+- Add-ons -> Local agent: each connected computer is a card (name and status, then user, system, version and when it was last seen, with Disconnect on the side). A development build shows its version as it is.
+- A development build of the program (aigentron-dev, made with "make local-agent-dev") keeps its own settings and can run next to the installed one; it is never shown as "update available".

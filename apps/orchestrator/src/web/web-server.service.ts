@@ -8,6 +8,7 @@ import { AccessService } from '../access/access.service';
 import { SecretJsonFile } from '../security/secret-json-file';
 import { AppConfigService } from '../config/app-config.service';
 import { EventsGateway } from '../events/events.gateway';
+import { LocalAgentGateway } from '../local-agent/local-agent.gateway';
 import {
   DEFAULT_WEB_CONFIG,
   inspectCertificate,
@@ -173,6 +174,12 @@ export class WebServerService {
           this.moduleRef.get(EventsGateway, { strict: false }).server.attach(server as HttpServer);
         } catch (e) {
           this.logger.warn(`could not attach live updates to :${port}: ${(e as Error).message}`);
+        }
+        // the local agents' WebSocket (/api/local-agent/ws) on this listener too
+        try {
+          this.moduleRef.get(LocalAgentGateway, { strict: false }).attach(server as HttpServer);
+        } catch (e) {
+          this.logger.warn(`could not attach the local agent socket to :${port}: ${(e as Error).message}`);
         }
         this.logger.log(`${kind.toUpperCase()} ${role === 'redirect' ? 'redirect to HTTPS' : 'app'} listening on :${port}`);
         resolve({ kind, port, state: 'listening', role });

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -31,5 +32,19 @@ func TestSaveLoadClear(t *testing.T) {
 	}
 	if _, err := Load(); !errors.Is(err, ErrNotPaired) {
 		t.Fatalf("after Clear: %v", err)
+	}
+}
+
+func TestDevProfileHasItsOwnFolder(t *testing.T) {
+	t.Setenv("AIGENTRON_LOCAL_HOME", "")
+	d, err := Dir()
+	if err != nil {
+		t.Skip(err)
+	}
+	if Dev() {
+		t.Skip("the test binary is not named aigentron-dev")
+	}
+	if filepath.Base(d) != "aigentron-local" {
+		t.Errorf("the installed program's folder is %s", d)
 	}
 }
