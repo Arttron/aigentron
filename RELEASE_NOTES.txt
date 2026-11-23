@@ -1,11 +1,7 @@
-Aigentron v0.2.6
+Aigentron v0.2.7
 
-For people who are not programmers: the program on your computer can now update itself with one command.
+For people who are not programmers: the Local agent page is tidier.
 
-Added
-- "aigentron update" installs the version of the server your computer is paired with. It downloads the program from that server, checks it, tries it once, and only then replaces the old one (kept next to it as a backup with the ending ".prev"). If the background service is running, it is restarted. "aigentron update --check" only tells you whether there is a new version.
-- The Local agent tab now points to this command when a computer is out of date.
-- Nothing updates in the background by itself, and development copies (aigentron-dev) are never changed this way.
-
-Note
-- Computers with an older program (before 0.2.6) do not have this command yet: run the install command from the tab once more, after that "aigentron update" is enough.
+Fixed
+- On Add-ons -> Local agent a section's heading no longer runs into its text.
+- The repositories are now a table: computer, repository (with its state and changed files), the projects it is shared with, and where you share it with another project. The list of shared models is a table too.

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type LocalAgentRules } from '@/lib/api';
 import { Badge, Button, ErrorText, Muted, Row } from '@/components/ui';
+import styles from './LocalAgentPanels.module.css';
 
 type Loaded = Awaited<ReturnType<typeof api.localAgentRules>>;
 
@@ -55,11 +56,11 @@ export function LocalAgentRulesEditor({ rulesRev, devices }: { rulesRev: number;
   };
 
   return (
-    <div style={{ margin: '14px 0' }}>
-      <strong>Rules</strong>{' '}
+    <div className={styles.section}>
+      <strong className={styles.title}>Rules</strong>{' '}
       <Badge tone="neutral">revision {rulesRev || '—'}</Badge>{' '}
       {online.length > 0 && <Badge tone={upToDate === online.length ? 'done' : 'review'}>{upToDate === online.length ? 'applied on every online computer' : `applied on ${upToDate} of ${online.length} online`}</Badge>}
-      <Muted>
+      <Muted className={styles.note}>
         What an agent may do on its own in a repository. Saved here, they reach your computers at once (and offline ones when they connect); a computer keeps a copy in <code>rules.global.yaml</code>. Hard limits — which folders, what needs your approval —
         are not settings and cannot be changed here or by a project.
       </Muted>
