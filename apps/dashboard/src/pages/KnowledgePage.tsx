@@ -160,7 +160,6 @@ export function KnowledgePage() {
   }, [chunkingKey, sample]);
 
   const embedders = providers.filter((p) => p.kind !== 'anthropic' && p.kind !== 'codex' && p.authMode !== 'oauth-token');
-  const num = (v: string, d: number) => (v === '' ? d : Number(v));
 
   return (
     <>

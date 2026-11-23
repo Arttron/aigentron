@@ -5,6 +5,7 @@ export const COOLDOWN_MS: Record<ProviderFailureKind, number> = {
   quota: 30 * 60_000, // the plan / balance / window is used up
   auth: 10 * 60_000, // a rejected key or token
   rate: 2 * 60_000, // a transient rate limit
+  offline: 60_000, // a computer's model that cannot be reached (it may come back any moment)
   other: 0,
 };
 

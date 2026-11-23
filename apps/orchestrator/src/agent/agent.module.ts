@@ -4,6 +4,7 @@ import { RealAgentExecutor } from './real-agent-executor';
 import { AgentUserService } from './agent-user.service';
 import { ResearchModule } from '../research/research.module';
 import { WorktreeModule } from '../worktrees/worktree.module';
+import { LocalAgentModule } from '../local-agent/local-agent.module';
 
 /**
  * Binds the AgentExecutor port to the real implementation that drives
@@ -12,7 +13,7 @@ import { WorktreeModule } from '../worktrees/worktree.module';
  */
 @Module({
   // ResearchModule: the executor hands each run a bearer for the built-in research MCP. WorktreeModule: `push_branch` publishes through GitHubService.
-  imports: [ResearchModule, WorktreeModule],
+  imports: [ResearchModule, WorktreeModule, LocalAgentModule],
   providers: [AgentUserService, { provide: AgentExecutor, useClass: RealAgentExecutor }],
   exports: [AgentExecutor],
 })

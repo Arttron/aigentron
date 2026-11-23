@@ -24,7 +24,7 @@ export function FinishedWorkSettings() {
   const [plan, setPlan] = useState<FinishedWorkPlan | null>(null);
   const [log, setLog] = useState<FinishedWorkLogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const { busy, msg, setMsg, run } = useAction();
+  const { busy, msg, run } = useAction();
 
   const load = useCallback(() => {
     void api.getSettings().then((s) => {

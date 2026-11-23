@@ -1,0 +1,1 @@
+{"type":"event","name":"repos","data":{"repos":[{"id":"a1b2c3d4","path":"/Users/me/Code/shop","branch":"main","detached":false,"head":"abc1234","upstream":"origin/main","ahead":1,"behind":2,"staged":0,"unstaged":1,"untracked":1,"conflicted":0,"origin":"https://github.com/acme/shop.git","files":[{"path":"src/a.go","xy":".M"},{"path":"new.txt","xy":"??"}]}]}}

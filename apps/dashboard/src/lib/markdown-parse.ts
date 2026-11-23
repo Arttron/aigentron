@@ -103,7 +103,7 @@ function mediaOrFileName(raw: string): string | null {
   return name && name !== '..' && !name.startsWith('.') ? name : null;
 }
 
-const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^\[\]\n]*\]\((?:(?:task|attachments?):[^)\n]+|[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)|(~~[^~\n]+~~)/g;
+const INLINE_RE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(!?\[[^[\]\n]*\]\((?:(?:task|attachments?):[^)\n]+|[^)\s]+)\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)|(~~[^~\n]+~~)/g;
 
 /**
  * `user`: what a PERSON typed in the composer. Only what the composer's toolbar makes is interpreted (bold, italic, strike, code, links, lists, quotes,

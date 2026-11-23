@@ -1,0 +1,200 @@
+[
+  {
+    "name": "empty document = the defaults",
+    "rules": {},
+    "normalized": {
+      "snapshot": {
+        "enabled": true,
+        "idleMinutes": 2,
+        "keep": 20
+      },
+      "fetch": {
+        "enabled": true,
+        "everyMinutes": 5
+      },
+      "fastForward": {
+        "enabled": false
+      },
+      "notify": {
+        "enabled": true,
+        "dirtyAfterMinutes": 60,
+        "behindAfterMinutes": 30
+      },
+      "proposeCommit": {
+        "enabled": false,
+        "idleMinutes": 30
+      },
+      "quiet": {
+        "typingSeconds": 20
+      },
+      "ignore": [],
+      "projectCanEnable": []
+    }
+  },
+  {
+    "name": "version only",
+    "rules": {
+      "version": 1
+    },
+    "normalized": {
+      "snapshot": {
+        "enabled": true,
+        "idleMinutes": 2,
+        "keep": 20
+      },
+      "fetch": {
+        "enabled": true,
+        "everyMinutes": 5
+      },
+      "fastForward": {
+        "enabled": false
+      },
+      "notify": {
+        "enabled": true,
+        "dirtyAfterMinutes": 60,
+        "behindAfterMinutes": 30
+      },
+      "proposeCommit": {
+        "enabled": false,
+        "idleMinutes": 30
+      },
+      "quiet": {
+        "typingSeconds": 20
+      },
+      "ignore": [],
+      "projectCanEnable": []
+    }
+  },
+  {
+    "name": "fast-forward on, snapshot tuned",
+    "rules": {
+      "fastForward": {
+        "enabled": true
+      },
+      "snapshot": {
+        "idleMinutes": 5
+      }
+    },
+    "normalized": {
+      "snapshot": {
+        "enabled": true,
+        "idleMinutes": 5,
+        "keep": 20
+      },
+      "fetch": {
+        "enabled": true,
+        "everyMinutes": 5
+      },
+      "fastForward": {
+        "enabled": true
+      },
+      "notify": {
+        "enabled": true,
+        "dirtyAfterMinutes": 60,
+        "behindAfterMinutes": 30
+      },
+      "proposeCommit": {
+        "enabled": false,
+        "idleMinutes": 30
+      },
+      "quiet": {
+        "typingSeconds": 20
+      },
+      "ignore": [],
+      "projectCanEnable": []
+    }
+  },
+  {
+    "name": "ignore and projectCanEnable",
+    "rules": {
+      "ignore": [
+        "dist/**",
+        "*.log"
+      ],
+      "projectCanEnable": [
+        "snapshot",
+        "fastForward"
+      ]
+    },
+    "normalized": {
+      "snapshot": {
+        "enabled": true,
+        "idleMinutes": 2,
+        "keep": 20
+      },
+      "fetch": {
+        "enabled": true,
+        "everyMinutes": 5
+      },
+      "fastForward": {
+        "enabled": false
+      },
+      "notify": {
+        "enabled": true,
+        "dirtyAfterMinutes": 60,
+        "behindAfterMinutes": 30
+      },
+      "proposeCommit": {
+        "enabled": false,
+        "idleMinutes": 30
+      },
+      "quiet": {
+        "typingSeconds": 20
+      },
+      "ignore": [
+        "dist/**",
+        "*.log"
+      ],
+      "projectCanEnable": [
+        "fastForward",
+        "snapshot"
+      ]
+    }
+  },
+  {
+    "name": "every bound at its edge",
+    "rules": {
+      "snapshot": {
+        "idleMinutes": 120,
+        "keep": 200
+      },
+      "fetch": {
+        "everyMinutes": 1
+      },
+      "quiet": {
+        "typingSeconds": 600
+      },
+      "proposeCommit": {
+        "idleMinutes": 5
+      }
+    },
+    "normalized": {
+      "snapshot": {
+        "enabled": true,
+        "idleMinutes": 120,
+        "keep": 200
+      },
+      "fetch": {
+        "enabled": true,
+        "everyMinutes": 1
+      },
+      "fastForward": {
+        "enabled": false
+      },
+      "notify": {
+        "enabled": true,
+        "dirtyAfterMinutes": 60,
+        "behindAfterMinutes": 30
+      },
+      "proposeCommit": {
+        "enabled": false,
+        "idleMinutes": 5
+      },
+      "quiet": {
+        "typingSeconds": 600
+      },
+      "ignore": [],
+      "projectCanEnable": []
+    }
+  }
+]

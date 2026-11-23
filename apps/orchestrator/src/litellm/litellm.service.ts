@@ -13,6 +13,9 @@ export interface LitellmRoute {
   managed: boolean;
 }
 
+import { needsChatCompletions } from './route-flags';
+export { needsChatCompletions };
+
 /** Upstream API family → LiteLLM backend prefix. */
 export type ProviderKind = 'anthropic' | 'openai' | 'deepseek' | 'ollama' | 'codex';
 
@@ -254,6 +257,7 @@ export class LitellmService {
         ...(params.rpm ? { rpm: params.rpm } : {}),
         ...(params.tpm ? { tpm: params.tpm } : {}),
         ...(dropReasoning ? NO_REASONING : {}),
+        ...(needsChatCompletions(`${prefix}/${model}`, apiBase) ? { use_chat_completions_api: true } : {}),
       },
     };
     const res = await this.api('/model/new', { method: 'POST', body: JSON.stringify(body) });

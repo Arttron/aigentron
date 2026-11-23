@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { kindOf, routeParams } from './litellm.service';
+import { kindOf, needsChatCompletions, routeParams } from './litellm.service';
 
 describe('kindOf / routeParams', () => {
   it('uses the stored kind, else guesses from the base URL', () => {
@@ -13,5 +13,16 @@ describe('kindOf / routeParams', () => {
       kind: 'openai', apiBase: 'http://x', apiKey: 'k', rpm: 5, tpm: null,
     });
     expect(routeParams({ kind: '', baseUrl: null, secret: null })).toMatchObject({ kind: 'anthropic', apiBase: null, apiKey: '' });
+  });
+});
+
+describe('needsChatCompletions', () => {
+  it('is for openai routes to a base that is not OpenAI (they have no /responses)', () => {
+    expect(needsChatCompletions('openai/qwen3-coder:30b', 'http://host.docker.internal:3001/api/local-llm/v1')).toBe(true);
+    expect(needsChatCompletions('openai/x', 'http://localhost:1234/v1')).toBe(true);
+    expect(needsChatCompletions('openai/gpt-4o', 'https://api.openai.com/v1')).toBe(false);
+    expect(needsChatCompletions('openai/gpt-4o', null)).toBe(false);
+    expect(needsChatCompletions('ollama_chat/x', 'http://localhost:11434')).toBe(false);
+    expect(needsChatCompletions('deepseek/x', 'https://api.deepseek.com')).toBe(false);
   });
 });

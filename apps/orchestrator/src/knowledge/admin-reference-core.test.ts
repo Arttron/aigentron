@@ -54,6 +54,11 @@ describe('the administrator reference answers typical questions (retrieval)', ()
     ['text compression and filtering settings', /Compression and filtering\*:/i],
     ['stats page escalations and questions', /\*\*Escalations\*\*/i],
     ['how do I create a new agent from a template', /catalog_list/i],
+    ['how do I install the local agent on my laptop', /install\.sh/i],
+    ['how do I let a project\'s agents read a repository on my computer', /Share \(read only\)/],
+    ['local agent shows not usable for a repository', /origin/i],
+    ['can agents read my .env on the local computer', /Never readable/i],
+    ['local agent rules .aigentron/local.yaml what can a project file do', /switch a rule OFF/],
   ];
   it.each(cases)('"%s"', (q, needle) => {
     expect(found(q, needle), `${q} → ${hits(q, 4).map((h) => h.doc).join(' | ')}`).toBe(true);

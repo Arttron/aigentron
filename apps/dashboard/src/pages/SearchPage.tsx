@@ -48,7 +48,10 @@ export function SearchPage() {
   const setParam = useCallback(
     (changes: Record<string, string>) => {
       const next = new URLSearchParams(sp);
-      for (const [k, v] of Object.entries(changes)) (v ? next.set(k, v) : next.delete(k));
+      for (const [k, v] of Object.entries(changes)) {
+        if (v) next.set(k, v);
+        else next.delete(k);
+      }
       setSp(next, { replace: true });
     },
     [sp, setSp],
@@ -105,7 +108,6 @@ export function SearchPage() {
       })
       .finally(() => !ctl.signal.aborted && setBusy(false));
     return () => ctl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, page]);
 
   // while the old history is still being indexed, look again: results fill in as it goes

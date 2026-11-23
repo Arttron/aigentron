@@ -7,6 +7,7 @@ import { BrowserAddonPanel } from './BrowserPage';
 import { PlaywrightAddonPanel } from './PlaywrightAddonPanel';
 import { VoiceAddonPanel } from './VoiceAddonPanel';
 import { ExtensionSettings } from '@/components/settings/ExtensionSettings';
+import { LocalAgentSettings } from '@/components/settings/LocalAgentSettings';
 import { ProxyConnections } from '@/components/settings/ProxyConnections';
 
 const TABS = [
@@ -14,11 +15,12 @@ const TABS = [
   { id: 'playwright', label: '🎭 Playwright' },
   { id: 'voice', label: '🎙 Voice' },
   { id: 'extension', label: '🔌 Extension' },
+  { id: 'local-agent', label: '💻 Local agent' },
 ] as const satisfies ReadonlyArray<TabDef<string>>;
 type TabId = (typeof TABS)[number]['id'];
 const isTab = (v: string | null): v is TabId => TABS.some((t) => t.id === v);
 
-/** Optional server components (docs/addons.md): the visible Browser, the agents' headless Playwright browser, local Voice, and the browser Extension (built with the project, configured per server). */
+/** Optional server components (docs/addons.md): the visible Browser, the agents' headless Playwright browser, local Voice, the browser Extension (built with the project, configured per server) and the Local agent (a program on your own computer, docs/plan-local-agent.md). */
 export function AddonsPage() {
   const [params, setParams] = useSearchParams();
   const tab: TabId = isTab(params.get('tab')) ? (params.get('tab') as TabId) : 'browser';
@@ -42,6 +44,7 @@ export function AddonsPage() {
       {tab === 'playwright' && <ProxyConnections />}
       {tab === 'voice' && <VoiceAddonPanel />}
       {tab === 'extension' && <ExtensionSettings />}
+      {tab === 'local-agent' && <LocalAgentSettings />}
     </>
   );
 }

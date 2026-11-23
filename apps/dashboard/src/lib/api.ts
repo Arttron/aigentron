@@ -23,6 +23,52 @@ import { buildQuery, request, setActingHeaders } from './http';
 
 export { ApiError, errMsg } from './http';
 
+/** A repository a local agent reports (docs/plan-local-agent.md): the allowed folder and its git state. */
+export interface LocalRepo {
+  id: string;
+  path: string;
+  branch: string;
+  detached: boolean;
+  head: string;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  conflicted: number;
+  state?: string;
+  origin?: string;
+  files: { path: string; xy: string }[];
+  filesCut?: boolean;
+  error?: string;
+}
+
+/** «This project's agents may read this repository on this computer». `valid` = usable now; otherwise `reason` says why not. */
+export interface LocalBindingView {
+  id: string;
+  projectId: string;
+  projectName: string;
+  deviceId: string;
+  deviceLabel: string;
+  repoId: string;
+  repoPath: string | null;
+  valid: boolean;
+  reason: string | null;
+}
+
+/** The global rules of the local agents (docs/plan-local-agent.md); the server fills every value. */
+export interface LocalAgentRules {
+  snapshot: { enabled: boolean; idleMinutes: number; keep: number };
+  fetch: { enabled: boolean; everyMinutes: number };
+  fastForward: { enabled: boolean };
+  notify: { enabled: boolean; dirtyAfterMinutes: number; behindAfterMinutes: number };
+  proposeCommit: { enabled: boolean; idleMinutes: number };
+  quiet: { typingSeconds: number };
+  ignore: string[];
+  projectCanEnable: string[];
+}
+
 /** Body for create/update user. */
 export type UserInput = {
   displayName?: string;
@@ -1019,6 +1065,17 @@ export const api = {
   setActiveProxy: (id: string | null) => request<ProxyList>('PUT', '/proxies/active', { body: { id } }),
   setProxyAgents: (allowed: boolean) => request<ProxyList>('PUT', '/proxies/agents', { body: { allowed } }),
   testProxy: (id: string) => request<{ ok: boolean; ip?: string; ms?: number; error?: string }>('POST', `/proxies/${e(id)}/test`),
+  localAgentInfo: () => request<{ version: string; signInOn: boolean; devices: { id: string; label: string; user: string; os: string | null; arch: string | null; host: string | null; version: string | null; createdAt: string; lastSeenAt: string; online: boolean; outdated: boolean; rulesRev: number | null; repos: LocalRepo[] }[]; rulesRev: number; bindings: LocalBindingView[] }>('GET', '/local-agent/info'),
+  localAgentRules: () => request<{ rev: number; rules: LocalAgentRules; defaults: LocalAgentRules; ruleNames: string[] }>('GET', '/local-agent/rules'),
+  localAgentSaveRules: (rules: LocalAgentRules) => request<{ rev: number; rules: LocalAgentRules }>('PUT', '/local-agent/rules', { body: { rules } }),
+  localAgentBind: (body: { projectId: string; deviceId: string; repoId: string }) => request<{ id: string }>('POST', '/local-agent/bindings', { body }),
+  localAgentUnbind: (id: string) => request<{ ok: boolean }>('DELETE', `/local-agent/bindings/${e(id)}`),
+  localAgentLlm: () => request<{ baseUrl: string; models: { deviceId: string; deviceLabel: string; backend: string; id: string }[]; provider: { name: string; model: string } | null }>('GET', '/local-agent/llm'),
+  localAgentLlmProvider: (body: { model: string; baseUrl?: string }) => request<{ name: string; model: string; baseUrl: string }>('POST', '/local-agent/llm/provider', { body }),
+  localAgentLookup: (code: string) => request<{ userCode: string; info: { device: string; os: string; arch: string; version: string } }>('GET', `/local-agent/device/lookup${buildQuery({ code })}`),
+  localAgentApprove: (code: string, approve: boolean) => request<{ ok: boolean }>('POST', '/local-agent/device/approve', { body: { code, approve } }),
+  localAgentPair: () => request<{ code: string; expiresInSec: number }>('POST', '/local-agent/pair'),
+  localAgentRemoveDevice: (id: string) => request<{ ok: boolean }>('DELETE', `/local-agent/devices/${e(id)}`),
   extensionRemoveDevice: (id: string) => request<{ ok: boolean }>('DELETE', `/extension/devices/${e(id)}`),
   extensionPair: () => request<{ code: string; expiresInSec: number }>('POST', '/extension/pair'),
   listAddons: () => request<AddonInfo[]>('GET', '/addons'),

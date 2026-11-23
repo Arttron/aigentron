@@ -122,7 +122,6 @@ export function useFormatting(ref: RefObject<HTMLTextAreaElement | null>, setVal
       const e = current();
       if (e) commit(applyFormat(e, action));
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [commit],
   );
 
@@ -170,7 +169,6 @@ export function useFormatting(ref: RefObject<HTMLTextAreaElement | null>, setVal
       }
       return false;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [apply, commit],
   );
 
@@ -184,7 +182,6 @@ export function useFormatting(ref: RefObject<HTMLTextAreaElement | null>, setVal
       commit(next);
       return true;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [commit],
   );
 

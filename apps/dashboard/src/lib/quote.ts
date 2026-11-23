@@ -8,7 +8,7 @@ export const QUOTE_MAX = 6000;
 
 /** The text as a Markdown quote block (no trailing newline). Empty text gives an empty string. */
 export function quoteText(raw: string, max = QUOTE_MAX): string {
-  let t = raw.replace(/\r\n?/g, '\n').replace(/​/g, '').trim();
+  let t = raw.replace(/\r\n?/g, '\n').replace(/\u200b/g, '').trim();
   if (!t) return '';
   if (t.length > max) {
     // cut at the end of a paragraph / line when there is one near, so no sentence is left half-way

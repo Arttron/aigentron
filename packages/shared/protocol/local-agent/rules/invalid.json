@@ -1,0 +1,162 @@
+[
+  {
+    "name": "unknown rule",
+    "rules": {
+      "autoPush": {
+        "enabled": true
+      }
+    }
+  },
+  {
+    "name": "unknown key inside a rule",
+    "rules": {
+      "snapshot": {
+        "enabled": true,
+        "everything": 1
+      }
+    }
+  },
+  {
+    "name": "wrong version",
+    "rules": {
+      "version": 2
+    }
+  },
+  {
+    "name": "idle minutes below the minimum",
+    "rules": {
+      "snapshot": {
+        "idleMinutes": 0
+      }
+    }
+  },
+  {
+    "name": "fetch interval above the maximum",
+    "rules": {
+      "fetch": {
+        "everyMinutes": 1441
+      }
+    }
+  },
+  {
+    "name": "typing seconds below the minimum",
+    "rules": {
+      "quiet": {
+        "typingSeconds": 4
+      }
+    }
+  },
+  {
+    "name": "propose-commit idle below the minimum",
+    "rules": {
+      "proposeCommit": {
+        "idleMinutes": 4
+      }
+    }
+  },
+  {
+    "name": "enabled is not a boolean",
+    "rules": {
+      "snapshot": {
+        "enabled": "yes"
+      }
+    }
+  },
+  {
+    "name": "ignore pattern is absolute",
+    "rules": {
+      "ignore": [
+        "/etc/passwd"
+      ]
+    }
+  },
+  {
+    "name": "ignore pattern climbs out",
+    "rules": {
+      "ignore": [
+        "../secrets"
+      ]
+    }
+  },
+  {
+    "name": "ignore pattern empty",
+    "rules": {
+      "ignore": [
+        ""
+      ]
+    }
+  },
+  {
+    "name": "too many ignore patterns",
+    "rules": {
+      "ignore": [
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a",
+        "a"
+      ]
+    }
+  },
+  {
+    "name": "projectCanEnable names an unknown rule",
+    "rules": {
+      "projectCanEnable": [
+        "push"
+      ]
+    }
+  },
+  {
+    "name": "not an object",
+    "rules": [
+      1,
+      2
+    ]
+  }
+]

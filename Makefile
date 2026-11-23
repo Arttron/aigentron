@@ -61,6 +61,12 @@ archive: ## Build the release source archive locally (dist/aigentron-<VERSION>.t
 clean: ## Stop the stack and remove volumes (DESTRUCTIVE)
 	$(COMPOSE) down -v
 
-.PHONY: test-infra
+.PHONY: test-infra local-agent-test local-agent-build
 test-infra: ## shell tests of backup / restore / export / import in throw-away containers (needs Docker)
 	sh scripts/test-infra.sh
+
+local-agent-test: ## Go tests of the local agent (apps/local-agent; needs Go)
+	cd apps/local-agent && go vet ./... && go test -race ./...
+
+local-agent-build: ## Cross-build the local agent into dist/local-agent (all platforms)
+	apps/local-agent/build.sh "$$(cat VERSION)" dist/local-agent

@@ -77,6 +77,8 @@ describe('requests', () => {
   it('classifies routes', () => {
     expect(isPublicRoute('/api/health')).toBe(true);
     expect(isPublicRoute('/api/tasks')).toBe(false);
+    for (const ok of ['device/start', 'device/poll', 'token', 'install.sh', 'package', 'package.sha256']) expect(isPublicRoute(`/api/local-agent/${ok}`)).toBe(true);
+    for (const closed of ['info', 'device/approve', 'device/lookup', 'pair', 'devices/abc']) expect(isPublicRoute(`/api/local-agent/${closed}`)).toBe(false);
     expect(isPublicRoute('/api/secret-links/abc123')).toBe(true); // the one-time token is the credential
     expect(isPublicRoute('/api/secret-linksX')).toBe(false);
     expect(isMachineRoute('/api/approvals/check')).toBe(true);

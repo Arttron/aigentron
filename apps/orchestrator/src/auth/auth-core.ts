@@ -108,11 +108,14 @@ export function isThisMachine(addr: string | undefined, ownAddresses: readonly s
   return ownAddresses.some((o) => o.replace(/^::ffff:/, '') === a);
 }
 
+/** The local agent's own open routes: the sign-in handshake (the codes are the credential), the installer script and the release archive. */
+const isLocalAgentPublic = (path: string): boolean => /^\/api\/local-agent\/(device\/start|device\/poll|token|install\.sh|package|package\.sha256)$/.test(path);
+
 /** Open without a session: liveness and the sign-in endpoints themselves. */
 export function isPublicRoute(path: string): boolean {
   // /api/secret-links/<token>: the one-time token is the credential (see SecretLinksService).
   if (path.startsWith('/api/secret-links/')) return true;
-  return path === '/api/health' || path === '/api/auth/status' || path === '/api/auth/login' || path === '/api/auth/setup' || path === '/api/auth/logout' || path === '/api/extension/token';
+  return path === '/api/health' || path === '/api/auth/status' || path === '/api/auth/login' || path === '/api/auth/setup' || path === '/api/auth/logout' || path === '/api/extension/token' || isLocalAgentPublic(path);
 }
 
 /**
@@ -121,7 +124,7 @@ export function isPublicRoute(path: string): boolean {
  * they are not reachable through a public tunnel.
  */
 export function isMachineRoute(path: string): boolean {
-  return /^\/api\/approvals\/check$/.test(path) || /^\/api\/approvals\/[^/]+\/wait$/.test(path) || path.startsWith('/api/internal-mcp') || path.startsWith('/api/research-mcp') || path.startsWith('/api/browser-mcp') || path.startsWith('/api/commands-mcp');
+  return /^\/api\/approvals\/check$/.test(path) || /^\/api\/approvals\/[^/]+\/wait$/.test(path) || path.startsWith('/api/internal-mcp') || path.startsWith('/api/research-mcp') || path.startsWith('/api/browser-mcp') || path.startsWith('/api/local-os-mcp') || path.startsWith('/api/local-llm/') || path.startsWith('/api/commands-mcp');
 }
 
 /** Failed sign-ins per key (client address): 5 misses → locked, doubling up to 15 minutes. Old failures are forgotten after an hour. */

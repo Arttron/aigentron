@@ -49,6 +49,7 @@ import { GitAccessModule } from './projects/git/git-access.module';
 import { PacksModule } from './packs/packs.module';
 import { VoiceModule } from './voice/voice.module';
 import { ExtensionModule } from './extension/extension.module';
+import { LocalAgentModule } from './local-agent/local-agent.module';
 import { BrowserControlModule } from './browser-control/browser-control.module';
 import { CommandsModule } from './commands/commands.module';
 import { StatsModule } from './stats/stats.module';
@@ -82,6 +83,7 @@ import { HealthController } from './health/health.controller';
     PacksModule,
     VoiceModule,
     ExtensionModule,
+    LocalAgentModule,
     BrowserControlModule,
     CommandsModule,
     PreflightModule,

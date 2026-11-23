@@ -57,13 +57,15 @@ export const QUOTA_PATTERNS: readonly RegExp[] = [
   /usage limit|limit reached|(5|five)[- ]hour limit|weekly limit|you.?ve hit your|resets? (at|in|on)|try again (in|at|after) \d/i,
 ];
 
-export type ProviderFailureKind = 'quota' | 'rate' | 'auth' | 'other';
+export type ProviderFailureKind = 'quota' | 'rate' | 'auth' | 'offline' | 'other';
 
 /** What kind of provider failure this message describes (for the cool-down and the hint shown to people). */
 export function classifyProviderFailure(message: string | undefined | null): ProviderFailureKind {
   const m = message ?? '';
   if (!m) return 'other';
   if (QUOTA_PATTERNS.some((re) => re.test(m))) return 'quota';
+  // a model on the person's own computer that is not reachable right now (the local agent's line is down): skip it for a minute, not for the whole task
+  if (/local computer is offline/i.test(m)) return 'offline';
   if (/rate.?limit|too many requests|overloaded|capacity|temporarily unavailable|\b429\b/i.test(m)) return 'rate';
   if (/unauthorized|forbidden|authentication|invalid.*(api.?key|token)|not signed in|\b40[13]\b/i.test(m)) return 'auth';
   return 'other';

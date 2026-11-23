@@ -19,7 +19,7 @@ export interface HlLine {
 }
 
 const FENCE_OPEN = /^(\s*)(`{3,})\s*([\w+#.-]*)\s*$/;
-const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\[\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)|(~~[^~\n]+~~)/g;
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^[\]\n]*\]\([^)\s]+\))|(https?:\/\/[^\s<>)\]]+)|(\*[^*\s][^*\n]*\*)|(~~[^~\n]+~~)/g;
 
 function inline(src: string, parent: HlClass[], depth: number, before: string, out: Seg[]): void {
   let last = 0;

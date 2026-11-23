@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { AppConfigService } from '../config/app-config.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { needsChatCompletions } from './route-flags';
 
 /** How long to wait for the freshly-spawned litellm to answer before giving up. */
 // Generous: the first start of `litellm[proxy]` on a small VM can take over a minute (heavy imports).
@@ -238,6 +239,7 @@ function renderLitellmConfig(routes: RouteRow[]): string {
       ];
       if (r.apiBase) lines.push(`      api_base: ${yamlStr(r.apiBase)}`);
       if (r.apiKey) lines.push(`      api_key: ${yamlStr(r.apiKey)}`);
+      if (needsChatCompletions(r.backend, r.apiBase)) lines.push('      use_chat_completions_api: true');
       if (r.rpm) lines.push(`      rpm: ${r.rpm}`);
       if (r.tpm) lines.push(`      tpm: ${r.tpm}`);
       if (r.dropReasoning) {

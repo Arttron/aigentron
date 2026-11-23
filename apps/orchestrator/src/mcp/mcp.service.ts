@@ -93,7 +93,7 @@ export class McpService implements OnModuleInit {
     private readonly appConfig: AppConfigService,
   ) {}
 
-  /** The built-in servers (research, browser-ext, commands) must exist before the first agent run asks for them, not only after someone opens the MCP page. */
+  /** The built-in servers (research, browser-ext, local-os, commands) must exist before the first agent run asks for them, not only after someone opens the MCP page. */
   async onModuleInit(): Promise<void> {
     await this.ensureSeeded().catch((e) => this.logger.warn(`MCP seeding failed: ${(e as Error).message}`));
   }
@@ -103,7 +103,7 @@ export class McpService implements OnModuleInit {
     // Filtered here (not `createMany({skipDuplicates:true})`) since that
     // option isn't supported on SQLite.
     const existing = await this.prisma.mcpServer.findMany({
-      where: { name: { in: [...DEFAULT_MCP_SERVERS.map((s) => s.name), 'research', 'browser-ext', 'commands'] } },
+      where: { name: { in: [...DEFAULT_MCP_SERVERS.map((s) => s.name), 'research', 'browser-ext', 'commands', 'local-os'] } },
       select: { name: true },
     });
     const existingNames = new Set(existing.map((s) => s.name));
@@ -123,9 +123,11 @@ export class McpService implements OnModuleInit {
       name: 'browser-ext',
       config: { type: 'http', url: `${this.appConfig.approvalsApiUrl.replace(/\/$/, '')}/api/browser-mcp`, readOnlyTools: ['*'] },
     };
+    // The local agent's read-only repository tools (a repository on the person's own computer, bound to the project): the binding is the person's consent, checked inside the server.
+    const localSeed = { name: 'local-os', config: { type: 'http', url: `${this.appConfig.approvalsApiUrl.replace(/\/$/, '')}/api/local-os-mcp`, readOnlyTools: ['*'] } };
     // The command pipeline (heavy commands through one queue): the dangerous-command check is made inside the server, exactly as for Bash.
     const commandsSeed = { name: 'commands', config: { type: 'http', url: `${this.appConfig.approvalsApiUrl.replace(/\/$/, '')}/api/commands-mcp`, readOnlyTools: ['*'] } };
-    const missing = [...DEFAULT_MCP_SERVERS, researchSeed, browserSeed, commandsSeed].filter((s) => !existingNames.has(s.name));
+    const missing = [...DEFAULT_MCP_SERVERS, researchSeed, browserSeed, localSeed, commandsSeed].filter((s) => !existingNames.has(s.name));
     if (!missing.length) return;
     await this.prisma.mcpServer.createMany({ data: missing as Prisma.McpServerCreateManyInput[] });
     this.logger.log(`Seeded ${missing.length} default MCP server(s)`);

@@ -42,6 +42,8 @@ import { newColleaguesNote, type Colleague } from './roster-note';
 import { CommandPipelineService } from '../commands/command-pipeline.service';
 import { mcpWithCommands } from '../commands/commands-policy';
 import { mcpWithBrowser } from '../browser-control/browser-policy';
+import { LocalOsMcpService } from '../local-agent/local-os-mcp.service';
+import { mcpWithLocal } from '../local-agent/mcp-with-local';
 import { ResearchMcpService } from '../research/research-mcp.service';
 import { ResourcesService } from '../resources/resources.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
@@ -172,6 +174,7 @@ export class RealAgentExecutor extends AgentExecutor {
     private readonly workspace: WorkspaceService,
     private readonly researchMcp: ResearchMcpService,
     private readonly browserMcp: BrowserMcpService,
+    private readonly localMcp: LocalOsMcpService,
     private readonly commands: CommandPipelineService,
     private readonly media: MediaService,
     private readonly questions: QuestionsService,
@@ -210,13 +213,16 @@ export class RealAgentExecutor extends AgentExecutor {
     // the server's own config says (a `${GITHUB_TOKEN}` placeholder becomes empty).
     const githubToken = (await this.credentials.apiTokenFor?.(project.git).catch(() => null)) ?? (await this.settings.githubToken());
     // A discussion participant only talks: none of the agent's own MCP servers (their tools could write somewhere).
-    const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(mcpWithCommands(mcpWithBrowser(agentDef?.mcp ?? [], { available: this.browserMcp.available, isAdmin: agentDef?.name === 'admin', discussion: Boolean(ctx.discussion) }), { enabled: await this.settings.commandPipeline().catch(() => false), chat: agentDef?.mode === 'chat' || task.kind === 'ask', discussion: Boolean(ctx.discussion), allowedTools: agentDef?.allowedTools, disallowedTools: agentDef?.disallowedTools }), { GITHUB_TOKEN: githubToken });
+    const mcpServers = ctx.discussion ? {} : await this.mcp.resolveMany(mcpWithCommands(mcpWithLocal(mcpWithBrowser(agentDef?.mcp ?? [], { available: this.browserMcp.available, isAdmin: agentDef?.name === 'admin', discussion: Boolean(ctx.discussion) }), { available: await this.localMcp.availableFor(project.id), isAdmin: agentDef?.name === 'admin', discussion: Boolean(ctx.discussion) }), { enabled: await this.settings.commandPipeline().catch(() => false), chat: agentDef?.mode === 'chat' || task.kind === 'ask', discussion: Boolean(ctx.discussion), allowedTools: agentDef?.allowedTools, disallowedTools: agentDef?.disallowedTools }), { GITHUB_TOKEN: githubToken });
     // The built-in research server lives in this process and only serves runs that carry a bearer (S-04): give this run its own.
     const researchCfg = mcpServers['research'] as { url?: string; headers?: Record<string, string> } | undefined;
     if (researchCfg?.url) researchCfg.headers = { ...(researchCfg.headers ?? {}), Authorization: `Bearer ${this.researchMcp.register().token}` };
     // The browser-control server names the task by the run's bearer (it must know whose approvals to ask).
     const browserCfg = mcpServers['browser-ext'] as { url?: string; headers?: Record<string, string> } | undefined;
     if (browserCfg?.url) browserCfg.headers = { ...(browserCfg.headers ?? {}), Authorization: `Bearer ${this.browserMcp.register(ctx.taskId).token}` };
+    // The local-os server (a repository on the person's computer) names the task and its project by the run's bearer.
+    const localCfg = mcpServers['local-os'] as { url?: string; headers?: Record<string, string> } | undefined;
+    if (localCfg?.url) localCfg.headers = { ...(localCfg.headers ?? {}), Authorization: `Bearer ${this.localMcp.register(ctx.taskId, project.id).token}` };
     const ownAttachmentPaths = await this.attachments.paths(ctx.taskId).catch(() => [] as string[]);
     const ownOriginals = await this.attachments.originalNames(ctx.taskId).catch(() => ({}) as Record<string, string>);
     // A subtask is sent to do part of the lead's job, and the files the person attached live with the LEAD (each task has its own folder): list them too
@@ -448,7 +454,7 @@ export class RealAgentExecutor extends AgentExecutor {
       if (r.failoverWorthy) {
         const kind = classifyProviderFailure(r.outcome.errorText ?? r.reason);
         const ms = this.cooldown.mark(provider.name, kind);
-        if (ms > 0) this.logger.warn(`Provider "${provider.name}" looks ${kind === 'quota' ? 'out of quota / plan' : kind === 'rate' ? 'rate limited' : 'unauthorised'} — runs prefer its fallbacks for ${Math.round(ms / 60_000)} min`);
+        if (ms > 0) this.logger.warn(`Provider "${provider.name}" looks ${kind === 'quota' ? 'out of quota / plan' : kind === 'rate' ? 'rate limited' : kind === 'offline' ? 'unreachable (its computer is offline)' : 'unauthorised'} — runs prefer its fallbacks for ${Math.round(ms / 60_000)} min`);
       }
       // Quality escalation: the cheaper model did not finish the work (it reported `failed`, or ran out of time / steps) and the ladder has a
       // stronger step — hand the task on, in a fresh session, with what the first attempt said. Not for a provider failure (that is failover).
