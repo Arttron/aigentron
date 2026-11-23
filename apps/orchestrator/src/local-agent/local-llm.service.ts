@@ -16,7 +16,7 @@ interface ModelsAnswer {
 /**
  * A model that runs on a person's computer, offered to the server as an OpenAI-compatible endpoint (`/api/local-llm/v1`): LiteLLM (so every agent) can use it
  * like any provider — the request goes over the line the local agent holds open, and the answer streams back. The person chooses what is shared, on that computer
- * (`aigentron-local llm allow …`); the server only ever sees the models the computer lists.
+ * (`aigentron llm allow …`); the server only ever sees the models the computer lists.
  */
 @Injectable()
 export class LocalLlmService {
@@ -93,7 +93,7 @@ export class LocalLlmService {
     if (typeof body.model !== 'string' || !body.model) return this.fail(res, 400, 'model is required');
     const target = pickModel(await this.shared(), body.model);
     if (!target) {
-      const u = unavailable('no-model', `("${body.model}": run aigentron-local llm allow … on a connected computer)`);
+      const u = unavailable('no-model', `("${body.model}": run aigentron llm allow … on a connected computer)`);
       return this.fail(res, u.status, u.message);
     }
     const wantStream = body.stream === true;

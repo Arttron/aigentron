@@ -30,7 +30,7 @@ export const localOutdated = (installed: string | undefined, server: string): bo
 @Controller('local-agent')
 export class LocalAgentController {
   private readonly flow = new DeviceFlow(10 * 60_000, 2);
-  /** the fallback for a machine with no browser: a code typed into `aigentron-local pair` (long enough to finish an install) */
+  /** the fallback for a machine with no browser: a code typed into `aigentron pair` (long enough to finish an install) */
   private readonly pairing = new PairingCodes(10 * 60_000);
   private readonly limiter = new LoginLimiter(10);
   private readonly starts = new Map<string, number[]>();
@@ -174,7 +174,7 @@ export class LocalAgentController {
     return { ok: true };
   }
 
-  /** Fallback for a machine without a browser: a one-use code to type into `aigentron-local pair`. */
+  /** Fallback for a machine without a browser: a one-use code to type into `aigentron pair`. */
   @Post('pair')
   @HttpCode(200)
   async pair(@Req() req: AuthedRequest) {

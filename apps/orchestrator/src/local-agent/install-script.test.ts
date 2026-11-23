@@ -30,7 +30,9 @@ describe('install script and assets', () => {
     const s = installScript('https://dev.example.com');
     expect(s).toContain('SERVER="${AIGENTRON_SERVER:-https://dev.example.com}"');
     expect(s.startsWith('#!/bin/sh')).toBe(true);
-    expect(s).toContain('aigentron-local" login --server "$SERVER"');
+    expect(s).toContain('aigentron" login --server "$SERVER"');
+    expect(s).toContain('"$BIN_DIR/aigentron"'); // installed as `aigentron`, the old name kept as a link
+    expect(s).toContain('ln -sf aigentron "$BIN_DIR/aigentron-local"');
     expect(s).toContain('does not match');
   });
   it('build.sh builds exactly the platforms the server hands out', () => {

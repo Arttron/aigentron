@@ -2,7 +2,7 @@
 // OpenAI-style /v1 API): the server sends a chat request over the line the agent already holds open, the agent forwards it to the local backend and streams
 // the answer back. Nothing listens for the server and no port is opened.
 //
-// The setup is the person's, made on this computer (`aigentron-local llm …`, a file next to the pairing) and never pushed from the server: the server cannot
+// The setup is the person's, made on this computer (`aigentron llm …`, a file next to the pairing) and never pushed from the server: the server cannot
 // add a backend address (that would let it make this machine call any URL) or widen the list of models it may use. By default nothing is shared.
 package llm
 
@@ -148,7 +148,7 @@ func (c Config) Allowed(model string) bool {
 
 func (c Config) backend(name string) (Backend, error) {
 	if len(c.Backends) == 0 {
-		return Backend{}, errors.New("no model server is set up on that computer (aigentron-local llm add <name> <url>)")
+		return Backend{}, errors.New("no model server is set up on that computer (aigentron llm add <name> <url>)")
 	}
 	if name == "" {
 		return c.Backends[0], nil
@@ -300,7 +300,7 @@ func (r *Runner) Chat(ctx context.Context, c Config, a ChatArgs, emit func(paylo
 		return nil, errors.New("the chat request names no model")
 	}
 	if !c.Allowed(model) {
-		return nil, fmt.Errorf("the model %q is not shared from that computer (aigentron-local llm allow <model>)", model)
+		return nil, fmt.Errorf("the model %q is not shared from that computer (aigentron llm allow <model>)", model)
 	}
 	b, err := c.backend(a.Backend)
 	if err != nil {

@@ -25,7 +25,7 @@ import type { PrismaService } from '../prisma/prisma.service';
 
 /**
  * The real daemon against the real controller + gateway: `login` (device flow, approved over HTTP), `run`, a command and its answer.
- * Needs the Go binary: `LOCAL_AGENT_BIN=/path/to/aigentron-local pnpm vitest run src/local-agent/local-agent-e2e.test.ts` (skipped without it).
+ * Needs the Go binary: `LOCAL_AGENT_BIN=/path/to/aigentron pnpm vitest run src/local-agent/local-agent-e2e.test.ts` (skipped without it).
  */
 const BIN = process.env.LOCAL_AGENT_BIN;
 

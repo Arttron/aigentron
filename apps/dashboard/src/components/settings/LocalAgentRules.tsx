@@ -136,7 +136,7 @@ export function LocalAgentRulesEditor({ rulesRev, devices }: { rulesRev: number;
       </Row>
       <details style={{ marginTop: 8 }}>
         <summary>Per project: <code>.aigentron/local.yaml</code></summary>
-        <Muted>Put this file in a repository (commit it to share it with the team). Same keys as above, all optional; a typo is reported, not ignored. See what applies with <code>aigentron-local rules --repo .</code>.</Muted>
+        <Muted>Put this file in a repository (commit it to share it with the team). Same keys as above, all optional; a typo is reported, not ignored. See what applies with <code>aigentron rules --repo .</code>.</Muted>
         <pre style={{ overflow: 'auto' }}>{`version: 1
 snapshot:
   idleMinutes: 10        # tune

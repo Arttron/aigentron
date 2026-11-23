@@ -25,7 +25,7 @@ export function LocalAgentLlm() {
       <Muted>
         A model running on a connected computer (Ollama, LM Studio, llama.cpp&apos;s <code>llama-server</code>) can serve the agents of this server: the request goes over the line the local agent already holds open, no port is opened. You choose what is shared, <em>on that computer</em>:
         <br />
-        <code>aigentron-local llm add ollama http://localhost:11434</code> (LM Studio: <code>http://localhost:1234</code>), then <code>aigentron-local llm allow &apos;qwen3-coder*&apos;</code>. Nothing is shared by default, and the server cannot widen the list.
+        <code>aigentron llm add ollama http://localhost:11434</code> (LM Studio: <code>http://localhost:1234</code>), then <code>aigentron llm allow &apos;qwen3-coder*&apos;</code>. Nothing is shared by default, and the server cannot widen the list.
       </Muted>
       {error && <ErrorText>{error}</ErrorText>}
       {done && <Muted>{done}</Muted>}

@@ -15,7 +15,7 @@ const summary = (r: LocalRepo): string => {
   return bits.join(' · ');
 };
 
-/** Repositories the computers allowed (`aigentron-local add`), and which project each one is shared with. Read only for now: agents can look, not change. */
+/** Repositories the computers allowed (`aigentron add`), and which project each one is shared with. Read only for now: agents can look, not change. */
 export function LocalAgentRepos({ devices, bindings, reload }: { devices: Device[]; bindings: LocalBindingView[]; reload: () => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -29,11 +29,11 @@ export function LocalAgentRepos({ devices, bindings, reload }: { devices: Device
     <div style={{ margin: '14px 0' }}>
       <strong>Repositories on your computers</strong>
       <Muted>
-        A computer allows a repository with <code>aigentron-local add &lt;path&gt;</code> (its top folder). Here you share it with a project: from then on that project&apos;s agents can <em>read</em> it — status, diff, history, files — and nothing else. They cannot change
+        A computer allows a repository with <code>aigentron add &lt;path&gt;</code> (its top folder). Here you share it with a project: from then on that project&apos;s agents can <em>read</em> it — status, diff, history, files — and nothing else. They cannot change
         anything, and never see secret files (<code>.env</code>, keys, credentials, <code>.git</code>). It works only while the repository&apos;s <code>origin</code> is the project&apos;s repository.
       </Muted>
       {error && <ErrorText>{error}</ErrorText>}
-      {withRepos.length === 0 && <Muted>No repository yet. On a connected computer run: <code>aigentron-local add ~/Code/my-project</code></Muted>}
+      {withRepos.length === 0 && <Muted>No repository yet. On a connected computer run: <code>aigentron add ~/Code/my-project</code></Muted>}
       {withRepos.map((d) => (
         <div key={d.id} style={{ margin: '8px 0' }}>
           <strong>{d.label}</strong> <Badge tone={d.online ? 'done' : 'neutral'}>{d.online ? 'online' : 'offline'}</Badge>

@@ -17,10 +17,10 @@ type Config struct {
 }
 
 // ErrNotPaired is returned when there is no saved pairing.
-var ErrNotPaired = errors.New("not paired: run `aigentron-local pair --server <url> --code <code>`")
+var ErrNotPaired = errors.New("not paired: run `aigentron pair --server <url> --code <code>`")
 
 // Dev reports whether this binary is the development build (`aigentron-dev`, made by `make local-agent-dev`): it keeps its own folder, so it can be paired,
-// run and broken while the installed `aigentron-local` keeps working next to it.
+// run and broken while the installed `aigentron` keeps working next to it.
 func Dev() bool {
 	exe, err := os.Executable()
 	if err != nil {

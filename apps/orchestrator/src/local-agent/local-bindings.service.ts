@@ -76,7 +76,7 @@ export class LocalBindingsService {
     if (!dev) return { ok: false, reason: 'the computer was disconnected', repoPath: null, ...base };
     if (!this.bridge.isOnline(deviceId)) return { ok: false, reason: 'the computer is offline', repoPath: null, ...base };
     const repo = this.bridge.repos(deviceId).find((r) => r.id === repoId);
-    if (!repo) return { ok: false, reason: 'the repository is not allowed on that computer any more (aigentron-local add …)', repoPath: null, ...base };
+    if (!repo) return { ok: false, reason: 'the repository is not allowed on that computer any more (aigentron add …)', repoPath: null, ...base };
     if (!project.repoUrl) return { ok: false, reason: 'the project has no repository address (Projects → settings → Repository), so the local one cannot be matched to it', repoPath: repo.path, ...base };
     if (!sameRemote(repo.origin, project.repoUrl)) return { ok: false, reason: `the repository's origin (${repo.origin || 'none'}) is not the project's repository`, repoPath: repo.path, ...base };
     return { ok: true, repo, ...base };

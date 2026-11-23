@@ -113,8 +113,8 @@ export function LocalAgentSettings() {
           </Button>
           {pair && (
             <>
-              <code style={{ wordBreak: 'break-all' }}>{`aigentron-local pair --server ${origin} --code ${pair.code}`}</code>
-              <CopyButton text={`aigentron-local pair --server ${origin} --code ${pair.code}`} label="Copy the command" />
+              <code style={{ wordBreak: 'break-all' }}>{`aigentron pair --server ${origin} --code ${pair.code}`}</code>
+              <CopyButton text={`aigentron pair --server ${origin} --code ${pair.code}`} label="Copy the command" />
               <Muted>valid {Math.round(pair.expiresInSec / 60)} min, once</Muted>
             </>
           )}
@@ -151,7 +151,7 @@ export function LocalAgentSettings() {
       {info && <LocalAgentRepos devices={info.devices} bindings={info.bindings} reload={load} />}
       {info && <LocalAgentLlm />}
       {info && <LocalAgentRulesEditor rulesRev={info.rulesRev} devices={info.devices} />}
-      <Muted>Server version {info?.version ?? '…'}. Disconnecting a computer tells it at once; it will not reconnect until you sign in again with <code>aigentron-local login</code>.</Muted>
+      <Muted>Server version {info?.version ?? '…'}. Disconnecting a computer tells it at once; it will not reconnect until you sign in again with <code>aigentron login</code>.</Muted>
     </Card>
   );
 }

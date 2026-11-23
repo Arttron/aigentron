@@ -41,7 +41,7 @@ func cmdChat(args []string) error {
 	}
 	b, err := cfg.Pick(*backend)
 	if err != nil {
-		return errors.New("no model server set up — `aigentron-local llm add ollama http://localhost:11434` (LM Studio: http://localhost:1234)")
+		return errors.New("no model server set up — `aigentron llm add ollama http://localhost:11434` (LM Studio: http://localhost:1234)")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -80,7 +80,7 @@ func cmdChat(args []string) error {
 			fmt.Println("\n" + out + "\n")
 		}
 	}
-	fmt.Printf("aigentron-local · %s · model %s (%s)\n", root.Path, m, b.Name)
+	fmt.Printf("aigentron · %s · model %s (%s)\n", root.Path, m, b.Name)
 	if *prompt != "" {
 		ask(*prompt)
 		return nil
@@ -109,7 +109,7 @@ func pickRoot(arg string) (policy.Root, error) {
 		return policy.Root{}, err
 	}
 	if len(roots) == 0 {
-		return policy.Root{}, errors.New("no repository allowed yet — `aigentron-local add <path to a git repository>`")
+		return policy.Root{}, errors.New("no repository allowed yet — `aigentron add <path to a git repository>`")
 	}
 	if arg != "" {
 		if r, ok := policy.Find(roots, arg); ok {
@@ -122,7 +122,7 @@ func pickRoot(arg string) (policy.Root, error) {
 				}
 			}
 		}
-		return policy.Root{}, fmt.Errorf("%q is not an allowed repository (see `aigentron-local roots`)", arg)
+		return policy.Root{}, fmt.Errorf("%q is not an allowed repository (see `aigentron roots`)", arg)
 	}
 	if out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output(); err == nil {
 		top, _ := filepath.EvalSymlinks(strings.TrimSpace(string(out)))

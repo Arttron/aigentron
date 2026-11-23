@@ -58,20 +58,20 @@ func cmdLLM(args []string) error {
 	case "add":
 		rest, remote := stripFlag(args[1:], "--allow-remote")
 		if len(rest) != 2 {
-			return errors.New("usage: aigentron-local llm add <name> <url> [--allow-remote]   e.g. add ollama http://localhost:11434   ·   add lmstudio http://localhost:1234")
+			return errors.New("usage: aigentron llm add <name> <url> [--allow-remote]   e.g. add ollama http://localhost:11434   ·   add lmstudio http://localhost:1234")
 		}
 		if err := cfg.AddBackend(rest[0], rest[1], remote); err != nil {
 			return err
 		}
-		fmt.Printf("Added %s. Nothing is shared yet: choose the models with `aigentron-local llm allow <model>` (a name, a pattern such as qwen*, or *).\n", rest[0])
+		fmt.Printf("Added %s. Nothing is shared yet: choose the models with `aigentron llm allow <model>` (a name, a pattern such as qwen*, or *).\n", rest[0])
 	case "remove":
 		if len(args) != 2 || !cfg.RemoveBackend(args[1]) {
-			return errors.New("usage: aigentron-local llm remove <name>")
+			return errors.New("usage: aigentron llm remove <name>")
 		}
 		fmt.Println("Removed.")
 	case "allow":
 		if len(args) < 2 {
-			return errors.New("usage: aigentron-local llm allow <model|pattern> …")
+			return errors.New("usage: aigentron llm allow <model|pattern> …")
 		}
 		for _, m := range args[1:] {
 			if strings.TrimSpace(m) != "" {
@@ -81,7 +81,7 @@ func cmdLLM(args []string) error {
 		fmt.Println("Shared with the server:", strings.Join(cfg.Allow, ", "))
 	case "deny":
 		if len(args) < 2 {
-			return errors.New("usage: aigentron-local llm deny <model|pattern> …")
+			return errors.New("usage: aigentron llm deny <model|pattern> …")
 		}
 		keep := cfg.Allow[:0]
 		for _, p := range cfg.Allow {
@@ -93,7 +93,7 @@ func cmdLLM(args []string) error {
 		fmt.Println("Shared with the server:", strings.Join(cfg.Allow, ", "))
 	case "parallel":
 		if len(args) != 2 {
-			return errors.New("usage: aigentron-local llm parallel <1-8>")
+			return errors.New("usage: aigentron llm parallel <1-8>")
 		}
 		var n int
 		if _, err := fmt.Sscanf(args[1], "%d", &n); err != nil || n < 1 || n > 8 {
@@ -114,7 +114,7 @@ func cmdLLMShow() error {
 		return err
 	}
 	if len(cfg.Backends) == 0 {
-		fmt.Println("No model server set up. Share a local model with the server:\n  aigentron-local llm add ollama http://localhost:11434\n  aigentron-local llm allow 'qwen3-coder*'")
+		fmt.Println("No model server set up. Share a local model with the server:\n  aigentron llm add ollama http://localhost:11434\n  aigentron llm allow 'qwen3-coder*'")
 		return nil
 	}
 	for _, b := range cfg.Backends {

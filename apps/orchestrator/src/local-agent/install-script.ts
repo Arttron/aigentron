@@ -27,14 +27,14 @@ export const safeOrigin = (o: string): boolean => /^https?:\/\/[A-Za-z0-9.-]+(:\
 
 /**
  * `curl -fsSL <server>/api/local-agent/install.sh | sh` — finds the platform, downloads the archive FROM THIS SERVER, checks its SHA-256 (also from this server, which verified
- * both against the release), installs the binary into ~/.local/bin and starts the browser sign-in (`aigentron-local login`).
+ * both against the release), installs the binary into ~/.local/bin and starts the browser sign-in (`aigentron login`).
  */
 export function installScript(origin: string): string {
   if (!safeOrigin(origin)) throw new Error('unsafe server address');
   return `#!/bin/sh
 # Aigentron local agent — installer served by ${origin}
 # The server address below is the one this script was downloaded from; AIGENTRON_SERVER=https://other.example sh install.sh uses another.
-# Installs the "aigentron-local" program for the current user (no root), then signs in through your browser.
+# Installs the "aigentron" program for the current user (no root), then signs in through your browser.
 set -eu
 SERVER="\${AIGENTRON_SERVER:-${origin}}"
 BIN_DIR="\${AIGENTRON_LOCAL_BIN:-$HOME/.local/bin}"
@@ -65,12 +65,19 @@ if command -v sha256sum >/dev/null 2>&1; then got="$(sha256sum "$tmp/pkg.tar.gz"
 
 tar -xzf "$tmp/pkg.tar.gz" -C "$tmp" aigentron-local || die "the archive has no aigentron-local"
 mkdir -p "$BIN_DIR"
-install -m 755 "$tmp/aigentron-local" "$BIN_DIR/aigentron-local"
-echo "Installed $BIN_DIR/aigentron-local ($("$BIN_DIR/aigentron-local" version))"
+install -m 755 "$tmp/aigentron-local" "$BIN_DIR/aigentron"
+# the name it had before (older instructions, scripts): the same program
+ln -sf aigentron "$BIN_DIR/aigentron-local"
+echo "Installed $BIN_DIR/aigentron ($("$BIN_DIR/aigentron" version))"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "Note: $BIN_DIR is not in your PATH." ;; esac
+# the server's own command-line tool is also called "aigentron": say so when it would come first
+other="$(command -v aigentron 2>/dev/null || true)"
+if [ -n "$other" ] && [ "$other" != "$BIN_DIR/aigentron" ]; then
+  echo "Note: another \"aigentron\" is on your PATH ($other) — that is the server's tool. Use $BIN_DIR/aigentron (or aigentron-local) for this one."
+fi
 
-"$BIN_DIR/aigentron-local" login --server "$SERVER"
+"$BIN_DIR/aigentron" login --server "$SERVER"
 echo
-echo "Start it with: $BIN_DIR/aigentron-local run"
+echo "Start it with: $BIN_DIR/aigentron run"
 `;
 }

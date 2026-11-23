@@ -1,6 +1,6 @@
 // Package policy holds the hard limits of the local agent. They are NOT settings: neither the server, nor a repository's file, nor a model can change them.
 //
-//   - roots: only repositories the person added on this machine (`aigentron-local add`) are ever touched;
+//   - roots: only repositories the person added on this machine (`aigentron add`) are ever touched;
 //   - every path an agent names is resolved (symlinks included) and must stay inside its root;
 //   - a never-list of secrets (.env, keys, credentials, .git, .ssh …) is refused for reading and left out of every diff.
 package policy

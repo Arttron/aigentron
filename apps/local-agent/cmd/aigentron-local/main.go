@@ -1,4 +1,4 @@
-// aigentron-local is the Aigentron agent for a person's own machine: it pairs with a server and keeps one connection up
+// aigentron is the Aigentron agent for a person's own machine: it pairs with a server and keeps one connection up
 // so server-side agents (under approvals) can work with the local repositories. See docs/plan-local-agent.md.
 package main
 
@@ -29,7 +29,7 @@ import (
 // version is set at build time: -ldflags "-X main.version=$(cat VERSION)".
 var version = "dev"
 
-const usage = `aigentron-local %s
+const usage = `aigentron %s
 
   login --server <url> [--name <device name>]                sign in through your browser (the usual way)
   pair --server <url> --code <code> [--name <device name>]   pair with a one-use code (a machine without a browser)
@@ -171,7 +171,7 @@ func openBrowser(url string) error {
 
 func cmdServer(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: aigentron-local server <url>")
+		return errors.New("usage: aigentron server <url>")
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -285,7 +285,7 @@ func repoOp(ctx context.Context, op string, args json.RawMessage) (any, error) {
 	}
 	root, ok := policy.Find(roots, a.Repo)
 	if !ok {
-		return nil, fmt.Errorf("no allowed repository %q (add it on that computer with `aigentron-local add <path>`)", a.Repo)
+		return nil, fmt.Errorf("no allowed repository %q (add it on that computer with `aigentron add <path>`)", a.Repo)
 	}
 	switch op {
 	case "repo.status":
@@ -309,7 +309,7 @@ func repoOp(ctx context.Context, op string, args json.RawMessage) (any, error) {
 
 func cmdAdd(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: aigentron-local add <path to a git repository>")
+		return errors.New("usage: aigentron add <path to a git repository>")
 	}
 	r, err := policy.AddRoot(args[0])
 	if err != nil {
@@ -321,7 +321,7 @@ func cmdAdd(args []string) error {
 
 func cmdRemove(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: aigentron-local remove <id or path>")
+		return errors.New("usage: aigentron remove <id or path>")
 	}
 	ok, err := policy.RemoveRoot(args[0])
 	if err != nil {
@@ -340,7 +340,7 @@ func cmdRoots() error {
 		return err
 	}
 	if len(roots) == 0 {
-		fmt.Println("No repositories allowed yet. Add one with: aigentron-local add <path>")
+		fmt.Println("No repositories allowed yet. Add one with: aigentron add <path>")
 		return nil
 	}
 	for _, r := range roots {
@@ -396,5 +396,5 @@ func deviceName(host string) string {
 	return host
 }
 
-// progName is how the person called this program (aigentron-local, or aigentron-dev for the development build), for the hints we print.
+// progName is how the person called this program (aigentron, or aigentron-dev for the development build), for the hints we print.
 func progName() string { return filepath.Base(os.Args[0]) }

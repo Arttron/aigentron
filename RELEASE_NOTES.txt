@@ -1,10 +1,7 @@
-Aigentron v0.2.1
+Aigentron v0.2.2
 
-For people who are not programmers: the local agent now connects through the address your server is normally opened at (the "520" error behind a tunnel or proxy is gone), and the list of connected computers is easier to read.
-
-Fixed
-- The local agent could not connect when the server is reached through its built-in web server (ports 80/443), for example behind a Cloudflare tunnel: the connection was dropped and the error 520 was shown. It connects there now.
+For people who are not programmers: the program for your own computer is now simply called "aigentron", and the installer says so if the server's own "aigentron" tool would get in the way.
 
 Changed
-- Add-ons -> Local agent: each connected computer is a card (name and status, then user, system, version and when it was last seen, with Disconnect on the side). A development build shows its version as it is.
-- A development build of the program (aigentron-dev, made with "make local-agent-dev") keeps its own settings and can run next to the installed one; it is never shown as "update available".
+- The local agent program is installed as "aigentron" (before: "aigentron-local", which stays as another name for the same program). Commands and hints on the Add-ons -> Local agent tab, in the program and in the administrator's reference use the new name. An existing pairing keeps working.
+- If another "aigentron" (the server's command-line tool) is found first in your PATH, the installer tells you and shows which one to call.
