@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { API_BASE } from '@/lib/config';
 import { UPDATING_EVENT } from '@/lib/auth';
+import styles from './UpdatingBanner.module.css';
 
 /**
  * While the server updates, the update page of the installer answers every request with 503 and `x-aigentron-updating`. A tab that is already open
@@ -35,7 +36,7 @@ export function UpdatingBanner() {
 
   if (!updating) return null;
   return (
-    <div role="status" style={{ position: 'sticky', top: 0, zIndex: 2000, padding: '10px 16px', textAlign: 'center', background: 'var(--amber-soft)', color: 'var(--text)', fontSize: 14, boxShadow: 'var(--raised-xs)' }}>
+    <div role="status" className={styles.banner}>
       ⏳ <strong>Aigentron is updating.</strong> The server is back in a minute or two — this page reloads by itself.
     </div>
   );

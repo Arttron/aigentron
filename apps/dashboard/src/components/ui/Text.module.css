@@ -5,3 +5,8 @@
 .error {
   color: var(--red);
 }
+
+.block {
+  display: block;
+  line-height: 1.5;
+}

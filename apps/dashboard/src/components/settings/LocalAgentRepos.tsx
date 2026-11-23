@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type LocalBindingView, type LocalRepo } from '@/lib/api';
 import type { Project } from '@lds/shared';
-import { Badge, Button, ErrorText, Muted, Row } from '@/components/ui';
-import styles from './LocalAgentPanels.module.css';
+import { Badge, Button, ErrorText, Muted, Row, Table } from '@/components/ui';
 
 type Device = { id: string; label: string; online: boolean; repos: LocalRepo[] };
 
@@ -29,17 +28,16 @@ export function LocalAgentRepos({ devices, bindings, reload }: { devices: Device
   const rows = withRepos.flatMap((d) => d.repos.map((r) => ({ d, r })));
 
   return (
-    <div className={styles.section}>
-      <strong className={styles.title}>Repositories on your computers</strong>
-      <Muted className={styles.note}>
+    <div style={{ margin: '14px 0' }}>
+      <strong>Repositories on your computers</strong>
+      <Muted block>
         A computer allows a repository with <code>aigentron add &lt;path&gt;</code> (its top folder). Here you share it with a project: from then on that project&apos;s agents can <em>read</em> it — status, diff, history, files — and nothing else. They cannot change
         anything, and never see secret files (<code>.env</code>, keys, credentials, <code>.git</code>). If the project has a repository address, it works only while the repository&apos;s <code>origin</code> is that address; a project without one needs no match (your Share is the consent).
       </Muted>
       {error && <ErrorText>{error}</ErrorText>}
       {rows.length === 0 && <Muted>No repository yet. On a connected computer run: <code>aigentron add ~/Code/my-project</code></Muted>}
       {rows.length > 0 && (
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
+        <Table>
             <thead>
               <tr>
                 <th>Computer</th>
@@ -54,12 +52,12 @@ export function LocalAgentRepos({ devices, bindings, reload }: { devices: Device
                 const key = `${d.id}:${r.id}`;
                 return (
                   <tr key={key}>
-                    <td className={styles.nowrap}>
+                    <td style={{ whiteSpace: 'nowrap' }}>
                       {d.label} <Badge tone={d.online ? 'done' : 'neutral'}>{d.online ? 'online' : 'offline'}</Badge>
                     </td>
                     <td>
-                      <code className={styles.path}>{r.path}</code>
-                      <Muted className={styles.sub}>{summary(r)}</Muted>
+                      <code style={{ wordBreak: 'break-all' }}>{r.path}</code>
+                      <Muted block>{summary(r)}</Muted>
                       {r.error && <ErrorText>{r.error}</ErrorText>}
                       {r.files.length > 0 && (
                         <details>
@@ -70,23 +68,23 @@ export function LocalAgentRepos({ devices, bindings, reload }: { devices: Device
                     </td>
                     <td>
                       {mine.length === 0 && <Muted>—</Muted>}
-                      <div className={styles.shared}>
+                      <div style={{ display: 'grid', gap: 6 }}>
                         {mine.map((b) => (
                           <div key={b.id}>
-                            <div className={styles.sharedItem}>
+                            <Row wrap>
                               <Badge tone={b.valid ? 'done' : 'review'}>{b.valid ? 'shared' : 'not usable'}</Badge>
                               <strong>{b.projectName}</strong>
                               <Button size="sm" onClick={() => act(api.localAgentUnbind(b.id))}>
                                 Stop sharing
                               </Button>
-                            </div>
-                            {b.reason && <Muted className={styles.sub}>{b.reason}</Muted>}
+                            </Row>
+                            {b.reason && <Muted block>{b.reason}</Muted>}
                           </div>
                         ))}
                       </div>
                     </td>
                     <td>
-                      <div className={styles.add}>
+                      <Row wrap>
                         <select value={choice[key] ?? ''} onChange={(e) => setChoice({ ...choice, [key]: e.target.value })}>
                           <option value="">Choose a project…</option>
                           {projects.filter((p) => !mine.some((b) => b.projectId === p.id)).map((p) => (
@@ -98,14 +96,13 @@ export function LocalAgentRepos({ devices, bindings, reload }: { devices: Device
                         <Button size="sm" disabled={!choice[key]} onClick={() => act(api.localAgentBind({ projectId: choice[key]!, deviceId: d.id, repoId: r.id }).then(() => setChoice({ ...choice, [key]: '' })))}>
                           Share (read only)
                         </Button>
-                      </div>
+                      </Row>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
-          </table>
-        </div>
+        </Table>
       )}
       {bindings.filter((b) => !devices.some((d) => d.id === b.deviceId && d.repos.some((r) => r.id === b.repoId))).map((b) => (
         <Row key={b.id} wrap>

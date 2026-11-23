@@ -3,6 +3,7 @@ export type { ButtonVariant, ButtonSize } from './Button';
 export { Card, SectionTitle } from './Card';
 export { Field } from './Field';
 export { Row } from './Row';
+export { Table } from './Table';
 export { Badge } from './Badge';
 export type { BadgeTone } from './Badge';
 export { Tabs } from './Tabs';

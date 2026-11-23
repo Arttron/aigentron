@@ -1,0 +1,14 @@
+/* Pinned to the top of the window whatever scrolls (the page, a panel, a modal), above everything else. */
+.banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2000;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
+  text-align: center;
+  background: var(--amber-soft);
+  color: var(--text);
+  font-size: 14px;
+  box-shadow: var(--raised-xs);
+}

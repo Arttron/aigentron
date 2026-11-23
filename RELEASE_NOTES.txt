@@ -1,7 +1,7 @@
-Aigentron v0.2.7
+Aigentron v0.2.8
 
-For people who are not programmers: the Local agent page is tidier.
+For people who are not programmers: two small tidy-ups of the dashboard.
 
 Fixed
-- On Add-ons -> Local agent a section's heading no longer runs into its text.
-- The repositories are now a table: computer, repository (with its state and changed files), the projects it is shared with, and where you share it with another project. The list of shared models is a table too.
+- The "Aigentron is updating" notice now stays pinned to the top of the window, whatever you scroll.
+- The Local agent page (repositories, models, rules) now uses the same building blocks as the rest of the dashboard, so it looks like the other pages.

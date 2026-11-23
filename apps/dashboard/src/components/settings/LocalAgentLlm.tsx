@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
-import { Badge, Button, ErrorText, Muted, Row } from '@/components/ui';
-import styles from './LocalAgentPanels.module.css';
+import { Badge, Button, ErrorText, Muted, Row, Table } from '@/components/ui';
 
 type Info = Awaited<ReturnType<typeof api.localAgentLlm>>;
 
@@ -21,20 +20,19 @@ export function LocalAgentLlm() {
       .catch((e: Error) => setError(e.message));
 
   return (
-    <div className={styles.section}>
-      <strong className={styles.title}>Models on your computers</strong>
-      <Muted className={styles.note}>
+    <div style={{ margin: '14px 0' }}>
+      <strong>Models on your computers</strong>
+      <Muted block>
         A model running on a connected computer (Ollama, LM Studio, llama.cpp&apos;s <code>llama-server</code>) can serve the agents of this server: the request goes over the line the local agent already holds open, no port is opened. You choose what is shared, <em>on that computer</em>:
         <br />
         <code>aigentron llm add ollama http://localhost:11434</code> (LM Studio: <code>http://localhost:1234</code>), then <code>aigentron llm allow &apos;qwen3-coder*&apos;</code>. Nothing is shared by default, and the server cannot widen the list.
       </Muted>
       {error && <ErrorText>{error}</ErrorText>}
-      {done && <Muted className={styles.note}>{done}</Muted>}
-      {info && info.models.length === 0 && <Muted className={styles.note}>No shared model right now (the computer must be online and have allowed at least one model).</Muted>}
+      {done && <Muted block>{done}</Muted>}
+      {info && info.models.length === 0 && <Muted block>No shared model right now (the computer must be online and have allowed at least one model).</Muted>}
       {info && info.models.length > 0 && (
         <>
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
+          <Table>
               <thead>
                 <tr>
                   <th>Model</th>
@@ -47,7 +45,7 @@ export function LocalAgentLlm() {
                 {info.models.map((m) => (
                   <tr key={`${m.deviceId}:${m.id}`}>
                     <td>
-                      <code className={styles.path}>{m.id}</code>
+                      <code style={{ wordBreak: 'break-all' }}>{m.id}</code>
                     </td>
                     <td>{m.deviceLabel}</td>
                     <td>{m.backend}</td>
@@ -59,8 +57,7 @@ export function LocalAgentLlm() {
                   </tr>
                 ))}
               </tbody>
-            </table>
-          </div>
+          </Table>
           <Row wrap>
             <label>
               Address of this server as <em>LiteLLM</em> sees it:{' '}
