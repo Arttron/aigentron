@@ -1,11 +1,6 @@
-Aigentron v0.2.3
+Aigentron v0.2.4
 
-For people who are not programmers: the program on your computer can now fetch a project's code by itself, or work right in the folder you start it from.
+For people who are not programmers: the program on your computer can now keep running in the background and start by itself when you sign in.
 
 Added
-- "aigentron open <project>": from any folder, picks one of the server's projects that has a repository, uses the copy that is already on your computer or downloads it (you confirm the address and the folder first) and allows the agent to work in it. "aigentron open" alone lists the projects.
-- Starting "aigentron chat" or "aigentron run" inside a git repository that is not allowed yet asks once whether to allow it.
-
-Safe by design
-- The server can only name a project. The program checks the address itself (no local paths, no passwords, no commands) and runs the download without any hooks of the repository.
-- The server needs this version too: older servers answer "too old to list projects".
+- "aigentron service install" keeps the local agent running in the background and starts it at sign-in (macOS and Linux); "aigentron service status" shows whether it runs, "aigentron service uninstall" turns it off. Nothing is started in the background unless you ask for it.

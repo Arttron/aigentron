@@ -34,7 +34,8 @@ const usage = `aigentron %s
 
   login --server <url> [--name <device name>]                sign in through your browser (the usual way)
   pair --server <url> --code <code> [--name <device name>]   pair with a one-use code (a machine without a browser)
-  run                                                        connect and stay connected (this is what the service runs)
+  run                                                        connect and stay connected (in this terminal)
+  service install|uninstall|status                           keep "run" going in the background and start it at sign-in (launchd / systemd --user)
   add <path>                                                 allow a git repository (its top folder) — agents can then read it, never anything else
   remove <id|path>                                           stop allowing a repository
   roots                                                      list the allowed repositories
@@ -69,6 +70,8 @@ func main() {
 		err = cmdRemove(os.Args[2:])
 	case "roots":
 		err = cmdRoots()
+	case "service":
+		err = cmdService(os.Args[2:])
 	case "open":
 		err = cmdOpen(os.Args[2:])
 	case "chat":
