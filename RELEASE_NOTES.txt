@@ -1,7 +1,11 @@
-Aigentron v0.2.5
+Aigentron v0.2.6
 
-For people who are not programmers: a folder on your computer can now be shared with a project even when the project has no repository address, and the background service reports its state more clearly.
+For people who are not programmers: the program on your computer can now update itself with one command.
 
-Changed
-- A project that has a repository address still needs the shared folder to be that repository. A project without an address no longer blocks sharing: your "Share" is the consent, and the folder's name does not matter. (Server-side change: update the server.)
-- "aigentron service status" shows one clear line (state and process number) instead of repeated ones.
+Added
+- "aigentron update" installs the version of the server your computer is paired with. It downloads the program from that server, checks it, tries it once, and only then replaces the old one (kept next to it as a backup with the ending ".prev"). If the background service is running, it is restarted. "aigentron update --check" only tells you whether there is a new version.
+- The Local agent tab now points to this command when a computer is out of date.
+- Nothing updates in the background by itself, and development copies (aigentron-dev) are never changed this way.
+
+Note
+- Computers with an older program (before 0.2.6) do not have this command yet: run the install command from the tab once more, after that "aigentron update" is enough.

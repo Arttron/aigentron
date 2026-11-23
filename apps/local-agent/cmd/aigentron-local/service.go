@@ -190,3 +190,44 @@ func launchdState(out string) string {
 	}
 	return state
 }
+
+// restartService restarts the background service if one is installed AND it runs one of these programs (a copy somewhere else is not its business); installed=false otherwise.
+func restartService(exes ...string) (installed bool, err error) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		return false, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, err
+	}
+	if runtime.GOOS == "darwin" {
+		label := plistLabel()
+		b, err := os.ReadFile(filepath.Join(home, "Library", "LaunchAgents", label+".plist"))
+		if err != nil || !mentions(string(b), exes, html.EscapeString) {
+			return false, nil
+		}
+		out, err := run("launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/%s", os.Getuid(), label))
+		if err != nil {
+			return true, fmt.Errorf("%s", out)
+		}
+		return true, nil
+	}
+	name := serviceName() + ".service"
+	b, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", name))
+	if err != nil || !mentions(string(b), exes, systemdQuote) {
+		return false, nil
+	}
+	if out, err := run("systemctl", "--user", "restart", name); err != nil {
+		return true, fmt.Errorf("%s", out)
+	}
+	return true, nil
+}
+
+func mentions(content string, exes []string, enc func(string) string) bool {
+	for _, e := range exes {
+		if e != "" && strings.Contains(content, enc(e)) {
+			return true
+		}
+	}
+	return false
+}

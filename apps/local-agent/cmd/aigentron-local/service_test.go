@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html"
 	"strings"
 	"testing"
 )
@@ -34,5 +35,16 @@ func TestLaunchdState(t *testing.T) {
 	}
 	if launchdState("nothing") != "loaded" {
 		t.Error("fallback")
+	}
+}
+
+func TestMentions(t *testing.T) {
+	plist := renderPlist("l", "/Users/a&b/aigentron", "/l", "")
+	if !mentions(plist, []string{"/other", "/Users/a&b/aigentron"}, html.EscapeString) || mentions(plist, []string{"/tmp/x/aigentron"}, html.EscapeString) || mentions(plist, []string{""}, html.EscapeString) {
+		t.Error("plist")
+	}
+	unit := renderUnit("/home/me/.local/bin/aigentron", "")
+	if !mentions(unit, []string{"/home/me/.local/bin/aigentron"}, systemdQuote) || mentions(unit, []string{"/tmp/aigentron"}, systemdQuote) {
+		t.Error("unit")
 	}
 }

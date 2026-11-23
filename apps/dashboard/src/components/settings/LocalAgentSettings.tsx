@@ -146,7 +146,7 @@ export function LocalAgentSettings() {
             ))}
           </div>
         )}
-        {info?.devices.some((d) => d.outdated) && <Muted>To update, run the install command above again (it replaces the program with this server&apos;s version).</Muted>}
+        {info?.devices.some((d) => d.outdated) && <Muted>To update, run <code>aigentron update</code> on that computer (it installs this server&apos;s version, keeps the old one as a backup and restarts the background service). Older programs without that command: run the install command above again.</Muted>}
       </div>
       {info && <LocalAgentRepos devices={info.devices} bindings={info.bindings} reload={load} />}
       {info && <LocalAgentLlm />}
