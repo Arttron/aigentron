@@ -1,0 +1,1 @@
+{"type":"command","id":"c9","op":"llm.chat","args":{"id":"j1","backend":"ollama","request":{"model":"qwen3","messages":[{"role":"user","content":"hi"}],"stream_options":{"include_usage":true}}}}

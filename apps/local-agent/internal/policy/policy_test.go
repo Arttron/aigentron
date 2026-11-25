@@ -117,3 +117,72 @@ func TestAddAndRemoveRoots(t *testing.T) {
 		t.Fatal("not removed")
 	}
 }
+
+// A bypass attempt must not get past the never-list by spelling: case (macOS and Windows disks ignore it), dots, slashes.
+func TestNeverReasonSpellingTricks(t *testing.T) {
+	for _, bad := range []string{".ENV", ".Env.local", "KEYS/Server.PEM", "ID_RSA", "Id_Ed25519", ".GIT/config", "x/.Git/hooks/y", ".SSH/id_rsa", "./.env", "src/../.env", "a/./.env", ".env/", "x//.env", ".NPMRC"} {
+		if NeverReason(bad) == "" {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+	for _, ok := range []string{".ENV.EXAMPLE", ".Env.Sample"} {
+		if why := NeverReason(ok); why != "" {
+			t.Errorf("%q is an example file and must be allowed, got: %s", ok, why)
+		}
+	}
+}
+
+// Links inside the repository must not lead to a secret, to the git folder, or outside — whatever the link's own name looks like.
+func TestResolveLinkTricks(t *testing.T) {
+	root, _ := filepath.EvalSymlinks(t.TempDir())
+	outside, _ := filepath.EvalSymlinks(t.TempDir())
+	_ = os.MkdirAll(filepath.Join(root, ".git"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, ".git", "config"), []byte("[core]"), 0o644)
+	_ = os.MkdirAll(filepath.Join(root, "src"), 0o755)
+	_ = os.WriteFile(filepath.Join(root, "src", "a.go"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("s"), 0o644)
+	// a relative link to the git folder, a link to a file outside (absolute and by climbing), a chain of links, a link to the root's parent
+	_ = os.Symlink(".git", filepath.Join(root, "gitlink"))
+	_ = os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "abs.txt"))
+	_ = os.Symlink("../"+filepath.Base(outside)+"/secret.txt", filepath.Join(root, "rel.txt"))
+	_ = os.Symlink("abs.txt", filepath.Join(root, "chain1"))
+	_ = os.Symlink("chain1", filepath.Join(root, "chain2"))
+	_ = os.Symlink("..", filepath.Join(root, "src", "up"))
+	_ = os.Symlink(filepath.Join(root, "src", "a.go"), filepath.Join(root, "ok-link.go"))
+
+	for name, rel := range map[string]string{
+		"link to .git folder":    "gitlink/config",
+		"absolute link out":      "abs.txt",
+		"relative link out":      "rel.txt",
+		"chain of links":         "chain2",
+		"link to the parent":     "src/up/" + filepath.Base(outside) + "/secret.txt",
+		"link then climb":        "gitlink/../abs.txt",
+		"backslash climbing":     `..\..\x`,
+		"trailing slash on .env": ".env/",
+	} {
+		if p, err := Resolve(root, rel); err == nil {
+			t.Errorf("%s: %q was accepted as %s", name, rel, p)
+		}
+	}
+	// a link that stays inside and leads to a normal file is fine
+	if p, err := Resolve(root, "ok-link.go"); err != nil || p != filepath.Join(root, "src", "a.go") {
+		t.Errorf("an inside link: %v %v", p, err)
+	}
+}
+
+// Roots must not be a way in either: a link to the home folder or to a secret folder is refused once resolved.
+func TestCheckRootRefusesLinksToForbiddenPlaces(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home")
+	}
+	link := filepath.Join(t.TempDir(), "h")
+	if err := os.Symlink(home, link); err != nil {
+		t.Skip("no symlinks")
+	}
+	// AddRoot resolves the path before checking; the link must not hide the home folder
+	if _, err := AddRoot(link); err == nil {
+		_, _ = RemoveRoot(link)
+		t.Error("a link to the home folder was accepted as a root")
+	}
+}

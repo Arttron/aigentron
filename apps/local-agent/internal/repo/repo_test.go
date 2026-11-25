@@ -141,11 +141,33 @@ func TestDiffNeverShowsSecrets(t *testing.T) {
 	if !strings.Contains(res.Out, "// changed") {
 		t.Fatalf("the real change is missing:\n%s", res.Out)
 	}
+	if _, err := ReadDiff(context.Background(), root, ".ENV", false); err == nil {
+		t.Error("asking for the diff of .ENV (another spelling of .env) must be refused")
+	}
 	if _, err := ReadDiff(context.Background(), root, ".env", false); err == nil {
 		t.Error("asking for the diff of .env must be refused")
 	}
 	if _, err := ReadDiff(context.Background(), root, "../etc/passwd", false); err == nil {
 		t.Error("climbing out must be refused")
+	}
+}
+
+// The diff's exclusions ignore case too: a changed "KEY.PEM" or ".Env" must not leak on any disk.
+func TestDiffExcludesOtherSpellings(t *testing.T) {
+	root, _ := fixture(t)
+	git(t, root.Path, "config", "user.name", "t")
+	write(t, root.Path, "KEY.PEM", "old\n")
+	write(t, root.Path, "cfg/.Env", "old\n")
+	git(t, root.Path, "add", "-f", ".")
+	git(t, root.Path, "commit", "-qm", "caps")
+	write(t, root.Path, "KEY.PEM", "SUPERSECRET\n")
+	write(t, root.Path, "cfg/.Env", "SUPERSECRET\n")
+	res, err := ReadDiff(context.Background(), root, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Out, "SUPERSECRET") {
+		t.Fatalf("a secret is in the diff:\n%s", res.Out)
 	}
 }
 
@@ -184,7 +206,7 @@ func TestReadFile(t *testing.T) {
 	if c2.Offset != 64*1024 || c2.More {
 		t.Fatalf("second chunk: %+v", c2.More)
 	}
-	for _, bad := range []string{".env", "bin.dat", "../x", "/etc/passwd", ".git/config", "nope", "."} {
+	for _, bad := range []string{".env", ".ENV", "./.env", "src/../.env", "bin.dat", "../x", "/etc/passwd", ".git/config", "nope", "."} {
 		if _, err := ReadFile(root, bad, 0, 0); err == nil {
 			t.Errorf("%q must be refused", bad)
 		}

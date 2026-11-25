@@ -1,0 +1,1 @@
+{"type":"command","id":"c5","op":"repo.diff","args":{"repo":"a1b2c3d4","path":"src/a.go","staged":false}}

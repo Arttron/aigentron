@@ -1,7 +1,10 @@
-Aigentron v0.2.8
+Aigentron v0.2.9
 
-For people who are not programmers: two small tidy-ups of the dashboard.
+For people who are not programmers: the program on your computer is safer, and you can now keep a record of what the server asks it to do.
 
 Fixed
-- The "Aigentron is updating" notice now stays pinned to the top of the window, whatever you scroll.
-- The Local agent page (repositories, models, rules) now uses the same building blocks as the rest of the dashboard, so it looks like the other pages.
+- The program refused to show secret files (.env, keys, .git) only when their names were written in lower case. On a Mac or Windows computer a name like ".ENV" is the same file, so it could be read. Now capital letters make no difference. Please update the program on your computers.
+
+New
+- Optional journal of operations. Turn it on with `aigentron log on`: every request from the server (what it asked, which repository and file, whether it was done or refused) is written to a file on your computer. File contents and questions to your models are never written. It is off by default; only you can change it, the server cannot.
+- `aigentron log` shows the latest entries. `aigentron log rotate 5 3` sets when the file is closed and how many old files are kept (default: 5 MB, 3 old files), so the journal never grows without limit. `aigentron log clear` deletes it.

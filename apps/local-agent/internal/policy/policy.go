@@ -25,7 +25,8 @@ var allowedExamples = map[string]bool{".env.example": true, ".env.sample": true,
 
 // NeverReason says why a path (relative to its root, slash-separated) is refused, or "" when it may be read.
 func NeverReason(rel string) string {
-	rel = path.Clean(filepath.ToSlash(rel))
+	// compared in lower case: macOS and Windows disks ignore case, so ".ENV" or ".GIT/config" is the very same file as ".env" / ".git/config"
+	rel = strings.ToLower(path.Clean(filepath.ToSlash(rel)))
 	parts := strings.Split(rel, "/")
 	for i := range parts {
 		for _, d := range neverDirs {
@@ -51,10 +52,10 @@ func NeverReason(rel string) string {
 func DiffExcludes() []string {
 	var out []string
 	for _, d := range neverDirs {
-		out = append(out, ":(exclude,glob)**/"+d+"/**")
+		out = append(out, ":(exclude,glob,icase)**/"+d+"/**")
 	}
 	for _, n := range neverNames {
-		out = append(out, ":(exclude,glob)**/"+n)
+		out = append(out, ":(exclude,glob,icase)**/"+n)
 	}
 	return out
 }

@@ -43,6 +43,7 @@ const usage = `aigentron %s
   open [<project>] [--dir <folder>]                          work on a server project from any folder: use the copy that is here, or clone it (you confirm the address and folder)
   chat [--repo <id|path>] [--model <name>] [-p <prompt>]      work on a repository with a model that runs HERE (offline: no server, no internet); every change asks you first
   llm [add <name> <url> | allow <model> | deny <model> | remove <name> | parallel <n>]   share a model that runs here (Ollama, LM Studio, llama-server) with the server
+  log [-n 20] | on | off | rotate <MB> <files> | path | clear   the journal of what the server asked this computer to do (off by default; requests only, never contents)
   rules [--repo <path>]                                      show the rules that apply (global + the repository's .aigentron/local.yaml)
   server <url>                                               the server moved to another address: keep the pairing, change the address
   status                                                     show the pairing (never the token)
@@ -81,6 +82,8 @@ func main() {
 		err = cmdChat(os.Args[2:])
 	case "llm":
 		err = cmdLLM(os.Args[2:])
+	case "log":
+		err = cmdLog(os.Args[2:])
 	case "rules":
 		err = cmdRules(os.Args[2:])
 	case "server":
@@ -244,12 +247,16 @@ func cmdRun() error {
 
 // newHandler answers the commands of this stage: `status` and `config.set` (the server pushes the global rules; later stages add the repository operations).
 func newHandler(rev *atomic.Int64) link.Handler {
+	return journaled(handle(rev))
+}
+
+func handle(rev *atomic.Int64) link.Handler {
 	return func(ctx context.Context, op string, args json.RawMessage) (any, error) {
 		switch op {
 		case "status":
 			i := info()
 			roots, _ := policy.LoadRoots()
-			return map[string]any{"version": i.Version, "os": i.OS, "arch": i.Arch, "host": i.Host, "roots": len(roots), "configRev": rev.Load(), "llm": llmShared()}, nil
+			return map[string]any{"version": i.Version, "os": i.OS, "arch": i.Arch, "host": i.Host, "roots": len(roots), "configRev": rev.Load(), "llm": llmShared(), "journal": journalOn()}, nil
 		case "config.set":
 			var a struct {
 				Rev   int             `json:"rev"`
