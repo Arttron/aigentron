@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Arttron/aigentron/apps/local-agent/internal/autopilot"
 	"github.com/Arttron/aigentron/apps/local-agent/internal/config"
 	"github.com/Arttron/aigentron/apps/local-agent/internal/link"
 	"github.com/Arttron/aigentron/apps/local-agent/internal/llm"
@@ -44,6 +45,8 @@ const usage = `aigentron %s
   chat [--repo <id|path>] [--model <name>] [-p <prompt>]      work on a repository with a model that runs HERE (offline: no server, no internet); every change asks you first
   llm [add <name> <url> | allow <model> | deny <model> | remove <name> | parallel <n>]   share a model that runs here (Ollama, LM Studio, llama-server) with the server
   log [-n 20] | on | off | rotate <MB> <files> | path | clear   the journal of what the server asked this computer to do (off by default; requests only, never contents)
+  snapshots <id|path>                                        the copies of your unsaved work that the program keeps (rules: snapshot)
+  restore <id|path> <snapshot> [--force]                     put a snapshot's files back (it refuses to overwrite changes unless --force; those are saved first)
   rules [--repo <path>]                                      show the rules that apply (global + the repository's .aigentron/local.yaml)
   server <url>                                               the server moved to another address: keep the pairing, change the address
   status                                                     show the pairing (never the token)
@@ -84,6 +87,10 @@ func main() {
 		err = cmdLLM(os.Args[2:])
 	case "log":
 		err = cmdLog(os.Args[2:])
+	case "snapshots":
+		err = cmdSnapshots(os.Args[2:])
+	case "restore":
+		err = cmdRestore(os.Args[2:])
 	case "rules":
 		err = cmdRules(os.Args[2:])
 	case "server":
@@ -239,6 +246,8 @@ func cmdRun() error {
 		}
 	}
 	go w.Run(ctx)
+	// the rules engine: keeps unsaved work, fetches, fast-forwards (per the rules); every action goes to the journal when it is on
+	go autopilot.New(policy.LoadRoots, journalAuto).Run(ctx)
 	if err := c.Run(ctx); err != nil {
 		return err
 	}

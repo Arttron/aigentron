@@ -54,7 +54,7 @@ export function LocalAgentSettings() {
       <SectionTitle>Local agent (a program on your own computer)</SectionTitle>
       <Muted>
         It keeps one connection to this server and lets agents see and — in later stages, with your approval — change the code on <strong>your</strong> machine. Today: <strong>read only</strong> — you allow a repository, share it with a project, and that project&apos;s agents can look at its status, diff, history and files. Nothing is installed on the
-        server and nothing listens on your computer: the program only dials out. It is built in Go (one file, no runtime). Writing (snapshots, fetch, commit) comes next (plan: <code>docs/plan-local-agent.md</code>).
+        server and nothing listens on your computer: the program only dials out. It is built in Go (one file, no runtime). Safe copies of your unsaved work and fetch run on your machine by the rules below; changing your code through the server (commit, push) comes next (plan: <code>docs/plan-local-agent.md</code>).
       </Muted>
       {error && <ErrorText>{error}</ErrorText>}
 

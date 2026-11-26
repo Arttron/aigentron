@@ -13,6 +13,7 @@ import (
 
 	"github.com/Arttron/aigentron/apps/local-agent/internal/link"
 	"github.com/Arttron/aigentron/apps/local-agent/internal/oplog"
+	"github.com/Arttron/aigentron/apps/local-agent/internal/policy"
 )
 
 var warnOnce sync.Once
@@ -157,4 +158,13 @@ func cmdLog(args []string) error {
 func journalOn() bool {
 	c, err := oplog.Load()
 	return err == nil && c.Enabled
+}
+
+// journalAuto records what the rules engine did on its own (op "auto.snapshot" / "auto.fetch" / "auto.fast-forward"), when the journal is on.
+func journalAuto(op string, root policy.Root, detail string, err error) {
+	e := oplog.Entry{Op: op, Repo: root.ID, Detail: detail, Result: "ok"}
+	if err != nil {
+		e.Result, e.Error = "error", err.Error()
+	}
+	_ = oplog.Record(e)
 }

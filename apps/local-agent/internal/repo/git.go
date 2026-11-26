@@ -61,11 +61,29 @@ func (c *capped) Write(p []byte) (int, error) {
 
 // Git runs `git -C dir <args>` with the hardening, a timeout and a cap on the output.
 func Git(ctx context.Context, dir string, args ...string) (Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	return run(ctx, dir, runOpts{timeout: gitTimeout}, args...)
+}
+
+// runOpts are the few ways one call differs from the read-only default.
+type runOpts struct {
+	timeout time.Duration
+	env     []string // added after the defaults (a later value wins)
+	extra   []string // more `-c` pairs, put after the hardening
+	stdin   string
+}
+
+func run(ctx context.Context, dir string, o runOpts, args ...string) (Result, error) {
+	if o.timeout <= 0 {
+		o.timeout = gitTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, o.timeout)
 	defer cancel()
-	full := append(append([]string{}, hardening...), args...)
+	full := append(append(append([]string{}, hardening...), o.extra...), args...)
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, full...)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C", "GIT_ASKPASS=/bin/false", "GIT_EXTERNAL_DIFF=", "GIT_SSH_COMMAND=/bin/false")
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "LC_ALL=C", "GIT_ASKPASS=/bin/false", "GIT_EXTERNAL_DIFF=", "GIT_SSH_COMMAND=/bin/false"), o.env...)
+	if o.stdin != "" {
+		cmd.Stdin = strings.NewReader(o.stdin)
+	}
 	out := &capped{max: MaxOutput}
 	var stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = out, &stderr

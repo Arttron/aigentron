@@ -1,10 +1,10 @@
-Aigentron v0.2.9
+Aigentron v0.2.10
 
-For people who are not programmers: the program on your computer is safer, and you can now keep a record of what the server asks it to do.
-
-Fixed
-- The program refused to show secret files (.env, keys, .git) only when their names were written in lower case. On a Mac or Windows computer a name like ".ENV" is the same file, so it could be read. Now capital letters make no difference. Please update the program on your computers.
+For people who are not programmers: the program on your computer now looks after your unsaved work by itself.
 
 New
-- Optional journal of operations. Turn it on with `aigentron log on`: every request from the server (what it asked, which repository and file, whether it was done or refused) is written to a file on your computer. File contents and questions to your models are never written. It is off by default; only you can change it, the server cannot.
-- `aigentron log` shows the latest entries. `aigentron log rotate 5 3` sets when the file is closed and how many old files are kept (default: 5 MB, 3 old files), so the journal never grows without limit. `aigentron log clear` deletes it.
+- Safety copies of your unsaved work. While the program is running, it keeps a copy of your changes after you stop touching them for 2 minutes (the last 20 are kept). Your files, your branch and your staging area are never touched, and secret files (.env, keys) are never copied.
+- `aigentron snapshots <repository>` lists the copies; `aigentron restore <repository> <copy>` puts them back (it will not overwrite fresh changes unless you add --force, and then it saves them first).
+- The program fetches the latest changes from your remote every 5 minutes, so the dashboard shows how far behind you are. It never changes your files for this.
+- Optional: "fast-forward" (off by default) brings a clean branch up to date with its remote when you have no changes of your own on it.
+- The program waits and does nothing while you are in the middle of a merge or rebase, while git is busy, or while you are typing. All of this can be tuned or switched off in the rules, and every automatic action appears in the journal (`aigentron log on`).

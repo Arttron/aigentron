@@ -8,8 +8,8 @@ const RULES: { key: 'snapshot' | 'fetch' | 'fastForward' | 'notify' | 'proposeCo
   { key: 'snapshot', title: 'Snapshots', help: 'A safe copy of your uncommitted work (kept beside your branch, never touching it) while you are idle.' },
   { key: 'fetch', title: 'Fetch', help: 'git fetch on a timer: you see what is new on the remote. Never changes your files.' },
   { key: 'fastForward', title: 'Fast-forward', help: 'Moves the current branch forward when the remote only has new commits and your tree is clean (never merges, never touches local changes).' },
-  { key: 'notify', title: 'Notify', help: 'Tells you when work stays uncommitted, or the branch stays behind, too long.' },
-  { key: 'proposeCommit', title: 'Propose a commit', help: 'After a long idle period with changes, opens a task asking an agent to suggest a commit. It never commits by itself.' },
+  { key: 'notify', title: 'Notify', help: 'Tells you when work stays uncommitted, or the branch stays behind, too long. (Setting only: not active yet.)' },
+  { key: 'proposeCommit', title: 'Propose a commit', help: 'After a long idle period with changes, opens a task asking an agent to suggest a commit. It never commits by itself. (Setting only: not active yet.)' },
 ];
 
 function Num({ value, min, max, onChange, suffix }: { value: number; min: number; max: number; onChange: (n: number) => void; suffix: string }) {
