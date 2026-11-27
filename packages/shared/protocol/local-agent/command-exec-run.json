@@ -1,0 +1,1 @@
+{"type":"command","id":"c24","op":"exec.run","args":{"repo":"a1b2c3d4","command":"go test ./...","timeoutSec":120,"task":"task-1"}}

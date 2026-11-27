@@ -1,0 +1,1 @@
+{"type":"result","id":"c11","ok":true,"data":{"commit":"abc123456789","branch":"main","files":["src/a.go","new.txt"]}}

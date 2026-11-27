@@ -11,6 +11,7 @@ import { LocalBridgeService } from './local-bridge.service';
 import { LocalDevicesService } from './local-devices.service';
 import { LocalRulesService } from './local-rules.service';
 import { LocalBindingsService } from './local-bindings.service';
+import { LocalOsMcpService } from './local-os-mcp.service';
 import { DEFAULT_RULES, RULE_NAMES } from './local-rules';
 
 type AuthedRequest = Request & { authUserId?: string };
@@ -43,6 +44,7 @@ export class LocalAgentController {
     private readonly pkg: LocalAgentPackageService,
     private readonly rules: LocalRulesService,
     private readonly bindings: LocalBindingsService,
+    private readonly mcp: LocalOsMcpService,
   ) {}
 
   private async actingUser(req: AuthedRequest): Promise<string> {
@@ -86,7 +88,25 @@ export class LocalAgentController {
       });
     const visible = new Set(devices.map((d) => d.id));
     const bindings = (await this.bindings.view()).filter((b) => visible.has(b.deviceId));
-    return { version, signInOn: this.auth.isConfigured(), rulesRev: this.rules.get().rev, devices, bindings };
+    return { version, signInOn: this.auth.isConfigured(), rulesRev: this.rules.get().rev, devices, bindings, stopped: this.mcp.allStopped };
+  }
+
+  /** Stop: no agent changes or runs anything on a person's computer for a while (all tasks, or one with `taskId`); what is running is cut off now. */
+  @Post('stop')
+  @HttpCode(200)
+  async stop(@Req() req: AuthedRequest, @Body() body: { taskId?: unknown }) {
+    if (!(await this.isManager(req)).manager) throw new ForbiddenException('Only an operator can do that.');
+    this.mcp.stop(typeof body?.taskId === 'string' && body.taskId ? body.taskId.slice(0, 80) : undefined);
+    return { ok: true };
+  }
+
+  /** Allow agents again after a Stop. */
+  @Post('allow')
+  @HttpCode(200)
+  async allow(@Req() req: AuthedRequest) {
+    if (!(await this.isManager(req)).manager) throw new ForbiddenException('Only an operator can do that.');
+    this.mcp.allow();
+    return { ok: true };
   }
 
   /** «This project's agents may read this repository on this computer» — the person's consent. Only while the repository's origin is the project's repository. */

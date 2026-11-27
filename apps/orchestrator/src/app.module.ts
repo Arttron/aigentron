@@ -50,6 +50,7 @@ import { PacksModule } from './packs/packs.module';
 import { VoiceModule } from './voice/voice.module';
 import { ExtensionModule } from './extension/extension.module';
 import { LocalAgentModule } from './local-agent/local-agent.module';
+import { LocalReactionsModule } from './local-agent/local-reactions.module';
 import { BrowserControlModule } from './browser-control/browser-control.module';
 import { CommandsModule } from './commands/commands.module';
 import { StatsModule } from './stats/stats.module';
@@ -84,6 +85,7 @@ import { HealthController } from './health/health.controller';
     VoiceModule,
     ExtensionModule,
     LocalAgentModule,
+    LocalReactionsModule,
     BrowserControlModule,
     CommandsModule,
     PreflightModule,

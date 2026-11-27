@@ -421,6 +421,24 @@ export class ChannelManagerService implements OnModuleInit, OnModuleDestroy {
     for (const chatId of chats) await this.escalateTo(target.channelId, chatId, taskId, title, error, status, chats.length === 1);
   }
 
+  /**
+   * A plain notice to a project's notification chat(s) (Project → Notifications, else the global escalation chat). False when nothing was delivered: no chat
+   * is set, the channel is off, the chat is muted or belongs to another project.
+   */
+  async notifyProject(projectId: string, text: string): Promise<boolean> {
+    const ctx = await this.projects.contextFor({ projectId }).catch(() => null);
+    if (!ctx?.notifyChannelId) return false;
+    const chats = ctx.notifyChatId ? [ctx.notifyChatId] : await this.allowedChatsOf(ctx.notifyChannelId);
+    let delivered = false;
+    for (const chatId of chats) {
+      const bound = await this.projects.boundToChat(ctx.notifyChannelId, chatId).catch(() => null);
+      if (bound && bound.id !== projectId) continue;
+      if ((await this.dest.prefs(ctx.notifyChannelId, chatId)).muted) continue;
+      if (await this.gateway.sendText(ctx.notifyChannelId, chatId, text)) delivered = true;
+    }
+    return delivered;
+  }
+
   /** The chats a channel lets us talk to (none when it is off or not configured). */
   private async allowedChatsOf(channelId: string): Promise<string[]> {
     const row = (await this.channels.list()).find((r) => r.id === channelId && r.enabled && this.channels.isConfigured(r));

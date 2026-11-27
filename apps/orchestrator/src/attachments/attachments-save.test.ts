@@ -110,6 +110,33 @@ describe('names, types and limits', () => {
   });
 });
 
+describe('delete', () => {
+  it('removes an own file and its remembered original name; refuses bookkeeping files, other names and escapes', async () => {
+    await mkdir(svc.dir('t1'), { recursive: true });
+    await writeFile(join(svc.dir('t1'), 'a.docx'), 'x');
+    await writeFile(join(svc.dir('t1'), 'b.docx'), 'y');
+    await writeFile(join(svc.dir('t1'), '.names.json'), JSON.stringify({ 'a.docx': 'Кухня.docx', 'b.docx': 'Б.docx' }));
+    await writeFile(join(base, 'outside.txt'), 'keep');
+    await svc.delete('t1', 'a.docx');
+    expect((await svc.list('t1')).map((m) => m.name)).toEqual(['b.docx']);
+    expect(await svc.originalNames('t1')).toEqual({ 'b.docx': 'Б.docx' });
+    await expect(svc.delete('t1', 'a.docx')).rejects.toThrow(/not found/);
+    await expect(svc.delete('t1', '.names.json')).rejects.toThrow(/not found/);
+    await expect(svc.delete('t1', '../outside.txt')).rejects.toThrow(/not found/);
+    expect(await readFile(join(base, 'outside.txt'), 'utf8')).toBe('keep');
+  });
+
+  it('deleting a linked file removes only the link, never the file it points to', async () => {
+    await mkdir(join(base, 'ws'), { recursive: true });
+    await writeFile(join(base, 'ws', 'chart.gif'), 'GIF89a');
+    const name = await svc.link('t1', join(base, 'ws', 'chart.gif'));
+    expect((await svc.list('t1')).map((m) => m.name)).toEqual([name]);
+    await svc.delete('t1', name);
+    expect(await svc.list('t1')).toEqual([]);
+    expect(await readFile(join(base, 'ws', 'chart.gif'), 'utf8')).toBe('GIF89a');
+  });
+});
+
 describe('adopt / writeImage', () => {
   it('adopt refuses a symlink and a hard-linked file', async () => {
     await mkdir(join(base, 'ws'), { recursive: true });

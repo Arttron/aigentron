@@ -40,18 +40,25 @@ func journaled(next link.Handler) link.Handler {
 func entryFor(op string, args json.RawMessage) oplog.Entry {
 	e := oplog.Entry{Op: op}
 	var a struct {
-		Repo    string `json:"repo"`
-		Path    string `json:"path"`
-		Backend string `json:"backend"`
+		Repo    string   `json:"repo"`
+		Path    string   `json:"path"`
+		Paths   []string `json:"paths"`
+		Backend string   `json:"backend"`
 		Request struct {
 			Model string `json:"model"`
 		} `json:"request"`
 	}
 	if json.Unmarshal(args, &a) == nil {
 		e.Repo, e.Path = a.Repo, a.Path
+		if len(a.Paths) > 0 {
+			e.Path, e.Detail = a.Paths[0], fmt.Sprintf("%d file(s)", len(a.Paths))
+		}
 		if a.Backend != "" || a.Request.Model != "" {
 			e.Detail = a.Backend + "/" + a.Request.Model
 		}
+	}
+	if op == "exec.run" {
+		e.Detail = "shell command (its text is not kept)"
 	}
 	return e
 }

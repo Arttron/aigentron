@@ -1,3 +1,18 @@
+Aigentron v0.2.11
+
+For people who are not programmers: the program on your computer can now do work for your agents, and attachments can be deleted.
+
+New
+- Your agents can work on your computer, the same way the browser extension lets them work in the browser. They can look through a project folder, search it, change files, create new ones and run commands. Before the first change in a folder the dashboard asks you once (a card); it is off until you allow it on that computer with `aigentron writes on`.
+- A Stop button (dashboard: Settings > Local agent, or `aigentron stop`) cuts running commands at once and keeps every agent out until you allow them again.
+- Only one task works in a folder at a time, and secret files (.env, keys) and the .git folder are never opened. Note: commands are not locked into the folder yet.
+- The agent can propose a commit and notices appear in the project's chat.
+- A ready-made agent "local-machine" (executor on your own computer) in the catalog.
+- Attachments can be deleted: a cross on each file in the task's list. A file that only points to another place is unlinked, the original stays.
+
+Fixed
+- A picture you attach was shown twice when the agent opened it: the program saved its own copy. Not any more.
+
 Aigentron v0.2.10
 
 For people who are not programmers: the program on your computer now looks after your unsaved work by itself.

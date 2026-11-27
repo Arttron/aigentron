@@ -374,3 +374,20 @@ func commitArgs(root policy.Root, a json.RawMessage) (commitReq, error) {
 	}
 	return v, nil
 }
+
+// serverTools are the tools the server's agents may run here through the line, by name. The person's approval has already happened on the server (a card in the
+// dashboard), so these run without the terminal question — but with every limit the tool itself has: the never-list, paths inside the root, files not links.
+var serverTools = map[string]bool{"list_files": true, "search": true, "read_file": true, "edit_file": true, "write_file": true}
+
+// RunTool runs one of the file tools of the local agent for the server. args is the tool's JSON arguments.
+func RunTool(ctx context.Context, root policy.Root, name string, args json.RawMessage) (string, error) {
+	if !serverTools[name] {
+		return "", fmt.Errorf("no such tool %q", name)
+	}
+	for _, t := range tools(root) {
+		if t.Name == name {
+			return t.Run(ctx, args)
+		}
+	}
+	return "", fmt.Errorf("no such tool %q", name)
+}

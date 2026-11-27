@@ -16,6 +16,6 @@ import { LocalRulesService } from './local-rules.service';
 @Module({
   controllers: [LocalAgentController, LocalOsMcpController, LocalLlmController, LocalLlmAdminController, LocalProjectsController],
   providers: [LocalDevicesService, LocalBridgeService, LocalAgentPackageService, LocalAgentGateway, LocalRulesService, LocalBindingsService, LocalOsMcpService, LocalLlmService],
-  exports: [LocalBridgeService, LocalDevicesService, LocalOsMcpService, LocalLlmService],
+  exports: [LocalBridgeService, LocalDevicesService, LocalBindingsService, LocalOsMcpService, LocalLlmService],
 })
 export class LocalAgentModule {}

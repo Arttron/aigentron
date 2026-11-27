@@ -11,6 +11,7 @@ import (
 
 	"github.com/Arttron/aigentron/apps/local-agent/internal/oplog"
 	"github.com/Arttron/aigentron/apps/local-agent/internal/proto"
+	"github.com/Arttron/aigentron/apps/local-agent/internal/writes"
 )
 
 const protocolDir = "../../../../packages/shared/protocol/local-agent"
@@ -111,5 +112,28 @@ func TestJournalRecordsRequestsNotContents(t *testing.T) {
 	raw, _ := os.ReadFile(p)
 	if strings.Contains(string(raw), "TOPSECRETPROMPT") {
 		t.Fatal("a prompt reached the journal")
+	}
+}
+
+// The server cannot commit unless the owner turned writes on, on this computer.
+func TestCommitNeedsTheOwnersSwitch(t *testing.T) {
+	t.Setenv("AIGENTRON_LOCAL_HOME", t.TempDir())
+	var rev atomic.Int64
+	h := newHandler(&rev)
+	args := json.RawMessage(`{"repo":"zzzz","message":"m","paths":["a.txt"]}`)
+	if _, err := h(context.Background(), "repo.commit", args); err == nil || !strings.Contains(err.Error(), "writes are off") {
+		t.Fatalf("off by default: %v", err)
+	}
+	if err := writes.Save(writes.Config{Write: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h(context.Background(), "repo.commit", args); err == nil || !strings.Contains(err.Error(), "no allowed repository") {
+		t.Fatalf("on: the next lock is the repository list: %v", err)
+	}
+	// a broken switch file means off, never on
+	dir := os.Getenv("AIGENTRON_LOCAL_HOME")
+	_ = os.WriteFile(filepath.Join(dir, "writes.json"), []byte("{broken"), 0o600)
+	if writes.Allowed() {
+		t.Fatal("a broken file must not allow writes")
 	}
 }

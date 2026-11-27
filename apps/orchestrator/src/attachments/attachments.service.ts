@@ -376,6 +376,43 @@ export class AttachmentsService {
     return { path, mime, inline, name, downloadName };
   }
 
+  /**
+   * Delete one attachment of a task: its own file (and the remembered original name), or — for a file shown by a link — only the link, never the
+   * file it points to. The agents' next run no longer sees it; the chat messages that showed it simply lose the picture.
+   */
+  async delete(taskId: string, rawName: string): Promise<void> {
+    if (basename(rawName).startsWith('.')) throw new BadRequestException('attachment not found'); // the bookkeeping files are not attachments
+    const name = sanitize(rawName);
+    const dir = this.dir(taskId);
+    const own = await lstat(join(dir, name)).catch(() => null);
+    if (own?.isFile()) {
+      await unlink(join(dir, name));
+      const run = (this.namesChain.get(dir) ?? Promise.resolve()).then(async () => {
+        const names = await this.readNames(dir);
+        if (!(name in names)) return;
+        delete names[name];
+        const tmp = `${this.namesFile(dir)}.${process.pid}.${Date.now()}.tmp`;
+        await writeFile(tmp, JSON.stringify(names));
+        await rename(tmp, this.namesFile(dir));
+      });
+      this.namesChain.set(dir, run.catch(() => undefined));
+      await run.catch(() => undefined);
+      this.logger.log(`Deleted attachment ${taskId}/${name}`);
+      return;
+    }
+    const run = (this.linkChain.get(taskId) ?? Promise.resolve()).then(async () => {
+      const links = await this.readLinks(taskId);
+      if (!(name in links)) throw new BadRequestException('attachment not found');
+      delete links[name];
+      const tmp = `${this.linksFile(taskId)}.${process.pid}.tmp`;
+      await writeFile(tmp, JSON.stringify(links));
+      await rename(tmp, this.linksFile(taskId));
+    });
+    this.linkChain.set(taskId, run.catch(() => undefined));
+    await run;
+    this.logger.log(`Removed the link ${taskId}/${name}`);
+  }
+
   /** Remove all of a task's attachments (called on task delete). */
   async remove(taskId: string): Promise<void> {
     if (!TASK_ID_RE.test(taskId)) return;

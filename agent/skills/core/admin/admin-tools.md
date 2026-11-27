@@ -11,7 +11,7 @@ Reading tools run at once. **Every `propose_*` opens an approval card; nothing h
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `catalog_list` | – | Shipped agent templates (pm, architect, backend, frontend, designer, coder, reviewer, local-helper, **researcher**): name + description |
+| `catalog_list` | – | Shipped agent templates (pm, architect, backend, frontend, designer, coder, reviewer, researcher, local-helper, local-machine): name + description |
 | `catalog_get` | `name` | The full template file (frontmatter + prompt) |
 | `agents_list` | – | Agents (name, description) + available skills |
 | `agent_get` | `name` | Full current file of an agent |

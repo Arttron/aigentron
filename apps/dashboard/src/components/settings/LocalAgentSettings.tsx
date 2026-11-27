@@ -148,6 +148,26 @@ export function LocalAgentSettings() {
         )}
         {info?.devices.some((d) => d.outdated) && <Muted>To update, run <code>aigentron update</code> on that computer (it installs this server&apos;s version, keeps the old one as a backup and restarts the background service). Older programs without that command: run the install command above again.</Muted>}
       </div>
+      {info && (
+        <div style={{ margin: '10px 0' }}>
+          <strong>Stop</strong>{' '}
+          {info.stopped ? <Badge tone="review">agents are stopped</Badge> : <Badge tone="done">agents may work</Badge>}
+          <Row wrap>
+            {info.stopped ? (
+              <Button size="sm" onClick={() => void api.localAgentAllow().then(load).catch((e: Error) => setError(e.message))}>
+                Allow agents again
+              </Button>
+            ) : (
+              <Button size="sm" variant="red" onClick={() => void api.localAgentStop().then(load).catch((e: Error) => setError(e.message))}>
+                Stop all agents on these computers
+              </Button>
+            )}
+            <Muted>
+              For 10 minutes no agent changes or runs anything on your computers; what is running is cut off now. Reading is not affected. On the computer itself: <code>aigentron stop</code>.
+            </Muted>
+          </Row>
+        </div>
+      )}
       {info && <LocalAgentRepos devices={info.devices} bindings={info.bindings} reload={load} />}
       {info && <LocalAgentLlm />}
       {info && <LocalAgentRulesEditor rulesRev={info.rulesRev} devices={info.devices} />}

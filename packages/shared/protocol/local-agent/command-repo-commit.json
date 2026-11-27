@@ -1,0 +1,1 @@
+{"type":"command","id":"c11","op":"repo.commit","args":{"repo":"a1b2c3d4","message":"fix: a thing","paths":["src/a.go","new.txt"]}}

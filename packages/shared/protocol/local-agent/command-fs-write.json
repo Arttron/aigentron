@@ -1,0 +1,1 @@
+{"type":"command","id":"c23","op":"fs.write","args":{"repo":"a1b2c3d4","path":"notes/new.md","content":"hello\n"}}

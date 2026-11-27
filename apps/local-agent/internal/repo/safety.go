@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -257,4 +258,101 @@ func FastForward(ctx context.Context, root policy.Root) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// CommitResult is what a commit made.
+type CommitResult struct {
+	Commit string   `json:"commit"`
+	Branch string   `json:"branch"`
+	Files  []string `json:"files"`
+}
+
+const maxCommitPaths = 200
+
+// CommitFiles stages the named files and commits ONLY them on the current branch (other staged changes stay staged), after the person approved it. Hard limits,
+// whatever the server asked: files only (no folders, no globs), inside the repository, never the never-list, a named branch (no detached HEAD), not while
+// a merge/rebase is in progress or git is busy, and not in a repository whose own config defines a filter. Hooks and signing prompts are off; the commit
+// carries the person's own git identity. Nothing is pushed.
+func CommitFiles(ctx context.Context, root policy.Root, message string, paths []string) (CommitResult, error) {
+	message = strings.TrimSpace(message)
+	if message == "" || len(message) > 4000 || strings.ContainsRune(message, 0) {
+		return CommitResult{}, errors.New("the commit message must be 1–4000 characters")
+	}
+	if len(paths) == 0 || len(paths) > maxCommitPaths {
+		return CommitResult{}, fmt.Errorf("name 1–%d files to commit", maxCommitPaths)
+	}
+	st := ReadStatus(ctx, root)
+	if why := Busy(st); why != "" {
+		return CommitResult{}, fmt.Errorf("not now: %s", why)
+	}
+	if st.Detached || st.Branch == "" {
+		return CommitResult{}, errors.New("HEAD is detached: check out a branch first (nothing is committed on a detached HEAD)")
+	}
+	if st.Conflicted > 0 {
+		return CommitResult{}, errors.New("the repository has conflicts")
+	}
+	if r, err := Git(ctx, root.Path, "config", "--local", "--name-only", "--get-regexp", `^filter\..*\.(clean|smudge|process)$`); err == nil && strings.TrimSpace(r.Out) != "" {
+		return CommitResult{}, errors.New("the repository's own git config defines a filter; commits are off for it")
+	}
+	if email, err := Git(ctx, root.Path, "config", "user.email"); err != nil || strings.TrimSpace(email.Out) == "" {
+		return CommitResult{}, errors.New("git has no user.email here: set your identity first (git config user.name / user.email)")
+	}
+	seen := map[string]bool{}
+	var specs, files []string
+	for _, p := range paths {
+		rel, err := commitPath(ctx, root, p)
+		if err != nil {
+			return CommitResult{}, fmt.Errorf("%s: %w", p, err)
+		}
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		files = append(files, rel)
+		specs = append(specs, ":(literal)"+rel)
+	}
+	o := runOpts{timeout: 60 * time.Second}
+	if _, err := run(ctx, root.Path, o, append([]string{"add", "--"}, specs...)...); err != nil {
+		return CommitResult{}, err
+	}
+	if _, err := run(ctx, root.Path, o, append([]string{"commit", "--no-verify", "--no-gpg-sign", "--only", "-m", message, "--"}, specs...)...); err != nil {
+		return CommitResult{}, err
+	}
+	head, err := Git(ctx, root.Path, "rev-parse", "--short=12", "HEAD")
+	if err != nil {
+		return CommitResult{}, err
+	}
+	return CommitResult{Commit: strings.TrimSpace(head.Out), Branch: st.Branch, Files: files}, nil
+}
+
+// commitPath checks one file name the server gave and returns it cleaned (slash-separated, relative).
+func commitPath(ctx context.Context, root policy.Root, p string) (string, error) {
+	if p == "" || strings.ContainsAny(p, "\x00\n\r") {
+		return "", errors.New("not a file name")
+	}
+	if filepath.IsAbs(p) || strings.HasPrefix(p, ":") {
+		return "", errors.New("the path must be relative to the repository")
+	}
+	clean := path.Clean(filepath.ToSlash(p))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", errors.New("the path leaves the repository")
+	}
+	if why := policy.NeverReason(clean); why != "" {
+		return "", errors.New(why)
+	}
+	abs, err := policy.Resolve(root.Path, clean)
+	if err == nil {
+		if fi, serr := os.Lstat(abs); serr == nil && fi.IsDir() {
+			return "", errors.New("name files, not folders")
+		}
+		return clean, nil
+	}
+	// a file that was deleted: allowed only when git knows it (so the deletion is what gets committed), and its folder must still be inside the repository
+	if _, terr := Git(ctx, root.Path, "ls-files", "--error-unmatch", "--", ":(literal)"+clean); terr != nil {
+		return "", err
+	}
+	if _, perr := policy.Resolve(root.Path, path.Dir(clean)); perr != nil && path.Dir(clean) != "." {
+		return "", perr
+	}
+	return clean, nil
 }

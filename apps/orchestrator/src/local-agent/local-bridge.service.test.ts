@@ -175,4 +175,20 @@ describe('LocalAgentGateway (a real WebSocket)', () => {
     expect((await open(c.url, c.token)).status).toBe(421);
     c.stop();
   });
+
+  it('passes the events it does not handle itself to listeners; a failing listener does not break the line', () => {
+    const { bridge } = setup();
+    const seen: unknown[] = [];
+    bridge.onEvent(() => {
+      throw new Error('boom');
+    });
+    bridge.onEvent((id, name, data) => void seen.push([id, name, data]));
+    const s = fakeSocket();
+    const h = bridge.attach(s.sock, device());
+    h.message(hello());
+    h.message(encodeFrame({ type: 'event', name: 'notice', data: { repo: 'r', kind: 'dirty' } }));
+    h.message(encodeFrame({ type: 'event', name: 'repos', data: { repos: [] } })); // handled by the bridge itself
+    expect(seen).toEqual([['d1', 'notice', { repo: 'r', kind: 'dirty' }]]);
+    expect(bridge.isOnline('d1')).toBe(true);
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CREATE_TASK_TOOL, EXTEND_RUN_TOOL, INTERNAL_TOOL_PREFIX, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, PUSH_BRANCH_TOOL, BROWSER_GRANT_TOOL } from '@lds/shared';
+import { classifyToolCall, LOCAL_COMMIT_TOOL, CREATE_TASK_TOOL, EXTEND_RUN_TOOL, INTERNAL_TOOL_PREFIX, PROPOSE_SETTINGS_TOOL, PROPOSE_TASK_TOOL, PUSH_BRANCH_TOOL, BROWSER_GRANT_TOOL } from '@lds/shared';
 import { approvalWaived, parseApprovalMode, resolveApprovalMode } from './approval-mode';
 
 const risky = { dangerous: true };
@@ -69,5 +69,12 @@ describe('a small model asks more, even with approvals off', () => {
     expect(approvalWaived('off', CREATE_TASK_TOOL, risky)).toBe(true);
     expect(approvalWaived('off', 'Bash', risky, 'cheap')).toBe(true); // a shell command is the agent's own work
     expect(approvalWaived('off', PUSH_BRANCH_TOOL, risky, 'cheap')).toBe(true);
+  });
+});
+
+describe('a commit on the person\'s own computer', () => {
+  it('is asked about even when approvals are off', () => {
+    const v = classifyToolCall(LOCAL_COMMIT_TOOL, { repo: 'r', message: 'm', paths: ['a'] }, { readOnlyMcp: { 'local-os': ['*'] } });
+    expect(approvalWaived('off', LOCAL_COMMIT_TOOL, v)).toBe(false);
   });
 });

@@ -39,6 +39,7 @@ describe('the protocol fixtures (shared with the Go daemon)', () => {
       'repo.diff',
       'repo.log',
       'repo.read',
+      'repo.commit',
       'llm.models',
       'llm.chat',
       'llm.cancel',

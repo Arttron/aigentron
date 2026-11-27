@@ -68,3 +68,42 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.cell {
+  position: relative;
+}
+
+.remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  box-shadow: var(--raised-xs);
+  opacity: 0;
+  cursor: pointer;
+}
+.cell:hover .remove,
+.remove:focus-visible {
+  opacity: 1;
+}
+.remove:hover {
+  color: var(--text);
+}
+/* a touch screen has no hover: the button stays visible there */
+@media (hover: none) {
+  .remove {
+    opacity: 1;
+  }
+}

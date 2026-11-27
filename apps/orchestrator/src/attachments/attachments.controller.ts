@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, NotFoundException, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Delete, Get, NotFoundException, Param, Post, Req, Res, UseGuards } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { RolesGuard } from '../identity/roles.guard';
@@ -44,5 +44,14 @@ export class AttachmentsController {
     const { path, downloadName } = await this.attachments.filePath(id, file);
     // the shared policy: pictures / PDF / playable video inline, text as text/plain, anything else (html, svg, js …) a download; byte ranges for video
     return serveFile(req, res, { path, name: downloadName, cacheControl: 'private, max-age=300' });
+  }
+
+  /** Delete one attachment (a linked file is only unlinked). */
+  @UseGuards(RolesGuard)
+  @Roles('task_setter', 'operator', 'admin')
+  @Delete(':file')
+  async remove(@Param('id') id: string, @Param('file') file: string) {
+    await this.attachments.delete(id, file);
+    return { name: file };
   }
 }

@@ -30,6 +30,7 @@ import { browserPageAfter, type BrowserPage,
   KNOWN_VAR_NAMES,
   approvalNeedsDashboard,
   BROWSER_SUBMIT_TOOL,
+  isLocalWriteTool,
 } from '@lds/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppConfigService } from '../config/app-config.service';
@@ -366,8 +367,8 @@ export class ApprovalsService {
 
     // On approve, optionally remember this call so it isn't asked again
     // (meaningless for a continuation prompt — skip it there).
-    // a form submitted in the person's browser is decided every time: never a standing exception
-    if (decision === 'approve' && !isContinuation && current.toolName !== BROWSER_SUBMIT_TOOL) {
+    // a form submitted in the person's browser and a change to the person's own computer are decided every time: never a standing exception
+    if (decision === 'approve' && !isContinuation && current.toolName !== BROWSER_SUBMIT_TOOL && !isLocalWriteTool(current.toolName)) {
       if (options?.taskException) await this.addException('task', current.taskId, current);
       if (options?.globalException) await this.addException('global', null, current);
     }

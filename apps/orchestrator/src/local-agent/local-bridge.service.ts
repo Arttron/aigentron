@@ -60,6 +60,7 @@ export class LocalBridgeService {
   private readonly logger = new Logger(LocalBridgeService.name);
   private readonly conns = new Map<string, Conn>();
   private readonly pending = new Map<string, Pending>();
+  private readonly eventHooks: Array<(deviceId: string, name: string, data: unknown) => void> = [];
   private readonly readyHooks: Array<(deviceId: string, info: LocalConnectionInfo) => void> = [];
 
   constructor(private readonly devices: LocalDevicesService) {}
@@ -147,6 +148,15 @@ export class LocalBridgeService {
         if (f.name === 'repos') {
           conn.repos = parseRepos(f.data);
           conn.reposAt = new Date().toISOString();
+          return;
+        }
+        // anything else the computer reports (`notice`, `propose-commit`): whoever listens decides; a listener that throws must not break the line
+        for (const hook of this.eventHooks) {
+          try {
+            hook(conn.device.id, f.name ?? '', f.data);
+          } catch (e) {
+            this.logger.warn(`a listener of "${f.name}" failed: ${(e as Error).message}`);
+          }
         }
         return;
       }
@@ -172,6 +182,11 @@ export class LocalBridgeService {
 
   reposAt(deviceId: string): string | null {
     return this.conns.get(deviceId)?.reposAt ?? null;
+  }
+
+  /** Called for the events of a ready computer other than `repos` and `llm.chunk`. */
+  onEvent(hook: (deviceId: string, name: string, data: unknown) => void): void {
+    this.eventHooks.push(hook);
   }
 
   /** Called when a device has completed its handshake (the rules service uses it to sync). */

@@ -26,6 +26,7 @@ import (
 	"github.com/Arttron/aigentron/apps/local-agent/internal/policy"
 	"github.com/Arttron/aigentron/apps/local-agent/internal/repo"
 	"github.com/Arttron/aigentron/apps/local-agent/internal/rules"
+	"github.com/Arttron/aigentron/apps/local-agent/internal/writes"
 )
 
 // version is set at build time: -ldflags "-X main.version=$(cat VERSION)".
@@ -45,6 +46,8 @@ const usage = `aigentron %s
   chat [--repo <id|path>] [--model <name>] [-p <prompt>]      work on a repository with a model that runs HERE (offline: no server, no internet); every change asks you first
   llm [add <name> <url> | allow <model> | deny <model> | remove <name> | parallel <n>]   share a model that runs here (Ollama, LM Studio, llama-server) with the server
   log [-n 20] | on | off | rotate <MB> <files> | path | clear   the journal of what the server asked this computer to do (off by default; requests only, never contents)
+  writes [on|off]                                            let the server's agents change files and run commands in your allowed folders (off by default; the dashboard still asks you)
+  stop [10m|1h|off]                                          Stop: for a while nothing is changed or run here, whatever the server asks (default 10m; off lifts it)
   snapshots <id|path>                                        the copies of your unsaved work that the program keeps (rules: snapshot)
   restore <id|path> <snapshot> [--force]                     put a snapshot's files back (it refuses to overwrite changes unless --force; those are saved first)
   rules [--repo <path>]                                      show the rules that apply (global + the repository's .aigentron/local.yaml)
@@ -87,6 +90,10 @@ func main() {
 		err = cmdLLM(os.Args[2:])
 	case "log":
 		err = cmdLog(os.Args[2:])
+	case "stop":
+		err = cmdStop(os.Args[2:])
+	case "writes":
+		err = cmdWrites(os.Args[2:])
 	case "snapshots":
 		err = cmdSnapshots(os.Args[2:])
 	case "restore":
@@ -247,7 +254,7 @@ func cmdRun() error {
 	}
 	go w.Run(ctx)
 	// the rules engine: keeps unsaved work, fetches, fast-forwards (per the rules); every action goes to the journal when it is on
-	go autopilot.New(policy.LoadRoots, journalAuto).Run(ctx)
+	go autopilot.New(policy.LoadRoots, c.Emit, journalAuto).Run(ctx)
 	if err := c.Run(ctx); err != nil {
 		return err
 	}
@@ -265,7 +272,7 @@ func handle(rev *atomic.Int64) link.Handler {
 		case "status":
 			i := info()
 			roots, _ := policy.LoadRoots()
-			return map[string]any{"version": i.Version, "os": i.OS, "arch": i.Arch, "host": i.Host, "roots": len(roots), "configRev": rev.Load(), "llm": llmShared(), "journal": journalOn()}, nil
+			return map[string]any{"version": i.Version, "os": i.OS, "arch": i.Arch, "host": i.Host, "roots": len(roots), "configRev": rev.Load(), "llm": llmShared(), "journal": journalOn(), "writes": map[string]bool{"allowed": writes.Allowed(), "stopped": writes.Stopped()}}, nil
 		case "config.set":
 			var a struct {
 				Rev   int             `json:"rev"`
@@ -285,8 +292,10 @@ func handle(rev *atomic.Int64) link.Handler {
 			return map[string]any{"rev": a.Rev}, nil
 		case "llm.models", "llm.chat", "llm.cancel":
 			return llmOp(ctx, "", op, args)
-		case "repos.list", "repo.status", "repo.diff", "repo.log", "repo.read":
+		case "repos.list", "repo.status", "repo.diff", "repo.log", "repo.read", "repo.commit":
 			return repoOp(ctx, op, args)
+		case "fs.list", "fs.search", "fs.edit", "fs.write", "exec.run", "exec.cancel":
+			return workOp(ctx, op, args)
 		}
 		return nil, fmt.Errorf("unknown op %q", op)
 	}
@@ -294,6 +303,10 @@ func handle(rev *atomic.Int64) link.Handler {
 
 // repoOp answers the read-only repository commands. A repository is named by its id (from `roots`); only repositories the person added are known.
 func repoOp(ctx context.Context, op string, args json.RawMessage) (any, error) {
+	// the second lock, checked before anything else: the person turned writes on, on this computer (the server cannot); the first lock is the card they approved in the dashboard
+	if op == "repo.commit" && (!writes.Allowed() || writes.Stopped()) {
+		return nil, errors.New("writes are off (or stopped) on this computer: the owner can allow changes with `aigentron writes on`")
+	}
 	roots, err := policy.LoadRoots()
 	if err != nil {
 		return nil, err
@@ -307,6 +320,9 @@ func repoOp(ctx context.Context, op string, args json.RawMessage) (any, error) {
 		Staged bool   `json:"staged"`
 		Limit  int    `json:"limit"`
 		Offset int    `json:"offset"`
+		// repo.commit
+		Message string   `json:"message"`
+		Paths   []string `json:"paths"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return nil, errors.New("bad arguments")
@@ -316,6 +332,8 @@ func repoOp(ctx context.Context, op string, args json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("no allowed repository %q (add it on that computer with `aigentron add <path>`)", a.Repo)
 	}
 	switch op {
+	case "repo.commit":
+		return repo.CommitFiles(ctx, root, a.Message, a.Paths)
 	case "repo.status":
 		return repo.ReadStatus(ctx, root), nil
 	case "repo.diff":

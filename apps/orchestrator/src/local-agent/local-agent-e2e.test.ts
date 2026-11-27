@@ -50,9 +50,9 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
     const users = { defaultOperator: async () => ({ id: 'op' }), list: async () => [] } as unknown as UsersService;
     const rules = new LocalRulesService({ secretsDir: secrets } as AppConfigService, bridge);
     const bindings = new LocalBindingsService({ secretsDir: secrets } as AppConfigService, { project: { findUnique: async ({ where }: { where: { id: string } }) => ({ name: where.id, repoUrl: where.id === 'p1' ? 'https://github.com/acme/shop.git' : where.id === 'p4' ? null : 'https://github.com/acme/other.git', archivedAt: null }) } } as unknown as PrismaService, bridge, devices);
-    const ctl = new LocalAgentController(auth, users, devices, bridge, {} as LocalAgentPackageService, rules, bindings);
-
     const mcp = new LocalOsMcpService(bridge, bindings);
+    const ctl = new LocalAgentController(auth, users, devices, bridge, {} as LocalAgentPackageService, rules, bindings, mcp);
+
     const projectsCtl = new LocalProjectsController(devices, { list: async () => [{ id: 'p1', slug: 'shop', name: 'Shop', repoUrl: 'https://u:tok@github.com/acme/shop.git' }, { id: 'p3', slug: 'local', name: 'Local', repoUrl: '/srv/git/x' }] } as unknown as ProjectsService);
     const llm = new LocalLlmService({ secretsDir: secrets, approvalsApiUrl: 'http://x' } as AppConfigService, bridge, devices);
     // the controller's routes behind a thin router (the repo's tests do not start Nest)
@@ -211,7 +211,7 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
     };
     const agent = await connect('p1');
     const tools = (await agent.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(['local_diff', 'local_log', 'local_read', 'local_repos', 'local_status']); // read only: no tool changes anything
+    expect(tools).toEqual(['local_bash', 'local_commit', 'local_diff', 'local_edit', 'local_list', 'local_log', 'local_read', 'local_repos', 'local_search', 'local_status', 'local_write']);
     expect((await call(agent, 'local_repos')).text).toContain(reported.id);
     const status = await call(agent, 'local_status');
     expect(status.text).toContain('branch main');
@@ -227,6 +227,62 @@ describe.skipIf(!BIN || !existsSync(BIN))('the Go daemon against this server', (
       expect(r.error, bad).toBe(true);
       expect(r.text).not.toContain('TOPSECRET');
     }
+    // looking around: files are listed and searched, the secret file is neither
+    const listing = await call(agent, 'local_list');
+    expect(listing.text).toContain('src/app.go');
+    expect(listing.text).not.toMatch(/(^|\n)\.env/);
+    expect((await call(agent, 'local_search', { query: 'uncommitted' })).text).toContain('src/app.go');
+    expect((await call(agent, 'local_search', { query: 'CHANGED-TOPSECRET' })).text).not.toContain('TOPSECRET');
+
+    // WORKING: the grant card (one per task and folder), the owner's switch on that computer, the daemon's own limits, Stop
+    const asked: { toolName: string; toolInput: unknown }[] = [];
+    (mcp as unknown as { approvalsCache: unknown }).approvalsCache = { check: async (i: { toolName: string; toolInput: unknown }) => (asked.push(i), { allow: true }), waitForVerdict: async () => ({ status: 'approved' }) };
+    const appFile = join(proj, 'src', 'app.go');
+    // the owner's switch is off by default: even an approved request changes nothing
+    const off = await call(agent, 'local_edit', { path: 'src/app.go', old: '// uncommitted change', new: '// edited by an agent' });
+    expect(off.error).toBe(true);
+    expect(off.text).toContain('aigentron writes on');
+    expect(readFileSync(appFile, 'utf8')).toContain('// uncommitted change');
+    expect(execFileSync(BIN!, ['writes', 'on'], { env: fast, encoding: 'utf8' })).toContain('Writes are ON');
+    const edited = await call(agent, 'local_edit', { path: 'src/app.go', old: '// uncommitted change', new: '// edited by an agent' });
+    expect(edited.error, edited.text).toBe(false);
+    expect(readFileSync(appFile, 'utf8')).toContain('// edited by an agent');
+    expect(asked.filter((a) => a.toolName.endsWith('local_grant'))).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ toolInput: { folder: expect.stringContaining('lag-l1-'), level: 'write' } });
+    expect((await call(agent, 'local_write', { path: 'src/new.go', content: 'package app\n' })).error).toBe(false);
+    expect(readFileSync(join(proj, 'src', 'new.go'), 'utf8')).toBe('package app\n');
+    for (const bad of [{ path: '.env', content: 'x' }, { path: '.git/config', content: 'x' }, { path: '../x.txt', content: 'x' }, { path: 'src/new.go', content: 'over' }]) {
+      expect((await call(agent, 'local_write', bad)).error, bad.path).toBe(true);
+    }
+    expect((await call(agent, 'local_edit', { path: '.env', old: 'CHANGED', new: 'X' })).error).toBe(true);
+    expect(readFileSync(join(proj, '.env'), 'utf8')).toContain('CHANGED-TOPSECRET');
+    const bash = await call(agent, 'local_bash', { command: 'pwd; git status --short; echo "token=[$GITHUB_TOKEN]"' });
+    expect(bash.error, bash.text).toBe(false);
+    expect(bash.text).toContain('lag-l1-');
+    expect(bash.text).toContain('src/new.go');
+    expect(bash.text).toContain('token=[]'); // the person's environment does not reach a command
+    expect(bash.text).toContain('untrusted');
+    expect((await call(agent, 'local_bash', { command: 'exit 3' })).error).toBe(true);
+    // Stop on the computer: nothing changes, looking still works; lifted, it works again
+    execFileSync(BIN!, ['stop', '10m'], { env: fast });
+    const stoppedHere = await call(agent, 'local_write', { path: 'src/stopped.go', content: 'x' });
+    expect(stoppedHere.error).toBe(true);
+    expect(stoppedHere.text).toContain('Stop');
+    expect((await call(agent, 'local_list')).error).toBe(false);
+    execFileSync(BIN!, ['stop', 'off'], { env: fast });
+    // Stop in the dashboard: this task only, then allowed again
+    mcp.stop('t1');
+    expect((await call(agent, 'local_write', { path: 'src/stopped.go', content: 'x' })).text).toContain('pressed Stop');
+    mcp.allow();
+    expect((await call(agent, 'local_write', { path: 'src/after.go', content: 'package app\n' })).error).toBe(false);
+    // a command that is running is cut off by Stop
+    const slow = call(agent, 'local_bash', { command: 'sleep 30' });
+    await new Promise((r) => setTimeout(r, 500));
+    mcp.stop('t1');
+    expect((await slow).text).toContain('cut off');
+    mcp.allow();
+    execFileSync(BIN!, ['writes', 'off'], { env: fast });
+
     // another project's agent has no repository at all; a run without a valid token gets nothing
     const stranger = await connect('p2');
     expect((await call(stranger, 'local_status')).error).toBe(true);

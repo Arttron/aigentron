@@ -21,10 +21,15 @@ The **Local agent** tab of **🧩 Add-ons** (`/addons?tab=local-agent`). A small
 ## Local mode (offline)
 - `aigentron chat` on the computer: an agent in the terminal with a model that runs there (set up with `llm add`), no server and no internet needed. Works in one allowed repository; reads freely (never secret files) and asks `apply [y/N]` before every edit, new file or commit. `chat -p "<request>"` without a terminal only reads. It is separate from the server's tasks — nothing from a local session reaches the server yet. Use a model with working tool calls (Qwen3-Coder 30B works on a 36 GB Mac).
 
+## Working on the computer (off by default)
+- Agents of a shared project can also change things there: `local_edit`, `local_write` (new files), `local_bash` (a command in the repository root). Two keys, both the person's: `aigentron writes on` ON THE COMPUTER (the server cannot turn it on) and one grant card per task and folder in the dashboard (asked even in the no-approvals mode). A command is judged like a server agent's Bash: harmless ones run, risky ones ask. One task at a time per folder.
+- **Stop**: the button on the tab (10 min, all agents, cuts off what runs) or `aigentron stop` on the computer; `aigentron stop off` lifts it. Reading keeps working.
+- No sandbox yet: a command is NOT confined to the folder. Say so if asked. Secrets are never read or written by the file tools.
+
 ## Rules
 - **Rules** section of the tab (operator / admin): snapshots, fetch, fast-forward, notifications, propose-a-commit, quiet time after typing, extra ignore patterns. **Save and sync** pushes them to every computer at once (offline ones get them when they connect); the tab shows how many online computers have the latest revision. A computer keeps the copy in `rules.global.yaml`.
 - A repository can carry `.aigentron/local.yaml` with the same keys. A project file may switch a rule OFF, tune numbers, add ignore patterns and make the quiet time LONGER; it may switch a rule ON only if the global rules tick that rule under "A repository may switch on". `aigentron rules --repo .` shows the effective values and why anything was ignored. Reachable folders and approval requirements are hard limits, never rules.
-- These rules are only configured so far: the engine that acts on them (snapshots, fetch, fast-forward, commits) comes in the next stage, so changing them has no visible effect yet. Say so if asked.
+- The engine that acts on the rules runs while `aigentron run` (or the background service) is up, every 30 s, never while the person works. Every automatic action is a journal entry if the journal is on.
 
 Details: `docs/addons.md` («The local agent»), `docs/plan-local-agent.md`.
 - Where it works: start `aigentron chat` inside a project's folder (it asks once to allow a new git repository), or `aigentron open <project>` from any folder: it lists the server's projects that have a repository, reuses a copy already there (same origin) or clones it after the person confirms the address and folder (own git login, no hooks). A project without a repository address, or with a local path as address, cannot be opened this way — set it under Projects → Repository.

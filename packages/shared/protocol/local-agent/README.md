@@ -29,6 +29,13 @@ A repository is named by its `repo` id (from `repos.list` / `aigentron roots`); 
 | `repo.diff` | `{repo, path?, staged?}` | `{diff, truncated}` |
 | `repo.log` | `{repo, limit?, path?}` | `{commits: [{hash, author, date, subject}]}` (at most 50) |
 | `repo.read` | `{repo, path, offset?, limit?}` | `{path, text, offset, size, more}` (64 KB at a time; secrets and binary files refused) |
+| `repo.commit` | `{repo, message, paths}` | `{commit, branch, files}` — commits ONLY the named files on the current branch; needs the owner's `aigentron writes on` on that computer AND a card the person approved on the server; refuses folders, globs, secrets, paths outside, a detached HEAD, a merge in progress; nothing is pushed |
+| `fs.list` | `{repo, path?}` | `{text}` — the repository's files (tracked and new), one per line; secrets never listed |
+| `fs.search` | `{repo, query, path?}` | `{text}` — `file:line: text`, at most 100 lines; a fixed string; secrets never searched |
+| `fs.edit` | `{repo, path, old, new}` | `{text}` — replaces an exact text that occurs once; needs `aigentron writes on` and no Stop; secrets, `.git`, links and paths outside refused |
+| `fs.write` | `{repo, path, content}` | `{text}` — creates a NEW file (never overwrites), same limits as `fs.edit` |
+| `exec.run` | `{repo, command, timeoutSec?, task?}` | `{exit, output, truncated?, timedOut?, cancelled?, ms}` — `sh -c` in the repository root with a cleaned environment (no tokens, no ssh agent); needs `writes on` and no Stop; NOT confined to the folder; output kept head + tail (≈24 KB); the server judges the command like a server agent's `Bash` call before sending it |
+| `exec.cancel` | `{task}` | `{cancelled}` — cuts off every command that task has running |
 | `llm.models` | `{}` | `{models: [{backend, id}], problems, shared}` |
 | `llm.chat` | `{id, backend, request}` | streamed as `llm.chunk` events carrying `id`; the result says how it ended |
 | `llm.cancel` | `{id}` | `{ok:true}` |
@@ -38,6 +45,8 @@ A repository is named by its `repo` id (from `repos.list` / `aigentron roots`); 
 | name | data |
 |---|---|
 | `repos` | `{repos: [status…]}` — all allowed repositories, sent when something changes |
+| `notice` | `{repo, kind: "dirty"\|"behind", branch, minutes, count}` — the `notify` rule: work stayed uncommitted / the branch stayed behind for longer than the rule says; once per episode, counts only |
+| `propose-commit` | `{repo, branch, files: [{path, xy}], idleMinutes}` — the `proposeCommit` rule: the tree has been dirty and idle; names of changed files only (never the never-list's), at most 50; the server opens a task asking an agent to SUGGEST a commit |
 | `llm.chunk` | `{id, data}` — `id` is the `llm.chat` command's `args.id`, `data` one server-sent-event payload (a string) |
 
 ## HTTP next to the socket

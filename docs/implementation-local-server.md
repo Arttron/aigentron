@@ -559,6 +559,7 @@ provider/model chosen at install (not fixed in the template):
 | **coder** | `mcp: github,postgres,code-intel` | General implementation fallback. |
 | **reviewer** | read-only | Code review / QA. |
 | **local-helper** | — | Tiny low-risk edits on a local model. |
+| **local-machine** | — | Executor on the person's OWN computer through the local agent's `local_*` tools (server tools off); pair with provider `local-llm`. Needs a shared repository and `aigentron writes on` there. |
 | **researcher** | `mcp: research`, no shell/files | Official-source legal/regulatory research with verified quotes. |
 
 The `english` and `renovation` packs bring their own agents (English tutor/curriculum/quizmaster;

@@ -1,0 +1,1 @@
+{"type":"event","name":"propose-commit","data":{"repo":"a1b2c3d4","branch":"main","files":[{"path":"src/a.go","xy":".M"},{"path":"new.txt","xy":"??"}],"idleMinutes":30}}

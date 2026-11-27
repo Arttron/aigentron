@@ -46,6 +46,17 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
     }
   };
 
+  const onDelete = async (a: AttachmentMeta) => {
+    if (!window.confirm(`Delete "${a.originalName ?? a.name}" from this task? Agents will no longer see it.`)) return;
+    setError(null);
+    try {
+      await api.deleteAttachment(taskId, a.name);
+      setItems((list) => list.filter((x) => x.name !== a.name));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
   return (
     <Card>
       <Row spaceBetween>
@@ -68,8 +79,11 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
         {items.map((a) => {
           const url = api.attachmentUrl(taskId, a.name);
           return (
+            <div key={a.name} className={styles.cell}>
+              <button type="button" className={styles.remove} title="Delete" aria-label={`Delete ${a.originalName ?? a.name}`} onClick={() => void onDelete(a)}>
+                ×
+              </button>
             <a
-              key={a.name}
               href={url}
               target="_blank"
               rel="noreferrer"
@@ -95,6 +109,7 @@ export function Attachments({ taskId, reloadSignal, onAsk }: { taskId: string; r
               )}
               <span className={styles.name}>{a.originalName ?? a.name}</span>
             </a>
+            </div>
           );
         })}
       </div>

@@ -825,12 +825,17 @@ export class RealAgentExecutor extends AgentExecutor {
     const answer = new AnswerTracker();
     /** Tools this run really used (the reporting ones do not count): a scheduled report written without using any is not based on fresh data. */
     let workTools = 0;
-    const onEvent = (raw: AgentEvent): void => {
+    /** One entry per tool call still waiting for its result, in order: was it a Read of a file that is already an attachment of the task. */
+    const readsOfAttachments: boolean[] = [];
+    const onEvent =(raw: AgentEvent): void => {
       let event = raw;
       // The answer an agent wrote as a message must stand in the final one (see finalWithAnswer); the dashboard drops its earlier copy.
       if (event.kind === 'assistant') answer.assistant(event.text);
       // work done after the message (any tool but the reporting ones) makes it a stage of the run, not the answer
       if (event.kind === 'tool_use') {
+        // a picture the agent opens with Read that is ALREADY one of the task's attachments comes back as an image result: it must not be saved again as a copy
+        const readPath = event.toolName === 'Read' ? String(event.input.file_path ?? event.input.path ?? '') : '';
+        readsOfAttachments.push(Boolean(readPath) && opts.attachmentPaths.includes(readPath));
         answer.tool(event.toolName);
         if (!isQuietTool(event.toolName)) workTools += 1;
       }
@@ -860,7 +865,8 @@ export class RealAgentExecutor extends AgentExecutor {
       let attachments: string[] = event.kind === 'prompt' || event.kind === 'assistant' ? (event.attachments ?? []) : [];
       // Images a tool returned (e.g. an MCP browser screenshot) are saved as task
       // attachments so they render inline in the transcript + gallery.
-      if (event.kind === 'tool_result' && event.images?.length) {
+      const wasAttachmentRead = event.kind === 'tool_result' ? readsOfAttachments.shift() === true : false;
+      if (event.kind === 'tool_result' && event.images?.length && !wasAttachmentRead) {
         const imgs = event.images;
         attachments = imgs.map((img, i) => `shot-${current}-${i}.${extForMedia(img.mediaType)}`);
         writeChain = writeChain.then(() =>

@@ -136,6 +136,20 @@ export const BROWSER_GRANT_TOOL = `${INTERNAL_TOOL_PREFIX}browser_grant`;
 export const BROWSER_SUBMIT_TOOL = `${INTERNAL_TOOL_PREFIX}browser_submit`;
 export const PROPOSE_TASK_TOOL = `${INTERNAL_TOOL_PREFIX}propose_task`;
 /**
+ * A commit in a repository on the person's OWN computer (the `local-os` MCP server). A write to their machine: it always has its own card, even in the
+ * no-approvals mode, it is decided in the dashboard only, and it can never become a standing exception («don't ask again»).
+ */
+export const LOCAL_COMMIT_TOOL = 'mcp__local-os__local_commit';
+/**
+ * Working in a folder on the person's own computer (`local-os`): ONE grant card per task and folder (asked even in the no-approvals mode, like the browser's
+ * site grant), after which `local_edit` / `local_write` need no card of their own (a file inside the folder, never a secret) and `local_bash` is judged
+ * like a `Bash` call of a server agent: a safe command runs, a dangerous one asks.
+ */
+export const LOCAL_GRANT_TOOL = `${INTERNAL_TOOL_PREFIX}local_grant`;
+export const LOCAL_BASH_TOOL = 'mcp__local-os__local_bash';
+export const LOCAL_EDIT_TOOL = 'mcp__local-os__local_edit';
+export const LOCAL_WRITE_TOOL = 'mcp__local-os__local_write';
+/**
  * Several related admin changes behind ONE approval card (agents, skills, providers, settings, task starts, task actions,
  * agent deletions). Validated as a whole before the card is shown; applied in order through the same code paths as the
  * single proposals, each journaled separately.
@@ -363,7 +377,10 @@ export function approvalNeedsDashboard(a: { toolName: string; reason: string; to
 }
 
 /** Approvals that must never be decided blind («approve the latest», «approve everything of this task»): the browser grants and form submissions — the person has to look at THIS card. */
-export const approvalNeedsItsOwnAnswer = (a: { toolName: string }): boolean => a.toolName.toLowerCase() === BROWSER_GRANT_TOOL.toLowerCase() || a.toolName.toLowerCase() === BROWSER_SUBMIT_TOOL.toLowerCase();
+export const approvalNeedsItsOwnAnswer = (a: { toolName: string }): boolean => a.toolName.toLowerCase() === BROWSER_GRANT_TOOL.toLowerCase() || a.toolName.toLowerCase() === LOCAL_GRANT_TOOL.toLowerCase() || a.toolName.toLowerCase() === BROWSER_SUBMIT_TOOL.toLowerCase() || isLocalWriteTool(a.toolName);
+
+/** A tool that changes something on the person's own computer: decided every time, never a standing exception. */
+export const isLocalWriteTool = (toolName: string): boolean => toolName.toLowerCase() === LOCAL_COMMIT_TOOL;
 
 /** Shell command patterns that are destructive, irreversible, or outbound. */
 const DANGEROUS_SHELL_PATTERNS: ReadonlyArray<{ re: RegExp; reason: string; hard?: boolean }> = [
@@ -775,6 +792,15 @@ export function classifyToolCall(
       reason: `agent is about to press "${label.slice(0, 80)}" on ${host}${typeof toolInput.action === 'string' && toolInput.action ? ` (sends to ${toolInput.action.slice(0, 120)})` : ''} — this sends or changes something on that site${fields.length ? '; the form holds: ' + shown : ''}`,
     };
   }
+  if (name === LOCAL_GRANT_TOOL.toLowerCase()) {
+    const folder = typeof toolInput.folder === 'string' && toolInput.folder ? toolInput.folder.slice(0, 200) : 'a folder';
+    const computer = typeof toolInput.computer === 'string' && toolInput.computer ? toolInput.computer.slice(0, 80) : 'your computer';
+    return {
+      dangerous: true,
+      summary: `local_grant write ${folder} on ${computer}`,
+      reason: `agent wants to CHANGE files and RUN commands in ${folder} on YOUR computer (${computer}) for this task — edits and new files stay inside that folder (never secrets); each command is still judged like a server agent's, and you can stop it any time (Stop in the dashboard, or \`aigentron stop\` on that computer)${typeof toolInput.why === 'string' && toolInput.why ? `; why: ${toolInput.why.slice(0, 160)}` : ''}`,
+    };
+  }
   if (name === PROPOSE_TASK_TOOL.toLowerCase()) {
     const agent = typeof toolInput.agentName === 'string' ? toolInput.agentName : '?';
     const prompt = typeof toolInput.prompt === 'string' ? toolInput.prompt : '';
@@ -938,6 +964,28 @@ export function classifyToolCall(
   // it), so this prefix can't be spoofed by a user-registered server.
   if (name.startsWith(INTERNAL_TOOL_PREFIX)) {
     return { dangerous: false, summary: toolName, reason: '' };
+  }
+
+  // the person's own computer: a command is judged like a server agent's Bash call; an edit or a new file sits inside the folder the grant card allowed
+  if (name === LOCAL_EDIT_TOOL || name === LOCAL_WRITE_TOOL) {
+    const path = typeof toolInput.path === 'string' ? toolInput.path.slice(0, 160) : '?';
+    return { dangerous: false, summary: `${name === LOCAL_EDIT_TOOL ? 'edit' : 'write'} ${path} on your computer`, reason: '' };
+  }
+  if (name === LOCAL_BASH_TOOL) {
+    const v = classifyToolCall('Bash', { command: typeof toolInput.command === 'string' ? toolInput.command : '' }, {});
+    return { ...v, summary: `on your computer: ${v.summary}`, ...(v.reason ? { reason: `on YOUR computer — ${v.reason}` } : {}) };
+  }
+  if (name === LOCAL_COMMIT_TOOL) {
+    const paths = Array.isArray(toolInput.paths) ? (toolInput.paths as unknown[]).filter((p): p is string => typeof p === 'string') : [];
+    const message = typeof toolInput.message === 'string' ? toolInput.message.trim() : '';
+    const repo = typeof toolInput.repo === 'string' && toolInput.repo ? toolInput.repo : 'the repository';
+    const shown = paths.slice(0, 15).join(', ') + (paths.length > 15 ? `, … (+${paths.length - 15})` : '');
+    return {
+      dangerous: true,
+      hard: true,
+      summary: `local_commit ${repo}: ${paths.length} file(s) "${message.replace(/\s+/g, ' ').slice(0, 80)}" #${shortHash(`${repo}\n${message}\n${paths.join('\n')}`)}`,
+      reason: `agent wants to COMMIT on YOUR computer (${repo}): ${shown || 'no files named'} — message: "${message.replace(/\s+/g, ' ').slice(0, 300)}". The files are staged and committed on your current branch; nothing is pushed`,
+    };
   }
 
   // MCP tools reach external servers (browser, GitHub, DB, …) — default-deny,
